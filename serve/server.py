@@ -4009,6 +4009,32 @@ def request_stats(segments: list[dict]) -> dict:
     return result
 
 
+def _dump_claude_prompt(req: dict):
+    """Save full system prompt and tool definitions per model into dumps/claude_models/."""
+    try:
+        model = str(req.get("model") or "unknown").replace("/", "_")
+        dump_dir = Path("/mnt/data/Strata/dumps/claude_models")
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        sys_val = req.get("system")
+        sys_text = ""
+        if isinstance(sys_val, str):
+            sys_text = sys_val
+        elif isinstance(sys_val, list):
+            sys_text = "\n\n".join(b.get("text", "") for b in sys_val if isinstance(b, dict))
+        if sys_text:
+            (dump_dir / f"{model}_system.md").write_text(sys_text, encoding="utf-8")
+        if req.get("tools"):
+            (dump_dir / f"{model}_tools.json").write_text(json.dumps(req["tools"], indent=2, ensure_ascii=False), encoding="utf-8")
+        (dump_dir / f"{model}_summary.json").write_text(json.dumps({
+            "model": model,
+            "system_chars": len(sys_text),
+            "tools_count": len(req.get("tools") or []),
+            "tools": [t.get("name") for t in (req.get("tools") or [])]
+        }, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _debug_req(api, req, messages, tools, max_new, thinking, prompt_tokens):
     """One compact line per request while diagnosing blank/empty turns. Set STRATA_DEBUG=1 to enable."""
     if not os.environ.get("STRATA_DEBUG"):
@@ -5692,6 +5718,7 @@ def make_handler(svc: Service):
         def _count_tokens(self, req):
             """Anthropic's token count, which Claude Code asks for its context figures: the prompt this server would
             read for the same request, rendered and tokenized - the model does not run."""
+            _dump_claude_prompt(req)
             req = svc.with_shared(req, "anthropic")
             messages, tools, kw = anthropic_to_messages(req, svc.anthropic_think_unasked)
             stop_strings(req)                                 # the same 400 as the request itself would get
@@ -5699,6 +5726,7 @@ def make_handler(svc: Service):
             self._json(200, {"input_tokens": len(svc.encode_prompt(messages, tools, kw))})
 
         def _anthropic(self, req):
+            _dump_claude_prompt(req)
             svc.load()
             req = svc.with_shared(req, "anthropic")
             messages, tools, kw = anthropic_to_messages(req, svc.anthropic_think_unasked)
