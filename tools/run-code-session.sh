@@ -17,6 +17,7 @@ export LC_ALL="en_US.UTF-8"
 export ANTHROPIC_BASE_URL="http://127.0.0.1:8080"
 export ANTHROPIC_AUTH_TOKEN="$STRATA_API_KEY"
 export ANTHROPIC_MODEL="$STRATA_MODEL"
+export CLAUDE_CODE_AUTO_MODE_SERVER="0"
 
 # Inner runner loop executed inside tmux
 INNER_RUNNER="/tmp/dl-ai-code-runner.sh"
@@ -28,6 +29,7 @@ export LC_ALL="en_US.UTF-8"
 export ANTHROPIC_BASE_URL="http://127.0.0.1:8080"
 export ANTHROPIC_AUTH_TOKEN="$STRATA_API_KEY"
 export ANTHROPIC_MODEL="$STRATA_MODEL"
+export CLAUDE_CODE_AUTO_MODE_SERVER="0"
 cd "$WORKSPACE_DIR"
 
 while true; do
