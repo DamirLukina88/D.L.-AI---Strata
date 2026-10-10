@@ -111,13 +111,12 @@ if ($("code-restart-btn")) {
     try {
       const r = await fetch("api/code/restart", { method: "POST", headers: headers(true) });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      toast("info", "Session restarted", "Reconnecting to new Claude Code session...");
+      toast("info", "Session restarted", "Claude Code session reset.");
       const frame = $("code-terminal-frame");
-      if (frame) {
+      if (frame && (!frame.src || frame.src === "about:blank")) {
         const key = store.get("apikey", DEFAULT_KEY);
         try { document.cookie = `strata_key=${encodeURIComponent(key)}; path=/; SameSite=Lax`; } catch (e) {}
-        frame.src = "about:blank";
-        setTimeout(() => { frame.src = "/code/"; }, 60);
+        frame.src = "/code/";
       }
     } catch (e) {
       toast("error", "Restart failed", e.message);

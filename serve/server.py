@@ -4741,11 +4741,11 @@ def make_handler(svc: Service):
                 self.send_header("Location", redirect_url)
                 self.end_headers()
                 return
+            if raw_path == "/code/token":
+                self._json(200, {"token": ""})
+                return
             if raw_path.startswith("/code/"):
                 if not self._authorized():
-                    return
-                if raw_path == "/code/token":
-                    self._json(200, {"token": ""})
                     return
                 is_ws = (self.headers.get("Upgrade", "").lower() == "websocket" or
                          "upgrade" in self.headers.get("Connection", "").lower())
@@ -5133,7 +5133,10 @@ def make_handler(svc: Service):
                 return
             if path == "/api/code/restart":
                 try:
-                    subprocess.run(["tmux", "kill-session", "-t", "dl-ai-code"], check=False)
+                    res = subprocess.run(["tmux", "respawn-pane", "-k", "-t", "dl-ai-code:0.0"], capture_output=True, text=True)
+                    if res.returncode != 0:
+                        subprocess.run(["tmux", "kill-session", "-t", "dl-ai-code"], check=False)
+                        subprocess.run(["systemctl", "--user", "restart", "claude-terminal"], check=False)
                     self._json(200, {"status": "ok", "message": "Claude Code session restarted"})
                 except Exception as e:
                     self._json(500, {"error": {"message": f"failed to restart session: {e}"}})
