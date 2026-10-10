@@ -1038,6 +1038,31 @@ def tool_defs(models: dict, families: dict, contexts: list) -> list:
                         "Codex CLI, the OpenAI SDK, curl, Cursor/Continue/Open WebUI. Read-only.",
          "inputSchema": {"type": "object", "additionalProperties": False, "properties": {"port": port}},
          "annotations": ro},
+        {"name": "strata_coder_generate", "title": "Generate code with Strata",
+         "description": "Execute a code generation, refactoring, or bug-fix task on the local Strata Coder model. "
+                        "Can save output directly to a file and accept multiple context files. "
+                        "Optimized for agentic workflows.",
+         "inputSchema": {"type": "object", "required": ["prompt"], "additionalProperties": False, "properties": {
+             "prompt": {"type": "string", "description": "The coding task, prompt, or bug fix instruction."},
+             "context_files": {"type": "array", "items": {"type": "string"},
+                               "description": "Optional list of file paths to load as context."},
+             "output_file": {"type": "string", "description": "Optional path where generated code will be written directly."},
+             "code_only": {"type": "boolean", "description": "Strip markdown fences so output is raw code (default true)."},
+             "system": {"type": "string", "description": "Optional custom system prompt."},
+             "reasoning_effort": {"type": "string", "enum": ["none", "low", "medium", "high"],
+                                  "description": "Reasoning effort (default low)."},
+             "max_tokens": {"type": "integer", "minimum": 16, "maximum": 16384, "description": "Max tokens to generate (default 4096)."},
+             "port": port}},
+         "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False}},
+        {"name": "strata_coder_review", "title": "Review code with Strata",
+         "description": "Review code or a file using the local Strata Coder model for security, bugs, and performance.",
+         "inputSchema": {"type": "object", "additionalProperties": False, "properties": {
+             "file_path": {"type": "string", "description": "Path to file to review."},
+             "code": {"type": "string", "description": "Raw code snippet to review if file_path is omitted."},
+             "focus": {"type": "string", "enum": ["bugs", "security", "performance", "style", "general"],
+                       "description": "Review focus (default general)."},
+             "port": port}},
+         "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False}},
     ]
 
 
@@ -1556,6 +1581,118 @@ class Tools:
                                                    f"(--openai-api-base {base}/v1)"}},
             "other_devices": "the server listens on this PC only; to reach it from your network, run setup with "
                              "--host 0.0.0.0 --api-key <secret> (docs/DETAILS.md, 'Using it')"}
+
+    # ---- strata_coder_generate
+    def strata_coder_generate(self, prompt: str, context_files=None, output_file=None, code_only=True,
+                              system=None, reasoning_effort="low", max_tokens=4096, port=None) -> dict:
+        s = self.s
+        target = None
+        for p in s.ports(port):
+            info = s.probe(p, deep=False)
+            if info and not info.get("other"):
+                target = info
+                break
+        if target is None:
+            raise ToolError("Strata is not running: start it first (strata_start)")
+        p = target["port"]
+        key = s.api_key_for(p)
+
+        context_blocks = []
+        for fpath in (context_files or []):
+            try:
+                p_file = Path(fpath).resolve()
+                if p_file.is_file():
+                    content = p_file.read_text(encoding="utf-8", errors="replace")
+                    ext = p_file.suffix.lstrip('.') or 'text'
+                    context_blocks.append(f"### File: {fpath}\n```{ext}\n{content}\n```")
+            except Exception as e:
+                context_blocks.append(f"### File: {fpath} (Read error: {e})")
+
+        full_user_content = prompt
+        if context_blocks:
+            full_user_content = "\n\n".join(context_blocks) + "\n\n" + prompt
+
+        if code_only and not system:
+            system = "You are an expert software engineer. Output ONLY the code or requested implementation without introductory or conversational text."
+        elif not system:
+            system = "You are an expert software engineer."
+
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": full_user_content}
+        ]
+        body = {
+            "model": target.get("model") or "strata",
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "reasoning_effort": reasoning_effort,
+            "stream": False
+        }
+        t0 = time.time()
+        st, r = http_json(f"http://127.0.0.1:{p}/v1/chat/completions", "POST", body, api_key=key, timeout=600)
+        wall = time.time() - t0
+        if st != 200 or not isinstance(r, dict):
+            msg = (r or {}).get("error", {}).get("message") if isinstance(r, dict) else None
+            raise ToolError(f"Generation failed (HTTP {st}): {msg or 'no response'}")
+
+        raw_content = ((r.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+        final_code = raw_content
+        if code_only:
+            m = re.search(r"```(?:\w+)?\n([\s\S]*?)\n```", raw_content)
+            if m:
+                final_code = m.group(1)
+            else:
+                final_code = raw_content.strip()
+
+        written_path = None
+        if output_file:
+            out_p = Path(output_file).resolve()
+            out_p.parent.mkdir(parents=True, exist_ok=True)
+            out_p.write_text(final_code, encoding="utf-8")
+            written_path = str(out_p)
+
+        usage = r.get("usage") or {}
+        timings = r.get("timings") or {}
+        tokens = usage.get("completion_tokens") or timings.get("predicted_n") or 0
+        tok_s = timings.get("predicted_per_second") or (round(tokens / wall, 1) if wall > 0 else None)
+        out = {
+            "tokens_generated": tokens,
+            "tokens_per_second": tok_s,
+            "wall_seconds": round(wall, 2),
+            "summary": f"Generated {tokens} tokens in {wall:.1f}s ({tok_s} tok/s)" + (f" -> saved to {written_path}" if written_path else "")
+        }
+        if written_path:
+            out["written_to"] = written_path
+        else:
+            out["code"] = final_code
+        return out
+
+    # ---- strata_coder_review
+    def strata_coder_review(self, file_path=None, code=None, focus="general", port=None) -> dict:
+        if not file_path and not code:
+            raise ToolError("Either file_path or code must be provided")
+        source_code = code
+        filename = "snippet"
+        if file_path:
+            p = Path(file_path).resolve()
+            if not p.is_file():
+                raise ToolError(f"File not found: {file_path}")
+            source_code = p.read_text(encoding="utf-8", errors="replace")
+            filename = p.name
+
+        prompt = (f"Review the following code from '{filename}' with a focus on {focus}.\n"
+                  f"Provide concise, actionable findings (bugs, security risks, performance issues, or edge cases) "
+                  f"and specific recommendations.\n\n```\n{source_code}\n```")
+        res = self.strata_coder_generate(prompt=prompt, code_only=False,
+                                          system="You are a principal software engineer and rigorous code reviewer.",
+                                          reasoning_effort="medium", port=port)
+        return {
+            "file": file_path,
+            "focus": focus,
+            "review": res.get("code") or res.get("summary"),
+            "tokens_generated": res.get("tokens_generated"),
+            "summary": f"Reviewed {filename} ({focus}) - {res.get('tokens_generated', 0)} tokens"
+        }
 
 
 # ------------------------------------------------------------------------------------------------ MCP over stdio

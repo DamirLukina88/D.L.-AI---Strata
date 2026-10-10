@@ -1,37 +1,50 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Strata</title>
-<link rel="stylesheet" href="web/tokens.css">
-<link rel="stylesheet" href="web/components.css">
-<link rel="stylesheet" href="web/app.css">
+<title>D.L. AI</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico?v=20261010-9">
+<link rel="icon" type="image/svg+xml" href="web/favicon.svg?v=20261010-9">
+<link rel="stylesheet" href="web/tokens.css?v=20261010-9">
+<link rel="stylesheet" href="web/components.css?v=20261010-9">
+<link rel="stylesheet" href="web/app.css?v=20261010-9">
 <script>
-  // the theme before the first paint: the saved choice, else the system's
+  // the theme before the first paint: default dark for D.L. AI
   try {
-    const t = localStorage.getItem("strata.theme") ||
-      (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const t = localStorage.getItem("strata.theme") || "dark";
     document.documentElement.dataset.theme = t;
   } catch (e) {}
 </script>
 </head>
 <body>
 <header class="st-header">
-  <span class="st-header__brand">Strata</span>
+  <span class="st-header__brand">D.L. AI</span>
   <nav class="st-tabs" role="tablist" aria-label="Views">
-    <button class="st-tab" role="tab" id="tab-btn-chat" aria-controls="view-chat" aria-selected="true" data-tab="chat">
-      <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-chat"/></svg>Chat</button>
-    <button class="st-tab" role="tab" id="tab-btn-monitor" aria-controls="view-monitor" aria-selected="false" data-tab="monitor">
-      <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-activity"/></svg>Monitor</button>
-    <button class="st-tab" role="tab" id="tab-btn-about" aria-controls="view-about" aria-selected="false" data-tab="about">
-      <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-info"/></svg>About</button>
+    <button class="st-tab" role="tab" id="tab-btn-chat" aria-controls="view-chat" aria-selected="true" data-tab="chat" title="Chat" aria-label="Chat">
+      <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-chat"/></svg><span class="st-tab__label">Chat</span></button>
+    <button class="st-tab" role="tab" id="tab-btn-code" aria-controls="view-code" aria-selected="false" data-tab="code" title="Code" aria-label="Code">
+      <svg class="st-icon st-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg><span class="st-tab__label">Code</span></button>
+    <button class="st-tab" role="tab" id="tab-btn-monitor" aria-controls="view-monitor" aria-selected="false" data-tab="monitor" title="Monitor" aria-label="Monitor">
+      <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-activity"/></svg><span class="st-tab__label">Monitor</span></button>
+    <button class="st-tab" role="tab" id="tab-btn-about" aria-controls="view-about" aria-selected="false" data-tab="about" title="About" aria-label="About">
+      <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-info"/></svg><span class="st-tab__label">About</span></button>
   </nav>
   <span class="st-header__spacer"></span>
-  <span class="st-pill" id="pill" data-state="idle" role="status" aria-live="polite">
+  <select id="model-select" class="st-select" aria-label="Select active model">
+    <option value="qwen3.8-flash-next-coder-iq1_m">Qwen 3.8 Flash Coder (IQ1_M)</option>
+    <option value="qwen3.8-flash-next-q2_0">Qwen 3.8 Flash General (Q2_0)</option>
+  </select>
+  <span class="st-pill" id="pill" data-state="idle" role="status" aria-live="polite" title="Connection status">
     <span class="st-pill__dot"></span><span id="pill-text">Connecting&hellip;</span></span>
   <button class="st-btn st-btn--icon" id="theme-btn" title="Light / dark" aria-label="Switch between light and dark">
-    <svg class="st-icon"><use id="theme-icon" href="web/sprite.svg#i-moon"/></svg></button>
+    <svg class="st-icon"><use id="theme-icon" href="web/sprite.svg#i-sun"/></svg></button>
+  <button class="st-btn st-btn--icon" id="logout-btn" title="Log out" aria-label="Log out of session" style="color:var(--st-danger);">
+    <svg class="st-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+  </button>
 </header>
 
 <main>
@@ -40,8 +53,8 @@
     <div class="chat-scroll" id="chat-scroll">
       <div class="chat" id="chat">
         <div class="chat-empty" id="chat-empty">
-          <div class="chat-empty__title">Ask anything</div>
-          <div class="chat-empty__sub" id="chat-empty-sub">The model runs on this PC. Nothing leaves it.</div>
+          <div class="chat-empty__title">D.L. AI</div>
+          <div class="chat-empty__sub" id="chat-empty-sub">Dedicated private AI without external tracking. Your own model, your own rules.</div>
         </div>
       </div>
     </div>
@@ -50,9 +63,15 @@
         <div class="attachments" id="attachments" hidden></div>
         <textarea id="input" rows="2" placeholder="Ask anything&hellip;" aria-label="Message"></textarea>
         <div class="st-composer__bar">
-          <button type="button" class="st-btn st-btn--icon" id="attach-btn" title="Attach a text file (or drop it here)" aria-label="Attach a file">
+          <button type="button" class="st-btn st-btn--icon" id="attach-btn" title="Attach a text file (or drop it here)" aria-label="Attach a file" hidden style="display:none;">
             <svg class="st-icon"><use href="web/sprite.svg#i-attach"/></svg></button>
           <input type="file" id="file" multiple hidden>
+          <button type="button" class="st-btn st-btn--icon" id="workspace-btn" title="Server Workspace" aria-label="Server Workspace">
+            <svg class="st-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path opacity="0.25" d="M3 6C3 4.895 3.895 4 5 4H9.172C9.702 4 10.211 4.21 10.586 4.586L12.414 6.414C12.789 6.789 13.298 7 13.828 7H19C20.105 7 21 7.895 21 9V18C21 19.105 20.105 20 19 20H5C3.895 20 3 19.105 3 18V6Z" fill="currentColor"></path>
+              <path d="M3 6C3 4.895 3.895 4 5 4H9.172C9.702 4 10.211 4.21 10.586 4.586L12.414 6.414C12.789 6.789 13.298 7 13.828 7H19C20.105 7 21 7.895 21 9V18C21 19.105 20.105 20 19 20H5C3.895 20 3 19.105 3 18V6Z"></path>
+            </svg>
+          </button>
           <button type="button" class="st-btn st-btn--icon" id="new-btn" title="New chat" aria-label="New chat">
             <svg class="st-icon"><use href="web/sprite.svg#i-new-chat"/></svg></button>
           <button type="button" class="st-btn st-btn--icon" id="export-btn" title="Save this chat as Markdown" aria-label="Save this chat">
@@ -70,6 +89,30 @@
     </div>
   </section>
 
+  <!-- ============================ Code ============================ -->
+  <section class="view view--code" id="view-code" role="tabpanel" aria-labelledby="tab-btn-code" hidden>
+    <div class="code-terminal-wrap">
+      <div class="code-terminal-bar">
+        <div class="code-terminal-info">
+          <span class="code-dot"></span>
+          <span class="code-title">Claude Code CLI</span>
+          <span class="muted small code-meta">Session: <code>dl-ai-code</code></span>
+        </div>
+        <div class="code-terminal-actions">
+          <button type="button" class="st-btn st-btn--secondary st-btn--sm code-action-btn" id="code-restart-btn" title="Restart Claude CLI session">
+            <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-refresh"/></svg><span>Restart</span>
+          </button>
+          <button type="button" class="st-btn st-btn--icon code-action-btn" id="code-fullscreen-btn" title="Toggle Fullscreen" aria-label="Toggle Fullscreen">
+            <svg class="st-icon st-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+          </button>
+        </div>
+      </div>
+      <div class="code-terminal-body">
+        <iframe id="code-terminal-frame" src="about:blank" title="Claude Code Web Terminal" class="code-iframe"></iframe>
+      </div>
+    </div>
+  </section>
+
   <!-- ============================ Monitor ============================ -->
   <section class="view view--monitor" id="view-monitor" role="tabpanel" aria-labelledby="tab-btn-monitor" hidden>
     <div class="monitor">
@@ -83,6 +126,7 @@
             <span class="st-badge st-badge--queued" data-s="queued">Queued</span>
             <span class="st-badge st-badge--error" data-s="error">Error</span>
           </span>
+          <button type="button" class="st-btn st-btn--danger" id="force-restart-btn" style="margin-left:auto;height:28px;padding:0 12px;font-size:12px;" title="Forcefully kill and restart the engine if stuck or looping">Force Restart</button>
         </div>
         <div class="state-card__row"><span id="state-label">Waiting for a request</span><span class="muted" id="state-detail"></span></div>
         <div class="st-progress" id="state-progress"><div class="st-progress__bar" id="state-bar" style="width:0%"></div></div>
@@ -170,13 +214,12 @@
         </div>
         <div class="toggle-row"><span>Dark theme</span>
           <button class="st-toggle" id="dark-toggle" role="switch" aria-checked="false" aria-label="Dark theme"></button></div>
-        <p class="muted small">Chats, settings and the key are kept in this browser only.
-          <a href="https://github.com/Niko1221/Strata" target="_blank" rel="noopener noreferrer">Strata on GitHub</a></p>
+        <p class="muted small">Chats, settings and the key are kept in this browser only.</p>
       </div>
       <div class="st-card cfg-card" id="cfg-card" hidden>
         <div class="req-head"><span class="card-title">Model settings</span><span class="muted small" id="cfg-file"></span></div>
         <p class="muted small">Kept in the model's run config for every client. An empty field is the default. They
-          take effect the next time the model starts (close Strata's window and start it again).</p>
+          take effect the next time the model starts.</p>
         <form class="cfg-form" id="cfg-form"></form>
         <div class="cfg-actions"><button class="st-btn st-btn--primary" id="cfg-save" type="button">Save</button>
           <span class="muted small" id="cfg-msg" role="status"></span></div>
@@ -192,8 +235,8 @@
       <svg class="st-icon"><use href="web/sprite.svg#i-chevron"/></svg></button></div>
   <div class="st-drawer__body">
     <div class="st-field">
-      <label class="st-label" for="s-thinking">Thinking <output id="o-thinking"></output></label>
-      <div class="seg" id="s-thinking" role="radiogroup" aria-label="Thinking">
+      <div class="st-label" id="label-thinking">Thinking <output id="o-thinking"></output></div>
+      <div class="seg" id="s-thinking" role="radiogroup" aria-labelledby="label-thinking">
         <button type="button" role="radio" data-v="none">Off</button><button type="button" role="radio" data-v="low">Low</button>
         <button type="button" role="radio" data-v="medium">Medium</button><button type="button" role="radio" data-v="high">High</button>
       </div>
@@ -236,8 +279,63 @@
     </div>
   </div>
 </aside>
+<dialog class="st-dialog" id="workspace-dialog">
+  <div class="st-dialog__head">
+    <div class="st-dialog__title-wrap">
+      <svg class="st-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:var(--st-accent);">
+        <path opacity="0.25" d="M3 6C3 4.895 3.895 4 5 4H9.172C9.702 4 10.211 4.21 10.586 4.586L12.414 6.414C12.789 6.789 13.298 7 13.828 7H19C20.105 7 21 7.895 21 9V18C21 19.105 20.105 20 19 20H5C3.895 20 3 19.105 3 18V6Z" fill="currentColor"></path>
+        <path d="M3 6C3 4.895 3.895 4 5 4H9.172C9.702 4 10.211 4.21 10.586 4.586L12.414 6.414C12.789 6.789 13.298 7 13.828 7H19C20.105 7 21 7.895 21 9V18C21 19.105 20.105 20 19 20H5C3.895 20 3 19.105 3 18V6Z"></path>
+      </svg>
+      <span class="st-dialog__title">Server Workspace</span>
+      <span class="muted small ws-path-badge" id="ws-path">Workspace</span>
+    </div>
+    <div class="st-dialog__actions">
+      <button type="button" class="st-btn st-btn--icon" id="ws-refresh-btn" title="Refresh files" aria-label="Refresh">
+        <svg class="st-icon"><use href="web/sprite.svg#i-refresh"/></svg></button>
+      <button type="button" class="st-btn st-btn--icon" id="ws-close-btn" title="Close" aria-label="Close">
+        <svg class="st-icon"><use href="web/sprite.svg#i-chevron"/></svg></button>
+    </div>
+  </div>
+  <div class="st-dialog__body">
+    <div class="ws-dropzone" id="ws-dropzone" role="button" tabindex="0" title="Tap to upload files">
+      <svg class="st-icon ws-dropzone__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 15V17C4 18.657 5.343 20 7 20H17C18.657 20 20 18.657 20 17V15"></path>
+        <path d="M12 4V14M12 14L8 10M12 14L16 10"></path>
+      </svg>
+      <div class="ws-dropzone__text">
+        <strong>Tap here or drop files to upload to workspace</strong>
+        <span class="muted small">Saved directly on server &bull; Auto-overwrites duplicates</span>
+      </div>
+      <label class="st-btn st-btn--secondary ws-upload-btn">
+        <span>Browse files to upload</span>
+        <input type="file" id="ws-file-input" multiple hidden>
+      </label>
+    </div>
+
+    <div class="ws-toolbar">
+      <input type="text" class="st-input ws-search" id="ws-search" placeholder="Search workspace files&hellip;">
+      <span class="muted small ws-count" id="ws-count">0 files</span>
+    </div>
+
+    <div class="table-wrap ws-table-wrap">
+      <table class="st-table ws-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th class="num">Size</th>
+            <th>Modified</th>
+            <th class="num">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="ws-file-list">
+          <tr><td colspan="4" class="muted">Loading workspace files&hellip;</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</dialog>
 <div class="scrim" id="scrim" hidden></div>
 <div class="st-toasts" id="toasts" aria-live="polite"></div>
-<script src="web/app.js"></script>
+<script src="web/app.js?v=20261010-9"></script>
 </body>
 </html>

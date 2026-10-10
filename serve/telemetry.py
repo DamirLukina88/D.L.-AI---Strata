@@ -166,6 +166,58 @@ class _Amd:
         except (OSError, TypeError):
             return "AMD Radeon"
 
+    @staticmethod
+    def _gen(text):
+        """The PCIe generation of a link-speed file's contents ("16.0 GT/s PCIe" -> 4), or None."""
+        try:
+            return {2.5: 1, 5.0: 2, 8.0: 3, 16.0: 4, 32.0: 5, 64.0: 6}[float(str(text).split()[0])]
+        except (ValueError, TypeError, IndexError, KeyError):
+            return None
+
+    @staticmethod
+    def _bdf(s):
+        """True for a sysfs pci device name ("0000:03:00.0"); nothing is imported for it."""
+        return (len(s) == 12 and s[4] == ":" and s[7] == ":" and s[10] == "." and s[11] in "01234567"
+                and all(c in "0123456789abcdef" for c in s[0:4] + s[5:7] + s[8:10]))
+
+    @staticmethod
+    def _read(d, name):
+        try:
+            with open(os.path.join(d, name), encoding="utf-8") as f:
+                return f.read().strip()
+        except (OSError, TypeError):
+            return None
+
+    def _hops(self):
+        """The PCIe devices between the root port and this card, the card last: the sysfs path names every
+        hop (a card behind a bridge chain has more than one; a directly attached card has one)."""
+        out, prefix = [], []
+        for part in os.path.realpath(self.dev or "").split("/"):
+            prefix.append(part)
+            if self._bdf(part):
+                out.append("/".join(prefix))
+        return out
+
+    def link(self):
+        """The PCIe link the card actually gets: the narrowest/slowest hop between the root port and the card."""
+        hops = self._hops()
+        gens, widths, read = [], [], 0
+        for d in hops:
+            g = self._gen(_Amd._read(d, "max_link_speed"))
+            w = self._int(os.path.join(d, "max_link_width"))
+            read += 1 if (g is not None or w is not None) else 0
+            if g:
+                gens.append(g)
+            if w:
+                widths.append(w)
+        own = self.dev or ""
+        own_gen = self._gen(_Amd._read(own, "current_link_speed"))
+        whole = bool(hops) and read == len(hops)
+        gen = min(gens) if (whole and gens) else own_gen
+        width = min(widths) if (whole and widths) else self._int(os.path.join(own, "current_link_width"))
+        return {"pcie_gen": gen, "pcie_gen_max": gen, "pcie_own_gen": own_gen, "pcie_width": width,
+                "pcie_path": "%d/%d" % (read, len(hops))}
+
     def read(self):
         out = {"util": self._int(os.path.join(self.dev, "gpu_busy_percent")),
                "mem_used": self._int(os.path.join(self.dev, "mem_info_vram_used")),
@@ -179,6 +231,7 @@ class _Amd:
             out["power"] = p / 1e6 if p is not None else None
             cap = self._int(os.path.join(self.hwmon, "power1_cap"))
             out["power_limit"] = cap / 1e6 if cap is not None else None
+        out.update(self.link())
         return out
 
 

@@ -1,7 +1,14 @@
 "use strict";
 const $ = id => document.getElementById(id);
 let selected = null, detail = null, pane = "input", records = [], state = null, operating = false, stamp = "", actionError = "";
-let apiKey = sessionStorage.getItem("strata.monitor.key") || "";
+let apiKey = sessionStorage.getItem("strata.monitor.key") || (() => {
+  try {
+    const raw = localStorage.getItem("strata.apikey");
+    return raw ? JSON.parse(raw) : "";
+  } catch (e) {
+    return localStorage.getItem("strata.apikey") || "";
+  }
+})() || "";
 document.documentElement.dataset.theme = localStorage.getItem("strata.theme") || "dark";
 const seconds = n => typeof n === "number" ? `${n.toFixed(2)} s` : "—";
 const speed = n => typeof n === "number" ? n.toFixed(1) : "—";
@@ -101,6 +108,12 @@ async function control(load) {
   finally { operating = false; await refresh(); }
 }
 $("load").onclick = () => control(true); $("unload").onclick = () => control(false);
+if ($("restart")) {
+  $("restart").onclick = async () => {
+    if (!confirm("Forcefully kill and restart the engine?")) return;
+    try { await api("/restart", {}); notice("Model restarted"); } catch (error) { notice(error.message); } await refresh();
+  };
+}
 $("key").onclick = () => { $("auth").hidden = !$("auth").hidden; if (!$("auth").hidden) $("api-key").focus(); };
 $("auth").onsubmit = async event => { event.preventDefault(); apiKey = $("api-key").value.trim(); sessionStorage.setItem("strata.monitor.key", apiKey); $("auth").hidden = true; await refresh(); };
 $("theme").onclick = () => { const theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark"; document.documentElement.dataset.theme = theme; localStorage.setItem("strata.theme", theme); };

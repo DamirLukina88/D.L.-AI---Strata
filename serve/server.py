@@ -30,6 +30,7 @@ import codecs
 import ctypes
 import json
 import math
+import mimetypes
 import os
 import queue
 import re
@@ -66,6 +67,31 @@ from serve.responses import ResponsesError, error_body as responses_error_body  
 
 IM_END = "<|im_end|>"
 IMAGE_PAD = "<|image_pad|>"
+
+WORKSPACE_DIR = Path(os.environ.get("STRATA_WORKSPACE_DIR", str(Path.cwd() / "workspace"))).resolve()
+WORKSPACE_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
+WORKSPACE_TEXT_EXTS = {
+    ".txt", ".md", ".markdown", ".rst", ".py", ".pyi", ".ipynb", ".js", ".mjs", ".cjs",
+    ".ts", ".tsx", ".jsx", ".vue", ".svelte", ".json", ".jsonl", ".csv", ".tsv", ".log",
+    ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".env", ".xml", ".html", ".htm",
+    ".css", ".scss", ".less", ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".cu",
+    ".cuh", ".rs", ".go", ".java", ".kt", ".kts", ".swift", ".rb", ".php", ".pl", ".lua",
+    ".r", ".jl", ".scala", ".sql", ".sh", ".bash", ".zsh", ".fish", ".ps1", ".bat", ".cmd",
+    ".diff", ".patch", ".dockerfile", ".gitignore", ".proto", ".graphql"
+}
+
+
+def safe_workspace_path(rel_path: str) -> Path | None:
+    if not rel_path:
+        return None
+    try:
+        clean = rel_path.lstrip("/\\")
+        target = (WORKSPACE_DIR / clean).resolve()
+        target.relative_to(WORKSPACE_DIR)
+        return target
+    except (ValueError, Exception):
+        return None
+
 
 
 def popen(what: str, args: list, **kw):
@@ -155,14 +181,23 @@ LOW_EFFORT = EFFORT_TEXT["low"]
 LOOP_CHECK_EVERY = 512           # output tokens between two looks at the reasoning (at a clean parser boundary)
 LOOP_COVERAGE = 0.25             # the share of the last 2,000 words inside 12-word passages seen three times
 LOOP_HISTORY_WORDS = 30000       # how far back the passages are counted (bounds the cost of a look)
+LOOP_TAIL_CHARS = 2048           # chars at the end of the reasoning also checked for a short period (#1753)
+LOOP_TAIL_PERIOD = 64            # a period at most this long in that tail reads as a fully repeated window
 
 
 def reasoning_repeat_coverage(text):
     """Coverage of recent words by 12-word passages seen at least three times.
 
     Only reasoning is supplied. The history (the last LOOP_HISTORY_WORDS words) detects repeated verification passes
-    separated by long code drafts; the recent window excludes old repetitions.
+    separated by long code drafts; the recent window excludes old repetitions.  #1753: a loop can also be one long
+    word (a 24k-digit string cycling an 11-digit pattern): the word split makes it a single word and no word count
+    grows, and #606's token run never grows either (the tokenizer has no multi-digit tokens), so before the word
+    count the last LOOP_TAIL_CHARS chars are checked for a period of at most LOOP_TAIL_PERIOD, and a periodic tail
+    reads as full coverage: it is all of the recent output, repeated.
     """
+    tail = text[-LOOP_TAIL_CHARS:].lower()
+    if len(tail) == LOOP_TAIL_CHARS and any(tail[p:] == tail[:-p] for p in range(1, LOOP_TAIL_PERIOD + 1)):
+        return 1.0
     words = re.findall(r"\w+|[^\w\s]", text.lower())[-LOOP_HISTORY_WORDS:]
     width, window = 12, 2000
     if len(words) < window:
@@ -2587,6 +2622,18 @@ def slot_save_dir(value, base: str | None = None) -> str:
         raise ValueError(f"slot_save_path {path} is not a directory")
     return path
 
+def load_tokenizer_from_path(tpath: Path):
+    if (tpath / "vocab.json").exists():
+        import strata_tokenizer as ST
+        vocab = json.loads((tpath / "vocab.json").read_text(encoding="utf-8"))
+        tokens = [None] * len(vocab)
+        for t, i in vocab.items():
+            tokens[i] = t
+        merges = (tpath / "merges.txt").read_text(encoding="utf-8").split("\n")
+        types = json.loads((tpath / "token_type.json").read_text())
+        return ST.Tokenizer(tokens, merges, types)
+    return ByteTokenizer()
+
 class Service:
     def __init__(self, engine: Engine, tokenizer, template: ChatTemplate, model_name: str = "qwen3.8-flash-next",
                  vision: Vision | None = None, sampling_defaults: dict | None = None,
@@ -2611,6 +2658,7 @@ class Service:
         self.conv_log = ConvCacheLog()                  # #596: the parked conversations, from the engine's log
         self.config_path = None                         # #564: the run config the web page's Settings view edits
         self.config_lock = threading.Lock()
+        self.switch_lock = threading.Lock()
         # #321: browser pages of these origins may call /v1/* (CORS; "*" = any page - only with an api_key that
         # matters); empty = no CORS headers at all, as before
         self.cors_origins: list[str] = []
@@ -2647,6 +2695,7 @@ class Service:
         # only start it again when this much VRAM is free, and run this command first (e.g. to unload another
         # server's model); the next request after an unload starts the engine again
         self.idle_unload_s = 0
+        self.lazy = False
         self.min_free_vram_mib = 0
         self.before_load = None
         self.vram_reserve = None                         # #533: the last POST /v1/vram reserve (None: the start's)
@@ -2923,6 +2972,154 @@ class Service:
             return "unloaded"
         finally:
             self.fifo.release()
+
+    def force_restart(self) -> str:
+        """Forcefully kill and restart or unload the engine immediately (stopping any stuck requests)."""
+        print("[strata] forceful restart requested...", flush=True)
+        if hasattr(self.engine, "proc") and self.engine.proc is not None:
+            try:
+                self.engine.proc.kill()
+            except OSError:
+                pass
+            try:
+                self.engine.proc.wait(timeout=5)
+            except Exception:
+                pass
+        if hasattr(self.engine, "close"):
+            try:
+                self.engine.close()
+            except Exception:
+                pass
+        with self.status_lock:
+            self.status["busy"] = False
+            self.status["queued"] = 0
+            self.status["state"] = "idle"
+            self.status["detail"] = "Restarted"
+            self.status.pop("started", None)
+            self.status.pop("first_token", None)
+        self.live_reqs.clear()
+
+        if getattr(self, "lazy", False) or getattr(self.engine, "unloaded", False):
+            self.engine.unloaded = True
+            self.engine.ended = True
+            print("[strata] engine stopped and marked unloaded; ready for next request", flush=True)
+            return "unloaded"
+        else:
+            try:
+                self.engine.restart()
+                print("[strata] engine restarted successfully", flush=True)
+                return "restarted"
+            except Exception as e:
+                print(f"[strata] engine restart error: {e}", flush=True)
+                return f"error: {e}"
+
+    def available_models(self) -> list[dict]:
+        """List all available model configurations on this server."""
+        configs = []
+        for cfg_file in sorted(ROOT.glob("strata-*.json")):
+            try:
+                data = json.loads(cfg_file.read_text(encoding="utf-8-sig"))
+                m_id = data.get("model_name") or cfg_file.stem.replace("strata-", "")
+                d_name = data.get("display_name") or m_id
+                configs.append({
+                    "id": m_id,
+                    "name": d_name,
+                    "config": cfg_file.name,
+                    "active": m_id == self.model,
+                    "loaded": (m_id == self.model and self.loaded())
+                })
+            except Exception:
+                pass
+        return configs
+
+    def switch_model(self, target: str) -> dict:
+        """Switch active model to target id or config filename on the fly."""
+        if not self.switch_lock.acquire(blocking=False):
+            raise ModelBusy("A model switch is already in progress; please wait.")
+        try:
+            models = self.available_models()
+            match = next((m for m in models if m["id"] == target or m["config"] == target or m["name"] == target), None)
+            if not match:
+                raise ValueError(f"Model {target!r} not found in available configurations")
+
+            target_id = match["id"]
+            target_config = ROOT / match["config"]
+
+            if self.model == target_id:
+                if self.loaded():
+                    print(f"[strata] model {target_id} is already loaded and active", flush=True)
+                    return {"status": "already_loaded", "model": self.model, "name": match["name"]}
+                else:
+                    print(f"[strata] model {target_id} matches active configuration; loading now...", flush=True)
+                    self.load()
+                    return {"status": "loaded", "model": self.model, "name": match["name"]}
+
+            with open(target_config, "r", encoding="utf-8-sig") as f:
+                cfg = json.load(f)
+
+            # Pre-validate that model files exist BEFORE unloading anything
+            args = cfg.get("args", [])
+            for opt in ("--pack", "--native", "--ple-gguf"):
+                if opt in args:
+                    idx = args.index(opt)
+                    if idx + 1 < len(args):
+                        fpath = Path(args[idx + 1])
+                        if not fpath.exists():
+                            raise FileNotFoundError(
+                                f"Model files for {match['name']} are not downloaded yet ({fpath}). "
+                                "Download or setup the model weights first."
+                            )
+
+            tpath = Path(cfg["tokenizer"])
+            if not tpath.exists():
+                raise FileNotFoundError(f"Tokenizer directory for {match['name']} does not exist: {tpath}")
+
+            tok = load_tokenizer_from_path(tpath)
+            exe = cfg["exe"] if os.path.isabs(cfg["exe"]) else os.path.abspath(os.path.join(cfg.get("cwd") or ".", cfg["exe"]))
+            env = child_env(cfg)
+            lazy = cfg.get("lazy_load") is True
+
+            print(f"[strata] switching model from {self.model} to {target_id}...", flush=True)
+            if self.loaded() or (hasattr(self.engine, "alive") and self.engine.alive()):
+                print(f"[strata] unloading previous model {self.model}...", flush=True)
+                self.force_restart()
+                # Give Linux kernel and ROCm driver a moment to unpin/reclaim memory
+                time.sleep(2.0)
+
+            engine = StrataEngine(exe, engine_args(cfg), cwd=cfg.get("cwd"), log=cfg.get("log"), env=env, lazy=lazy)
+            self.engine = engine
+            self.tok = tok
+            self.model = target_id
+            self.config_path = str(target_config)
+            self.lazy = lazy
+            tpl = tpath / "chat_template.jinja"
+            self.template = ChatTemplate(tpl if tpl.exists() else ROOT / "serve/chat_template.jinja")
+            if "idle_unload_s" in cfg:
+                self.idle_unload_s = float(cfg["idle_unload_s"])
+
+            if getattr(self, "vision", None) is not None:
+                try:
+                    self.vision.unload()
+                except Exception:
+                    pass
+                self.vision = None
+
+            if cfg.get("vision"):
+                vcfg = {k: (os.path.abspath(os.path.join(cfg.get("cwd") or ".", v))
+                            if k in ("exe", "mmproj", "model") and isinstance(v, str) and not os.path.isabs(v) else v)
+                        for k, v in cfg["vision"].items()}
+                self.vision = Vision(vcfg, log=open(cfg["log"], "a", encoding="utf-8") if cfg.get("log") else None,
+                                     env=vision_env(cfg, env), lazy=lazy)
+
+            if not lazy:
+                self.load()
+                return {"status": "switched_and_loaded", "model": self.model, "name": match["name"]}
+            else:
+                return {"status": "switched", "model": self.model, "name": match["name"], "lazy": True}
+        finally:
+            self.switch_lock.release()
+
+
 
     def start_idle_unload(self):
         if not self.idle_unload_s or not hasattr(self.engine, "unload"):
@@ -4444,13 +4641,133 @@ def make_handler(svc: Service):
                 return True
             auth = self.headers.get("Authorization", "")
             given = auth[7:].strip() if auth.lower().startswith("bearer ") else self.headers.get("x-api-key", "")
+            if not given:
+                qs = parse_qs(urlsplit(self.path).query)
+                given = (qs.get("token") or qs.get("key") or qs.get("api_key") or [""])[0]
+            if not given:
+                cookie_str = self.headers.get("Cookie", "")
+                if "strata_key=" in cookie_str:
+                    for part in cookie_str.split(";"):
+                        p = part.strip()
+                        if p.startswith("strata_key="):
+                            given = p[len("strata_key="):]
+                            break
             if key_matches(given, svc.api_key):
                 return True
             self._json(401, {"error": {"type": "authentication_error", "message": "missing or wrong API key"}})
             return False
 
+        def _proxy_http(self, port: int):
+            import urllib.request, urllib.error
+            try:
+                req_url = f"http://127.0.0.1:{port}{self.path}"
+                hdrs = {}
+                for k, v in self.headers.items():
+                    if k.lower() not in ("host", "authorization"):
+                        hdrs[k] = v
+                sub_req = urllib.request.Request(req_url, headers=hdrs, method="GET")
+                with urllib.request.urlopen(sub_req, timeout=10) as resp:
+                    body = resp.read()
+                    self.send_response(resp.status)
+                    for h, val in resp.getheaders():
+                        if h.lower() not in ("transfer-encoding", "content-length", "connection"):
+                            self.send_header(h, val)
+                    qs = parse_qs(urlsplit(self.path).query)
+                    tok = (qs.get("token") or qs.get("key") or [""])[0]
+                    if tok and key_matches(tok, svc.api_key):
+                        self.send_header("Set-Cookie", f"strata_key={tok}; Path=/; SameSite=Lax")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+            except urllib.error.HTTPError as e:
+                body = e.read()
+                self.send_response(e.code)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as e:
+                self._json(502, {"error": {"message": f"backend error: {e}"}})
+
+        def _tunnel_ws(self, port: int):
+            import socket, select
+            backend = None
+            try:
+                backend = socket.create_connection(("127.0.0.1", port), timeout=10)
+                req_line = f"{self.command} {self.path} HTTP/1.1\r\n"
+                backend.sendall(req_line.encode("ascii"))
+                for k, v in self.headers.items():
+                    if k.lower() not in ("host",):
+                        backend.sendall(f"{k}: {v}\r\n".encode("utf-8"))
+                backend.sendall(f"Host: 127.0.0.1:{port}\r\n\r\n".encode("ascii"))
+
+                client_sock = self.connection
+                client_sock.setblocking(False)
+                backend.setblocking(False)
+
+                sockets = [client_sock, backend]
+                while True:
+                    r, _, x = select.select(sockets, [], sockets, 60)
+                    if x:
+                        break
+                    if not r:
+                        continue
+                    for s in r:
+                        other = backend if s is client_sock else client_sock
+                        try:
+                            data = s.recv(65536)
+                            if not data:
+                                return
+                            other.sendall(data)
+                        except (BlockingIOError, InterruptedError):
+                            continue
+                        except Exception:
+                            return
+            except Exception:
+                pass
+            finally:
+                if backend:
+                    try:
+                        backend.close()
+                    except Exception:
+                        pass
+                self.close_connection = True
+
         def do_GET(self):
-            path = self.path.split("?")[0].rstrip("/")
+            raw_path = self.path.split("?")[0]
+            if raw_path == "/code":
+                query = urlsplit(self.path).query
+                redirect_url = "/code/" + (f"?{query}" if query else "")
+                self.send_response(302)
+                self.send_header("Location", redirect_url)
+                self.end_headers()
+                return
+            if raw_path.startswith("/code/"):
+                if not self._authorized():
+                    return
+                if raw_path == "/code/token":
+                    self._json(200, {"token": ""})
+                    return
+                is_ws = (self.headers.get("Upgrade", "").lower() == "websocket" or
+                         "upgrade" in self.headers.get("Connection", "").lower())
+                if is_ws:
+                    self._tunnel_ws(7681)
+                    return
+                self._proxy_http(7681)
+                return
+            path = raw_path.rstrip("/")
+            if path in ("/favicon.ico", "/favicon.svg"):
+                icon_file = ROOT / "serve" / "web" / ("favicon.ico" if path == "/favicon.ico" else "favicon.svg")
+                if icon_file.is_file():
+                    body = icon_file.read_bytes()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/x-icon" if path == "/favicon.ico" else "image/svg+xml")
+                    self.send_header("Cache-Control", "public, max-age=86400")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                self._json(404, {"error": {"message": "not found"}})
+                return
             if path.startswith("/fonts/"):
                 # the web app's font (Outfit, OFL: serve/web/fonts); the page falls back to the system font
                 name = path[len("/fonts/"):]
@@ -4470,7 +4787,7 @@ def make_handler(svc: Service):
                 # the web app's own files (serve/web): styles, script, icon sprite - same origin, no CDN
                 name = path[len("/web/"):]
                 types = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8",
-                         ".svg": "image/svg+xml"}
+                         ".svg": "image/svg+xml", ".ico": "image/x-icon"}
                 f = ROOT / "serve" / "web" / name
                 ext = os.path.splitext(name)[1]
                 if "/" in name or "\\" in name or ext not in types or not f.is_file():
@@ -4479,7 +4796,9 @@ def make_handler(svc: Service):
                 body = f.read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Type", types[ext])
-                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -4521,10 +4840,99 @@ def make_handler(svc: Service):
                 if self._authorized():
                     self._json(200, svc.mcp.status() if svc.mcp else {"servers": [], "tools": 0})
                 return
+            if path in ("/available_models", "/api/models"):
+                if self._authorized():
+                    self._json(200, {"models": svc.available_models(), "current": svc.model})
+                return
+            if path in ("/api/workspace/files", "/api/workspace"):
+                if not self._authorized():
+                    return
+                try:
+                    WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+                    items = []
+                    for p in sorted(WORKSPACE_DIR.rglob("*")):
+                        if any(part.startswith(".") for part in p.parts):
+                            continue
+                        rel = str(p.relative_to(WORKSPACE_DIR)).replace("\\", "/")
+                        stat = p.stat()
+                        is_dir = p.is_dir()
+                        ext = p.suffix.lower()
+                        kind = "dir" if is_dir else ("image" if ext in WORKSPACE_IMAGE_EXTS else ("text" if ext in WORKSPACE_TEXT_EXTS else "other"))
+                        items.append({
+                            "name": p.name,
+                            "path": rel,
+                            "is_dir": is_dir,
+                            "size": 0 if is_dir else stat.st_size,
+                            "mtime": int(stat.st_mtime),
+                            "kind": kind
+                        })
+                    self._json(200, {"workspace": str(WORKSPACE_DIR), "files": items})
+                except Exception as e:
+                    self._json(500, {"error": {"message": f"failed to list workspace: {e}"}})
+                return
+            if path == "/api/workspace/download":
+                if not self._authorized():
+                    return
+                qs = parse_qs(urlsplit(self.path).query)
+                target_rel = (qs.get("file") or qs.get("path") or [""])[0]
+                target = safe_workspace_path(target_rel)
+                if not target or not target.is_file():
+                    self._json(404, {"error": {"message": "file not found in workspace"}})
+                    return
+                mime, _ = mimetypes.guess_type(target.name)
+                mime = mime or "application/octet-stream"
+                try:
+                    data = target.read_bytes()
+                    self.send_response(200)
+                    self.send_header("Content-Type", mime)
+                    self.send_header("Content-Disposition", f'attachment; filename="{target.name}"')
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                except Exception as e:
+                    self._json(500, {"error": {"message": f"download failed: {e}"}})
+                return
+            if path == "/api/workspace/file":
+                if not self._authorized():
+                    return
+                qs = parse_qs(urlsplit(self.path).query)
+                target_rel = (qs.get("file") or qs.get("path") or [""])[0]
+                target = safe_workspace_path(target_rel)
+                if not target or not target.is_file():
+                    self._json(404, {"error": {"message": "file not found in workspace"}})
+                    return
+                ext = target.suffix.lower()
+                try:
+                    if ext in WORKSPACE_IMAGE_EXTS:
+                        mime, _ = mimetypes.guess_type(target.name)
+                        mime = mime or "image/png"
+                        b64 = base64.b64encode(target.read_bytes()).decode("ascii")
+                        self._json(200, {
+                            "name": target.name,
+                            "path": str(target.relative_to(WORKSPACE_DIR)),
+                            "kind": "image",
+                            "url": f"data:{mime};base64,{b64}",
+                            "size": target.stat().st_size
+                        })
+                    else:
+                        text = target.read_text(encoding="utf-8", errors="replace")
+                        self._json(200, {
+                            "name": target.name,
+                            "path": str(target.relative_to(WORKSPACE_DIR)),
+                            "kind": "file",
+                            "text": text,
+                            "size": target.stat().st_size
+                        })
+                except Exception as e:
+                    self._json(500, {"error": {"message": f"failed to read file: {e}"}})
+                return
             if path == "" or (path == "/api-monitor" and svc.api_monitor):
                 body = (ROOT / "serve" / "web" / ("monitor.html" if path else "index.html")).read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -4606,10 +5014,10 @@ def make_handler(svc: Service):
             if path == "/config":
                 self._config_post()
                 return
-            if path in ("/unload", "/load") and not self._control_body():
+            if path in ("/unload", "/load", "/restart") and not self._control_body():
                 return
             # JSON from Strata's own page only, as /settings: else a plain form POST from any site unloads the model
-            if path in ("/unload", "/load") and not self._own_page("the model can be loaded or unloaded"):
+            if path in ("/unload", "/load", "/restart") and not self._own_page("the model can be loaded, unloaded or restarted"):
                 return
             # the same for the slot files: else any site could overwrite a saved conversation or replace the live one
             if path.startswith("/slots/") and not self._own_page("conversations can be saved or restored"):
@@ -4629,6 +5037,107 @@ def make_handler(svc: Service):
                 except GpuBusy as e:
                     self._json(503, {"error": {"type": "server_error", "message": str(e)}})
                 return
+            if path == "/restart":
+                try:
+                    r = svc.force_restart()
+                except Exception as e:
+                    self._json(500, {"error": {"type": "server_error", "message": str(e)}})
+                    return
+                self._json(200, {"status": r})
+                return
+            if path == "/switch_model":
+                if not self._own_page("the model can be switched"):
+                    return
+                try:
+                    req = json.loads(self._body() or b"{}")
+                except ValueError:
+                    req = {}
+                target = req.get("model") or req.get("id")
+                if not target:
+                    self._json(400, {"error": {"message": "missing model identifier"}})
+                    return
+                try:
+                    res = svc.switch_model(target)
+                    self._json(200, res)
+                except Exception as e:
+                    self._json(500, {"error": {"type": "server_error", "message": str(e)}})
+                return
+            if path == "/api/workspace/upload":
+                qs = parse_qs(urlsplit(self.path).query)
+                filename = (qs.get("file") or qs.get("filename") or [""])[0]
+                if not filename:
+                    filename = self.headers.get("X-Filename", "")
+                ctype = self.headers.get("Content-Type", "")
+                data = None
+                if ctype.startswith("application/json"):
+                    try:
+                        req = json.loads(self._body() or b"{}")
+                    except Exception:
+                        self._json(400, {"error": {"message": "invalid JSON"}})
+                        return
+                    filename = filename or req.get("filename") or req.get("name")
+                    if not filename:
+                        self._json(400, {"error": {"message": "missing filename"}})
+                        return
+                    if "content_base64" in req:
+                        try:
+                            data = base64.b64decode(req["content_base64"])
+                        except Exception:
+                            self._json(400, {"error": {"message": "invalid base64"}})
+                            return
+                    elif "text" in req:
+                        data = req["text"].encode("utf-8")
+                    elif "content" in req:
+                        val = req["content"]
+                        data = val.encode("utf-8") if isinstance(val, str) else bytes(val)
+                    else:
+                        self._json(400, {"error": {"message": "missing file content"}})
+                        return
+                else:
+                    if not filename:
+                        self._json(400, {"error": {"message": "missing filename in query or X-Filename header"}})
+                        return
+                    data = self._body()
+                target = safe_workspace_path(filename)
+                if not target:
+                    self._json(400, {"error": {"message": "invalid or unsafe filename"}})
+                    return
+                try:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(data)
+                    self._json(200, {"status": "ok", "filename": target.name, "path": str(target.relative_to(WORKSPACE_DIR)), "size": len(data)})
+                except Exception as e:
+                    self._json(500, {"error": {"message": f"failed to save file: {e}"}})
+                return
+            if path in ("/api/workspace/delete", "/api/workspace/remove"):
+                qs = parse_qs(urlsplit(self.path).query)
+                filename = (qs.get("file") or qs.get("path") or [""])[0]
+                if not filename:
+                    try:
+                        req = json.loads(self._body() or b"{}")
+                        filename = req.get("file") or req.get("path") or req.get("name")
+                    except Exception:
+                        pass
+                target = safe_workspace_path(filename)
+                if not target or not target.exists():
+                    self._json(404, {"error": {"message": "file not found"}})
+                    return
+                try:
+                    if target.is_dir():
+                        shutil.rmtree(target)
+                    else:
+                        target.unlink()
+                    self._json(200, {"status": "ok", "deleted": filename})
+                except Exception as e:
+                    self._json(500, {"error": {"message": f"failed to delete: {e}"}})
+                return
+            if path == "/api/code/restart":
+                try:
+                    subprocess.run(["tmux", "kill-session", "-t", "dl-ai-code"], check=False)
+                    self._json(200, {"status": "ok", "message": "Claude Code session restarted"})
+                except Exception as e:
+                    self._json(500, {"error": {"message": f"failed to restart session: {e}"}})
+                return
             try:
                 req = json.loads(self._body() or b"{}")
                 if not isinstance(req, dict):
@@ -4637,8 +5146,12 @@ def make_handler(svc: Service):
                     self._json(404, responses_error_body("this server keeps no responses (stateless); send the "
                                                          "whole conversation to POST /v1/responses", code="not_found"))
                     return
-                if path in ("/v1/load", "/v1/unload"):
-                    if not self._own_page("the model can be loaded or unloaded"):
+                if path in ("/v1/load", "/v1/unload", "/v1/restart"):
+                    if not self._own_page("the model can be loaded, unloaded or restarted"):
+                        return
+                    if path == "/v1/restart":
+                        r = svc.force_restart()
+                        self._json(200, {"status": r})
                         return
                     if req.get("model") not in (None, svc.model):
                         self._json(404, {"error": {"message": "model not found"}})
@@ -4962,6 +5475,7 @@ def make_handler(svc: Service):
                 raise ValueError("a forced tool_choice with MCP tools is not supported")
             svc.reasoning_budget(req)                         # a bad value is a 400 before anything is sent
             stop_strings(req)                                 # ... and so is a bad stop / stop_sequences
+            check_request_sampling(req)                       # ... and a sampling field of the wrong type
             ids, thinking, max_new = svc.prepare(messages, tools, kw, max_new, force=force, req=req)
             _debug_req("openai", req, messages, tools, max_new, thinking, len(ids))
             cancel = threading.Event()
@@ -5163,6 +5677,7 @@ def make_handler(svc: Service):
             req = svc.with_shared(req, "anthropic")
             messages, tools, kw = anthropic_to_messages(req, svc.anthropic_think_unasked)
             stop_strings(req)                                 # the same 400 as the request itself would get
+            check_request_sampling(req)                       # ... likewise a sampling field of the wrong type
             self._json(200, {"input_tokens": len(svc.encode_prompt(messages, tools, kw))})
 
         def _anthropic(self, req):
@@ -5176,6 +5691,7 @@ def make_handler(svc: Service):
             max_new = int(req.get("max_tokens") or 0)                  # 0/-1: the rest of the context
             svc.reasoning_budget(req)                         # a bad value is a 400 before anything is sent
             stop_strings(req)                                 # ... and so is a bad stop / stop_sequences
+            check_request_sampling(req)                       # ... and a sampling field of the wrong type
             ids, thinking, max_new = svc.prepare(messages, tools, kw, max_new, force=force, req=req)
             _debug_req("anthropic", req, messages, tools, max_new, thinking, len(ids))
             cancel = threading.Event()
@@ -5550,15 +6066,26 @@ def clean_shared_defaults(d) -> dict:
     return out
 
 
+SAMPLING_ALIASES = {"repeat_penalty": "repetition_penalty", "repeat_last_n": "penalty_last_n"}
+
+
 def sampling_defaults_from_config(cfg: dict) -> dict:
     """The run config's optional `sampling` block: defaults for the sampling fields a request leaves out, so
     a plain client gets configured sampling instead of greedy.  Supported: temperature, top_p, top_k, min_p,
-    presence_penalty, repetition_penalty, frequency_penalty, penalty_last_n, seed.  The request's own fields
+    presence_penalty, repetition_penalty (also written repeat_penalty), frequency_penalty, penalty_last_n (also
+    repeat_last_n), seed.  The request's own fields
     always win - an explicit temperature=0 still means greedy, a field set to null falls back to the default.
     A bad value refuses to start the server (a typo'd config should not quietly change sampling); unknown keys
     are named at startup and ignored."""
     out = {}
-    for key, value in (cfg.get("sampling") or {}).items():
+    block = dict(cfg.get("sampling") or {})
+    for alias, canon in SAMPLING_ALIASES.items():      # #1819: llama.cpp's names for the same two fields
+        if block.get(alias) is not None:
+            if block.get(canon) is not None:
+                raise SystemExit(f"[strata] config sampling: both {alias!r} and {canon!r} are set; they are the same "
+                                 f"setting, keep one")
+            block[canon] = block.pop(alias)
+    for key, value in block.items():
         if value is None:
             continue
         number = isinstance(value, (int, float)) and not isinstance(value, bool)
@@ -5606,6 +6133,42 @@ def sampling_defaults_from_config(cfg: dict) -> dict:
         else:
             print(f"[strata] config sampling.{key}={value!r}: unknown key, ignored", flush=True)
     return out
+
+
+def check_request_sampling(req) -> None:
+    """A request's sampling field of the wrong JSON type ("temperature": "0.7", "top_k": 40.0, "seed": true) is a 400
+    that names the field, as the same value is through POST /settings or the run config.  Unchecked, the value
+    replaced the configured default in run()'s merge and sampling_keys dropped it, so the reply was greedy.  Only
+    types are checked: a number (int or float, never bool) for temperature, top_p, min_p and the three penalties; an
+    integer (never bool or float) for top_k, penalty_last_n and seed.  Ranges behave as before (a temperature <= 0 is
+    greedy, top_k 0 or above 64 is clamped, a seed <= 0 is unset), and an absent or null field is not checked."""
+    if isinstance(req, dict):      # #1819: llama.cpp's names; the OpenAI-style field wins when both are sent
+        if req.get("repeat_penalty") is not None and req.get("repetition_penalty") is None:
+            req["repetition_penalty"] = req["repeat_penalty"]
+        rl = req.get("repeat_last_n")
+        if req.get("penalty_last_n") is None and isinstance(rl, int) and not isinstance(rl, bool) and rl > 0:
+            req["penalty_last_n"] = rl      # 0 and -1 (off / the whole context) keep the engine's default window
+    for key, integer in (("temperature", False), ("top_p", False), ("min_p", False), ("presence_penalty", False),
+                         ("frequency_penalty", False), ("repetition_penalty", False), ("top_k", True),
+                         ("penalty_last_n", True), ("seed", True)):
+        value = (req or {}).get(key)
+        if value is None:
+            continue
+        if isinstance(value, str) and value.strip():      # some clients send numbers as strings: read and used
+            try:
+                num = float(value)
+                num = int(num) if integer and num == int(num) else (num if not integer else None)
+                if integer and num is None:
+                    raise ValueError
+                if not integer and re.fullmatch(r"\s*[+-]?\d+\s*", value):
+                    num = int(value)
+            except (ValueError, OverflowError):
+                raise ValueError(f"{key}: {'an integer' if integer else 'a number'}") from None
+            if num != num or num in (float("inf"), float("-inf")):
+                raise ValueError(f"{key}: {'an integer' if integer else 'a number'}")
+            req[key] = value = num
+        if isinstance(value, bool) or not isinstance(value, int if integer else (int, float)):
+            raise ValueError(f"{key}: {'an integer' if integer else 'a number'}")
 
 
 def main() -> int:
@@ -5675,6 +6238,7 @@ def main() -> int:
         types = json.loads((tpath / "token_type.json").read_text())
         tok = ST.Tokenizer(tokens, merges, types)
     hub = hub_from_config(cfg, a.mcp_config)            # before the minutes of loading: a bad entry stops here
+    lazy = a.lazy or (cfg.get("lazy_load") is True if cfg else False)
     if a.engine == "strata":
         if not cfg:
             ap.error("--engine strata needs --config")
@@ -5684,7 +6248,6 @@ def main() -> int:
         if sampling_defaults:
             pretty = ", ".join(f"{k}={v}" for k, v in sampling_defaults.items())
             print(f"[strata] sampling defaults from the config: {pretty}", flush=True)
-        lazy = a.lazy or cfg.get("lazy_load") is True
         if cfg.get("vision"):
             print("loading the vision encoder ..." if not lazy else
                   "vision encoder unloaded; it starts with the model ...", flush=True)
@@ -5735,6 +6298,7 @@ def main() -> int:
                   model_name=cfg.get("model_name", "qwen3.8-flash-next"), vision=vision,
                   sampling_defaults=sampling_defaults,
                   fit_max_tokens=a.fit_max_tokens or cfg.get("fit_max_tokens") is True)
+    svc.lazy = lazy
     svc.reasoning_close_retry = cfg.get("reasoning_close_retry") is True    # #1053: opt-in, off by default
     svc.codex_thread_titles = cfg.get("codex_thread_titles") is True    # #923: opt-in, off by default
     svc.codex_compaction_cache = cfg.get("codex_compaction_cache") is True   # #924: opt-in, off by default

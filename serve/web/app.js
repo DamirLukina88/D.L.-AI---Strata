@@ -3,8 +3,13 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const SPRITE = "web/sprite.svg";
-const icon = (name, cls = "st-icon") => `<svg class="${cls}" aria-hidden="true"><use href="${SPRITE}#i-${name}"/></svg>`;
+const SPRITE = "web/sprite.svg?v=20261010-5";
+const icon = (name, cls = "st-icon") => {
+  if (name === "folder") {
+    return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path opacity="0.25" d="M3 6C3 4.895 3.895 4 5 4H9.172C9.702 4 10.211 4.21 10.586 4.586L12.414 6.414C12.789 6.789 13.298 7 13.828 7H19C20.105 7 21 7.895 21 9V18C21 19.105 20.105 20 19 20H5C3.895 20 3 19.105 3 18V6Z" fill="currentColor"/><path d="M3 6C3 4.895 3.895 4 5 4H9.172C9.702 4 10.211 4.21 10.586 4.586L12.414 6.414C12.789 6.789 13.298 7 13.828 7H19C20.105 7 21 7.895 21 9V18C21 19.105 20.105 20 19 20H5C3.895 20 3 19.105 3 18V6Z"/></svg>`;
+  }
+  return `<svg class="${cls}" aria-hidden="true"><use href="${SPRITE}#i-${name}"/></svg>`;
+};
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const fmt = (n, d = 0) => (n == null || Number.isNaN(n) ? "–" : Number(n).toLocaleString(undefined, {maximumFractionDigits: d, minimumFractionDigits: d}));
 const kfmt = (n) => (n == null ? "–" : n >= 1000 ? `${fmt(n / 1000, n >= 10000 ? 0 : 1)}k` : fmt(n));
@@ -64,20 +69,35 @@ function setTheme(t, save) {
 const flipTheme = () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", true);
 $("theme-btn").onclick = flipTheme;
 $("dark-toggle").onclick = flipTheme;
-setTheme(document.documentElement.dataset.theme || "light", false);
+setTheme(document.documentElement.dataset.theme || "dark", false);
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
   let saved = null;
   try { saved = localStorage.getItem("strata.theme"); } catch (err) { /* ignore */ }
-  if (!saved) setTheme(e.matches ? "dark" : "light", false);
+  if (saved) setTheme(saved, false);
 });
 
 let tab = "chat";
+let codeLoaded = false;
+function loadCodeTerminal() {
+  const frame = $("code-terminal-frame");
+  if (!frame) return;
+  if (!codeLoaded || frame.src === "about:blank") {
+    const key = store.get("apikey", DEFAULT_KEY);
+    try { document.cookie = `strata_key=${encodeURIComponent(key)}; path=/; SameSite=Lax`; } catch (e) {}
+    frame.src = "/code/";
+    codeLoaded = true;
+  }
+}
+
 function showTab(name) {
-  tab = ["chat", "monitor", "about"].includes(name) ? name : "chat";
+  tab = ["chat", "code", "monitor", "about"].includes(name) ? name : "chat";
   for (const b of document.querySelectorAll(".st-tab")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
-  for (const v of ["chat", "monitor", "about"]) $(`view-${v}`).hidden = v !== tab;
+  for (const v of ["chat", "code", "monitor", "about"]) {
+    if ($(`view-${v}`)) $(`view-${v}`).hidden = v !== tab;
+  }
   if (location.hash.slice(1) !== tab) history.replaceState(null, "", tab === "chat" ? location.pathname : `#${tab}`);
   if (tab === "chat") $("input").focus();
+  if (tab === "code") loadCodeTerminal();
   if (tab === "monitor") loadMcp();
   if (tab === "about") loadConfig();
   if (lastMetrics) render(lastMetrics);
@@ -85,24 +105,157 @@ function showTab(name) {
 for (const b of document.querySelectorAll(".st-tab")) b.onclick = () => showTab(b.dataset.tab);
 window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
 
+if ($("code-restart-btn")) {
+  $("code-restart-btn").onclick = async () => {
+    if (!confirm("Restart Claude Code CLI terminal session?")) return;
+    try {
+      const r = await fetch("api/code/restart", { method: "POST", headers: headers(true) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      toast("info", "Session restarted", "Reconnecting to new Claude Code session...");
+      const frame = $("code-terminal-frame");
+      if (frame) {
+        const key = store.get("apikey", DEFAULT_KEY);
+        try { document.cookie = `strata_key=${encodeURIComponent(key)}; path=/; SameSite=Lax`; } catch (e) {}
+        frame.src = "about:blank";
+        setTimeout(() => { frame.src = "/code/"; }, 60);
+      }
+    } catch (e) {
+      toast("error", "Restart failed", e.message);
+    }
+  };
+}
+if ($("code-fullscreen-btn")) {
+  $("code-fullscreen-btn").onclick = () => {
+    const wrap = document.querySelector(".code-terminal-wrap");
+    if (!wrap) return;
+    wrap.classList.toggle("code-terminal--fullscreen");
+  };
+}
+
 // ------------------------------------------------------------------ server access
+const DEFAULT_KEY = "";
 function headers(json = false) {
   const h = {};
-  const key = store.get("apikey", "");
+  const key = store.get("apikey", DEFAULT_KEY);
   if (key) h.Authorization = "Bearer " + key;
   if (json) h["Content-Type"] = "application/json";
   return h;
 }
-$("api-key").value = store.get("apikey", "");
+$("api-key").value = store.get("apikey", DEFAULT_KEY);
 $("api-key").onchange = () => { store.set("apikey", $("api-key").value.trim()); toast("success", "API key saved", "Kept in this browser only."); };
 
-let health = {model: "strata", images: false, max_context: 0};
+if ($("force-restart-btn")) {
+  $("force-restart-btn").onclick = async () => {
+    if (!confirm("Forcefully kill the running engine process and restart/reset?")) return;
+    const btn = $("force-restart-btn");
+    btn.disabled = true;
+    btn.textContent = "Restarting…";
+    try {
+      const r = await fetch("restart", {method: "POST", headers: headers(true), body: "{}"});
+      if (!r.ok) {
+        let msg = `HTTP ${r.status}`;
+        try { msg = (await r.json()).error.message || msg; } catch (e) {}
+        throw new Error(msg);
+      }
+      const res = await r.json();
+      toast("success", "Engine restarted", `Model state: ${res.status || "ready"}`);
+    } catch (e) {
+      toast("error", "Restart failed", e.message || String(e), 6000);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Force Restart";
+    }
+  };
+}
+
+if ($("logout-btn")) {
+  $("logout-btn").onclick = () => {
+    if (!confirm("Are you sure you want to log out?")) return;
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch (e) {}
+    const host = window.location.hostname;
+    const domains = [host, "." + host, ""];
+    const cookieNames = ["CF_Authorization", "CF_AppSession", "CF_Session", "strata.apikey", "strata.theme"];
+    try {
+      document.cookie.split(";").forEach(c => {
+        const name = c.split("=")[0].trim();
+        if (name && !cookieNames.includes(name)) cookieNames.push(name);
+      });
+    } catch (e) {}
+    for (const d of domains) {
+      for (const name of cookieNames) {
+        document.cookie = `${name}=; Path=/; ${d ? `Domain=${d}; ` : ""}Expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0;`;
+      }
+    }
+    const logoutUrl = window.STRATA_LOGOUT_URL || "/cdn-cgi/access/logout";
+    try {
+      if (window.top) {
+        window.top.location.href = logoutUrl;
+      } else {
+        window.location.href = logoutUrl;
+      }
+    } catch (e) {
+      window.location.href = logoutUrl;
+    }
+  };
+}
+
+async function loadAvailableModels() {
+  if (!$("model-select")) return;
+  try {
+    const r = await fetch("available_models", {headers: headers()});
+    if (r.ok) {
+      const data = await r.json();
+      if (data.models && data.models.length) {
+        $("model-select").innerHTML = data.models.map(m =>
+          `<option value="${esc(m.id)}"${m.active ? " selected" : ""}>${esc(m.name || m.id)}</option>`
+        ).join("");
+      }
+    }
+  } catch (e) {}
+}
+
+if ($("model-select")) {
+  $("model-select").onchange = async () => {
+    const target = $("model-select").value;
+    toast("info", "Switching model…", `Selecting ${target}`);
+    try {
+      const r = await fetch("switch_model", {
+        method: "POST",
+        headers: headers(true),
+        body: JSON.stringify({model: target})
+      });
+      if (!r.ok) {
+        let msg = `HTTP ${r.status}`;
+        try { msg = (await r.json()).error.message || msg; } catch (e) {}
+        throw new Error(msg);
+      }
+      const res = await r.json();
+      if (res.status === "already_loaded") {
+        toast("info", "Already Active", `${res.name || target} is already loaded.`);
+      } else {
+        toast("success", "Model Active", `${res.name || target} (${res.status || "ready"}).`);
+      }
+      loadHealth();
+    } catch (e) {
+      toast("error", "Model Switch Failed", e.message || String(e), 6000);
+      loadAvailableModels();
+    }
+  };
+}
+
+let health = {model: "D.L. AI", images: false, max_context: 0};
 async function loadHealth() {
   try {
     health = await (await fetch("health")).json();
     $("attach-btn").title = health.images ? "Attach a text file or a picture (or drop it here)"
                                           : "Attach a text file (or drop it here)";
-    $("chat-empty-sub").textContent = `${health.model} runs on this PC. Nothing leaves it.`;
+    $("chat-empty-sub").textContent = "Dedicated private AI without external tracking. Your own model, your own rules.";
+    if ($("model-select") && health.model) {
+      $("model-select").value = health.model;
+    }
   } catch (e) {
     setTimeout(loadHealth, 2000);
   }
@@ -139,7 +292,7 @@ function spark(id, values, max) {
   const svg = $(id);
   const v = (values || []).map((x) => (x == null ? 0 : x));
   if (v.length < 2) { svg.querySelector(".line").setAttribute("d", ""); svg.querySelector(".area").setAttribute("d", ""); return; }
-  const top = Math.max(max || 0, ...v, 1e-9);
+  const top = Math.max(max || 0, ...v, 1);
   const pts = v.map((x, i) => [(i / (v.length - 1)) * 100, 30 - (x / top) * 26]);
   const line = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(2)},${p[1].toFixed(2)}`).join("");
   svg.querySelector(".line").setAttribute("d", line);
@@ -1065,16 +1218,500 @@ $("s-apply").onclick = async () => {
   }
   toast("success", "Sampling saved", settings.temperature === 0 ? "Greedy: the same question gives the same answer." : "");
 };
+// ------------------------------------------------------------------ Server Workspace
+let wsFiles = [];
+let wsLoading = false;
+
+function openWorkspace(open = true) {
+  const dlg = $("workspace-dialog");
+  if (!dlg) return;
+  if (open) {
+    if (typeof dlg.showModal === "function") {
+      try { dlg.showModal(); } catch (e) { dlg.setAttribute("open", ""); }
+    } else {
+      dlg.setAttribute("open", "");
+    }
+    loadWorkspaceFiles();
+  } else {
+    if (typeof dlg.close === "function") dlg.close();
+    else dlg.removeAttribute("open");
+  }
+}
+
+async function loadWorkspaceFiles() {
+  if (wsLoading) return;
+  wsLoading = true;
+  const list = $("ws-file-list");
+  if (list) list.innerHTML = `<tr><td colspan="4" class="muted">Loading workspace files&hellip;</td></tr>`;
+  try {
+    const r = await fetch("api/workspace/files", { headers: headers() });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    wsFiles = data.files || [];
+    if (data.workspace && $("ws-path")) $("ws-path").textContent = data.workspace;
+    renderWorkspaceFiles();
+  } catch (err) {
+    if (list) list.innerHTML = `<tr><td colspan="4" class="muted">Failed to load workspace files: ${esc(err.message)}</td></tr>`;
+    toast("error", "Workspace error", err.message);
+  } finally {
+    wsLoading = false;
+  }
+}
+
+const wsExpandedFolders = new Set();
+
+function fmtWsSize(b) {
+  if (b == null || isNaN(b)) return "–";
+  if (b > 1048576) return `${(b / 1048576).toFixed(1)} MB`;
+  if (b > 1024) return `${(b / 1024).toFixed(0)} KB`;
+  return `${b} B`;
+}
+
+function buildWorkspaceTree(items, query = "") {
+  const root = {
+    name: "",
+    path: "",
+    is_dir: true,
+    folders: new Map(),
+    files: [],
+    totalFiles: 0,
+    totalSize: 0,
+    hasMatches: false
+  };
+
+  function getOrCreateFolder(segments) {
+    let curr = root;
+    let currPath = "";
+    for (const seg of segments) {
+      currPath = currPath ? `${currPath}/${seg}` : seg;
+      if (!curr.folders.has(seg)) {
+        curr.folders.set(seg, {
+          name: seg,
+          path: currPath,
+          is_dir: true,
+          folders: new Map(),
+          files: [],
+          totalFiles: 0,
+          totalSize: 0,
+          hasMatches: false
+        });
+      }
+      curr = curr.folders.get(seg);
+    }
+    return curr;
+  }
+
+  // Ensure explicit directories are registered
+  for (const item of items) {
+    if (item.is_dir) {
+      const parts = item.path.split("/").filter(Boolean);
+      getOrCreateFolder(parts);
+    }
+  }
+
+  // Place files into folders
+  for (const item of items) {
+    if (item.is_dir) continue;
+    const parts = item.path.split("/").filter(Boolean);
+    const fileName = parts.pop() || item.name;
+    const parentFolder = parts.length > 0 ? getOrCreateFolder(parts) : root;
+
+    const isMatch = !query || item.name.toLowerCase().includes(query) || item.path.toLowerCase().includes(query);
+    if (isMatch) {
+      parentFolder.files.push({
+        ...item,
+        name: fileName
+      });
+    }
+  }
+
+  // Compute recursive totals
+  function computeTotals(node) {
+    let count = node.files.length;
+    let size = node.files.reduce((sum, f) => sum + (f.size || 0), 0);
+    let matched = node.files.length > 0;
+
+    for (const child of node.folders.values()) {
+      computeTotals(child);
+      count += child.totalFiles;
+      size += child.totalSize;
+      if (child.hasMatches || child.totalFiles > 0) {
+        matched = true;
+      }
+    }
+
+    node.totalFiles = count;
+    node.totalSize = size;
+    node.hasMatches = matched;
+  }
+
+  computeTotals(root);
+  return root;
+}
+
+function renderFolderNode(folder, depth, list, query) {
+  if (query && !folder.hasMatches && folder.totalFiles === 0) return;
+
+  const isExpanded = wsExpandedFolders.has(folder.path) || Boolean(query);
+  const tr = document.createElement("tr");
+  tr.className = `ws-folder-row ${depth > 0 ? "ws-folder-row--nested" : ""}`;
+  tr.dataset.expanded = String(isExpanded);
+  tr.dataset.path = folder.path;
+
+  const indentPx = 12 + depth * 18;
+
+  tr.innerHTML = `
+    <td class="ws-file-name-cell" style="padding-left: ${indentPx}px;">
+      <span class="ws-folder-chevron">${isExpanded ? "▼" : "▶"}</span>
+      <span class="ws-file-icon">${icon("folder", "st-icon st-icon--sm")}</span>
+      <strong class="ws-file-title" title="${esc(folder.path)}">${esc(folder.name)}/</strong>
+      <span class="ws-folder-badge">${folder.totalFiles} item${folder.totalFiles === 1 ? "" : "s"}</span>
+    </td>
+    <td class="num muted small">${fmtWsSize(folder.totalSize)}</td>
+    <td class="muted small">–</td>
+    <td class="num ws-actions-cell">
+      <button type="button" class="st-btn st-btn--icon ws-action-btn ws-del-btn" title="Delete folder">
+        ${icon("trash", "st-icon st-icon--sm")}
+      </button>
+    </td>
+  `;
+
+  tr.querySelector("td").onclick = () => {
+    if (wsExpandedFolders.has(folder.path)) {
+      wsExpandedFolders.delete(folder.path);
+    } else {
+      wsExpandedFolders.add(folder.path);
+    }
+    renderWorkspaceFiles();
+  };
+
+  tr.querySelector(".ws-del-btn").onclick = (e) => {
+    e.stopPropagation();
+    deleteFromWorkspace({ name: folder.name, path: folder.path, is_dir: true });
+  };
+
+  list.appendChild(tr);
+
+  if (isExpanded) {
+    const subfolders = Array.from(folder.folders.values()).sort((a, b) => a.name.localeCompare(b.name));
+    for (const sub of subfolders) {
+      renderFolderNode(sub, depth + 1, list, query);
+    }
+
+    const files = folder.files.slice().sort((a, b) => a.name.localeCompare(b.name));
+    for (const file of files) {
+      renderFileRow(file, depth + 1, list);
+    }
+  }
+}
+
+function renderFileRow(f, depth, list) {
+  const tr = document.createElement("tr");
+  if (depth > 0) tr.className = "ws-child-row";
+
+  const indentPx = 12 + depth * 18 + (depth > 0 ? 18 : 0);
+
+  const tdName = document.createElement("td");
+  tdName.className = "ws-file-name-cell";
+  tdName.style.paddingLeft = `${indentPx}px`;
+
+  const fileIcon = f.kind === "image" ? "image" : "attach";
+  tdName.innerHTML = `
+    <span class="ws-file-icon">${icon(fileIcon, "st-icon st-icon--sm")}</span>
+    <span class="ws-file-title" title="${esc(f.path)}">${esc(f.name)}</span>
+  `;
+  tr.appendChild(tdName);
+
+  const tdSize = document.createElement("td");
+  tdSize.className = "num muted small";
+  tdSize.textContent = fmtWsSize(f.size);
+  tr.appendChild(tdSize);
+
+  const tdDate = document.createElement("td");
+  tdDate.className = "muted small";
+  const d = new Date(f.mtime * 1000);
+  tdDate.textContent = `${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour: "2-digit", minute:"2-digit"})}`;
+  tr.appendChild(tdDate);
+
+  const tdActions = document.createElement("td");
+  tdActions.className = "num ws-actions-cell";
+
+  const btnAttach = document.createElement("button");
+  btnAttach.type = "button";
+  btnAttach.className = "st-btn st-btn--secondary st-btn--sm ws-action-btn";
+  btnAttach.title = "Attach this file to chat prompt";
+  btnAttach.innerHTML = `${icon("attach", "st-icon st-icon--sm")}<span>Attach</span>`;
+  btnAttach.onclick = () => attachFromWorkspace(f);
+  tdActions.appendChild(btnAttach);
+
+  const btnDown = document.createElement("button");
+  btnDown.type = "button";
+  btnDown.className = "st-btn st-btn--icon ws-action-btn";
+  btnDown.title = "Download to browser";
+  btnDown.innerHTML = icon("download", "st-icon st-icon--sm");
+  btnDown.onclick = () => downloadFromWorkspace(f);
+  tdActions.appendChild(btnDown);
+
+  const btnDel = document.createElement("button");
+  btnDel.type = "button";
+  btnDel.className = "st-btn st-btn--icon ws-action-btn ws-del-btn";
+  btnDel.title = "Delete from workspace";
+  btnDel.innerHTML = icon("trash", "st-icon st-icon--sm");
+  btnDel.onclick = () => deleteFromWorkspace(f);
+  tdActions.appendChild(btnDel);
+
+  tr.appendChild(tdActions);
+  list.appendChild(tr);
+}
+
+function renderWorkspaceFiles() {
+  const list = $("ws-file-list");
+  if (!list) return;
+  const query = ($("ws-search") ? $("ws-search").value : "").trim().toLowerCase();
+
+  const tree = buildWorkspaceTree(wsFiles, query);
+
+  const allFileCount = wsFiles.filter(f => !f.is_dir).length;
+  if ($("ws-count")) {
+    $("ws-count").textContent = `${tree.totalFiles} of ${allFileCount} file${allFileCount === 1 ? "" : "s"}`;
+  }
+
+  if (tree.totalFiles === 0 && tree.folders.size === 0) {
+    list.innerHTML = `<tr><td colspan="4" class="muted">${query ? "No matching files" : "Workspace is empty. Drop files or folders above to upload."}</td></tr>`;
+    return;
+  }
+
+  list.innerHTML = "";
+
+  // Render top-level folders
+  const topFolders = Array.from(tree.folders.values()).sort((a, b) => a.name.localeCompare(b.name));
+  for (const folder of topFolders) {
+    renderFolderNode(folder, 0, list, query);
+  }
+
+  // Render root-level files
+  const rootFiles = tree.files.slice().sort((a, b) => a.name.localeCompare(b.name));
+  for (const file of rootFiles) {
+    renderFileRow(file, 0, list);
+  }
+}
+
+async function attachFromWorkspace(f) {
+  toast("info", "Loading file…", f.name, 1500);
+  try {
+    const r = await fetch(`api/workspace/file?file=${encodeURIComponent(f.path)}`, { headers: headers() });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    if (data.kind === "image") {
+      attachments.push({ kind: "image", name: data.name, url: data.url });
+    } else {
+      attachments.push({ kind: "file", name: data.name, text: data.text });
+    }
+    renderAttachments();
+    openWorkspace(false);
+    $("input").focus();
+    toast("success", "Attached to prompt", f.name);
+  } catch (err) {
+    toast("error", "Attach failed", err.message);
+  }
+}
+
+async function downloadFromWorkspace(f) {
+  try {
+    toast("info", "Downloading…", f.name, 1500);
+    const r = await fetch(`api/workspace/download?file=${encodeURIComponent(f.path)}`, { headers: headers() });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = f.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    toast("success", "Download started", f.name);
+  } catch (err) {
+    toast("error", "Download failed", err.message);
+  }
+}
+
+async function deleteFromWorkspace(f) {
+  const targetLabel = f.is_dir ? `folder "${f.name}" and all its contents` : `"${f.name}"`;
+  if (!confirm(`Delete ${targetLabel} from server workspace?`)) return;
+  try {
+    const r = await fetch(`api/workspace/delete?file=${encodeURIComponent(f.path)}`, {
+      method: "POST",
+      headers: headers(true),
+      body: JSON.stringify({ file: f.path })
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (f.is_dir) {
+      for (const p of Array.from(wsExpandedFolders)) {
+        if (p === f.path || p.startsWith(`${f.path}/`)) {
+          wsExpandedFolders.delete(p);
+        }
+      }
+    }
+    toast("success", "Deleted", f.name);
+    loadWorkspaceFiles();
+  } catch (err) {
+    toast("error", "Delete failed", err.message);
+  }
+}
+
+async function extractFilesFromDataTransfer(dataTransfer) {
+  if (!dataTransfer) return [];
+  const items = dataTransfer.items;
+  if (!items || !items.length) {
+    return [...(dataTransfer.files || [])];
+  }
+
+  const files = [];
+  async function readEntry(entry, path = "") {
+    if (entry.isFile) {
+      return new Promise((resolve) => {
+        entry.file((f) => {
+          f.relativePath = path ? `${path}/${f.name}` : f.name;
+          files.push(f);
+          resolve();
+        }, () => resolve());
+      });
+    } else if (entry.isDirectory) {
+      const dirReader = entry.createReader();
+      return new Promise((resolve) => {
+        function readBatch() {
+          dirReader.readEntries(async (entries) => {
+            if (!entries.length) {
+              resolve();
+              return;
+            }
+            const nextPath = path ? `${path}/${entry.name}` : entry.name;
+            for (const sub of entries) {
+              await readEntry(sub, nextPath);
+            }
+            readBatch();
+          }, () => resolve());
+        }
+        readBatch();
+      });
+    }
+  }
+
+  const promises = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.webkitGetAsEntry) {
+      const entry = item.webkitGetAsEntry();
+      if (entry) promises.push(readEntry(entry));
+    } else {
+      const f = item.getAsFile();
+      if (f) files.push(f);
+    }
+  }
+  await Promise.all(promises);
+  return files.length ? files : [...(dataTransfer.files || [])];
+}
+
+async function uploadFilesToWorkspace(fileList) {
+  if (!fileList || !fileList.length) return;
+  let count = 0;
+  for (const file of fileList) {
+    try {
+      const uploadPath = file.relativePath || file.name;
+      toast("info", "Uploading…", uploadPath, 1500);
+      const r = await fetch(`api/workspace/upload?file=${encodeURIComponent(uploadPath)}`, {
+        method: "POST",
+        headers: {
+          ...headers(),
+          "X-Filename": uploadPath,
+          "Content-Type": "application/octet-stream"
+        },
+        body: file
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      count++;
+    } catch (err) {
+      toast("error", `Failed to upload ${file.name}`, err.message);
+    }
+  }
+  if (count > 0) {
+    toast("success", `Uploaded ${count} file${count === 1 ? "" : "s"} to workspace`, "Saved in server workspace");
+    loadWorkspaceFiles();
+  }
+}
+
+if ($("workspace-btn")) $("workspace-btn").onclick = () => openWorkspace(true);
+if ($("ws-close-btn")) $("ws-close-btn").onclick = () => openWorkspace(false);
+if ($("ws-refresh-btn")) $("ws-refresh-btn").onclick = () => loadWorkspaceFiles();
+if ($("ws-search")) $("ws-search").oninput = () => renderWorkspaceFiles();
+if ($("ws-file-input")) $("ws-file-input").onchange = () => {
+  uploadFilesToWorkspace($("ws-file-input").files);
+  $("ws-file-input").value = "";
+};
+
+const wsDropzone = $("ws-dropzone");
+if (wsDropzone) {
+  wsDropzone.addEventListener("click", (e) => {
+    if (e.target !== $("ws-file-input") && !e.target.closest("label")) {
+      $("ws-file-input").click();
+    }
+  });
+  wsDropzone.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      $("ws-file-input").click();
+    }
+  });
+  wsDropzone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    wsDropzone.classList.add("ws-dropzone--active");
+  });
+  wsDropzone.addEventListener("dragleave", () => {
+    wsDropzone.classList.remove("ws-dropzone--active");
+  });
+  wsDropzone.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    wsDropzone.classList.remove("ws-dropzone--active");
+    const files = await extractFilesFromDataTransfer(e.dataTransfer);
+    if (files.length) uploadFilesToWorkspace(files);
+  });
+}
+
+const wsDialog = $("workspace-dialog");
+if (wsDialog) {
+  wsDialog.addEventListener("dragover", (e) => { e.preventDefault(); });
+  wsDialog.addEventListener("drop", async (e) => {
+    if (e.target !== wsDropzone && !wsDropzone.contains(e.target)) {
+      e.preventDefault();
+      const files = await extractFilesFromDataTransfer(e.dataTransfer);
+      if (files.length) uploadFilesToWorkspace(files);
+    }
+  });
+  wsDialog.addEventListener("click", (e) => {
+    const rect = wsDialog.getBoundingClientRect();
+    const isInDialog = (rect.top <= e.clientY && e.clientY <= rect.top + rect.height
+      && rect.left <= e.clientX && e.clientX <= rect.left + rect.width);
+    if (!isInDialog) openWorkspace(false);
+  });
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    if ($("drawer") && $("drawer").dataset.open === "true") openDrawer(false);
+    if ($("workspace-dialog") && ($("workspace-dialog").hasAttribute("open") || $("workspace-dialog").open)) openWorkspace(false);
+  }
+});
+
 $("sampling-btn").onclick = () => openDrawer(true);
 $("drawer-close").onclick = () => openDrawer(false);
 $("scrim").onclick = () => openDrawer(false);
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("drawer").dataset.open === "true") openDrawer(false); });
 
 // ------------------------------------------------------------------ start
 setBusy(false);
 renderChat();
 const startQuestion = new URLSearchParams(location.search).get("q");   // /?q=... starts a chat (a shortcut)
 if (startQuestion) history.replaceState(null, "", location.pathname + location.hash);
-loadHealth().then(loadMcp).then(() => { if (startQuestion) { $("input").value = startQuestion; send(); } });
+loadHealth().then(loadMcp).then(loadAvailableModels).then(() => { if (startQuestion) { $("input").value = startQuestion; send(); } });
 showTab(location.hash.slice(1) || "chat");
 poll();

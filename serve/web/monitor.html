@@ -2,8 +2,8 @@
 <html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Strata API Monitor</title>
-<link rel="stylesheet" href="/web/tokens.css">
+<title>D.L. AI Monitor</title>
+<link rel="stylesheet" href="/web/tokens.css?v=20261010-3">
 <style>
 *{box-sizing:border-box}body{margin:0;background:var(--st-bg);color:var(--st-ink);font:15px/1.5 var(--st-font)}
 button,input,select{font:inherit}button{cursor:pointer;color:inherit;background:var(--st-surface-2);border:1px solid var(--st-line);border-radius:9px;padding:8px 13px}button:hover{border-color:var(--st-accent)}button:disabled{opacity:.4;cursor:default}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--st-focus);outline-offset:3px}[hidden]{display:none!important}
@@ -13,9 +13,9 @@ header{height:70px;padding:0 32px;display:flex;align-items:center;justify-conten
 <script defer src="/web/monitor.js"></script>
 </head>
 <body>
-<header><div class="brand">Strata <span>Local inference</span></div><div class="controls"><button id="key">API key</button><button id="theme" aria-label="Switch color theme">Light / dark</button></div></header>
+<header><div class="brand">D.L. AI <span>Local inference</span></div><div class="controls"><button id="key">API key</button><button id="theme" aria-label="Switch color theme">Light / dark</button></div></header>
 <main>
-<div class="top"><div><h1>API Monitor</h1><p class="sub">Model status and every request, in one place.</p></div><div class="controls"><button id="load" class="primary" disabled>Load model</button><button id="unload" disabled>Unload model</button></div></div>
+<div class="top"><div><h1>API Monitor</h1><p class="sub">Model status and every request, in one place.</p></div><div class="controls"><button id="load" class="primary" disabled>Load model</button><button id="unload" disabled>Unload model</button><button id="restart" class="danger">Force restart</button></div></div>
 <div id="error" class="notice" role="status" hidden></div>
 <form id="auth" class="panel" hidden><label for="api-key">API key</label><input id="api-key" type="password" autocomplete="off" placeholder="Only needed if the server has a key"><button class="primary">Connect</button></form>
 <div class="cards">
