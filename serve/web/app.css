@@ -3,8 +3,8 @@
 [hidden] { display: none !important; }
 html, body { height: 100%; }
 body { display: flex; flex-direction: column; overflow: hidden; }
-main { flex: 1; min-height: 0; display: flex; }
-.view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+main { flex: 1; min-height: 0; min-width: 0; max-width: 100vw; overflow-x: hidden; display: flex; }
+.view { flex: 1; min-height: 0; min-width: 0; max-width: 100vw; display: flex; flex-direction: column; }
 .view[hidden] { display: none; }
 .muted { color: var(--st-ink-muted); }
 .small { font-size: var(--st-fs-xs); }
@@ -601,20 +601,28 @@ main { flex: 1; min-height: 0; display: flex; }
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-width: 0;
+  max-width: 100vw;
+  width: 100%;
   height: calc(100vh - 56px);
   padding: 12px 16px;
   box-sizing: border-box;
+  overflow-x: hidden;
 }
 .code-terminal-wrap {
   display: flex;
   flex-direction: column;
   flex: 1;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   border: 1px solid var(--st-line);
   border-radius: var(--st-r-lg);
   background: #0c0f12;
   overflow: hidden;
   box-shadow: var(--st-sh-bar);
   min-height: 0;
+  box-sizing: border-box;
 }
 .code-terminal--fullscreen {
   position: fixed;
@@ -633,12 +641,16 @@ main { flex: 1; min-height: 0; display: flex; }
   padding: 8px 16px;
   background: var(--st-surface-2);
   border-bottom: 1px solid var(--st-line);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 .code-terminal-info {
   display: flex;
   align-items: center;
   gap: 10px;
   font-size: var(--st-fs-sm);
+  min-width: 0;
 }
 .code-dot {
   width: 8px;
@@ -646,13 +658,16 @@ main { flex: 1; min-height: 0; display: flex; }
   border-radius: 50%;
   background: #22c55e;
   box-shadow: 0 0 6px #22c55e;
+  flex-shrink: 0;
 }
 .code-title {
   font-weight: var(--st-fw-bold);
   color: var(--st-ink);
+  white-space: nowrap;
 }
 .code-meta {
   color: var(--st-ink-muted);
+  white-space: nowrap;
 }
 .code-meta code {
   background: rgba(255, 255, 255, 0.06);
@@ -683,6 +698,7 @@ main { flex: 1; min-height: 0; display: flex; }
   border-radius: var(--st-r-sm);
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
 }
 .code-scaffold-btn:hover {
   color: var(--st-ink);
@@ -700,6 +716,7 @@ main { flex: 1; min-height: 0; display: flex; }
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 .code-action-btn {
   height: 30px;
@@ -709,6 +726,8 @@ main { flex: 1; min-height: 0; display: flex; }
   min-height: 0;
   position: relative;
   background: #0c0f12;
+  width: 100%;
+  max-width: 100%;
 }
 .code-iframe {
   width: 100%;
@@ -716,13 +735,97 @@ main { flex: 1; min-height: 0; display: flex; }
   border: none;
   display: block;
 }
+@media (max-width: 900px) {
+  .code-terminal-bar {
+    flex-wrap: wrap;
+    padding: 6px 10px;
+    gap: 8px;
+  }
+  .code-terminal-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .code-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .code-terminal-actions {
+    margin-left: auto;
+  }
+  .code-scaffold-picker {
+    order: 3;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    display: flex;
+    justify-content: flex-start;
+  }
+  .code-scaffold-picker::-webkit-scrollbar {
+    display: none;
+  }
+  .code-scaffold-btn {
+    flex-shrink: 0;
+  }
+}
 @media (max-width: 600px) {
   .view--code {
     padding: 4px;
     height: calc(100dvh - 52px);
+    width: 100%;
+    max-width: 100vw;
+    min-width: 0;
+    overflow-x: hidden;
+    box-sizing: border-box;
+  }
+  .code-terminal-wrap {
+    border-radius: var(--st-r-md);
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .code-terminal-bar {
+    padding: 6px 8px;
+    gap: 6px;
   }
   .code-meta {
     display: none;
+  }
+  .code-title {
+    max-width: 140px;
+    font-size: 13px;
+  }
+  .code-action-btn {
+    height: 28px;
+    padding: 0 8px;
+  }
+  .code-action-btn span {
+    display: none;
+  }
+  .code-scaffold-picker {
+    padding: 2px;
+    gap: 2px;
+  }
+  .code-scaffold-btn {
+    height: 26px;
+    padding: 0 8px;
+    font-size: 11px;
+    gap: 4px;
+  }
+  .code-scaffold-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+}
+@media (max-width: 380px) {
+  .code-title {
+    max-width: 110px;
+    font-size: 12px;
+  }
+  .code-action-btn {
+    padding: 0 6px;
   }
 }
 
