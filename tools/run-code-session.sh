@@ -9,7 +9,7 @@ CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude 2>/dev/null || echo "$HOME/.local/
 AGY_BIN="${AGY_BIN:-$(command -v agy 2>/dev/null || echo "$HOME/.local/bin/agy")}"
 DEEPSEEK_BIN="${DEEPSEEK_BIN:-$(command -v deepseek 2>/dev/null || echo "$HOME/.local/bin/deepseek")}"
 CODEX_BIN="${CODEX_BIN:-$(command -v codex 2>/dev/null || echo "$HOME/.local/bin/codex")}"
-STRATA_API_KEY="${STRATA_API_KEY:-}"
+STRATA_API_KEY="${STRATA_API_KEY:-REDACTED}"
 STRATA_MODEL="${STRATA_MODEL:-haiku}"
 
 mkdir -p "$WORKSPACE_DIR"
@@ -66,13 +66,17 @@ cat << EOF > "$AGY_RUNNER"
 export TERM="xterm-256color"
 export LANG="en_US.UTF-8"
 export LC_ALL="en_US.UTF-8"
+export STRATA_URL="http://127.0.0.1:8080"
+export STRATA_API_KEY="$STRATA_API_KEY"
+export ANTHROPIC_BASE_URL="http://127.0.0.1:8080"
+export OPENAI_BASE_URL="http://127.0.0.1:8080/v1"
 cd "$WORKSPACE_DIR"
 
 while true; do
     echo -e "\033[1;36m=====================================================\033[0m"
     echo -e "\033[1;35m  D.L. AI — Google Antigravity (AGY) Autonomous CLI  \033[0m"
     echo -e "\033[0;37m  Workspace: $WORKSPACE_DIR\033[0m"
-    echo -e "\033[0;37m  Engine:    Antigravity 2.0 Multi-Agent System      \033[0m"
+    echo -e "\033[0;37m  Engine:    Antigravity 2.0 with Strata Local Coder \033[0m"
     echo -e "\033[1;36m=====================================================\033[0m\n"
 
     if [ -x "$AGY_BIN" ]; then
@@ -102,14 +106,15 @@ cat << EOF > "$DEEPSEEK_RUNNER"
 export TERM="xterm-256color"
 export LANG="en_US.UTF-8"
 export LC_ALL="en_US.UTF-8"
-export DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-sk-fb960c94b0144a11954e085e98079b43}"
+export DEEPSEEK_BASE_URL="http://127.0.0.1:8080/v1"
+export DEEPSEEK_API_KEY="$STRATA_API_KEY"
 cd "$WORKSPACE_DIR"
 
 while true; do
     echo -e "\033[1;36m=====================================================\033[0m"
-    echo -e "\033[1;34m  D.L. AI — DeepSeek CLI Coding Engine               \033[0m"
+    echo -e "\033[1;34m  D.L. AI — DeepSeek CLI on Local Strata Engine      \033[0m"
     echo -e "\033[0;37m  Workspace: $WORKSPACE_DIR\033[0m"
-    echo -e "\033[0;37m  Engine:    DeepSeek V4 Coder / Reasoning (/think)  \033[0m"
+    echo -e "\033[0;37m  Engine:    Strata Qwen3.8 Coder via /v1/chat       \033[0m"
     echo -e "\033[1;36m=====================================================\033[0m\n"
 
     if [ -x "$DEEPSEEK_BIN" ]; then
@@ -141,19 +146,20 @@ export LANG="en_US.UTF-8"
 export LC_ALL="en_US.UTF-8"
 export OPENAI_BASE_URL="http://127.0.0.1:8080/v1"
 export OPENAI_API_KEY="$STRATA_API_KEY"
+export STRATA_API_KEY="$STRATA_API_KEY"
 cd "$WORKSPACE_DIR"
 
 while true; do
     echo -e "\033[1;36m=====================================================\033[0m"
-    echo -e "\033[1;33m  D.L. AI — OpenAI Codex CLI Coding Engine           \033[0m"
+    echo -e "\033[1;33m  D.L. AI — OpenAI Codex CLI on Local Strata Engine  \033[0m"
     echo -e "\033[0;37m  Workspace: $WORKSPACE_DIR\033[0m"
-    echo -e "\033[0;37m  Engine:    Codex CLI on Strata Responses / OpenAI  \033[0m"
+    echo -e "\033[0;37m  Engine:    Strata Responses API (/v1/responses)    \033[0m"
     echo -e "\033[1;36m=====================================================\033[0m\n"
 
     if [ -x "$CODEX_BIN" ]; then
-        "$CODEX_BIN" || true
+        "$CODEX_BIN" --model gpt-5.5 || true
     elif command -v codex >/dev/null 2>&1; then
-        codex || true
+        codex --model gpt-5.5 || true
     else
         echo -e "\033[1;31mError: codex binary not found ($CODEX_BIN)\033[0m"
     fi
