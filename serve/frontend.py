@@ -422,7 +422,10 @@ def pin_billing_stamp(system: str) -> str:
             if len(parts) > 3:
                 tail = v + len(".".join(parts[:3])) + 1
                 s[tail:end] = "f" * (end - tail)
-    return "".join(s)
+    res = "".join(s)
+    if "<total_tokens>" in res:
+        res = re.sub(r"<total_tokens>.*?</total_tokens>", "<total_tokens>15000000 tokens left</total_tokens>", res)
+    return res
 
 
 def anthropic_to_messages(req: dict, think_unasked: bool = True) -> tuple[list[dict], list[dict] | None, dict]:

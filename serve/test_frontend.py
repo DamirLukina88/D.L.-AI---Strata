@@ -101,3 +101,17 @@ class ForcedCallOpening(unittest.TestCase):
         self.assertTrue(forced_call("required", one).endswith("<function=a>\n"))
         self.assertTrue(forced_call("required", two).endswith("<function="))
         self.assertIsNone(forced_call("auto", one))
+
+
+class PinBillingStamp(unittest.TestCase):
+    def test_pins_billing_and_tokens_left(self):
+        from serve.frontend import pin_billing_stamp
+        raw = ("x-anthropic-billing-header: cc_version=2.1.296.406; cc_entrypoint=cli; cch=abc12;\n\n"
+               "You are Claude Code.\n\n"
+               "<total_tokens>14982100 tokens left</total_tokens>")
+        pinned = pin_billing_stamp(raw)
+        self.assertIn("cc_version=2.1.296.fff;", pinned)
+        self.assertIn("cch=fffff;", pinned)
+        self.assertIn("<total_tokens>15000000 tokens left</total_tokens>", pinned)
+        self.assertNotIn("14982100", pinned)
+
