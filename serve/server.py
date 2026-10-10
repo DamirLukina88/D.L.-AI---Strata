@@ -4855,8 +4855,14 @@ def make_handler(svc: Service):
                     for p in sorted(WORKSPACE_DIR.rglob("*")):
                         if any(part.startswith(".") for part in p.parts):
                             continue
+                        try:
+                            resolved = p.resolve()
+                            if not resolved.is_relative_to(WORKSPACE_DIR):
+                                continue
+                            stat = p.stat()
+                        except (OSError, ValueError):
+                            continue
                         rel = str(p.relative_to(WORKSPACE_DIR)).replace("\\", "/")
-                        stat = p.stat()
                         is_dir = p.is_dir()
                         ext = p.suffix.lower()
                         kind = "dir" if is_dir else ("image" if ext in WORKSPACE_IMAGE_EXTS else ("text" if ext in WORKSPACE_TEXT_EXTS else "other"))
@@ -5065,6 +5071,9 @@ def make_handler(svc: Service):
                     self._json(500, {"error": {"type": "server_error", "message": str(e)}})
                 return
             if path == "/api/workspace/upload":
+                if self._foreign_origin():
+                    self._json(403, {"error": {"message": "workspace files can only be uploaded from Strata's own page (or a trusted origin)"}})
+                    return
                 qs = parse_qs(urlsplit(self.path).query)
                 filename = (qs.get("file") or qs.get("filename") or [""])[0]
                 if not filename:
@@ -5112,6 +5121,8 @@ def make_handler(svc: Service):
                     self._json(500, {"error": {"message": f"failed to save file: {e}"}})
                 return
             if path in ("/api/workspace/delete", "/api/workspace/remove"):
+                if not self._own_page("workspace files can be deleted"):
+                    return
                 qs = parse_qs(urlsplit(self.path).query)
                 filename = (qs.get("file") or qs.get("path") or [""])[0]
                 if not filename:
