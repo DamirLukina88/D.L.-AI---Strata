@@ -3002,6 +3002,11 @@ bool Verifier::pl_launch(int T, const int32_t* tokens, int64_t pos0, std::string
 int Verifier::service(PoolMultiFn pool, void* user, std::string& err) {
     if (!fl_active_) return 1;
     if (fl_k_ >= fl_total_) return 1;
+    // Nothing rang yet and neither the WDDM flush nor the timeout below is due: return before any CUDA call.
+    if (!ar_on() && *(volatile uint32_t*) h_seq_ < (uint32_t) (fl_k_ + 1)) {
+        const double now = now_ms();
+        if (now - fl_flush_ms_ <= 2.0 && now - fl_since_ms_ <= 20000.0) return 0;
+    }
     const OnDevice on_device(device_);
     const ModelGeometry& g = *g_;
     SessionState& ss = *ss_;
