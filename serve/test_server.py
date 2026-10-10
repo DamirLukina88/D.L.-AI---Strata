@@ -3886,7 +3886,9 @@ class AmdTelemetry(unittest.TestCase):
                 self.assertTrue(g.ok())
                 self.assertEqual(g.name(), "AMD Radeon AI PRO R9700")
                 self.assertEqual(g.read(), {"util": 37, "mem_used": 2 << 30, "mem_total": 32 << 30, "temp": 51.0,
-                                            "power": 85.0, "power_limit": 300.0})
+                                            "power": 85.0, "power_limit": 300.0, "pcie_gen": None,
+                                            "pcie_gen_max": None, "pcie_own_gen": None, "pcie_width": None,
+                                            "pcie_path": "0/0"})
                 r = telemetry.gpu_reader(1, amd=True).read()
                 self.assertEqual((r["util"], r["temp"], r["power"]), (99, 64.0, 120.0))     # power1_input
                 self.assertEqual(telemetry.free_vram_mib(0, amd=True), 30 << 10)

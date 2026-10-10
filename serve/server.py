@@ -88,6 +88,8 @@ def safe_workspace_path(rel_path: str) -> Path | None:
         clean = rel_path.lstrip("/\\")
         target = (WORKSPACE_DIR / clean).resolve()
         target.relative_to(WORKSPACE_DIR)
+        if target == WORKSPACE_DIR:
+            return None
         return target
     except (ValueError, Exception):
         return None
@@ -5132,6 +5134,8 @@ def make_handler(svc: Service):
                     self._json(500, {"error": {"message": f"failed to delete: {e}"}})
                 return
             if path == "/api/code/restart":
+                if not self._own_page("Claude Code session can be restarted"):
+                    return
                 try:
                     res = subprocess.run(["tmux", "respawn-pane", "-k", "-t", "dl-ai-code:0.0"], capture_output=True, text=True)
                     if res.returncode != 0:
