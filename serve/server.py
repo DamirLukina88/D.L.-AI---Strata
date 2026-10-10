@@ -4888,7 +4888,8 @@ def make_handler(svc: Service):
                     "scaffolds": [
                         {"id": "claude", "name": "Claude Code", "desc": "Official CLI on local Strata Engine", "model": "Haiku 5.5"},
                         {"id": "agy", "name": "Antigravity CLI", "desc": "Autonomous Multi-Agent System", "model": "AGY 2.0"},
-                        {"id": "deepseek", "name": "DeepSeek CLI", "desc": "DeepSeek V4 Coding Engine", "model": "V4 Flash / Pro"}
+                        {"id": "deepseek", "name": "DeepSeek CLI", "desc": "DeepSeek V4 Coding Engine", "model": "V4 Flash / Pro"},
+                        {"id": "codex", "name": "Codex CLI", "desc": "OpenAI Codex CLI on Strata Responses API", "model": "Codex / Responses"}
                     ]
                 })
                 return
@@ -5196,8 +5197,8 @@ def make_handler(svc: Service):
                 try:
                     req = json.loads(self._body() or b"{}")
                     scaffold = req.get("scaffold", "claude")
-                    if scaffold not in ("claude", "agy", "deepseek"):
-                        self._json(400, {"error": {"message": "unknown scaffold: use claude, agy, or deepseek"}})
+                    if scaffold not in ("claude", "agy", "deepseek", "codex"):
+                        self._json(400, {"error": {"message": "unknown scaffold: use claude, agy, deepseek, or codex"}})
                         return
                     res = subprocess.run(["tmux", "select-window", "-t", f"dl-ai-code:{scaffold}"],
                                          capture_output=True, text=True, check=False)
@@ -5211,12 +5212,12 @@ def make_handler(svc: Service):
                     self._json(500, {"error": {"message": f"failed to switch scaffold: {e}"}})
                 return
             if path == "/api/code/restart":
-                if not self._own_page("Claude Code session can be restarted"):
+                if not self._own_page("Coding session can be restarted"):
                     return
                 try:
                     req = json.loads(self._body() or b"{}") if self.headers.get("Content-Length") else {}
                     target = req.get("scaffold") if isinstance(req, dict) else None
-                    if not target or target not in ("claude", "agy", "deepseek"):
+                    if not target or target not in ("claude", "agy", "deepseek", "codex"):
                         res = subprocess.run(["tmux", "display-message", "-t", "dl-ai-code", "-p", "#{window_name}"],
                                              capture_output=True, text=True, check=False)
                         target = res.stdout.strip() if res.returncode == 0 and res.stdout.strip() else "claude"
