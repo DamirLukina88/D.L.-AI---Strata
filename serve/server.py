@@ -4872,6 +4872,26 @@ def make_handler(svc: Service):
                 if self._authorized():
                     self._json(200, {"models": svc.available_models(), "current": svc.model})
                 return
+            if path == "/api/code/scaffold":
+                if not self._authorized():
+                    return
+                active = "claude"
+                try:
+                    res = subprocess.run(["tmux", "display-message", "-t", "dl-ai-code", "-p", "#{window_name}"],
+                                         capture_output=True, text=True, check=False)
+                    if res.returncode == 0 and res.stdout.strip():
+                        active = res.stdout.strip()
+                except Exception:
+                    pass
+                self._json(200, {
+                    "active": active,
+                    "scaffolds": [
+                        {"id": "claude", "name": "Claude Code", "desc": "Official CLI on local Strata Engine", "model": "Haiku 5.5"},
+                        {"id": "agy", "name": "Antigravity CLI", "desc": "Autonomous Multi-Agent System", "model": "AGY 2.0"},
+                        {"id": "deepseek", "name": "DeepSeek CLI", "desc": "DeepSeek V4 Coding Engine", "model": "V4 Flash / Pro"}
+                    ]
+                })
+                return
             if path in ("/api/workspace/files", "/api/workspace"):
                 if not self._authorized():
                     return
@@ -5170,15 +5190,42 @@ def make_handler(svc: Service):
                 except Exception as e:
                     self._json(500, {"error": {"message": f"failed to delete: {e}"}})
                 return
+            if path == "/api/code/scaffold":
+                if not self._own_page("Coding scaffold can be selected"):
+                    return
+                try:
+                    req = json.loads(self._body() or b"{}")
+                    scaffold = req.get("scaffold", "claude")
+                    if scaffold not in ("claude", "agy", "deepseek"):
+                        self._json(400, {"error": {"message": "unknown scaffold: use claude, agy, or deepseek"}})
+                        return
+                    res = subprocess.run(["tmux", "select-window", "-t", f"dl-ai-code:{scaffold}"],
+                                         capture_output=True, text=True, check=False)
+                    if res.returncode != 0:
+                        subprocess.run(["/home/damirl/Desktop/Strata/tools/run-code-session.sh"],
+                                       capture_output=True, text=True, check=False)
+                        res = subprocess.run(["tmux", "select-window", "-t", f"dl-ai-code:{scaffold}"],
+                                             capture_output=True, text=True, check=False)
+                    self._json(200, {"status": "ok", "active": scaffold})
+                except Exception as e:
+                    self._json(500, {"error": {"message": f"failed to switch scaffold: {e}"}})
+                return
             if path == "/api/code/restart":
                 if not self._own_page("Claude Code session can be restarted"):
                     return
                 try:
-                    res = subprocess.run(["tmux", "respawn-pane", "-k", "-t", "dl-ai-code:0.0"], capture_output=True, text=True)
+                    req = json.loads(self._body() or b"{}") if self.headers.get("Content-Length") else {}
+                    target = req.get("scaffold") if isinstance(req, dict) else None
+                    if not target or target not in ("claude", "agy", "deepseek"):
+                        res = subprocess.run(["tmux", "display-message", "-t", "dl-ai-code", "-p", "#{window_name}"],
+                                             capture_output=True, text=True, check=False)
+                        target = res.stdout.strip() if res.returncode == 0 and res.stdout.strip() else "claude"
+                    res = subprocess.run(["tmux", "respawn-pane", "-k", "-t", f"dl-ai-code:{target}.0"],
+                                         capture_output=True, text=True, check=False)
                     if res.returncode != 0:
                         subprocess.run(["tmux", "kill-session", "-t", "dl-ai-code"], check=False)
                         subprocess.run(["systemctl", "--user", "restart", "claude-terminal"], check=False)
-                    self._json(200, {"status": "ok", "message": "Claude Code session restarted"})
+                    self._json(200, {"status": "ok", "message": f"{target} session restarted", "active": target})
                 except Exception as e:
                     self._json(500, {"error": {"message": f"failed to restart session: {e}"}})
                 return

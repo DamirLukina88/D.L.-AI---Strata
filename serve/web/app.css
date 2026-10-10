@@ -660,6 +660,42 @@ main { flex: 1; min-height: 0; display: flex; }
   border-radius: 4px;
   font-family: monospace;
 }
+.code-scaffold-picker {
+  display: flex;
+  align-items: center;
+  background: var(--st-surface-1);
+  border: 1px solid var(--st-line);
+  border-radius: var(--st-r-md);
+  padding: 2px;
+  gap: 2px;
+}
+.code-scaffold-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  background: transparent;
+  color: var(--st-ink-muted);
+  font-size: var(--st-fs-xs);
+  font-weight: var(--st-fw-medium);
+  border-radius: var(--st-r-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.code-scaffold-btn:hover {
+  color: var(--st-ink);
+  background: rgba(255, 255, 255, 0.05);
+}
+.code-scaffold-btn.is-active {
+  color: #fff;
+  background: var(--st-accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.code-scaffold-btn.is-active svg {
+  stroke: #fff;
+}
 .code-terminal-actions {
   display: flex;
   align-items: center;

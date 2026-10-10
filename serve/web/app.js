@@ -97,7 +97,7 @@ function showTab(name) {
   }
   if (location.hash.slice(1) !== tab) history.replaceState(null, "", tab === "chat" ? location.pathname : `#${tab}`);
   if (tab === "chat") $("input").focus();
-  if (tab === "code") loadCodeTerminal();
+  if (tab === "code") { loadCodeTerminal(); syncCodeScaffold(); }
   if (tab === "monitor") loadMcp();
   if (tab === "about") loadConfig();
   if (lastMetrics) render(lastMetrics);
@@ -105,13 +105,67 @@ function showTab(name) {
 for (const b of document.querySelectorAll(".st-tab")) b.onclick = () => showTab(b.dataset.tab);
 window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
 
+let currentScaffold = "claude";
+const SCAFFOLD_NAMES = {
+  claude: { title: "Claude Code CLI", meta: "Session: dl-ai-code:claude" },
+  agy: { title: "Antigravity CLI", meta: "Session: dl-ai-code:agy" },
+  deepseek: { title: "DeepSeek CLI", meta: "Session: dl-ai-code:deepseek" }
+};
+
+function setScaffoldUI(scaffold) {
+  currentScaffold = scaffold;
+  const info = SCAFFOLD_NAMES[scaffold] || SCAFFOLD_NAMES.claude;
+  if ($("code-scaffold-title")) $("code-scaffold-title").textContent = info.title;
+  if ($("code-scaffold-meta")) $("code-scaffold-meta").innerHTML = `Session: <code>${info.meta.replace("Session: ", "")}</code>`;
+  for (const b of document.querySelectorAll(".code-scaffold-btn")) {
+    b.classList.toggle("is-active", b.dataset.scaffold === scaffold);
+  }
+}
+
+async function syncCodeScaffold() {
+  try {
+    const r = await fetch("api/code/scaffold", { headers: headers() });
+    if (r.ok) {
+      const data = await r.json();
+      if (data.active && SCAFFOLD_NAMES[data.active]) {
+        setScaffoldUI(data.active);
+      }
+    }
+  } catch (e) {}
+}
+
+async function switchCodeScaffold(scaffold) {
+  setScaffoldUI(scaffold);
+  try {
+    const r = await fetch("api/code/scaffold", {
+      method: "POST",
+      headers: headers(true),
+      body: JSON.stringify({ scaffold })
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    setScaffoldUI(data.active || scaffold);
+  } catch (e) {
+    toast("error", "Switch failed", e.message);
+  }
+}
+
+for (const b of document.querySelectorAll(".code-scaffold-btn")) {
+  b.onclick = () => switchCodeScaffold(b.dataset.scaffold);
+}
+
 if ($("code-restart-btn")) {
   $("code-restart-btn").onclick = async () => {
-    if (!confirm("Restart Claude Code CLI terminal session?")) return;
+    const name = SCAFFOLD_NAMES[currentScaffold]?.title || "CLI";
+    if (!confirm(`Restart ${name} terminal session?`)) return;
     try {
-      const r = await fetch("api/code/restart", { method: "POST", headers: headers(true) });
+      const r = await fetch("api/code/restart", {
+        method: "POST",
+        headers: headers(true),
+        body: JSON.stringify({ scaffold: currentScaffold })
+      });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      toast("info", "Session restarted", "Claude Code session reset.");
+      toast("info", "Session restarted", `${name} session reset.`);
       const frame = $("code-terminal-frame");
       if (frame && (!frame.src || frame.src === "about:blank")) {
         const key = store.get("apikey", DEFAULT_KEY);
