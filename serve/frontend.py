@@ -473,7 +473,12 @@ def anthropic_to_messages(req: dict, think_unasked: bool = True) -> tuple[list[d
     # "output_config": {"effort": "low" | "medium" | "high"}
     thinking = req.get("thinking")
     effort = (req.get("output_config") or {}).get("effort") if isinstance(req.get("output_config"), dict) else None
+    is_cc = bool(isinstance(system, str) and BILLING_HEADER in system) or \
+            (isinstance(system, list) and any(isinstance(b, dict) and BILLING_HEADER in b.get("text", "") for b in system))
     if isinstance(thinking, dict) and thinking.get("type") == "disabled":
+        kwargs["enable_thinking"] = False
+    elif is_cc and thinking is None and not req.get("reasoning_budget_tokens"):
+        # Claude Code CLI: thinking is deactivated by default so tool calling and bash are instant
         kwargs["enable_thinking"] = False
     elif effort:
         kwargs.update(effort_kwargs(effort))

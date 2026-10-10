@@ -3168,7 +3168,7 @@ class Service:
             elif not req.get("thinking") and not req.get("output_config"):
                 if effort == "none":
                     req["thinking"] = {"type": "disabled"}
-                else:
+                elif getattr(self, "anthropic_think_unasked", True):
                     req["output_config"] = {"effort": effort}
         return req
 
