@@ -6,7 +6,7 @@ WORKSPACE_DIR="${STRATA_WORKSPACE_DIR:-$(pwd)}"
 SESSION_NAME="${STRATA_SESSION_NAME:-dl-ai-code}"
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude 2>/dev/null || echo "$HOME/.local/bin/claude")}"
 STRATA_API_KEY="${STRATA_API_KEY:-}"
-STRATA_MODEL="${STRATA_MODEL:-qwen3.8-flash-next-coder-iq1_m}"
+STRATA_MODEL="${STRATA_MODEL:-haiku}"
 
 mkdir -p "$WORKSPACE_DIR"
 cd "$WORKSPACE_DIR"
