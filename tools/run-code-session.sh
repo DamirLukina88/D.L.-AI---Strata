@@ -59,9 +59,9 @@ done
 EOF
 chmod +x "$CLAUDE_RUNNER"
 
-# 2. Antigravity CLI runner (Local Strata Qwen Agent)
+# 2. D.L. CLI Autonomous Agent runner (Local Strata Qwen Engine)
 AGY_RUNNER="/tmp/dl-ai-agy-runner.sh"
-AGY_LOCAL_BIN="/home/damirl/Desktop/Strata/tools/antigravity_local.py"
+DL_CLI_BIN="/home/damirl/Desktop/Strata/tools/dl_cli.py"
 cat << EOF > "$AGY_RUNNER"
 #!/usr/bin/env bash
 export TERM="xterm-256color"
@@ -74,24 +74,16 @@ export OPENAI_BASE_URL="http://127.0.0.1:8080/v1"
 cd "$WORKSPACE_DIR"
 
 while true; do
-    if [ -f "$AGY_LOCAL_BIN" ]; then
-        python3 "$AGY_LOCAL_BIN" --workspace "$WORKSPACE_DIR" --url "http://127.0.0.1:8080" --api-key "$STRATA_API_KEY" || true
-    elif [ -x "$AGY_BIN" ]; then
-        "$AGY_BIN" || true
+    if [ -f "$DL_CLI_BIN" ]; then
+        python3 "$DL_CLI_BIN" --workspace "$WORKSPACE_DIR" --url "http://127.0.0.1:8080" --api-key "$STRATA_API_KEY" || true
     else
-        echo -e "\033[1;31mError: Antigravity local agent not found ($AGY_LOCAL_BIN)\033[0m"
+        echo -e "\033[1;31mError: D.L. CLI binary not found ($DL_CLI_BIN)\033[0m"
     fi
 
-    echo -e "\n\033[1;33mAntigravity CLI session ended.\033[0m"
-    echo -e "Press \033[1m[Enter]\033[0m to restart, type \033[1mcloud\033[0m for Gemini agy, or \033[1mbash\033[0m for shell:"
+    echo -e "\n\033[1;33mD.L. CLI session ended.\033[0m"
+    echo -e "Press \033[1m[Enter]\033[0m to restart, or type \033[1mbash\033[0m for terminal shell:"
     read -r user_choice
-    if [ "\$user_choice" = "cloud" ]; then
-        if [ -x "$AGY_BIN" ]; then
-            "$AGY_BIN" || true
-        else
-            echo "Cloud agy not found."
-        fi
-    elif [ "\$user_choice" = "bash" ] || [ "\$user_choice" = "sh" ]; then
+    if [ "\$user_choice" = "bash" ] || [ "\$user_choice" = "sh" ]; then
         echo -e "\033[1;34mStarting interactive workspace shell (type 'exit' to return)...\033[0m"
         bash -i || true
     fi

@@ -108,7 +108,7 @@ window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
 let currentScaffold = "claude";
 const SCAFFOLD_NAMES = {
   claude: { title: "Claude Code CLI", meta: "Session: dl-ai-code:claude" },
-  agy: { title: "Antigravity CLI", meta: "Session: dl-ai-code:agy" },
+  agy: { title: "D.L. CLI", meta: "Session: dl-ai-code:agy" },
   deepseek: { title: "DeepSeek CLI", meta: "Session: dl-ai-code:deepseek" },
   codex: { title: "Codex CLI", meta: "Session: dl-ai-code:codex" }
 };

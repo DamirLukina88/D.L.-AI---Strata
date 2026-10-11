@@ -1,0 +1,632 @@
+#!/usr/bin/env python3
+"""dl_cli.py - D.L. CLI Autonomous Engineering Agent powered by Strata Qwen3.8-Flash-Next Coder.
+
+Equipped with D.L. AI identity, tool schemas
+(run_command, view_file, write_to_file, replace_file_content), and an autonomous
+agent execution loop running 100% locally on the Strata engine.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import readline
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+# ANSI colors & formatting
+C_RESET = "\033[0m"
+C_BOLD = "\033[1m"
+C_DIM = "\033[2m"
+C_BLUE = "\033[38;5;39m"
+C_CYAN = "\033[36m"
+C_GREEN = "\033[32m"
+C_YELLOW = "\033[33m"
+C_RED = "\033[31m"
+C_GRAY = "\033[90m"
+
+DEFAULT_URL = os.environ.get("STRATA_URL", "http://127.0.0.1:8080").removesuffix("/v1")
+DEFAULT_API_KEY = os.environ.get("STRATA_API_KEY", "REDACTED")
+
+# Official D.L. AI Tool Definitions
+DL_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "run_command",
+            "description": "PROPOSE and execute a bash command in the workspace directory. Operating System: linux.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "CommandLine": {
+                        "type": "string",
+                        "description": "The exact shell command line string to execute."
+                    },
+                    "Cwd": {
+                        "type": "string",
+                        "description": "Working directory for the command (defaults to workspace)."
+                    },
+                    "toolSummary": {
+                        "type": "string",
+                        "description": "Brief 2-5 word noun phrase describing the specific task."
+                    }
+                },
+                "required": ["CommandLine"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "view_file",
+            "description": "View the contents of a file from the local filesystem with optional line slicing.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "AbsolutePath": {
+                        "type": "string",
+                        "description": "Path to file to view (absolute or relative to workspace)."
+                    },
+                    "StartLine": {
+                        "type": "integer",
+                        "description": "Optional start line number, 1-indexed inclusive."
+                    },
+                    "EndLine": {
+                        "type": "integer",
+                        "description": "Optional end line number, 1-indexed inclusive."
+                    }
+                },
+                "required": ["AbsolutePath"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_to_file",
+            "description": "Create a new file or completely overwrite an existing file with given code content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "TargetFile": {
+                        "type": "string",
+                        "description": "The target file to create and write code to."
+                    },
+                    "CodeContent": {
+                        "type": "string",
+                        "description": "The exact code contents to write to the file."
+                    },
+                    "Overwrite": {
+                        "type": "boolean",
+                        "description": "Set to true to overwrite an existing file."
+                    }
+                },
+                "required": ["TargetFile", "CodeContent", "Overwrite"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "replace_file_content",
+            "description": "Edit an existing file by replacing a single contiguous block of target text with replacement text.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "TargetFile": {
+                        "type": "string",
+                        "description": "The target file to modify."
+                    },
+                    "TargetContent": {
+                        "type": "string",
+                        "description": "The exact substring to be replaced."
+                    },
+                    "ReplacementContent": {
+                        "type": "string",
+                        "description": "The complete replacement content."
+                    }
+                },
+                "required": ["TargetFile", "TargetContent", "ReplacementContent"]
+            }
+        }
+    }
+]
+
+
+def print_banner(workspace: Path, think_level: str):
+    banner = f"""
+{C_BLUE}  ____    _       ____ _     ___ {C_RESET}
+{C_BLUE} |  _ \\  | |     / ___| |   |_ _|{C_RESET}   {C_BOLD}D.L. CLI{C_RESET} {C_GRAY}(Local Edition v2.0){C_RESET}
+{C_BLUE} | | | | | |    | |   | |    | | {C_RESET}   {C_CYAN}Qwen3.8-Flash-Next Coder (IQ1_M){C_RESET}
+{C_BLUE} | |_| | | |___ | |___| |___ | | {C_RESET}   {C_DIM}Engine:{C_RESET} {DEFAULT_URL} {C_GREEN}[ROCm GPU Active]{C_RESET}
+{C_BLUE} |____/  |_____(_)____|_____|___|{C_RESET}   {C_DIM}Workspace:{C_RESET} {workspace}
+{C_GRAY}─────────────────────────────────────────────────────────────────────────────{C_RESET}
+{C_DIM}Effort:{C_RESET} {C_YELLOW}{think_level}{C_RESET} {C_DIM}· Tools: run_command, view_file, write_to_file, replace{C_RESET}
+{C_DIM}Commands: /clear, /think <level>, /status, !<cmd> (shell), @file{C_RESET}
+{C_GRAY}─────────────────────────────────────────────────────────────────────────────{C_RESET}
+"""
+    sys.stdout.write(banner)
+    sys.stdout.flush()
+
+
+def build_dl_system_prompt(workspace: Path) -> str:
+    return f"""<identity>
+You are D.L. AI, a powerful autonomous software engineering agent pair programming with the developer on this workstation.
+You assist the developer with software engineering, code generation, refactoring, architectural design, debugging, and terminal execution.
+You run 100% locally on this workstation powered by Strata's Qwen3.8-Flash-Next Coder engine with ROCm GPU acceleration.
+</identity>
+
+<user_information>
+The USER's OS version is linux.
+Command Working Directory: {workspace}
+Active Workspaces:
+- {workspace}
+</user_information>
+
+<guidelines>
+- Always use the provided tools (`view_file`, `write_to_file`, `replace_file_content`, `run_command`) to inspect files, make changes, and run tests.
+- When inspecting a file, prefer `view_file`.
+- When writing a whole new file, use `write_to_file`.
+- When making targeted modifications to an existing file, use `replace_file_content`.
+- When checking system state or running build/test scripts, use `run_command`.
+- Keep explanations concise, clear, and focused on the results.
+</guidelines>"""
+
+
+def resolve_file_references(prompt: str, workspace: Path) -> str:
+    pattern = r"@([a-zA-Z0-9_\-\.\/]+)"
+    matches = list(re.finditer(pattern, prompt))
+    if not matches:
+        return prompt
+
+    offset = 0
+    new_prompt = prompt
+    for m in matches:
+        fpath_str = m.group(1)
+        p = (workspace / fpath_str).resolve()
+        if not p.is_file():
+            p = Path(fpath_str).resolve()
+        if p.is_file():
+            try:
+                content = p.read_text(encoding="utf-8", errors="replace")
+                ext = p.suffix.lstrip(".") or "text"
+                rel_path = p.relative_to(workspace) if p.is_relative_to(workspace) else p
+                replacement = f"\n\n```file:{rel_path}\n{content}\n```\n"
+                start, end = m.start() + offset, m.end() + offset
+                new_prompt = new_prompt[:start] + replacement + new_prompt[end:]
+                offset += len(replacement) - (end - start)
+            except Exception as e:
+                sys.stderr.write(f"{C_YELLOW}Warning: Could not read @{fpath_str}: {e}{C_RESET}\n")
+    return new_prompt
+
+
+# Tool implementations
+def tool_view_file(args: dict, workspace: Path) -> str:
+    path_str = args.get("AbsolutePath") or args.get("path")
+    if not path_str:
+        return "Error: AbsolutePath required"
+    p = Path(path_str).expanduser()
+    if not p.is_absolute():
+        p = (workspace / p).resolve()
+    if not p.is_file():
+        return f"Error: File not found: {p}"
+    try:
+        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+        start = args.get("StartLine", 1) or 1
+        end = args.get("EndLine", len(lines)) or len(lines)
+        start = max(1, min(start, len(lines)))
+        end = max(start, min(end, len(lines)))
+        selected = lines[start - 1 : end]
+        numbered = [f"{i}: {line}" for i, line in enumerate(selected, start=start)]
+        return f"File: {p} (lines {start}-{end} of {len(lines)})\n" + "\n".join(numbered)
+    except Exception as e:
+        return f"Error reading file {p}: {e}"
+
+
+def tool_write_to_file(args: dict, workspace: Path) -> str:
+    path_str = args.get("TargetFile") or args.get("path")
+    if not path_str:
+        return "Error: TargetFile required"
+    p = Path(path_str).expanduser()
+    if not p.is_absolute():
+        p = (workspace / p).resolve()
+    overwrite = args.get("Overwrite", True)
+    if p.exists() and not overwrite:
+        return f"Error: File {p} already exists and Overwrite is False"
+    content = args.get("CodeContent") or args.get("content") or ""
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        return f"Successfully wrote {len(content)} characters to {p}"
+    except Exception as e:
+        return f"Error writing file {p}: {e}"
+
+
+def tool_replace_file_content(args: dict, workspace: Path) -> str:
+    path_str = args.get("TargetFile") or args.get("path")
+    if not path_str:
+        return "Error: TargetFile required"
+    p = Path(path_str).expanduser()
+    if not p.is_absolute():
+        p = (workspace / p).resolve()
+    if not p.is_file():
+        return f"Error: File not found: {p}"
+    target = args.get("TargetContent", "")
+    replacement = args.get("ReplacementContent", "")
+    try:
+        orig = p.read_text(encoding="utf-8", errors="replace")
+        if target not in orig:
+            return f"Error: TargetContent not found in {p}"
+        new_text = orig.replace(target, replacement, 1)
+        p.write_text(new_text, encoding="utf-8")
+        return f"Successfully updated {p}"
+    except Exception as e:
+        return f"Error updating file {p}: {e}"
+
+
+def tool_run_command(args: dict, workspace: Path) -> str:
+    cmd = args.get("CommandLine") or args.get("command")
+    if not cmd:
+        return "Error: CommandLine required"
+    cwd_str = args.get("Cwd")
+    cwd = Path(cwd_str).resolve() if cwd_str else workspace
+    try:
+        res = subprocess.run(cmd, shell=True, cwd=cwd, text=True, capture_output=True, timeout=120)
+        out = []
+        if res.stdout:
+            out.append(res.stdout)
+        if res.stderr:
+            out.append(f"Stderr:\n{res.stderr}")
+        out.append(f"[Command exited with code {res.returncode}]")
+        return "\n".join(out).strip()
+    except subprocess.TimeoutExpired:
+        return "Error: Command timed out after 120s"
+    except Exception as e:
+        return f"Error running command: {e}"
+
+
+def dispatch_dl_tool(name: str, args: dict, workspace: Path) -> str:
+    if name == "view_file":
+        return tool_view_file(args, workspace)
+    elif name == "write_to_file":
+        return tool_write_to_file(args, workspace)
+    elif name == "replace_file_content":
+        return tool_replace_file_content(args, workspace)
+    elif name == "run_command":
+        return tool_run_command(args, workspace)
+    else:
+        return f"Error: Unknown tool {name}"
+
+
+def stream_chat_turn(messages: list[dict], url: str, api_key: str,
+                     think_level: str = "low", max_tokens: int = 4096,
+                     temperature: float = 0.2):
+    endpoint = f"{url.rstrip('/')}/v1/chat/completions"
+    payload = {
+        "model": "strata",
+        "messages": messages,
+        "tools": DL_TOOLS,
+        "max_tokens": max_tokens,
+        "reasoning_effort": think_level,
+        "temperature": temperature,
+        "stream": True,
+    }
+    req = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        }
+    )
+
+    t0 = time.time()
+    reasoning_started = False
+    reasoning_closed = False
+    full_reasoning = []
+    full_content = []
+    tool_calls_dict = {}
+    tok_count = 0
+    finish_reason = None
+
+    try:
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            for raw_line in resp:
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line or line.startswith(":"):
+                    continue
+                if line.startswith("data: "):
+                    data_str = line[6:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+
+                    choice = (chunk.get("choices") or [{}])[0]
+                    delta = choice.get("delta") or {}
+                    if choice.get("finish_reason"):
+                        finish_reason = choice["finish_reason"]
+
+                    # 1. Reasoning chunk
+                    reasoning_chunk = delta.get("reasoning_content")
+                    if reasoning_chunk:
+                        tok_count += 1
+                        if not reasoning_started:
+                            sys.stdout.write(f"\n{C_GRAY}{C_DIM}🧠 Thinking:{C_RESET} {C_GRAY}{C_DIM}")
+                            reasoning_started = True
+                        sys.stdout.write(reasoning_chunk)
+                        sys.stdout.flush()
+                        full_reasoning.append(reasoning_chunk)
+
+                    # 2. Main content chunk
+                    content_chunk = delta.get("content")
+                    if content_chunk:
+                        tok_count += 1
+                        if reasoning_started and not reasoning_closed:
+                            sys.stdout.write(f"{C_RESET}\n\n")
+                            reasoning_closed = True
+                        sys.stdout.write(content_chunk)
+                        sys.stdout.flush()
+                        full_content.append(content_chunk)
+
+                    # 3. Tool call chunks
+                    tc_deltas = delta.get("tool_calls")
+                    if tc_deltas:
+                        if reasoning_started and not reasoning_closed:
+                            sys.stdout.write(f"{C_RESET}\n")
+                            reasoning_closed = True
+                        for tc_item in tc_deltas:
+                            idx = tc_item.get("index", 0)
+                            if idx not in tool_calls_dict:
+                                tool_calls_dict[idx] = {
+                                    "id": tc_item.get("id") or f"call_{idx}",
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc_item.get("function", {}).get("name", ""),
+                                        "arguments": ""
+                                    }
+                                }
+                            if tc_item.get("function", {}).get("name"):
+                                tool_calls_dict[idx]["function"]["name"] = tc_item["function"]["name"]
+                            if tc_item.get("function", {}).get("arguments"):
+                                tool_calls_dict[idx]["function"]["arguments"] += tc_item["function"]["arguments"]
+
+            if reasoning_started and not reasoning_closed:
+                sys.stdout.write(f"{C_RESET}\n")
+
+            if full_content:
+                sys.stdout.write("\n")
+            sys.stdout.flush()
+
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Strata API HTTP {e.code}: {err}")
+    except Exception as e:
+        raise RuntimeError(f"Connection failed to Strata at {endpoint}: {e}")
+
+    dt = time.time() - t0
+    rate = tok_count / dt if dt > 0 else 0
+    parsed_tool_calls = [tool_calls_dict[i] for i in sorted(tool_calls_dict.keys())]
+
+    return {
+        "reasoning": "".join(full_reasoning),
+        "content": "".join(full_content) if full_content else None,
+        "tool_calls": parsed_tool_calls,
+        "finish_reason": finish_reason or ("tool_calls" if parsed_tool_calls else "stop"),
+        "tokens": tok_count,
+        "wall_time": dt,
+        "rate": rate,
+    }
+
+
+def format_args_preview(args: dict) -> str:
+    parts = []
+    for k, v in args.items():
+        val_str = str(v)
+        if len(val_str) > 40:
+            val_str = val_str[:37] + "..."
+        parts.append(f"{k}={repr(val_str)}")
+    return ", ".join(parts)
+
+
+def execute_agent_loop(messages: list[dict], url: str, api_key: str,
+                       workspace: Path, think_level: str = "low", max_turns: int = 10):
+    turn = 0
+    total_tokens = 0
+    t_start = time.time()
+
+    while turn < max_turns:
+        turn += 1
+        res = stream_chat_turn(
+            messages=messages,
+            url=url,
+            api_key=api_key,
+            think_level=think_level,
+        )
+        total_tokens += res["tokens"]
+
+        # Append assistant turn
+        asst_msg = {"role": "assistant"}
+        if res["content"] is not None:
+            asst_msg["content"] = res["content"]
+        if res["reasoning"]:
+            asst_msg["reasoning_content"] = res["reasoning"]
+        if res["tool_calls"]:
+            asst_msg["tool_calls"] = res["tool_calls"]
+        messages.append(asst_msg)
+
+        # If no tool calls, turn is complete
+        if not res["tool_calls"]:
+            wall = time.time() - t_start
+            rate = total_tokens / wall if wall > 0 else 0
+            print(f"{C_GRAY}[{total_tokens} tokens in {wall:.1f}s · {rate:.1f} t/s]{C_RESET}\n")
+            break
+
+        # Process and execute each tool call
+        for tc in res["tool_calls"]:
+            fn = tc.get("function", {})
+            fn_name = fn.get("name", "")
+            raw_args = fn.get("arguments", "{}")
+            try:
+                args = json.loads(raw_args)
+            except Exception:
+                args = {}
+
+            print(f"{C_BLUE}⚙ [D.L. Tool]{C_RESET} {C_BOLD}{fn_name}{C_RESET}({format_args_preview(args)})")
+
+            result_str = dispatch_dl_tool(fn_name, args, workspace)
+
+            res_preview = result_str.strip()
+            if len(res_preview) > 160:
+                res_preview = res_preview[:160] + "..."
+            print(f"{C_DIM}  ↳ {res_preview}{C_RESET}\n")
+
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.get("id") or "call_1",
+                "name": fn_name,
+                "content": result_str
+            })
+
+
+def check_status(url: str, api_key: str):
+    endpoint = f"{url.rstrip('/')}/health"
+    req = urllib.request.Request(endpoint, headers={"Authorization": f"Bearer {api_key}"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            print(f"\n{C_BOLD}Strata Engine Status:{C_RESET}")
+            print(f"  • Status:     {C_GREEN}{data.get('status', 'ok')}{C_RESET}")
+            print(f"  • Model:      {C_CYAN}{data.get('model', 'unknown')}{C_RESET}")
+            print(f"  • Context:    {data.get('max_context', 0):,} tokens")
+            print(f"  • Accelerator: ROCm GPU + Resident RAM\n")
+    except Exception as e:
+        print(f"{C_RED}Failed to reach Strata at {url}: {e}{C_RESET}\n")
+
+
+def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str = "low"):
+    history_file = Path.home() / ".config" / "dl" / "cli_history"
+    history_file.parent.mkdir(parents=True, exist_ok=True)
+    if history_file.is_file():
+        try:
+            readline.read_history_file(str(history_file))
+        except Exception:
+            pass
+
+    system_prompt = build_dl_system_prompt(workspace)
+    messages: list[dict] = [{"role": "system", "content": system_prompt}]
+
+    print_banner(workspace, think_level)
+
+    try:
+        while True:
+            try:
+                raw_input = input(f"{C_BLUE}dl{C_RESET} > ")
+            except EOFError:
+                print("\nExiting D.L. CLI.")
+                break
+            except KeyboardInterrupt:
+                print("\n")
+                continue
+
+            prompt = raw_input.strip()
+            if not prompt:
+                continue
+
+            # Command dispatch
+            if prompt in ("/exit", "/quit", "exit", "quit"):
+                print("Exiting D.L. CLI.")
+                break
+            elif prompt in ("/clear", "/reset"):
+                messages = [{"role": "system", "content": system_prompt}]
+                print(f"{C_GREEN}✓ D.L. memory reset.{C_RESET}\n")
+                continue
+            elif prompt == "/help":
+                print(f"\n{C_BOLD}D.L. CLI Commands:{C_RESET}")
+                print(f"  /clear, /reset        Reset conversation memory")
+                print(f"  /think <none|low|med|high> Set reasoning effort level")
+                print(f"  /status               Check Strata server health")
+                print(f"  !<shell command>      Execute bash command directly in workspace")
+                print(f"  @filename             Inject file content into your prompt\n")
+                continue
+            elif prompt.startswith("/think"):
+                parts = prompt.split()
+                if len(parts) > 1 and parts[1].lower() in ("none", "low", "medium", "med", "high"):
+                    val = parts[1].lower()
+                    if val == "med":
+                        val = "medium"
+                    think_level = val
+                    print(f"{C_GREEN}✓ Reasoning effort set to: {think_level}{C_RESET}\n")
+                else:
+                    print(f"Current reasoning effort: {think_level}. Usage: /think [none|low|medium|high]\n")
+                continue
+            elif prompt in ("/status", "/model"):
+                check_status(url, api_key)
+                continue
+            elif prompt.startswith("!"):
+                cmd = prompt[1:].strip()
+                if cmd:
+                    out = tool_run_command({"CommandLine": cmd}, workspace)
+                    print(f"\n{out}\n")
+                continue
+
+            # File context injection
+            resolved_prompt = resolve_file_references(prompt, workspace)
+            messages.append({"role": "user", "content": resolved_prompt})
+
+            try:
+                execute_agent_loop(
+                    messages=messages,
+                    url=url,
+                    api_key=api_key,
+                    workspace=workspace,
+                    think_level=think_level,
+                )
+            except Exception as e:
+                print(f"{C_RED}Error during agent turn: {e}{C_RESET}\n")
+                if messages and messages[-1].get("role") == "user":
+                    messages.pop()
+
+    finally:
+        try:
+            readline.write_history_file(str(history_file))
+        except Exception:
+            pass
+
+
+def main():
+    parser = argparse.ArgumentParser(description="D.L. CLI Autonomous Agent on Strata Engine")
+    parser.add_argument("--workspace", default=os.getcwd(), help="Workspace directory")
+    parser.add_argument("--url", default=DEFAULT_URL, help="Strata URL")
+    parser.add_argument("--api-key", default=DEFAULT_API_KEY, help="Strata API Key")
+    parser.add_argument("--think", default="low", choices=["none", "low", "medium", "high"], help="Reasoning effort")
+    parser.add_argument("-p", "--prompt", help="Run single prompt non-interactively and exit")
+
+    args = parser.parse_args()
+    ws = Path(args.workspace).resolve()
+
+    if args.prompt:
+        resolved = resolve_file_references(args.prompt, ws)
+        messages = [
+            {"role": "system", "content": build_dl_system_prompt(ws)},
+            {"role": "user", "content": resolved}
+        ]
+        try:
+            execute_agent_loop(messages, args.url, args.api_key, ws, think_level=args.think)
+            sys.exit(0)
+        except Exception as e:
+            sys.stderr.write(f"Error: {e}\n")
+            sys.exit(1)
+
+    interactive_loop(ws, args.url, args.api_key, think_level=args.think)
+
+
+if __name__ == "__main__":
+    main()
