@@ -1289,11 +1289,15 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                     messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
                     print(f"{C_YELLOW}📋 Entering PLAN MODE for: {sub}{C_RESET}\n")
                     prompt = sub
-            elif prompt.startswith("/act") or prompt.startswith("/execute"):
+            elif prompt.startswith("/act") or prompt.startswith("/execute") or prompt.lower() in ("act", "execute") or prompt.lower().startswith("act ") or prompt.lower().startswith("execute "):
                 if prompt.startswith("/act"):
                     sub = prompt[4:].strip()
-                else:
+                elif prompt.startswith("/execute"):
                     sub = prompt[8:].strip()
+                elif prompt.lower().startswith("act"):
+                    sub = prompt[3:].strip()
+                else:
+                    sub = prompt[7:].strip()
                 current_mode = "act"
                 messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
                 if not sub:
