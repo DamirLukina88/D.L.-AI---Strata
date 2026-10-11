@@ -212,6 +212,165 @@ if ($("code-fullscreen-btn")) {
   };
 }
 
+// ------------------------------------------------------------------ Companion Mobile Web Mode
+let mobileCodeChatTimer = null;
+let lastMobileChatHash = "";
+
+function setMobileCodeView(isMobileCard) {
+  const cardView = $("code-mobile-card-view");
+  const termBody = $("code-terminal-body");
+  const toggleBtn = $("code-view-toggle-btn");
+  if (!cardView || !termBody) return;
+
+  if (isMobileCard) {
+    cardView.hidden = false;
+    termBody.hidden = true;
+    if (toggleBtn) toggleBtn.classList.add("st-btn--active");
+    startMobileCodePolling();
+  } else {
+    cardView.hidden = true;
+    termBody.hidden = false;
+    if (toggleBtn) toggleBtn.classList.remove("st-btn--active");
+    stopMobileCodePolling();
+  }
+}
+
+function stopMobileCodePolling() {
+  if (mobileCodeChatTimer) {
+    clearInterval(mobileCodeChatTimer);
+    mobileCodeChatTimer = null;
+  }
+}
+
+function startMobileCodePolling() {
+  stopMobileCodePolling();
+  pollMobileCodeChat();
+  mobileCodeChatTimer = setInterval(pollMobileCodeChat, 2000);
+}
+
+async function pollMobileCodeChat() {
+  try {
+    const r = await fetch("api/code/chat", { headers: headers() });
+    if (!r.ok) return;
+    const data = await r.json();
+    const msgs = data.messages || [];
+    const hash = `${data.updated_at || ""}-${msgs.length}`;
+    if (hash === lastMobileChatHash) return;
+    lastMobileChatHash = hash;
+    renderMobileCodeMessages(msgs);
+  } catch (e) {
+    /* ignore polling errors */
+  }
+}
+
+function renderMobileCodeMessages(msgs) {
+  const container = $("code-mobile-messages");
+  if (!container) return;
+
+  const visible = msgs.filter((m) => m && (m.role === "user" || m.role === "assistant"));
+  if (visible.length === 0) {
+    container.innerHTML = `
+      <div class="code-mobile-welcome">
+        <div class="code-mobile-welcome-icon">✦</div>
+        <div class="code-mobile-welcome-title">D.L. Mobile Companion</div>
+        <div class="code-mobile-welcome-sub">Native touch feed connected to live autonomous session.</div>
+      </div>`;
+    return;
+  }
+
+  let html = "";
+  for (const m of visible) {
+    const role = m.role || "assistant";
+    const roleLabel = role === "user" ? "You" : "D.L. Agent";
+    let bodyText = "";
+    if (typeof m.content === "string") {
+      bodyText = m.content;
+    } else if (Array.isArray(m.content)) {
+      bodyText = m.content.map((p) => p.text || "").join("\n");
+    }
+    const escaped = esc(bodyText);
+    const withPre = escaped.replace(/```([\s\S]*?)```/g, "<pre><code>$1</code></pre>");
+    html += `
+      <div class="code-mobile-card code-mobile-card--${role}">
+        <div class="code-mobile-card-header">
+          <span class="role-tag">${roleLabel}</span>
+        </div>
+        <div class="code-mobile-card-body">${withPre}</div>
+      </div>`;
+  }
+  container.innerHTML = html;
+  container.scrollTop = container.scrollHeight;
+}
+
+async function sendMobileCodeInput() {
+  const ta = $("code-mobile-input");
+  if (!ta) return;
+  const text = ta.value.trim();
+  if (!text) return;
+
+  const btn = $("code-mobile-send-btn");
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch("api/code/send", {
+      method: "POST",
+      headers: headers(true),
+      body: JSON.stringify({ text })
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${r.status}`);
+    }
+    ta.value = "";
+    ta.style.height = "auto";
+    setTimeout(pollMobileCodeChat, 500);
+  } catch (e) {
+    toast("error", "Failed to send", e.message || String(e));
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+if ($("code-view-toggle-btn")) {
+  $("code-view-toggle-btn").onclick = () => {
+    const cardView = $("code-mobile-card-view");
+    const isCurrentlyCard = cardView && !cardView.hidden;
+    setMobileCodeView(!isCurrentlyCard);
+  };
+}
+
+if ($("code-mobile-send-btn")) {
+  $("code-mobile-send-btn").onclick = sendMobileCodeInput;
+}
+
+if ($("code-mobile-input")) {
+  $("code-mobile-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMobileCodeInput();
+    }
+  });
+  $("code-mobile-input").addEventListener("input", function() {
+    this.style.height = "auto";
+    this.style.height = Math.min(this.scrollHeight, 120) + "px";
+  });
+}
+
+document.querySelectorAll(".code-mobile-chip").forEach((chip) => {
+  chip.onclick = () => {
+    const cmd = chip.dataset.cmd;
+    const input = $("code-mobile-input");
+    if (cmd && input) {
+      input.value = cmd + " ";
+      input.focus();
+    }
+  };
+});
+
+// Auto-activate Mobile Card view on screens narrower than 680px
+if (window.innerWidth <= 680) {
+  setMobileCodeView(true);
+}
+
 // ------------------------------------------------------------------ server access
 const DEFAULT_KEY = "";
 function headers(json = false) {

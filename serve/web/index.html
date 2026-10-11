@@ -125,13 +125,45 @@
           <button type="button" class="st-btn st-btn--secondary st-btn--sm code-action-btn" id="code-restart-btn" title="Restart Claude CLI session">
             <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-refresh"/></svg><span>Restart</span>
           </button>
+          <button type="button" class="st-btn st-btn--icon code-action-btn" id="code-view-toggle-btn" title="Toggle Mobile Card / Terminal View" aria-label="Toggle Mobile Card / Terminal View">
+            <svg class="st-icon st-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+              <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+          </button>
           <button type="button" class="st-btn st-btn--icon code-action-btn" id="code-fullscreen-btn" title="Toggle Fullscreen" aria-label="Toggle Fullscreen">
             <svg class="st-icon st-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
           </button>
         </div>
       </div>
-      <div class="code-terminal-body">
+      <div class="code-terminal-body" id="code-terminal-body">
         <iframe id="code-terminal-frame" src="about:blank" title="Claude Code Web Terminal" class="code-iframe"></iframe>
+      </div>
+      <div class="code-mobile-card-view" id="code-mobile-card-view" hidden>
+        <div class="code-mobile-messages" id="code-mobile-messages">
+          <div class="code-mobile-welcome">
+            <div class="code-mobile-welcome-icon">✦</div>
+            <div class="code-mobile-welcome-title">D.L. Mobile Companion</div>
+            <div class="code-mobile-welcome-sub">Native touch feed connected to live autonomous session.</div>
+          </div>
+        </div>
+        <div class="code-mobile-composer">
+          <div class="code-mobile-chips">
+            <button type="button" class="code-mobile-chip" data-cmd="/act">/act</button>
+            <button type="button" class="code-mobile-chip" data-cmd="/plan">/plan</button>
+            <button type="button" class="code-mobile-chip" data-cmd="/status">/status</button>
+            <button type="button" class="code-mobile-chip" data-cmd="/diff">/diff</button>
+            <button type="button" class="code-mobile-chip" data-cmd="/health">/health</button>
+            <button type="button" class="code-mobile-chip" data-cmd="/wiki">/wiki</button>
+          </div>
+          <div class="code-mobile-input-bar">
+            <textarea id="code-mobile-input" class="code-mobile-textarea" placeholder="Send prompt or /command…" rows="1"></textarea>
+            <button type="button" id="code-mobile-send-btn" class="st-btn st-btn--primary code-mobile-send" title="Send">
+              <svg class="st-icon st-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </section>

@@ -271,13 +271,13 @@ DL_TOOLS = [
         "type": "function",
         "function": {
             "name": "local_wiki",
-            "description": "Interact with the project knowledge base in wiki/. Search decisions, constraints, preferences, architecture, and gotchas; create or lint pages; manage credentials in wiki/private/.env.",
+            "description": "Interact with the project knowledge base in wiki/. Search decisions, constraints, preferences, architecture; read pages; or create new pages.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["search", "read_page", "new_page", "lint", "digest", "init", "env_list", "log"],
+                        "enum": ["search", "read_page", "new_page", "lint", "digest", "env_list"],
                         "description": "Action to perform on the local wiki."
                     },
                     "query": {
@@ -286,36 +286,15 @@ DL_TOOLS = [
                     },
                     "page_path": {
                         "type": "string",
-                        "description": "Relative path to wiki page to read (e.g. 'wiki/decisions/claude-code-cli-integration.md')."
-                    },
-                    "page_type": {
-                        "type": "string",
-                        "enum": ["concept", "entity", "decision", "preference", "log", "artifact"],
-                        "description": "Page type (for 'new_page')."
-                    },
-                    "slug": {
-                        "type": "string",
-                        "description": "Kebab-case page slug without .md (for 'new_page', e.g. 'caching-layer')."
+                        "description": "Relative path to wiki page (for 'read_page')."
                     },
                     "title": {
                         "type": "string",
-                        "description": "Human-readable page title (for 'new_page')."
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "One-line description under 150 chars (for 'new_page')."
+                        "description": "Title (for 'new_page')."
                     },
                     "summary": {
                         "type": "string",
-                        "description": "Summary or full page content (for 'new_page')."
-                    },
-                    "tags": {
-                        "type": "string",
-                        "description": "Comma-separated tags (for 'new_page')."
-                    },
-                    "log_message": {
-                        "type": "string",
-                        "description": "Changelog entry message (for 'log')."
+                        "description": "Content or summary (for 'new_page')."
                     }
                 },
                 "required": ["action"]
@@ -324,10 +303,9 @@ DL_TOOLS = [
     }
 ]
 
-# Incorporate Auditing & Debugging Suite tools
-DL_TOOLS.extend(AUDITING_TOOL_DEFINITIONS)
-
-# Tool definitions by mode
+# Core 6 Engineering Suite for Local LLM High Velocity:
+# 1. run_command, 2. switch_workspace, 3. view_file, 4. write_to_file, 5. replace_file_content, 6. local_wiki
+# (Auditing, testing, and health are active via slash commands /health, /diff, /test, /secrets, /syntax)
 DL_ACT_TOOLS = DL_TOOLS
 
 
@@ -394,8 +372,6 @@ DL_PLAN_TOOLS = [
     next(t for t in DL_TOOLS if t["function"]["name"] == "resolve_library_id"),
     next(t for t in DL_TOOLS if t["function"]["name"] == "get_library_docs"),
 ]
-# Plan mode includes all read-only auditing and diagnostics tools
-DL_PLAN_TOOLS.extend(AUDITING_TOOL_DEFINITIONS)
 
 
 def print_banner(workspace: Path, think_level: str, mode: str = "act"):
@@ -505,20 +481,16 @@ Active Workspaces:
 </user_information>{wiki_section}
 
 <guidelines>
-- Always use the provided tools to inspect files, make changes, run tests, and search:
-  * Project Knowledge Base: `local_wiki` (search, read_page, new_page, lint)
-  * File Inspection: `view_file`
-  * New Files: `write_to_file` (protected by active AST syntax_guard and scan_secrets guardrails)
-  * Targeted Edits: `replace_file_content` (protected by active AST syntax_guard and scan_secrets guardrails)
-  * Auditing & Health: `system_health`, `git_diff_audit`, `scan_secrets`, `syntax_guard`
-  * Smart Test Runner: `smart_test_runner` (automatically detects modified modules and runs targeted tests)
-  * Shell / Terminal / Tests: `run_command`
-  * Web Search & News: `exa_web_search`
-  * Library & Framework Docs: `resolve_library_id` and `get_library_docs`
+- Reference code as `file_path:line_number` — it is clickable in terminal emulators.
+- Start editing once you know the first change. A design worked out in files persists, while long thinking can be cut off and lost.
+- Match existing codebase conventions, comment density, architecture patterns, and naming style.
+- Report outcomes faithfully: if a test fails or command errors, state the exact error and diagnose it immediately.
+- Use the provided tools directly to inspect files, edit code, execute commands, and search:
+  * Project Knowledge: `local_wiki` (search, read_page, new_page)
+  * Files: `view_file`, `write_to_file`, `replace_file_content` (protected by active AST syntax & leak guardrails)
+  * Terminal & Tests: `run_command`
+  * Web & Documentation: `exa_web_search`, `resolve_library_id`, `get_library_docs`
 - When starting work on a project with a wiki, search relevant decisions and preferences first.
-- When you need real-time web info or package references, search using `exa_web_search`.
-- When you need verified framework syntax or docs, query Context7 with `resolve_library_id` then `get_library_docs`.
-- After making code changes, run `smart_test_runner` or `git_diff_audit` to ensure tests pass and changes are clean.
 - Keep explanations concise, clear, and focused on the results.
 </guidelines>"""
 

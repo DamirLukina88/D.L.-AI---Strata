@@ -4895,6 +4895,19 @@ def make_handler(svc: Service):
                     ]
                 })
                 return
+            if path == "/api/code/chat":
+                if not self._authorized():
+                    return
+                # Return current chat state from /tmp/dl-cli-current-chat.json if available
+                chat_payload = {"messages": [], "model": "Qwen3.8-Flash-Next Coder", "workspace": str(WORKSPACE_DIR)}
+                if os.path.exists("/tmp/dl-cli-current-chat.json"):
+                    try:
+                        with open("/tmp/dl-cli-current-chat.json", "r", encoding="utf-8") as f:
+                            chat_payload = json.load(f)
+                    except Exception:
+                        pass
+                self._json(200, chat_payload)
+                return
             if path == "/api/code/export":
                 if not self._authorized():
                     return
@@ -5313,6 +5326,25 @@ def make_handler(svc: Service):
                     self._json(200, {"status": "ok", "message": f"{target} session restarted", "active": target})
                 except Exception as e:
                     self._json(500, {"error": {"message": f"failed to restart session: {e}"}})
+                return
+            if path == "/api/code/send":
+                if not self._own_page("Commands can be sent to coding session"):
+                    return
+                try:
+                    req = json.loads(self._body() or b"{}")
+                    text = (req.get("text") or "").strip()
+                    if not text:
+                        self._json(400, {"error": {"message": "text required"}})
+                        return
+                    # Determine active window
+                    res = subprocess.run(["tmux", "display-message", "-t", "dl-ai-code", "-p", "#{window_name}"],
+                                         capture_output=True, text=True, check=False)
+                    target = res.stdout.strip() if res.returncode == 0 and res.stdout.strip() else "agy"
+                    # Send input and Enter to tmux window
+                    subprocess.run(["tmux", "send-keys", "-t", f"dl-ai-code:{target}", text, "Enter"], check=False)
+                    self._json(200, {"status": "ok", "sent": text, "target": target})
+                except Exception as e:
+                    self._json(500, {"error": {"message": f"failed to send keys: {e}"}})
                 return
             try:
                 req = json.loads(self._body() or b"{}")
