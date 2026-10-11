@@ -199,7 +199,17 @@ class _Amd:
         return out
 
     def link(self):
-        """The PCIe link the card actually gets: the narrowest/slowest hop between the root port and the card."""
+        """The PCIe link the card actually gets: the **narrowest/slowest hop** between the root port and the card,
+        from each hop's `max_link_speed` / `max_link_width` (the capability, so a power-saving downgrade or a Gen3
+        slot cannot make it read low).  A card that is Gen4 on its own hop but sits behind a Gen3 root port really
+        runs at Gen3, and that is the number a PCIe bandwidth budget needs.
+        `pcie_own_gen` keeps the card's own hop aside: the gap between the two is what a user has to see.
+
+        The bottleneck is only claimed when **every** hop of the path could be read; `pcie_path` reports how many
+        of them were ("4/4").  A kernel or a container that hides part of /sys/devices would otherwise drop the
+        unreadable hops in silence and report the card's own Gen4 hop as the whole path - i.e. be optimistic
+        exactly where it matters.  When the walk is incomplete the reading falls back to the card's own negotiated
+        link and pcie_path says so."""
         hops = self._hops()
         gens, widths, read = [], [], 0
         for d in hops:
@@ -217,7 +227,6 @@ class _Amd:
         width = min(widths) if (whole and widths) else self._int(os.path.join(own, "current_link_width"))
         return {"pcie_gen": gen, "pcie_gen_max": gen, "pcie_own_gen": own_gen, "pcie_width": width,
                 "pcie_path": "%d/%d" % (read, len(hops))}
-
     def read(self):
         out = {"util": self._int(os.path.join(self.dev, "gpu_busy_percent")),
                "mem_used": self._int(os.path.join(self.dev, "mem_info_vram_used")),
@@ -364,6 +373,8 @@ class Telemetry:
         try:
             c = self.ps.disk_io_counters()
         except (OSError, RuntimeError):
+            return None, None
+        if c is None:   # psutil found no disk (a gVisor container, Windows with its disk counters off)
             return None, None
         t = time.time()
         prev, self._disk_prev = self._disk_prev, (t, c.read_bytes, c.write_bytes)
