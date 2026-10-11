@@ -26,6 +26,38 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+# Auditing & Debugging Suite Integration
+try:
+    from tools.dl_auditing import (
+        AUDITING_TOOL_DEFINITIONS,
+        audit_git_diff,
+        format_health_card,
+        get_system_health,
+        run_smart_tests,
+        scan_secrets_in_text,
+        tool_git_diff_audit,
+        tool_scan_secrets,
+        tool_smart_test_runner,
+        tool_syntax_guard,
+        tool_system_health,
+        validate_syntax,
+    )
+except ImportError:
+    from dl_auditing import (
+        AUDITING_TOOL_DEFINITIONS,
+        audit_git_diff,
+        format_health_card,
+        get_system_health,
+        run_smart_tests,
+        scan_secrets_in_text,
+        tool_git_diff_audit,
+        tool_scan_secrets,
+        tool_smart_test_runner,
+        tool_syntax_guard,
+        tool_system_health,
+        validate_syntax,
+    )
+
 # ANSI colors & formatting (Strata Dark & Orange Aesthetic)
 C_RESET = "\033[0m"
 C_BOLD = "\033[1m"
@@ -273,6 +305,9 @@ DL_TOOLS = [
     }
 ]
 
+# Incorporate Auditing & Debugging Suite tools
+DL_TOOLS.extend(AUDITING_TOOL_DEFINITIONS)
+
 # Tool definitions by mode
 DL_ACT_TOOLS = DL_TOOLS
 
@@ -339,13 +374,15 @@ DL_PLAN_TOOLS = [
     next(t for t in DL_TOOLS if t["function"]["name"] == "resolve_library_id"),
     next(t for t in DL_TOOLS if t["function"]["name"] == "get_library_docs"),
 ]
+# Plan mode includes all read-only auditing and diagnostics tools
+DL_PLAN_TOOLS.extend(AUDITING_TOOL_DEFINITIONS)
 
 
 def print_banner(workspace: Path, think_level: str, mode: str = "act"):
     mode_badge = f"{C_YELLOW}[PLAN MODE]{C_RESET}" if mode == "plan" else f"{C_GREEN}[ACT MODE]{C_RESET}"
     wroot = resolve_wiki_root(workspace)
     wiki_badge = f"{C_GREEN}[Active: {wroot.name}]{C_RESET}" if wroot else f"{C_MUTED}[Inactive]{C_RESET}"
-    tools_str = "bash, files, local_wiki, exa_search, context7_docs" if wroot else "bash, files, exa_search, context7_docs"
+    tools_str = "bash, files, audit, health, tests, wiki, exa, docs" if wroot else "bash, files, audit, health, tests, exa, docs"
     rocm_badge = f"{C_GREEN}[ROCm GPU Active]{C_RESET}"
 
     card_width = 79
@@ -373,7 +410,7 @@ def print_banner(workspace: Path, think_level: str, mode: str = "act"):
         _row(f"{C_MUTED}Workspace{C_RESET} : {C_INK_SOFT}{ws_str}{C_RESET}"),
         _row(f"{C_MUTED}Status{C_RESET}    : {mode_badge}  {C_MUTED}·{C_RESET}  Effort: {C_ACCENT_SOFT}{think_level}{C_RESET}  {C_MUTED}·{C_RESET}  Wiki: {wiki_badge}"),
         _row(f"{C_MUTED}Tools{C_RESET}     : {C_INK_SOFT}{tools_str}{C_RESET}"),
-        _row(f"{C_MUTED}Commands{C_RESET}  : {C_INK_SOFT}/plan, /act, /wiki <cmd>, /think <level>, /clear, !<bash>{C_RESET}"),
+        _row(f"{C_MUTED}Commands{C_RESET}  : {C_INK_SOFT}/plan, /act, /health, /diff, /test, /wiki, !<bash>{C_RESET}"),
         bot_border,
         "\n"
     ]
@@ -417,7 +454,12 @@ Active Workspaces:
 - Use read-only inspection tools to thoroughly explore and investigate:
   * Project Knowledge Base: `local_wiki` (search, read_page, lint, digest)
   * File Inspection: `view_file`
-  * Terminal Inspection: `run_command` (only non-destructive queries like `git status`, `git diff`, `find`, `grep`)
+  * System & Hardware Health: `system_health` (inspect RAM, VRAM, Swap, CPU load)
+  * Git Diffs & Risk Audit: `git_diff_audit` (review pending modifications)
+  * Targeted Test Runner: `smart_test_runner` (run unit tests to verify baseline)
+  * AST Syntax Guard: `syntax_guard`
+  * Secret Scanner: `scan_secrets`
+  * Terminal Inspection: `run_command` (only non-destructive queries like `git status`, `find`, `grep`)
   * Web Search & News: `exa_web_search`
   * Library & Framework Docs: `resolve_library_id` and `get_library_docs`
 - Formulate a clear, actionable implementation plan structured as:
@@ -446,14 +488,17 @@ Active Workspaces:
 - Always use the provided tools to inspect files, make changes, run tests, and search:
   * Project Knowledge Base: `local_wiki` (search, read_page, new_page, lint)
   * File Inspection: `view_file`
-  * New Files: `write_to_file`
-  * Targeted Edits: `replace_file_content`
+  * New Files: `write_to_file` (protected by active AST syntax_guard and scan_secrets guardrails)
+  * Targeted Edits: `replace_file_content` (protected by active AST syntax_guard and scan_secrets guardrails)
+  * Auditing & Health: `system_health`, `git_diff_audit`, `scan_secrets`, `syntax_guard`
+  * Smart Test Runner: `smart_test_runner` (automatically detects modified modules and runs targeted tests)
   * Shell / Terminal / Tests: `run_command`
   * Web Search & News: `exa_web_search`
   * Library & Framework Docs: `resolve_library_id` and `get_library_docs`
 - When starting work on a project with a wiki, search relevant decisions and preferences first.
 - When you need real-time web info or package references, search using `exa_web_search`.
 - When you need verified framework syntax or docs, query Context7 with `resolve_library_id` then `get_library_docs`.
+- After making code changes, run `smart_test_runner` or `git_diff_audit` to ensure tests pass and changes are clean.
 - Keep explanations concise, clear, and focused on the results.
 </guidelines>"""
 
@@ -519,6 +564,17 @@ def tool_write_to_file(args: dict, workspace: Path) -> str:
     if p.exists() and not overwrite:
         return f"Error: File {p} already exists and Overwrite is False"
     content = args.get("CodeContent") or args.get("content") or ""
+
+    # Pre-write Guardrail 1: scan_secrets
+    is_clean, sec_err = scan_secrets_in_text(content, p)
+    if not is_clean:
+        return f"SECURITY ERROR [scan_secrets]: Write blocked to prevent secret leak:\n{sec_err}\nPlease remove or redact credentials/tokens before writing."
+
+    # Pre-write Guardrail 2: syntax_guard
+    is_valid, syn_err = validate_syntax(content, p)
+    if not is_valid:
+        return f"SYNTAX ERROR [syntax_guard]: Write blocked due to invalid syntax:\n{syn_err}\nPlease fix the syntax error and try again."
+
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
@@ -543,6 +599,17 @@ def tool_replace_file_content(args: dict, workspace: Path) -> str:
         if target not in orig:
             return f"Error: TargetContent not found in {p}"
         new_text = orig.replace(target, replacement, 1)
+
+        # Pre-write Guardrail 1: scan_secrets
+        is_clean, sec_err = scan_secrets_in_text(new_text, p)
+        if not is_clean:
+            return f"SECURITY ERROR [scan_secrets]: File modification blocked to prevent secret leak:\n{sec_err}\nPlease remove or redact credentials/tokens before saving."
+
+        # Pre-write Guardrail 2: syntax_guard
+        is_valid, syn_err = validate_syntax(new_text, p)
+        if not is_valid:
+            return f"SYNTAX ERROR [syntax_guard]: File modification blocked due to invalid syntax:\n{syn_err}\nPlease fix the syntax error and try again."
+
         p.write_text(new_text, encoding="utf-8")
         return f"Successfully updated {p}"
     except Exception as e:
@@ -814,6 +881,16 @@ def dispatch_dl_tool(name: str, args: dict, workspace: Path, mode: str = "act") 
         return tool_context7_docs(args)
     elif name == "local_wiki":
         return tool_local_wiki(args, workspace, mode=mode)
+    elif name == "syntax_guard":
+        return tool_syntax_guard(args, workspace)
+    elif name == "scan_secrets":
+        return tool_scan_secrets(args, workspace)
+    elif name == "system_health":
+        return tool_system_health(args, workspace)
+    elif name == "git_diff_audit":
+        return tool_git_diff_audit(args, workspace)
+    elif name == "smart_test_runner":
+        return tool_smart_test_runner(args, workspace)
     else:
         return f"Error: Unknown tool {name}"
 
@@ -1077,6 +1154,11 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 print(f"\n{C_BOLD}D.L. CLI Commands:{C_RESET}")
                 print(f"  /plan [query]         Toggle or enter Plan Mode (read-only research & design)")
                 print(f"  /act, /execute [query] Switch to Act Mode (full execution & code edits)")
+                print(f"  /health, /sys         Real-time RAM, VRAM, Swap, ROCm GPU & server health card")
+                print(f"  /diff, /audit         Semantic git diff audit (deletions, size, leaks, risks)")
+                print(f"  /secrets [path]       Scan codebase or file for leaked API keys, tokens & certs")
+                print(f"  /syntax [path]        Run AST syntax check on Python, JS, Bash, JSON, YAML")
+                print(f"  /test [files]         Smart targeted test runner (pytest, unittest, npm, make)")
                 print(f"  /wiki [search|lint|digest] Query or manage workspace Local Wiki")
                 print(f"  /clear, /reset        Reset conversation memory")
                 print(f"  /think <none|low|med|high> Set reasoning effort level")
@@ -1221,6 +1303,38 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 continue
             elif prompt in ("/status", "/model"):
                 check_status(url, api_key)
+                continue
+            elif prompt in ("/health", "/sys"):
+                stats = get_system_health(url, api_key)
+                print(format_health_card(stats))
+                continue
+            elif prompt in ("/diff", "/audit"):
+                print(f"\n{C_ACCENT}✦ Semantic Git Diff Audit:{C_RESET}")
+                print(tool_git_diff_audit({}, workspace) + "\n")
+                continue
+            elif prompt.startswith("/secrets") or prompt.startswith("/scan"):
+                parts = prompt.split(maxsplit=1)
+                sub_path = parts[1].strip() if len(parts) > 1 else ""
+                print(f"\n{C_ACCENT}✦ Scanning for Leaked Credentials & Secrets...{C_RESET}")
+                args = {"path": sub_path} if sub_path else {}
+                print(tool_scan_secrets(args, workspace) + "\n")
+                continue
+            elif prompt.startswith("/syntax"):
+                parts = prompt.split(maxsplit=1)
+                sub_path = parts[1].strip() if len(parts) > 1 else ""
+                if not sub_path:
+                    print("Usage: /syntax <file_path>\n")
+                    continue
+                print(f"\n{C_ACCENT}✦ Running AST Syntax Guard:{C_RESET}")
+                print(tool_syntax_guard({"path": sub_path}, workspace) + "\n")
+                continue
+            elif prompt.startswith("/test"):
+                parts = prompt.split(maxsplit=1)
+                sub_files = parts[1].strip() if len(parts) > 1 else ""
+                file_list = [f.strip() for f in sub_files.split()] if sub_files else None
+                print(f"\n{C_ACCENT}✦ Smart Targeted Test Runner:{C_RESET}")
+                args = {"files": file_list} if file_list else {}
+                print(tool_smart_test_runner(args, workspace) + "\n")
                 continue
             elif prompt.startswith("!"):
                 cmd = prompt[1:].strip()
