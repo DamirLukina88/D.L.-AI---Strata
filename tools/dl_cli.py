@@ -290,16 +290,20 @@ def find_wiki_script(workspace: Path) -> Path | None:
 
 
 def resolve_wiki_root(workspace: Path) -> Path | None:
-    if (workspace / "wiki").is_dir():
-        return (workspace / "wiki").resolve()
-    curr = workspace.resolve()
-    for parent in [curr] + list(curr.parents):
-        if (parent / "wiki").is_dir():
-            return (parent / "wiki").resolve()
-    strata_wiki = Path("/home/damirl/Desktop/Strata/wiki")
-    if strata_wiki.is_dir():
-        return strata_wiki.resolve()
+    # A wiki is only active if it exists directly within the defined project folder
+    local_wiki = (workspace / "wiki").resolve()
+    if local_wiki.is_dir():
+        return local_wiki
     return None
+
+
+def get_active_tools(workspace: Path, mode: str = "act") -> list[dict]:
+    wroot = resolve_wiki_root(workspace)
+    base_tools = DL_PLAN_TOOLS if mode == "plan" else DL_ACT_TOOLS
+    if not wroot:
+        # Wiki skill is inactive by default in this workspace
+        return [t for t in base_tools if t["function"]["name"] != "local_wiki"]
+    return base_tools
 
 
 # Read-only exploration and architecture toolset for Plan Mode (strictly excludes write_to_file and replace_file_content)
@@ -340,7 +344,8 @@ DL_PLAN_TOOLS = [
 def print_banner(workspace: Path, think_level: str, mode: str = "act"):
     mode_badge = f"{C_YELLOW}[PLAN MODE]{C_RESET}" if mode == "plan" else f"{C_GREEN}[ACT MODE]{C_RESET}"
     wroot = resolve_wiki_root(workspace)
-    wiki_badge = f"{C_GREEN}[Active: {wroot.name}]{C_RESET}" if wroot else f"{C_MUTED}[None]{C_RESET}"
+    wiki_badge = f"{C_GREEN}[Active: {wroot.name}]{C_RESET}" if wroot else f"{C_MUTED}[Inactive]{C_RESET}"
+    tools_str = "bash, files, local_wiki, exa_search, context7_docs" if wroot else "bash, files, exa_search, context7_docs"
     rocm_badge = f"{C_GREEN}[ROCm GPU Active]{C_RESET}"
 
     card_width = 79
@@ -367,7 +372,7 @@ def print_banner(workspace: Path, think_level: str, mode: str = "act"):
         _row(f"{C_MUTED}Engine{C_RESET}    : {C_INK_SOFT}{DEFAULT_URL}{C_RESET}  {rocm_badge}"),
         _row(f"{C_MUTED}Workspace{C_RESET} : {C_INK_SOFT}{ws_str}{C_RESET}"),
         _row(f"{C_MUTED}Status{C_RESET}    : {mode_badge}  {C_MUTED}·{C_RESET}  Effort: {C_ACCENT_SOFT}{think_level}{C_RESET}  {C_MUTED}·{C_RESET}  Wiki: {wiki_badge}"),
-        _row(f"{C_MUTED}Tools{C_RESET}     : {C_INK_SOFT}bash, files, local_wiki, exa_search, context7_docs{C_RESET}"),
+        _row(f"{C_MUTED}Tools{C_RESET}     : {C_INK_SOFT}{tools_str}{C_RESET}"),
         _row(f"{C_MUTED}Commands{C_RESET}  : {C_INK_SOFT}/plan, /act, /wiki <cmd>, /think <level>, /clear, !<bash>{C_RESET}"),
         bot_border,
         "\n"
@@ -694,6 +699,16 @@ def tool_local_wiki(args: dict, workspace: Path, mode: str = "act") -> str:
 
     wiki_root = resolve_wiki_root(workspace)
 
+    # If wiki is not active in this project folder, initialize it in the defined workspace when invoked
+    if not wiki_root and action != "init":
+        target_root = (workspace / "wiki").resolve()
+        init_cmd = ["python3", str(wiki_script), "init", "--root", str(target_root)]
+        try:
+            subprocess.run(init_cmd, cwd=workspace, capture_output=True, text=True, check=True)
+            wiki_root = target_root
+        except subprocess.CalledProcessError as e:
+            return f"Error initializing Local Wiki in {target_root}: {e.stderr or e.stdout}"
+
     if action == "read_page":
         ppath_str = args.get("page_path") or args.get("query")
         if not ppath_str:
@@ -737,7 +752,8 @@ def tool_local_wiki(args: dict, workspace: Path, mode: str = "act") -> str:
             cmd.extend(["--root", str(wiki_root)])
 
     elif action == "init":
-        cmd.append("init")
+        target = args.get("root") or args.get("project_folder") or (workspace / "wiki")
+        cmd.extend(["init", "--root", str(Path(target).resolve())])
 
     elif action == "env_list":
         cmd.extend(["env", "list"])
@@ -942,7 +958,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
     turn = 0
     total_tokens = 0
     t_start = time.time()
-    active_tools = DL_PLAN_TOOLS if mode == "plan" else DL_ACT_TOOLS
+    active_tools = get_active_tools(workspace, mode=mode)
 
     while turn < max_turns:
         turn += 1
@@ -1112,17 +1128,48 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                     prompt = sub
             elif prompt.startswith("/wiki"):
                 sub = prompt[5:].strip()
+                wroot = resolve_wiki_root(workspace)
+                wscript = find_wiki_script(workspace)
+                if not wscript:
+                    print(f"{C_RED}Error: local-wiki script (wiki.py) not found on system.{C_RESET}\n")
+                    continue
+
+                if not wroot:
+                    # Wiki is not active by default. When invoked, create the wiki in the defined project folder!
+                    target_folder = workspace
+                    if sub.startswith("init"):
+                        custom_path = sub[4:].strip()
+                        if custom_path:
+                            target_folder = Path(custom_path).expanduser().resolve()
+                    elif sub and not any(sub.startswith(cmd) for cmd in ("status", "info", "search", "lint", "digest", "env", "help")):
+                        cand = Path(sub).expanduser()
+                        if cand.is_dir() or cand.parent.is_dir():
+                            target_folder = cand.resolve()
+
+                    target_wiki = (target_folder / "wiki" if target_folder.name != "wiki" else target_folder).resolve()
+                    print(f"\n{C_ACCENT}✦ Local Wiki is currently INACTIVE in this project.{C_RESET}")
+                    print(f"{C_INK_SOFT}✦ Initializing and activating Local Wiki in defined project folder:{C_RESET}")
+                    print(f"  {C_BOLD}{target_wiki}{C_RESET}...\n")
+
+                    cmd = ["python3", str(wscript), "init", "--root", str(target_wiki)]
+                    try:
+                        res = subprocess.run(cmd, cwd=target_folder, capture_output=True, text=True, check=True)
+                        print(f"{C_GREEN}✓ Local Wiki ready at {target_wiki}!{C_RESET}")
+                        if res.stdout:
+                            print(f"{C_MUTED}{res.stdout.strip()}{C_RESET}\n")
+                        # Update current session system prompt and state in memory
+                        messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
+                    except subprocess.CalledProcessError as e:
+                        print(f"{C_RED}Failed to initialize wiki: {e.stderr or e.stdout}{C_RESET}\n")
+                    continue
+
+                # Wiki is already active in this project folder:
                 if not sub or sub in ("status", "info"):
-                    wroot = resolve_wiki_root(workspace)
-                    wscript = find_wiki_script(workspace)
                     print(f"\n{C_BOLD}Local Wiki Status:{C_RESET}")
-                    print(f"  • Root:   {C_CYAN}{wroot or 'None'}{C_RESET}")
-                    print(f"  • Script: {wscript or 'Not found'}")
-                    if wroot:
-                        res = tool_local_wiki({"action": "digest"}, workspace)
-                        print(f"\n{res}\n")
-                    else:
-                        print("  (Run /wiki init to initialize a wiki in this workspace)\n")
+                    print(f"  • Root:   {C_ACCENT_SOFT}{wroot}{C_RESET}")
+                    print(f"  • Script: {wscript}")
+                    res = tool_local_wiki({"action": "digest"}, workspace)
+                    print(f"\n{res}\n")
                 elif sub.startswith("search"):
                     q = sub[6:].strip()
                     if q:
@@ -1135,9 +1182,8 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                     print(tool_local_wiki({"action": "lint"}, workspace) + "\n")
                 elif sub == "digest":
                     print("\n" + tool_local_wiki({"action": "digest"}, workspace) + "\n")
-                elif sub == "init":
-                    print(f"\n{C_CYAN}Initializing Local Wiki...{C_RESET}\n")
-                    print(tool_local_wiki({"action": "init"}, workspace) + "\n")
+                elif sub.startswith("init"):
+                    print(f"{C_YELLOW}Local Wiki is already active in this project at: {wroot}{C_RESET}\n")
                 elif sub.startswith("env"):
                     print("\n" + tool_local_wiki({"action": "env_list"}, workspace) + "\n")
                 else:
