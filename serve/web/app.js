@@ -105,10 +105,10 @@ function showTab(name) {
 for (const b of document.querySelectorAll(".st-tab")) b.onclick = () => showTab(b.dataset.tab);
 window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
 
-let currentScaffold = "claude";
+let currentScaffold = "agy";
 const SCAFFOLD_NAMES = {
-  claude: { title: "Claude Code CLI", meta: "Session: dl-ai-code:claude" },
   agy: { title: "D.L. CLI", meta: "Session: dl-ai-code:agy" },
+  claude: { title: "Claude Code CLI", meta: "Session: dl-ai-code:claude" },
   deepseek: { title: "DeepSeek CLI", meta: "Session: dl-ai-code:deepseek" },
   codex: { title: "Codex CLI", meta: "Session: dl-ai-code:codex" }
 };

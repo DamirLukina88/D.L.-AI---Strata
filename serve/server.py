@@ -4888,8 +4888,8 @@ def make_handler(svc: Service):
                 self._json(200, {
                     "active": active,
                     "scaffolds": [
-                        {"id": "claude", "name": "Claude Code", "desc": "Official CLI on local Strata Engine", "model": "Haiku 5.5"},
                         {"id": "agy", "name": "D.L. CLI", "desc": "Autonomous Engineering Agent", "model": "Qwen3.8 Coder"},
+                        {"id": "claude", "name": "Claude Code", "desc": "Official CLI on local Strata Engine", "model": "Haiku 5.5"},
                         {"id": "deepseek", "name": "DeepSeek CLI", "desc": "DeepSeek V4 Coding Engine", "model": "V4 Flash / Pro"},
                         {"id": "codex", "name": "Codex CLI", "desc": "OpenAI Codex CLI on Strata Responses API", "model": "Codex / Responses"}
                     ]
