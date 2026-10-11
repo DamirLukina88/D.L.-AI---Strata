@@ -399,7 +399,7 @@ def print_banner(workspace: Path, think_level: str, mode: str = "act"):
     out = [
         "\n",
         top_border,
-        _row(f"{C_ACCENT_BOLD}✦ D.L. CLI{C_RESET}  {C_MUTED}·{C_RESET}  {C_INK_SOFT}Autonomous Local Coding Agent{C_RESET} {C_MUTED}(v2.0){C_RESET}"),
+        _row(f"{C_ACCENT_BOLD}✦ CLI{C_RESET}  {C_MUTED}·{C_RESET}  {C_INK_SOFT}Autonomous Local Coding Agent{C_RESET} {C_MUTED}(v2.0){C_RESET}"),
         mid_border,
         _row(f"{C_MUTED}Model{C_RESET}     : {C_INK}Qwen3.8-Flash-Next Coder{C_RESET} {C_MUTED}(IQ1_M MOE · Local){C_RESET}"),
         _row(f"{C_MUTED}Engine{C_RESET}    : {C_INK_SOFT}{DEFAULT_URL}{C_RESET}  {rocm_badge}"),
@@ -1581,7 +1581,7 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                     if not out_p.suffix:
                         out_p = out_p.with_suffix(".md")
                 else:
-                    out_p = workspace / f"strata-chat-{now_str}.md"
+                    out_p = workspace / f"dl-ai-code-chat-{now_str}.md"
 
                 md_content = format_messages_to_markdown(messages, model_name="Qwen3.8-Flash-Next Coder", workspace=workspace)
                 try:

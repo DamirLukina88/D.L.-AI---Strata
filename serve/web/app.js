@@ -105,67 +105,33 @@ function showTab(name) {
 for (const b of document.querySelectorAll(".st-tab")) b.onclick = () => showTab(b.dataset.tab);
 window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
 
-let currentScaffold = "agy";
+let currentScaffold = "dl-ai-code";
 const SCAFFOLD_NAMES = {
-  agy: { title: "D.L. CLI", meta: "Session: dl-ai-code:agy" },
-  claude: { title: "Claude Code CLI", meta: "Session: dl-ai-code:claude" },
-  deepseek: { title: "DeepSeek CLI", meta: "Session: dl-ai-code:deepseek" }
+  "dl-ai-code": { title: "CLI", meta: "Session: dl-ai-code" },
+  agy: { title: "CLI", meta: "Session: dl-ai-code" }
 };
 
-function setScaffoldUI(scaffold) {
-  currentScaffold = scaffold;
-  const info = SCAFFOLD_NAMES[scaffold] || SCAFFOLD_NAMES.claude;
-  if ($("code-scaffold-title")) $("code-scaffold-title").textContent = info.title;
-  if ($("code-scaffold-meta")) $("code-scaffold-meta").innerHTML = `Session: <code>${info.meta.replace("Session: ", "")}</code>`;
-  for (const b of document.querySelectorAll(".code-scaffold-btn")) {
-    b.classList.toggle("is-active", b.dataset.scaffold === scaffold);
-  }
+function setScaffoldUI() {
+  currentScaffold = "dl-ai-code";
+  if ($("code-scaffold-title")) $("code-scaffold-title").textContent = "CLI";
+  if ($("code-scaffold-meta")) $("code-scaffold-meta").innerHTML = `Session: <code>dl-ai-code</code>`;
 }
 
 async function syncCodeScaffold() {
-  try {
-    const r = await fetch("api/code/scaffold", { headers: headers() });
-    if (r.ok) {
-      const data = await r.json();
-      if (data.active && SCAFFOLD_NAMES[data.active]) {
-        setScaffoldUI(data.active);
-      }
-    }
-  } catch (e) {}
-}
-
-async function switchCodeScaffold(scaffold) {
-  setScaffoldUI(scaffold);
-  try {
-    const r = await fetch("api/code/scaffold", {
-      method: "POST",
-      headers: headers(true),
-      body: JSON.stringify({ scaffold })
-    });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data = await r.json();
-    setScaffoldUI(data.active || scaffold);
-  } catch (e) {
-    toast("error", "Switch failed", e.message);
-  }
-}
-
-for (const b of document.querySelectorAll(".code-scaffold-btn")) {
-  b.onclick = () => switchCodeScaffold(b.dataset.scaffold);
+  setScaffoldUI();
 }
 
 if ($("code-restart-btn")) {
   $("code-restart-btn").onclick = async () => {
-    const name = SCAFFOLD_NAMES[currentScaffold]?.title || "CLI";
-    if (!confirm(`Restart ${name} terminal session?`)) return;
+    if (!confirm("Restart CLI terminal session?")) return;
     try {
       const r = await fetch("api/code/restart", {
         method: "POST",
         headers: headers(true),
-        body: JSON.stringify({ scaffold: currentScaffold })
+        body: JSON.stringify({ scaffold: "dl-ai-code" })
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      toast("info", "Session restarted", `${name} session reset.`);
+      toast("info", "Session restarted", "CLI session reset.");
       const frame = $("code-terminal-frame");
       if (frame && (!frame.src || frame.src === "about:blank")) {
         const key = store.get("apikey", DEFAULT_KEY);
@@ -191,7 +157,10 @@ if ($("code-export-btn")) {
         toast("info", "Nothing to save yet", "No session activity recorded.");
         return;
       }
-      const filename = data.filename || `strata-${scaffold}-chat-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.md`;
+      const d = new Date();
+      const pad = (n) => String(n).padStart(2, "0");
+      const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}-${pad(d.getMinutes())}`;
+      const filename = data.filename || `dl-ai-code-chat-${dateStr}.md`;
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([md], {type: "text/markdown"}));
       a.download = filename;

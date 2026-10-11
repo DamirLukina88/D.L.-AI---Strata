@@ -4878,20 +4878,10 @@ def make_handler(svc: Service):
             if path == "/api/code/scaffold":
                 if not self._authorized():
                     return
-                active = "claude"
-                try:
-                    res = subprocess.run(["tmux", "display-message", "-t", "dl-ai-code", "-p", "#{window_name}"],
-                                         capture_output=True, text=True, check=False)
-                    if res.returncode == 0 and res.stdout.strip():
-                        active = res.stdout.strip()
-                except Exception:
-                    pass
                 self._json(200, {
-                    "active": active,
+                    "active": "dl-ai-code",
                     "scaffolds": [
-                        {"id": "agy", "name": "D.L. CLI", "desc": "Autonomous Engineering Agent", "model": "Qwen3.8 Coder"},
-                        {"id": "claude", "name": "Claude Code", "desc": "Official CLI on local Strata Engine", "model": "Haiku 5.5"},
-                        {"id": "deepseek", "name": "DeepSeek CLI", "desc": "DeepSeek V4 Coding Engine", "model": "V4 Flash / Pro"}
+                        {"id": "dl-ai-code", "name": "CLI", "desc": "Autonomous Engineering Agent", "model": "Qwen3.8 Coder"}
                     ]
                 })
                 return
@@ -4912,25 +4902,14 @@ def make_handler(svc: Service):
                 if not self._authorized():
                     return
                 qs = parse_qs(urlsplit(self.path).query)
-                scaffold = qs.get("scaffold", [""])[0]
-                if not scaffold:
-                    try:
-                        res = subprocess.run(["tmux", "display-message", "-t", "dl-ai-code", "-p", "#{window_name}"],
-                                             capture_output=True, text=True, check=False)
-                        if res.returncode == 0 and res.stdout.strip():
-                            scaffold = res.stdout.strip()
-                    except Exception:
-                        scaffold = "agy"
-                if scaffold not in ("claude", "agy", "deepseek"):
-                    scaffold = "agy"
-
+                scaffold = qs.get("scaffold", [""])[0] or "dl-ai-code"
                 now = datetime.datetime.now()
                 now_str = now.strftime("%Y-%m-%d-%H-%M")
-                filename = f"strata-{scaffold}-chat-{now_str}.md"
+                filename = f"dl-ai-code-chat-{now_str}.md"
                 md_text = ""
 
-                # 1. If agy scaffold and structured chat state file exists
-                if scaffold == "agy" and os.path.exists("/tmp/dl-cli-current-chat.json"):
+                # 1. If structured chat state file exists
+                if os.path.exists("/tmp/dl-cli-current-chat.json"):
                     try:
                         with open("/tmp/dl-cli-current-chat.json", "r", encoding="utf-8") as f:
                             chat_data = json.load(f)
@@ -5313,17 +5292,12 @@ def make_handler(svc: Service):
                     return
                 try:
                     req = json.loads(self._body() or b"{}") if self.headers.get("Content-Length") else {}
-                    target = req.get("scaffold") if isinstance(req, dict) else None
-                    if not target or target not in ("claude", "agy", "deepseek"):
-                        res = subprocess.run(["tmux", "display-message", "-t", "dl-ai-code", "-p", "#{window_name}"],
-                                             capture_output=True, text=True, check=False)
-                        target = res.stdout.strip() if res.returncode == 0 and res.stdout.strip() else "claude"
-                    res = subprocess.run(["tmux", "respawn-pane", "-k", "-t", f"dl-ai-code:{target}.0"],
+                    res = subprocess.run(["tmux", "respawn-pane", "-k", "-t", "dl-ai-code:0"],
                                          capture_output=True, text=True, check=False)
                     if res.returncode != 0:
                         subprocess.run(["tmux", "kill-session", "-t", "dl-ai-code"], check=False)
                         subprocess.run(["systemctl", "--user", "restart", "claude-terminal"], check=False)
-                    self._json(200, {"status": "ok", "message": f"{target} session restarted", "active": target})
+                    self._json(200, {"status": "ok", "message": "CLI session restarted", "active": "dl-ai-code"})
                 except Exception as e:
                     self._json(500, {"error": {"message": f"failed to restart session: {e}"}})
                 return
@@ -5336,13 +5310,9 @@ def make_handler(svc: Service):
                     if not text:
                         self._json(400, {"error": {"message": "text required"}})
                         return
-                    # Determine active window
-                    res = subprocess.run(["tmux", "display-message", "-t", "dl-ai-code", "-p", "#{window_name}"],
-                                         capture_output=True, text=True, check=False)
-                    target = res.stdout.strip() if res.returncode == 0 and res.stdout.strip() else "agy"
-                    # Send input and Enter to tmux window
-                    subprocess.run(["tmux", "send-keys", "-t", f"dl-ai-code:{target}", text, "Enter"], check=False)
-                    self._json(200, {"status": "ok", "sent": text, "target": target})
+                    # Send input and Enter to dl-ai-code session window
+                    subprocess.run(["tmux", "send-keys", "-t", "dl-ai-code:0", text, "Enter"], check=False)
+                    self._json(200, {"status": "ok", "sent": text, "target": "dl-ai-code"})
                 except Exception as e:
                     self._json(500, {"error": {"message": f"failed to send keys: {e}"}})
                 return
