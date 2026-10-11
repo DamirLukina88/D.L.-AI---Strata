@@ -109,8 +109,7 @@ let currentScaffold = "agy";
 const SCAFFOLD_NAMES = {
   agy: { title: "D.L. CLI", meta: "Session: dl-ai-code:agy" },
   claude: { title: "Claude Code CLI", meta: "Session: dl-ai-code:claude" },
-  deepseek: { title: "DeepSeek CLI", meta: "Session: dl-ai-code:deepseek" },
-  codex: { title: "Codex CLI", meta: "Session: dl-ai-code:codex" }
+  deepseek: { title: "DeepSeek CLI", meta: "Session: dl-ai-code:deepseek" }
 };
 
 function setScaffoldUI(scaffold) {

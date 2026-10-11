@@ -4891,8 +4891,7 @@ def make_handler(svc: Service):
                     "scaffolds": [
                         {"id": "agy", "name": "D.L. CLI", "desc": "Autonomous Engineering Agent", "model": "Qwen3.8 Coder"},
                         {"id": "claude", "name": "Claude Code", "desc": "Official CLI on local Strata Engine", "model": "Haiku 5.5"},
-                        {"id": "deepseek", "name": "DeepSeek CLI", "desc": "DeepSeek V4 Coding Engine", "model": "V4 Flash / Pro"},
-                        {"id": "codex", "name": "Codex CLI", "desc": "OpenAI Codex CLI on Strata Responses API", "model": "Codex / Responses"}
+                        {"id": "deepseek", "name": "DeepSeek CLI", "desc": "DeepSeek V4 Coding Engine", "model": "V4 Flash / Pro"}
                     ]
                 })
                 return
@@ -4909,7 +4908,7 @@ def make_handler(svc: Service):
                             scaffold = res.stdout.strip()
                     except Exception:
                         scaffold = "agy"
-                if scaffold not in ("claude", "agy", "deepseek", "codex"):
+                if scaffold not in ("claude", "agy", "deepseek"):
                     scaffold = "agy"
 
                 now = datetime.datetime.now()
@@ -5282,8 +5281,8 @@ def make_handler(svc: Service):
                 try:
                     req = json.loads(self._body() or b"{}")
                     scaffold = req.get("scaffold", "claude")
-                    if scaffold not in ("claude", "agy", "deepseek", "codex"):
-                        self._json(400, {"error": {"message": "unknown scaffold: use claude, agy, deepseek, or codex"}})
+                    if scaffold not in ("claude", "agy", "deepseek"):
+                        self._json(400, {"error": {"message": "unknown scaffold: use claude, agy, or deepseek"}})
                         return
                     res = subprocess.run(["tmux", "select-window", "-t", f"dl-ai-code:{scaffold}"],
                                          capture_output=True, text=True, check=False)
@@ -5302,7 +5301,7 @@ def make_handler(svc: Service):
                 try:
                     req = json.loads(self._body() or b"{}") if self.headers.get("Content-Length") else {}
                     target = req.get("scaffold") if isinstance(req, dict) else None
-                    if not target or target not in ("claude", "agy", "deepseek", "codex"):
+                    if not target or target not in ("claude", "agy", "deepseek"):
                         res = subprocess.run(["tmux", "display-message", "-t", "dl-ai-code", "-p", "#{window_name}"],
                                              capture_output=True, text=True, check=False)
                         target = res.stdout.strip() if res.returncode == 0 and res.stdout.strip() else "claude"

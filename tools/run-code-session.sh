@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # run-code-session.sh - Persistent Multi-Scaffold CLI session for D.L. AI Web Terminal
-# Supports Claude Code CLI, Antigravity (AGY) Autonomous CLI, DeepSeek CLI, and OpenAI Codex CLI
+# Supports Claude Code CLI, Antigravity (AGY) Autonomous CLI, and DeepSeek CLI
 set -e
 
 WORKSPACE_DIR="${STRATA_WORKSPACE_DIR:-$(pwd)}"
@@ -8,7 +8,6 @@ SESSION_NAME="${STRATA_SESSION_NAME:-dl-ai-code}"
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude 2>/dev/null || echo "$HOME/.local/bin/claude")}"
 AGY_BIN="${AGY_BIN:-$(command -v agy 2>/dev/null || echo "$HOME/.local/bin/agy")}"
 DEEPSEEK_BIN="${DEEPSEEK_BIN:-$(command -v deepseek 2>/dev/null || echo "$HOME/.local/bin/deepseek")}"
-CODEX_BIN="${CODEX_BIN:-$(command -v codex 2>/dev/null || echo "$HOME/.local/bin/codex")}"
 STRATA_API_KEY="${STRATA_API_KEY:-REDACTED}"
 STRATA_MODEL="${STRATA_MODEL:-haiku}"
 
@@ -133,65 +132,21 @@ done
 EOF
 chmod +x "$DEEPSEEK_RUNNER"
 
-# 4. OpenAI Codex CLI runner
-CODEX_RUNNER="/tmp/dl-ai-codex-runner.sh"
-cat << EOF > "$CODEX_RUNNER"
-#!/usr/bin/env bash
-export TERM="xterm-256color"
-export LANG="en_US.UTF-8"
-export LC_ALL="en_US.UTF-8"
-export OPENAI_BASE_URL="http://127.0.0.1:8080/v1"
-export OPENAI_API_KEY="$STRATA_API_KEY"
-export STRATA_API_KEY="$STRATA_API_KEY"
-cd "$WORKSPACE_DIR"
-
-while true; do
-    echo -e "\033[38;5;238m╭─────────────────────────────────────────────────────────────────────────────╮\033[0m"
-    echo -e "\033[38;5;238m│\033[0m  \033[1;38;5;208m✦ D.L. AI\033[0m  \033[38;5;244m·\033[0m  \033[38;5;250mOpenAI Codex CLI on Local Strata Engine\033[0m                   \033[38;5;238m│\033[0m"
-    echo -e "\033[38;5;238m├─────────────────────────────────────────────────────────────────────────────┤\033[0m"
-    echo -e "\033[38;5;238m│\033[0m  \033[38;5;244mEngine\033[0m    : \033[38;5;255mStrata Responses API (/v1/responses)\033[0m                        \033[38;5;238m│\033[0m"
-    echo -e "\033[38;5;238m│\033[0m  \033[38;5;244mEndpoint\033[0m  : \033[38;5;250mhttp://127.0.0.1:8080/v1\033[0m  \033[38;5;78m[ROCm GPU Active]\033[0m                  \033[38;5;238m│\033[0m"
-    echo -e "\033[38;5;238m│\033[0m  \033[38;5;244mWorkspace\033[0m : \033[38;5;250m$WORKSPACE_DIR\033[0m"
-    echo -e "\033[38;5;238m│\033[0m  \033[38;5;244mStatus\033[0m    : \033[38;5;78m[Connected]\033[0m  \033[38;5;215m[Responses Mode]\033[0m                                  \033[38;5;238m│\033[0m"
-    echo -e "\033[38;5;238m╰─────────────────────────────────────────────────────────────────────────────╯\033[0m\n"
-
-    if [ -x "$CODEX_BIN" ]; then
-        "$CODEX_BIN" --model gpt-5.5 || true
-    elif command -v codex >/dev/null 2>&1; then
-        codex --model gpt-5.5 || true
-    else
-        echo -e "\033[1;31mError: codex binary not found ($CODEX_BIN)\033[0m"
-    fi
-
-    echo -e "\n\033[38;5;244m✦ Session ended.\033[0m Press \033[1;38;5;255m[Enter]\033[0m to restart, or type \033[38;5;208mbash\033[0m for terminal shell:"
-    read -r user_choice
-    if [ "\$user_choice" = "bash" ] || [ "\$user_choice" = "sh" ]; then
-        echo -e "\033[38;5;111mStarting interactive workspace shell (type 'exit' to return)...\033[0m"
-        bash -i || true
-    fi
-    clear
-done
-EOF
-chmod +x "$CODEX_RUNNER"
-
 # Check if tmux session already exists
 if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
     tmux new-session -d -s "$SESSION_NAME" -n "claude" -c "$WORKSPACE_DIR" "$CLAUDE_RUNNER"
     tmux new-window -d -t "$SESSION_NAME" -n "agy" -c "$WORKSPACE_DIR" "$AGY_RUNNER"
     tmux new-window -d -t "$SESSION_NAME" -n "deepseek" -c "$WORKSPACE_DIR" "$DEEPSEEK_RUNNER"
-    tmux new-window -d -t "$SESSION_NAME" -n "codex" -c "$WORKSPACE_DIR" "$CODEX_RUNNER"
     tmux set-option -t "$SESSION_NAME" mouse on 2>/dev/null || true
     tmux set-option -t "$SESSION_NAME" status off 2>/dev/null || true
 else
-    # Ensure all 4 windows exist
+    # Ensure all 3 windows exist
     tmux list-windows -t "$SESSION_NAME" -F '#{window_name}' | grep -q "^claude$" || \
         tmux new-window -d -t "$SESSION_NAME" -n "claude" -c "$WORKSPACE_DIR" "$CLAUDE_RUNNER"
     tmux list-windows -t "$SESSION_NAME" -F '#{window_name}' | grep -q "^agy$" || \
         tmux new-window -d -t "$SESSION_NAME" -n "agy" -c "$WORKSPACE_DIR" "$AGY_RUNNER"
     tmux list-windows -t "$SESSION_NAME" -F '#{window_name}' | grep -q "^deepseek$" || \
         tmux new-window -d -t "$SESSION_NAME" -n "deepseek" -c "$WORKSPACE_DIR" "$DEEPSEEK_RUNNER"
-    tmux list-windows -t "$SESSION_NAME" -F '#{window_name}' | grep -q "^codex$" || \
-        tmux new-window -d -t "$SESSION_NAME" -n "codex" -c "$WORKSPACE_DIR" "$CODEX_RUNNER"
 fi
 
 # Attach client to tmux session
