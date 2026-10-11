@@ -211,8 +211,45 @@ DL_TOOLS = [
     }
 ]
 
+# Tool definitions by mode
+DL_ACT_TOOLS = DL_TOOLS
 
-def print_banner(workspace: Path, think_level: str):
+# Read-only exploration and architecture toolset for Plan Mode (strictly excludes write_to_file and replace_file_content)
+DL_PLAN_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "run_command",
+            "description": "PROPOSE and execute an inspection or read-only bash command (e.g. ls, git status, git diff, find, grep). File writes or destructive changes are prohibited in Plan Mode. Operating System: linux.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "CommandLine": {
+                        "type": "string",
+                        "description": "The exact shell command line string to execute."
+                    },
+                    "Cwd": {
+                        "type": "string",
+                        "description": "Working directory for the command (defaults to workspace)."
+                    },
+                    "toolSummary": {
+                        "type": "string",
+                        "description": "Brief 2-5 word noun phrase describing the specific task."
+                    }
+                },
+                "required": ["CommandLine"]
+            }
+        }
+    },
+    next(t for t in DL_TOOLS if t["function"]["name"] == "view_file"),
+    next(t for t in DL_TOOLS if t["function"]["name"] == "exa_web_search"),
+    next(t for t in DL_TOOLS if t["function"]["name"] == "resolve_library_id"),
+    next(t for t in DL_TOOLS if t["function"]["name"] == "get_library_docs"),
+]
+
+
+def print_banner(workspace: Path, think_level: str, mode: str = "act"):
+    mode_badge = f"{C_YELLOW}[PLAN MODE - Research & Design]{C_RESET}" if mode == "plan" else f"{C_GREEN}[ACT MODE - Full Execution]{C_RESET}"
     banner = f"""
 {C_BLUE}  ____    _       ____ _     ___ {C_RESET}
 {C_BLUE} |  _ \\  | |     / ___| |   |_ _|{C_RESET}   {C_BOLD}D.L. CLI{C_RESET} {C_GRAY}(Local Edition v2.0){C_RESET}
@@ -220,15 +257,46 @@ def print_banner(workspace: Path, think_level: str):
 {C_BLUE} | |_| | | |___ | |___| |___ | | {C_RESET}   {C_DIM}Engine:{C_RESET} {DEFAULT_URL} {C_GREEN}[ROCm GPU Active]{C_RESET}
 {C_BLUE} |____/  |_____(_)____|_____|___|{C_RESET}   {C_DIM}Workspace:{C_RESET} {workspace}
 {C_GRAY}─────────────────────────────────────────────────────────────────────────────{C_RESET}
-{C_DIM}Effort:{C_RESET} {C_YELLOW}{think_level}{C_RESET} {C_DIM}· Tools: bash, files, exa_search, context7_docs{C_RESET}
-{C_DIM}Commands: /clear, /think <level>, /search <q>, /docs <lib>, /status, !<cmd>, @file{C_RESET}
+{C_DIM}Status:{C_RESET} {mode_badge} {C_DIM}· Effort:{C_RESET} {C_YELLOW}{think_level}{C_RESET}
+{C_DIM}Commands: /plan, /act, /clear, /think <level>, /search <q>, /docs <lib>, !<cmd>{C_RESET}
 {C_GRAY}─────────────────────────────────────────────────────────────────────────────{C_RESET}
 """
     sys.stdout.write(banner)
     sys.stdout.flush()
 
 
-def build_dl_system_prompt(workspace: Path) -> str:
+def build_dl_system_prompt(workspace: Path, mode: str = "act") -> str:
+    if mode == "plan":
+        return f"""<identity>
+You are D.L. AI in PLAN MODE, an autonomous software engineering architect pair programming with the developer on this workstation.
+In PLAN MODE, your sole responsibility is exploration, code analysis, documentation/web research, and designing a comprehensive implementation plan.
+You do NOT write or modify code or files while in Plan Mode.
+You run 100% locally on this workstation powered by Strata's Qwen3.8-Flash-Next Coder engine with ROCm GPU acceleration.
+</identity>
+
+<user_information>
+The USER's OS version is linux.
+Command Working Directory: {workspace}
+Active Workspaces:
+- {workspace}
+</user_information>
+
+<plan_mode_guidelines>
+- YOU ARE IN PLAN MODE: All destructive file modifications (`write_to_file`, `replace_file_content`) are disabled.
+- Use read-only inspection tools to thoroughly explore and investigate:
+  * File Inspection: `view_file`
+  * Terminal Inspection: `run_command` (only non-destructive queries like `git status`, `git diff`, `find`, `grep`)
+  * Web Search & News: `exa_web_search`
+  * Library & Framework Docs: `resolve_library_id` and `get_library_docs`
+- Formulate a clear, actionable implementation plan structured as:
+  1. Context & Architecture (what exists today, affected components)
+  2. Proposed Changes & Technical Decisions
+  3. Step-by-Step Implementation Phases (ordered chronological tasks)
+  4. Verification & Testing Strategy (how to validate correctness)
+- Keep responses focused, structured, and pragmatic.
+- Conclude by asking the user for feedback or approval, noting that they can run `/act` or `/execute` to switch to Act Mode and apply the plan.
+</plan_mode_guidelines>"""
+
     return f"""<identity>
 You are D.L. AI, a powerful autonomous software engineering agent pair programming with the developer on this workstation.
 You assist the developer with software engineering, code generation, refactoring, architectural design, debugging, and terminal execution.
@@ -483,7 +551,9 @@ def tool_context7_docs(args: dict) -> str:
     return call_context7_mcp_raw("get-library-docs", payload)
 
 
-def dispatch_dl_tool(name: str, args: dict, workspace: Path) -> str:
+def dispatch_dl_tool(name: str, args: dict, workspace: Path, mode: str = "act") -> str:
+    if mode == "plan" and name in ("write_to_file", "replace_file_content"):
+        return "Error: [PLAN MODE] File modifications are disabled. Research the codebase and present your implementation plan for approval before executing."
     if name == "view_file":
         return tool_view_file(args, workspace)
     elif name == "write_to_file":
@@ -504,12 +574,13 @@ def dispatch_dl_tool(name: str, args: dict, workspace: Path) -> str:
 
 def stream_chat_turn(messages: list[dict], url: str, api_key: str,
                      think_level: str = "low", max_tokens: int = 4096,
-                     temperature: float = 0.2):
+                     temperature: float = 0.2, tools: list[dict] | None = None):
     endpoint = f"{url.rstrip('/')}/v1/chat/completions"
+    active_tools = DL_TOOLS if tools is None else tools
     payload = {
         "model": "strata",
         "messages": messages,
-        "tools": DL_TOOLS,
+        "tools": active_tools,
         "max_tokens": max_tokens,
         "reasoning_effort": think_level,
         "temperature": temperature,
@@ -636,10 +707,12 @@ def format_args_preview(args: dict) -> str:
 
 
 def execute_agent_loop(messages: list[dict], url: str, api_key: str,
-                       workspace: Path, think_level: str = "low", max_turns: int = 10):
+                       workspace: Path, think_level: str = "low", max_turns: int = 10,
+                       mode: str = "act"):
     turn = 0
     total_tokens = 0
     t_start = time.time()
+    active_tools = DL_PLAN_TOOLS if mode == "plan" else DL_ACT_TOOLS
 
     while turn < max_turns:
         turn += 1
@@ -648,6 +721,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             url=url,
             api_key=api_key,
             think_level=think_level,
+            tools=active_tools,
         )
         total_tokens += res["tokens"]
 
@@ -665,7 +739,11 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
         if not res["tool_calls"]:
             wall = time.time() - t_start
             rate = total_tokens / wall if wall > 0 else 0
-            print(f"{C_GRAY}[{total_tokens} tokens in {wall:.1f}s · {rate:.1f} t/s]{C_RESET}\n")
+            print(f"{C_GRAY}[{total_tokens} tokens in {wall:.1f}s · {rate:.1f} t/s]{C_RESET}")
+            if mode == "plan":
+                print(f"{C_DIM}💡 Plan ready. Type {C_BOLD}/act{C_RESET}{C_DIM} or {C_BOLD}/execute{C_RESET}{C_DIM} to apply changes, or ask adjustments.{C_RESET}\n")
+            else:
+                print()
             break
 
         # Process and execute each tool call
@@ -680,7 +758,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
 
             print(f"{C_BLUE}⚙ [D.L. Tool]{C_RESET} {C_BOLD}{fn_name}{C_RESET}({format_args_preview(args)})")
 
-            result_str = dispatch_dl_tool(fn_name, args, workspace)
+            result_str = dispatch_dl_tool(fn_name, args, workspace, mode=mode)
 
             res_preview = result_str.strip()
             if len(res_preview) > 160:
@@ -710,7 +788,7 @@ def check_status(url: str, api_key: str):
         print(f"{C_RED}Failed to reach Strata at {url}: {e}{C_RESET}\n")
 
 
-def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str = "low"):
+def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str = "low", initial_mode: str = "act"):
     history_file = Path.home() / ".config" / "dl" / "cli_history"
     history_file.parent.mkdir(parents=True, exist_ok=True)
     if history_file.is_file():
@@ -719,15 +797,17 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
         except Exception:
             pass
 
-    system_prompt = build_dl_system_prompt(workspace)
+    current_mode = initial_mode
+    system_prompt = build_dl_system_prompt(workspace, mode=current_mode)
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
-    print_banner(workspace, think_level)
+    print_banner(workspace, think_level, mode=current_mode)
 
     try:
         while True:
+            prompt_prefix = f"{C_BLUE}dl{C_RESET} {C_YELLOW}(plan){C_RESET} > " if current_mode == "plan" else f"{C_BLUE}dl{C_RESET} > "
             try:
-                raw_input = input(f"{C_BLUE}dl{C_RESET} > ")
+                raw_input = input(prompt_prefix)
             except EOFError:
                 print("\nExiting D.L. CLI.")
                 break
@@ -744,11 +824,13 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 print("Exiting D.L. CLI.")
                 break
             elif prompt in ("/clear", "/reset"):
-                messages = [{"role": "system", "content": system_prompt}]
-                print(f"{C_GREEN}✓ D.L. memory reset.{C_RESET}\n")
+                messages = [{"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}]
+                print(f"{C_GREEN}✓ D.L. memory reset ({current_mode.upper()} mode).{C_RESET}\n")
                 continue
             elif prompt == "/help":
                 print(f"\n{C_BOLD}D.L. CLI Commands:{C_RESET}")
+                print(f"  /plan [query]         Toggle or enter Plan Mode (read-only research & design)")
+                print(f"  /act, /execute [query] Switch to Act Mode (full execution & code edits)")
                 print(f"  /clear, /reset        Reset conversation memory")
                 print(f"  /think <none|low|med|high> Set reasoning effort level")
                 print(f"  /search <query>       Direct Exa AI live web search")
@@ -757,6 +839,46 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 print(f"  !<shell command>      Execute bash command directly in workspace")
                 print(f"  @filename             Inject file content into your prompt\n")
                 continue
+            elif prompt.startswith("/plan"):
+                sub = prompt[5:].strip()
+                if not sub or sub.lower() in ("toggle", "switch"):
+                    if current_mode == "plan":
+                        current_mode = "act"
+                        messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
+                        print(f"{C_GREEN}⚡ Switched to ACT MODE. Full execution & file edits enabled.{C_RESET}\n")
+                    else:
+                        current_mode = "plan"
+                        messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
+                        print(f"{C_YELLOW}📋 Switched to PLAN MODE. File modifications disabled. Exploration & architecture enabled.{C_RESET}\n")
+                    continue
+                elif sub.lower() in ("on", "start", "enable"):
+                    current_mode = "plan"
+                    messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
+                    print(f"{C_YELLOW}📋 Plan Mode enabled.{C_RESET}\n")
+                    continue
+                elif sub.lower() in ("off", "stop", "disable"):
+                    current_mode = "act"
+                    messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
+                    print(f"{C_GREEN}⚡ Plan Mode disabled. Switched to ACT MODE.{C_RESET}\n")
+                    continue
+                else:
+                    current_mode = "plan"
+                    messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
+                    print(f"{C_YELLOW}📋 Entering PLAN MODE for: {sub}{C_RESET}\n")
+                    prompt = sub
+            elif prompt.startswith("/act") or prompt.startswith("/execute"):
+                if prompt.startswith("/act"):
+                    sub = prompt[4:].strip()
+                else:
+                    sub = prompt[8:].strip()
+                current_mode = "act"
+                messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
+                if not sub:
+                    print(f"{C_GREEN}⚡ Switched to ACT MODE. Ready to execute.{C_RESET}\n")
+                    continue
+                else:
+                    print(f"{C_GREEN}⚡ Executing in ACT MODE: {sub}{C_RESET}\n")
+                    prompt = sub
             elif prompt.startswith("/think"):
                 parts = prompt.split()
                 if len(parts) > 1 and parts[1].lower() in ("none", "low", "medium", "med", "high"):
@@ -807,6 +929,7 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                     api_key=api_key,
                     workspace=workspace,
                     think_level=think_level,
+                    mode=current_mode,
                 )
             except Exception as e:
                 print(f"{C_RED}Error during agent turn: {e}{C_RESET}\n")
@@ -826,25 +949,27 @@ def main():
     parser.add_argument("--url", default=DEFAULT_URL, help="Strata URL")
     parser.add_argument("--api-key", default=DEFAULT_API_KEY, help="Strata API Key")
     parser.add_argument("--think", default="low", choices=["none", "low", "medium", "high"], help="Reasoning effort")
+    parser.add_argument("--plan", action="store_true", help="Start directly in Plan Mode")
     parser.add_argument("-p", "--prompt", help="Run single prompt non-interactively and exit")
 
     args = parser.parse_args()
     ws = Path(args.workspace).resolve()
+    mode = "plan" if args.plan else "act"
 
     if args.prompt:
         resolved = resolve_file_references(args.prompt, ws)
         messages = [
-            {"role": "system", "content": build_dl_system_prompt(ws)},
+            {"role": "system", "content": build_dl_system_prompt(ws, mode=mode)},
             {"role": "user", "content": resolved}
         ]
         try:
-            execute_agent_loop(messages, args.url, args.api_key, ws, think_level=args.think)
+            execute_agent_loop(messages, args.url, args.api_key, ws, think_level=args.think, mode=mode)
             sys.exit(0)
         except Exception as e:
             sys.stderr.write(f"Error: {e}\n")
             sys.exit(1)
 
-    interactive_loop(ws, args.url, args.api_key, think_level=args.think)
+    interactive_loop(ws, args.url, args.api_key, think_level=args.think, initial_mode=mode)
 
 
 if __name__ == "__main__":
