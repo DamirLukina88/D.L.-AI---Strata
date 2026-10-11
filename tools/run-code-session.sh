@@ -33,11 +33,14 @@ export CLAUDE_CODE_AUTO_MODE_SERVER="0"
 cd "$WORKSPACE_DIR"
 
 while true; do
-    echo -e "\033[1;36m=====================================================\033[0m"
-    echo -e "\033[1;32m  D.L. AI — Claude Code CLI on Local Strata Engine  \033[0m"
-    echo -e "\033[0;37m  Workspace: $WORKSPACE_DIR\033[0m"
-    echo -e "\033[0;37m  Model:     $STRATA_MODEL (Local)\033[0m"
-    echo -e "\033[1;36m=====================================================\033[0m\n"
+    echo -e "\033[38;5;238m╭─────────────────────────────────────────────────────────────────────────────╮\033[0m"
+    echo -e "\033[38;5;238m│\033[0m  \033[1;38;5;208m✦ D.L. AI\033[0m  \033[38;5;244m·\033[0m  \033[38;5;250mClaude Code CLI on Local Strata Engine\033[0m                    \033[38;5;238m│\033[0m"
+    echo -e "\033[38;5;238m├─────────────────────────────────────────────────────────────────────────────┤\033[0m"
+    echo -e "\033[38;5;238m│\033[0m  \033[38;5;244mModel\033[0m     : \033[38;5;255m$STRATA_MODEL\033[0m \033[38;5;244m(Local Qwen3.8-Flash-Next Coder)\033[0m                 \033[38;5;238m│\033[0m"
+    echo -e "\033[38;5;238m│\033[0m  \033[38;5;244mEngine\033[0m    : \033[38;5;250mhttp://127.0.0.1:8080\033[0m  \033[38;5;78m[ROCm GPU Active]\033[0m                     \033[38;5;238m│\033[0m"
+    echo -e "\033[38;5;238m│\033[0m  \033[38;5;244mWorkspace\033[0m : \033[38;5;250m$WORKSPACE_DIR\033[0m"
+    echo -e "\033[38;5;238m│\033[0m  \033[38;5;244mStatus\033[0m    : \033[38;5;78m[Connected]\033[0m  \033[38;5;215m[Fit Max Tokens Active]\033[0m                           \033[38;5;238m│\033[0m"
+    echo -e "\033[38;5;238m╰─────────────────────────────────────────────────────────────────────────────╯\033[0m\n"
 
     if [ -x "$CLAUDE_BIN" ]; then
         "$CLAUDE_BIN" --model "$STRATA_MODEL" || true
@@ -47,11 +50,10 @@ while true; do
         echo -e "\033[1;31mError: claude binary not found ($CLAUDE_BIN)\033[0m"
     fi
 
-    echo -e "\n\033[1;33mClaude Code session ended.\033[0m"
-    echo -e "Press \033[1m[Enter]\033[0m to restart, or type \033[1mbash\033[0m for terminal:"
+    echo -e "\n\033[38;5;244m✦ Session ended.\033[0m Press \033[1;38;5;255m[Enter]\033[0m to restart, or type \033[38;5;208mbash\033[0m for terminal shell:"
     read -r user_choice
     if [ "\$user_choice" = "bash" ] || [ "\$user_choice" = "sh" ]; then
-        echo -e "\033[1;34mStarting interactive workspace shell (type 'exit' to return)...\033[0m"
+        echo -e "\033[38;5;111mStarting interactive workspace shell (type 'exit' to return)...\033[0m"
         bash -i || true
     fi
     clear
@@ -80,11 +82,10 @@ while true; do
         echo -e "\033[1;31mError: D.L. CLI binary not found ($DL_CLI_BIN)\033[0m"
     fi
 
-    echo -e "\n\033[1;33mD.L. CLI session ended.\033[0m"
-    echo -e "Press \033[1m[Enter]\033[0m to restart, or type \033[1mbash\033[0m for terminal shell:"
+    echo -e "\n\033[38;5;244m✦ Session ended.\033[0m Press \033[1;38;5;255m[Enter]\033[0m to restart, or type \033[38;5;208mbash\033[0m for terminal shell:"
     read -r user_choice
     if [ "\$user_choice" = "bash" ] || [ "\$user_choice" = "sh" ]; then
-        echo -e "\033[1;34mStarting interactive workspace shell (type 'exit' to return)...\033[0m"
+        echo -e "\033[38;5;111mStarting interactive workspace shell (type 'exit' to return)...\033[0m"
         bash -i || true
     fi
     clear
@@ -104,11 +105,14 @@ export DEEPSEEK_API_KEY="$STRATA_API_KEY"
 cd "$WORKSPACE_DIR"
 
 while true; do
-    echo -e "\033[1;36m=====================================================\033[0m"
-    echo -e "\033[1;34m  D.L. AI — DeepSeek CLI on Local Strata Engine      \033[0m"
-    echo -e "\033[0;37m  Workspace: $WORKSPACE_DIR\033[0m"
-    echo -e "\033[0;37m  Engine:    Strata Qwen3.8 Coder via /v1/chat       \033[0m"
-    echo -e "\033[1;36m=====================================================\033[0m\n"
+    echo -e "\033[38;5;238m╭─────────────────────────────────────────────────────────────────────────────╮\033[0m"
+    echo -e "\033[38;5;238m│\033[0m  \033[1;38;5;208m✦ D.L. AI\033[0m  \033[38;5;244m·\033[0m  \033[38;5;250mDeepSeek CLI on Local Strata Engine\033[0m                       \033[38;5;238m│\033[0m"
+    echo -e "\033[38;5;238m├─────────────────────────────────────────────────────────────────────────────┤\033[0m"
+    echo -e "\033[38;5;238m│\033[0m  \033[38;5;244mEngine\033[0m    : \033[38;5;255mStrata Qwen3.8 Coder via /v1/chat\033[0m                           \033[38;5;238m│\033[0m"
+    echo -e "\033[38;5;238m│\033[0m  \033[38;5;244mEndpoint\033[0m  : \033[38;5;250mhttp://127.0.0.1:8080/v1\033[0m  \033[38;5;78m[ROCm GPU Active]\033[0m                  \033[38;5;238m│\033[0m"
+    echo -e "\033[38;5;238m│\033[0m  \033[38;5;244mWorkspace\033[0m : \033[38;5;250m$WORKSPACE_DIR\033[0m"
+    echo -e "\033[38;5;238m│\033[0m  \033[38;5;244mStatus\033[0m    : \033[38;5;78m[Connected]\033[0m  \033[38;5;215m[Native Chat Mode]\033[0m                                \033[38;5;238m│\033[0m"
+    echo -e "\033[38;5;238m╰─────────────────────────────────────────────────────────────────────────────╯\033[0m\n"
 
     if [ -x "$DEEPSEEK_BIN" ]; then
         "$DEEPSEEK_BIN" || true
@@ -118,11 +122,10 @@ while true; do
         echo -e "\033[1;31mError: deepseek binary not found ($DEEPSEEK_BIN)\033[0m"
     fi
 
-    echo -e "\n\033[1;33mDeepSeek CLI session ended.\033[0m"
-    echo -e "Press \033[1m[Enter]\033[0m to restart, or type \033[1mbash\033[0m for terminal:"
+    echo -e "\n\033[38;5;244m✦ Session ended.\033[0m Press \033[1;38;5;255m[Enter]\033[0m to restart, or type \033[38;5;208mbash\033[0m for terminal shell:"
     read -r user_choice
     if [ "\$user_choice" = "bash" ] || [ "\$user_choice" = "sh" ]; then
-        echo -e "\033[1;34mStarting interactive workspace shell (type 'exit' to return)...\033[0m"
+        echo -e "\033[38;5;111mStarting interactive workspace shell (type 'exit' to return)...\033[0m"
         bash -i || true
     fi
     clear
@@ -143,11 +146,14 @@ export STRATA_API_KEY="$STRATA_API_KEY"
 cd "$WORKSPACE_DIR"
 
 while true; do
-    echo -e "\033[1;36m=====================================================\033[0m"
-    echo -e "\033[1;33m  D.L. AI — OpenAI Codex CLI on Local Strata Engine  \033[0m"
-    echo -e "\033[0;37m  Workspace: $WORKSPACE_DIR\033[0m"
-    echo -e "\033[0;37m  Engine:    Strata Responses API (/v1/responses)    \033[0m"
-    echo -e "\033[1;36m=====================================================\033[0m\n"
+    echo -e "\033[38;5;238m╭─────────────────────────────────────────────────────────────────────────────╮\033[0m"
+    echo -e "\033[38;5;238m│\033[0m  \033[1;38;5;208m✦ D.L. AI\033[0m  \033[38;5;244m·\033[0m  \033[38;5;250mOpenAI Codex CLI on Local Strata Engine\033[0m                   \033[38;5;238m│\033[0m"
+    echo -e "\033[38;5;238m├─────────────────────────────────────────────────────────────────────────────┤\033[0m"
+    echo -e "\033[38;5;238m│\033[0m  \033[38;5;244mEngine\033[0m    : \033[38;5;255mStrata Responses API (/v1/responses)\033[0m                        \033[38;5;238m│\033[0m"
+    echo -e "\033[38;5;238m│\033[0m  \033[38;5;244mEndpoint\033[0m  : \033[38;5;250mhttp://127.0.0.1:8080/v1\033[0m  \033[38;5;78m[ROCm GPU Active]\033[0m                  \033[38;5;238m│\033[0m"
+    echo -e "\033[38;5;238m│\033[0m  \033[38;5;244mWorkspace\033[0m : \033[38;5;250m$WORKSPACE_DIR\033[0m"
+    echo -e "\033[38;5;238m│\033[0m  \033[38;5;244mStatus\033[0m    : \033[38;5;78m[Connected]\033[0m  \033[38;5;215m[Responses Mode]\033[0m                                  \033[38;5;238m│\033[0m"
+    echo -e "\033[38;5;238m╰─────────────────────────────────────────────────────────────────────────────╯\033[0m\n"
 
     if [ -x "$CODEX_BIN" ]; then
         "$CODEX_BIN" --model gpt-5.5 || true
@@ -157,11 +163,10 @@ while true; do
         echo -e "\033[1;31mError: codex binary not found ($CODEX_BIN)\033[0m"
     fi
 
-    echo -e "\n\033[1;33mCodex CLI session ended.\033[0m"
-    echo -e "Press \033[1m[Enter]\033[0m to restart, or type \033[1mbash\033[0m for terminal:"
+    echo -e "\n\033[38;5;244m✦ Session ended.\033[0m Press \033[1;38;5;255m[Enter]\033[0m to restart, or type \033[38;5;208mbash\033[0m for terminal shell:"
     read -r user_choice
     if [ "\$user_choice" = "bash" ] || [ "\$user_choice" = "sh" ]; then
-        echo -e "\033[1;34mStarting interactive workspace shell (type 'exit' to return)...\033[0m"
+        echo -e "\033[38;5;111mStarting interactive workspace shell (type 'exit' to return)...\033[0m"
         bash -i || true
     fi
     clear

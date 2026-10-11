@@ -26,16 +26,23 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-# ANSI colors & formatting
+# ANSI colors & formatting (Strata Dark & Orange Aesthetic)
 C_RESET = "\033[0m"
 C_BOLD = "\033[1m"
 C_DIM = "\033[2m"
-C_BLUE = "\033[38;5;39m"
-C_CYAN = "\033[36m"
-C_GREEN = "\033[32m"
-C_YELLOW = "\033[33m"
-C_RED = "\033[31m"
-C_GRAY = "\033[90m"
+C_ACCENT = "\033[38;5;208m"       # Strata Orange (#f97316)
+C_ACCENT_BOLD = "\033[1;38;5;208m"
+C_ACCENT_SOFT = "\033[38;5;215m"  # Warm peach (#fb923c)
+C_INK = "\033[38;5;255m"          # Crisp text (#f3f4f6)
+C_INK_SOFT = "\033[38;5;250m"     # Soft text (#cbd5e1)
+C_MUTED = "\033[38;5;244m"        # Slate muted (#94a3b8)
+C_LINE = "\033[38;5;238m"         # Border line (#222933)
+C_GREEN = "\033[38;5;78m"         # Success green
+C_YELLOW = "\033[38;5;221m"       # Amber
+C_RED = "\033[38;5;203m"          # Soft error red
+C_BLUE = "\033[38;5;111m"         # Info soft blue
+C_CYAN = "\033[38;5;80m"          # Cyan
+C_GRAY = C_MUTED
 
 DEFAULT_URL = os.environ.get("STRATA_URL", "http://127.0.0.1:8080").removesuffix("/v1")
 DEFAULT_API_KEY = os.environ.get("STRATA_API_KEY", "REDACTED")
@@ -331,22 +338,41 @@ DL_PLAN_TOOLS = [
 
 
 def print_banner(workspace: Path, think_level: str, mode: str = "act"):
-    mode_badge = f"{C_YELLOW}[PLAN MODE - Research & Design]{C_RESET}" if mode == "plan" else f"{C_GREEN}[ACT MODE - Full Execution]{C_RESET}"
+    mode_badge = f"{C_YELLOW}[PLAN MODE]{C_RESET}" if mode == "plan" else f"{C_GREEN}[ACT MODE]{C_RESET}"
     wroot = resolve_wiki_root(workspace)
-    wiki_badge = f"{C_GREEN}Active ({wroot.name}){C_RESET}" if wroot else f"{C_DIM}None{C_RESET}"
-    banner = f"""
-{C_BLUE}  ____    _       ____ _     ___ {C_RESET}
-{C_BLUE} |  _ \\  | |     / ___| |   |_ _|{C_RESET}   {C_BOLD}D.L. CLI{C_RESET} {C_GRAY}(Local Edition v2.0){C_RESET}
-{C_BLUE} | | | | | |    | |   | |    | | {C_RESET}   {C_CYAN}Qwen3.8-Flash-Next Coder (IQ1_M){C_RESET}
-{C_BLUE} | |_| | | |___ | |___| |___ | | {C_RESET}   {C_DIM}Engine:{C_RESET} {DEFAULT_URL} {C_GREEN}[ROCm GPU Active]{C_RESET}
-{C_BLUE} |____/  |_____(_)____|_____|___|{C_RESET}   {C_DIM}Workspace:{C_RESET} {workspace}
-{C_GRAY}─────────────────────────────────────────────────────────────────────────────{C_RESET}
-{C_DIM}Status:{C_RESET} {mode_badge} {C_DIM}· Effort:{C_RESET} {C_YELLOW}{think_level}{C_RESET} {C_DIM}· Wiki:{C_RESET} {wiki_badge}
-{C_DIM}Tools: bash, files, local_wiki, exa_search, context7_docs{C_RESET}
-{C_DIM}Commands: /plan, /act, /wiki <cmd>, /clear, /think, /search <q>, /docs <lib>, !<cmd>{C_RESET}
-{C_GRAY}─────────────────────────────────────────────────────────────────────────────{C_RESET}
-"""
-    sys.stdout.write(banner)
+    wiki_badge = f"{C_GREEN}[Active: {wroot.name}]{C_RESET}" if wroot else f"{C_MUTED}[None]{C_RESET}"
+    rocm_badge = f"{C_GREEN}[ROCm GPU Active]{C_RESET}"
+
+    card_width = 79
+
+    def _row(text: str) -> str:
+        plain = re.sub(r'\033\[[0-9;]*m', '', text)
+        pad = max(0, card_width - 4 - len(plain))
+        return f"{C_LINE}│{C_RESET}  {text}{' ' * pad}{C_LINE}│{C_RESET}\n"
+
+    top_border = f"{C_LINE}╭{'─' * (card_width - 2)}╮{C_RESET}\n"
+    mid_border = f"{C_LINE}├{'─' * (card_width - 2)}┤{C_RESET}\n"
+    bot_border = f"{C_LINE}╰{'─' * (card_width - 2)}╯{C_RESET}\n"
+
+    ws_str = str(workspace)
+    if len(ws_str) > 52:
+        ws_str = "..." + ws_str[-49:]
+
+    out = [
+        "\n",
+        top_border,
+        _row(f"{C_ACCENT_BOLD}✦ D.L. CLI{C_RESET}  {C_MUTED}·{C_RESET}  {C_INK_SOFT}Autonomous Local Coding Agent{C_RESET} {C_MUTED}(v2.0){C_RESET}"),
+        mid_border,
+        _row(f"{C_MUTED}Model{C_RESET}     : {C_INK}Qwen3.8-Flash-Next Coder{C_RESET} {C_MUTED}(IQ1_M MOE · Local){C_RESET}"),
+        _row(f"{C_MUTED}Engine{C_RESET}    : {C_INK_SOFT}{DEFAULT_URL}{C_RESET}  {rocm_badge}"),
+        _row(f"{C_MUTED}Workspace{C_RESET} : {C_INK_SOFT}{ws_str}{C_RESET}"),
+        _row(f"{C_MUTED}Status{C_RESET}    : {mode_badge}  {C_MUTED}·{C_RESET}  Effort: {C_ACCENT_SOFT}{think_level}{C_RESET}  {C_MUTED}·{C_RESET}  Wiki: {wiki_badge}"),
+        _row(f"{C_MUTED}Tools{C_RESET}     : {C_INK_SOFT}bash, files, local_wiki, exa_search, context7_docs{C_RESET}"),
+        _row(f"{C_MUTED}Commands{C_RESET}  : {C_INK_SOFT}/plan, /act, /wiki <cmd>, /think <level>, /clear, !<bash>{C_RESET}"),
+        bot_border,
+        "\n"
+    ]
+    sys.stdout.write("".join(out))
     sys.stdout.flush()
 
 
@@ -777,7 +803,7 @@ def dispatch_dl_tool(name: str, args: dict, workspace: Path, mode: str = "act") 
 
 
 def stream_chat_turn(messages: list[dict], url: str, api_key: str,
-                     think_level: str = "low", max_tokens: int = 4096,
+                     think_level: str = "medium", max_tokens: int = 4096,
                      temperature: float = 0.2, tools: list[dict] | None = None):
     endpoint = f"{url.rstrip('/')}/v1/chat/completions"
     active_tools = DL_TOOLS if tools is None else tools
@@ -833,7 +859,7 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str,
                     if reasoning_chunk:
                         tok_count += 1
                         if not reasoning_started:
-                            sys.stdout.write(f"\n{C_GRAY}{C_DIM}🧠 Thinking:{C_RESET} {C_GRAY}{C_DIM}")
+                            sys.stdout.write(f"\n{C_ACCENT}🧠{C_RESET} {C_MUTED}Thinking:{C_RESET} {C_MUTED}")
                             reasoning_started = True
                         sys.stdout.write(reasoning_chunk)
                         sys.stdout.flush()
@@ -911,7 +937,7 @@ def format_args_preview(args: dict) -> str:
 
 
 def execute_agent_loop(messages: list[dict], url: str, api_key: str,
-                       workspace: Path, think_level: str = "low", max_turns: int = 10,
+                       workspace: Path, think_level: str = "medium", max_turns: int = 10,
                        mode: str = "act"):
     turn = 0
     total_tokens = 0
@@ -943,9 +969,9 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
         if not res["tool_calls"]:
             wall = time.time() - t_start
             rate = total_tokens / wall if wall > 0 else 0
-            print(f"{C_GRAY}[{total_tokens} tokens in {wall:.1f}s · {rate:.1f} t/s]{C_RESET}")
+            print(f"{C_MUTED}[{total_tokens} tokens in {wall:.1f}s · {rate:.1f} t/s]{C_RESET}")
             if mode == "plan":
-                print(f"{C_DIM}💡 Plan ready. Type {C_BOLD}/act{C_RESET}{C_DIM} or {C_BOLD}/execute{C_RESET}{C_DIM} to apply changes, or ask adjustments.{C_RESET}\n")
+                print(f"{C_MUTED}💡 Plan ready. Type {C_BOLD}/act{C_RESET}{C_MUTED} or {C_BOLD}/execute{C_RESET}{C_MUTED} to apply changes, or ask adjustments.{C_RESET}\n")
             else:
                 print()
             break
@@ -960,14 +986,14 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             except Exception:
                 args = {}
 
-            print(f"{C_BLUE}⚙ [D.L. Tool]{C_RESET} {C_BOLD}{fn_name}{C_RESET}({format_args_preview(args)})")
+            print(f"{C_ACCENT}◆{C_RESET} {C_INK_SOFT}[Tool]{C_RESET} {C_BOLD}{fn_name}{C_RESET}({C_MUTED}{format_args_preview(args)}{C_RESET})")
 
             result_str = dispatch_dl_tool(fn_name, args, workspace, mode=mode)
 
             res_preview = result_str.strip()
             if len(res_preview) > 160:
                 res_preview = res_preview[:160] + "..."
-            print(f"{C_DIM}  ↳ {res_preview}{C_RESET}\n")
+            print(f"{C_MUTED}  ↳ {res_preview}{C_RESET}\n")
 
             messages.append({
                 "role": "tool",
@@ -985,14 +1011,14 @@ def check_status(url: str, api_key: str):
             data = json.loads(resp.read().decode("utf-8"))
             print(f"\n{C_BOLD}Strata Engine Status:{C_RESET}")
             print(f"  • Status:     {C_GREEN}{data.get('status', 'ok')}{C_RESET}")
-            print(f"  • Model:      {C_CYAN}{data.get('model', 'unknown')}{C_RESET}")
+            print(f"  • Model:      {C_ACCENT_SOFT}{data.get('model', 'unknown')}{C_RESET}")
             print(f"  • Context:    {data.get('max_context', 0):,} tokens")
             print(f"  • Accelerator: ROCm GPU + Resident RAM\n")
     except Exception as e:
         print(f"{C_RED}Failed to reach Strata at {url}: {e}{C_RESET}\n")
 
 
-def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str = "low", initial_mode: str = "act"):
+def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str = "medium", initial_mode: str = "act"):
     history_file = Path.home() / ".config" / "dl" / "cli_history"
     history_file.parent.mkdir(parents=True, exist_ok=True)
     if history_file.is_file():
@@ -1009,7 +1035,7 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
 
     try:
         while True:
-            prompt_prefix = f"{C_BLUE}dl{C_RESET} {C_YELLOW}(plan){C_RESET} > " if current_mode == "plan" else f"{C_BLUE}dl{C_RESET} > "
+            prompt_prefix = f"{C_ACCENT_BOLD}dl{C_RESET} {C_YELLOW}(plan){C_RESET} {C_MUTED}›{C_RESET} " if current_mode == "plan" else f"{C_ACCENT_BOLD}dl{C_RESET} {C_MUTED}›{C_RESET} "
             try:
                 raw_input = input(prompt_prefix)
             except EOFError:
@@ -1187,7 +1213,7 @@ def main():
     parser.add_argument("--workspace", default=os.getcwd(), help="Workspace directory")
     parser.add_argument("--url", default=DEFAULT_URL, help="Strata URL")
     parser.add_argument("--api-key", default=DEFAULT_API_KEY, help="Strata API Key")
-    parser.add_argument("--think", default="low", choices=["none", "low", "medium", "high"], help="Reasoning effort")
+    parser.add_argument("--think", default="medium", choices=["none", "low", "medium", "high"], help="Reasoning effort")
     parser.add_argument("--plan", action="store_true", help="Start directly in Plan Mode")
     parser.add_argument("-p", "--prompt", help="Run single prompt non-interactively and exit")
 
