@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """dl_cli.py - D.L. CLI Autonomous Engineering Agent powered by Strata Qwen3.8-Flash-Next Coder.
 
-Equipped with D.L. AI identity, tool schemas
-(run_command, view_file, write_to_file, replace_file_content), and an autonomous
-agent execution loop running 100% locally on the Strata engine.
+Equipped with D.L. AI identity, tool schemas:
+- run_command
+- view_file
+- write_to_file
+- replace_file_content
+- exa_web_search (Exa AI Web Search API)
+- resolve_library_id (Context7 Documentation MCP)
+- get_library_docs (Context7 Documentation MCP)
+
+Runs 100% locally on the Strata engine with live SSE streaming.
 """
 from __future__ import annotations
 
@@ -32,6 +39,9 @@ C_GRAY = "\033[90m"
 
 DEFAULT_URL = os.environ.get("STRATA_URL", "http://127.0.0.1:8080").removesuffix("/v1")
 DEFAULT_API_KEY = os.environ.get("STRATA_API_KEY", "REDACTED")
+DEFAULT_EXA_KEY = os.environ.get("EXA_API_KEY", "REDACTED")
+DEFAULT_CONTEXT7_KEY = os.environ.get("CONTEXT7_API_KEY", "REDACTED")
+DEFAULT_CLIENT_IP_KEY = os.environ.get("CLIENT_IP_ENCRYPTION_KEY", "REDACTED")
 
 # Official D.L. AI Tool Definitions
 DL_TOOLS = [
@@ -134,6 +144,70 @@ DL_TOOLS = [
                 "required": ["TargetFile", "TargetContent", "ReplacementContent"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "exa_web_search",
+            "description": "Search the live web using Exa AI semantic search. Returns top webpage titles, URLs, and clean text summaries.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query string."
+                    },
+                    "num_results": {
+                        "type": "integer",
+                        "description": "Number of results to return (1-10, default 5)."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "resolve_library_id",
+            "description": "Resolves a package or product name to a Context7-compatible library ID (e.g. '/websites/deepwiki_fastapi_fastapi', '/vercel/next.js'). Call before get_library_docs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "libraryName": {
+                        "type": "string",
+                        "description": "Library or framework name (e.g. 'fastapi', 'react', 'next.js', 'tailwindcss', 'pytorch')."
+                    }
+                },
+                "required": ["libraryName"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_library_docs",
+            "description": "Fetches up-to-date official documentation and code examples for a library using Context7.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "context7CompatibleLibraryID": {
+                        "type": "string",
+                        "description": "Exact Context7 library ID from resolve_library_id (e.g. '/websites/deepwiki_fastapi_fastapi')."
+                    },
+                    "topic": {
+                        "type": "string",
+                        "description": "Topic or concept to focus on (e.g. 'routes', 'middleware', 'hooks', 'authentication')."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["code", "info"],
+                        "description": "Documentation mode: 'code' for API references and code examples (default), 'info' for conceptual guides."
+                    }
+                },
+                "required": ["context7CompatibleLibraryID"]
+            }
+        }
     }
 ]
 
@@ -146,8 +220,8 @@ def print_banner(workspace: Path, think_level: str):
 {C_BLUE} | |_| | | |___ | |___| |___ | | {C_RESET}   {C_DIM}Engine:{C_RESET} {DEFAULT_URL} {C_GREEN}[ROCm GPU Active]{C_RESET}
 {C_BLUE} |____/  |_____(_)____|_____|___|{C_RESET}   {C_DIM}Workspace:{C_RESET} {workspace}
 {C_GRAY}─────────────────────────────────────────────────────────────────────────────{C_RESET}
-{C_DIM}Effort:{C_RESET} {C_YELLOW}{think_level}{C_RESET} {C_DIM}· Tools: run_command, view_file, write_to_file, replace{C_RESET}
-{C_DIM}Commands: /clear, /think <level>, /status, !<cmd> (shell), @file{C_RESET}
+{C_DIM}Effort:{C_RESET} {C_YELLOW}{think_level}{C_RESET} {C_DIM}· Tools: bash, files, exa_search, context7_docs{C_RESET}
+{C_DIM}Commands: /clear, /think <level>, /search <q>, /docs <lib>, /status, !<cmd>, @file{C_RESET}
 {C_GRAY}─────────────────────────────────────────────────────────────────────────────{C_RESET}
 """
     sys.stdout.write(banner)
@@ -169,11 +243,15 @@ Active Workspaces:
 </user_information>
 
 <guidelines>
-- Always use the provided tools (`view_file`, `write_to_file`, `replace_file_content`, `run_command`) to inspect files, make changes, and run tests.
-- When inspecting a file, prefer `view_file`.
-- When writing a whole new file, use `write_to_file`.
-- When making targeted modifications to an existing file, use `replace_file_content`.
-- When checking system state or running build/test scripts, use `run_command`.
+- Always use the provided tools to inspect files, make changes, run tests, and search:
+  * File Inspection: `view_file`
+  * New Files: `write_to_file`
+  * Targeted Edits: `replace_file_content`
+  * Shell / Terminal / Tests: `run_command`
+  * Web Search & News: `exa_web_search`
+  * Library & Framework Docs: `resolve_library_id` and `get_library_docs`
+- When you need real-time web info or package references, search using `exa_web_search`.
+- When you need verified framework syntax or docs, query Context7 with `resolve_library_id` then `get_library_docs`.
 - Keep explanations concise, clear, and focused on the results.
 </guidelines>"""
 
@@ -290,6 +368,121 @@ def tool_run_command(args: dict, workspace: Path) -> str:
         return f"Error running command: {e}"
 
 
+def tool_exa_web_search(args: dict) -> str:
+    query = args.get("query")
+    if not query:
+        return "Error: query required"
+    num_results = min(int(args.get("num_results", 5) or 5), 10)
+    api_key = DEFAULT_EXA_KEY
+    url = "https://api.exa.ai/search"
+    headers = {
+        "x-api-key": api_key,
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "query": query,
+        "numResults": num_results,
+        "useAutoprompt": True,
+        "contents": {
+            "text": {"maxCharacters": 800}
+        }
+    }
+    try:
+        req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            results = data.get("results") or []
+            if not results:
+                return f"No search results found for: '{query}'"
+            out = [f"Exa Web Search results for: '{query}'\n"]
+            for i, r in enumerate(results, 1):
+                title = r.get("title") or "Untitled"
+                link = r.get("url") or ""
+                text = (r.get("text") or "").strip()
+                out.append(f"[{i}] {title}\nURL: {link}\nSummary: {text}\n")
+            return "\n".join(out)
+    except Exception as e:
+        return f"Error searching Exa: {e}"
+
+
+def call_context7_mcp_raw(tool_name: str, arguments: dict) -> str:
+    env = {
+        **os.environ,
+        "CONTEXT7_API_KEY": DEFAULT_CONTEXT7_KEY,
+        "CLIENT_IP_ENCRYPTION_KEY": DEFAULT_CLIENT_IP_KEY,
+        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:" + os.environ.get("PATH", "")
+    }
+    try:
+        proc = subprocess.Popen(
+            ["/usr/bin/npx", "@upstash/context7-mcp@1.0.31"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env
+        )
+        init_req = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "dl-cli", "version": "1.0"}
+            }
+        }
+        proc.stdin.write(json.dumps(init_req) + "\n")
+        proc.stdin.flush()
+
+        call_req = {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": arguments
+            }
+        }
+        proc.stdin.write(json.dumps(call_req) + "\n")
+        proc.stdin.flush()
+
+        result_text = ""
+        for line in proc.stdout:
+            try:
+                res = json.loads(line)
+                if res.get("id") == 2:
+                    content_items = (res.get("result") or {}).get("content") or []
+                    texts = [item.get("text", "") for item in content_items if item.get("type") == "text"]
+                    result_text = "\n".join(texts)
+                    break
+            except Exception:
+                continue
+
+        proc.terminate()
+        return result_text.strip() or "No documentation content returned by Context7."
+    except Exception as e:
+        return f"Error calling Context7 MCP: {e}"
+
+
+def tool_context7_resolve(args: dict) -> str:
+    lib = args.get("libraryName")
+    if not lib:
+        return "Error: libraryName required"
+    return call_context7_mcp_raw("resolve-library-id", {"libraryName": lib})
+
+
+def tool_context7_docs(args: dict) -> str:
+    lib_id = args.get("context7CompatibleLibraryID")
+    if not lib_id:
+        return "Error: context7CompatibleLibraryID required"
+    payload = {"context7CompatibleLibraryID": lib_id}
+    if args.get("topic"):
+        payload["topic"] = args["topic"]
+    if args.get("mode"):
+        payload["mode"] = args["mode"]
+    return call_context7_mcp_raw("get-library-docs", payload)
+
+
 def dispatch_dl_tool(name: str, args: dict, workspace: Path) -> str:
     if name == "view_file":
         return tool_view_file(args, workspace)
@@ -299,6 +492,12 @@ def dispatch_dl_tool(name: str, args: dict, workspace: Path) -> str:
         return tool_replace_file_content(args, workspace)
     elif name == "run_command":
         return tool_run_command(args, workspace)
+    elif name == "exa_web_search":
+        return tool_exa_web_search(args)
+    elif name == "resolve_library_id":
+        return tool_context7_resolve(args)
+    elif name == "get_library_docs":
+        return tool_context7_docs(args)
     else:
         return f"Error: Unknown tool {name}"
 
@@ -552,6 +751,8 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 print(f"\n{C_BOLD}D.L. CLI Commands:{C_RESET}")
                 print(f"  /clear, /reset        Reset conversation memory")
                 print(f"  /think <none|low|med|high> Set reasoning effort level")
+                print(f"  /search <query>       Direct Exa AI live web search")
+                print(f"  /docs <library>       Direct Context7 library documentation lookup")
                 print(f"  /status               Check Strata server health")
                 print(f"  !<shell command>      Execute bash command directly in workspace")
                 print(f"  @filename             Inject file content into your prompt\n")
@@ -566,6 +767,24 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                     print(f"{C_GREEN}✓ Reasoning effort set to: {think_level}{C_RESET}\n")
                 else:
                     print(f"Current reasoning effort: {think_level}. Usage: /think [none|low|medium|high]\n")
+                continue
+            elif prompt.startswith("/search"):
+                q = prompt[7:].strip()
+                if q:
+                    print(f"\n{C_CYAN}Searching Exa AI for:{C_RESET} {q}\n")
+                    res = tool_exa_web_search({"query": q})
+                    print(res)
+                else:
+                    print("Usage: /search <query>")
+                continue
+            elif prompt.startswith("/docs"):
+                lib = prompt[5:].strip()
+                if lib:
+                    print(f"\n{C_CYAN}Resolving Context7 docs for:{C_RESET} {lib}\n")
+                    res = tool_context7_resolve({"libraryName": lib})
+                    print(res)
+                else:
+                    print("Usage: /docs <library_name>")
                 continue
             elif prompt in ("/status", "/model"):
                 check_status(url, api_key)
