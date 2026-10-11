@@ -114,6 +114,23 @@ DL_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "switch_workspace",
+            "description": "Switch the active project working directory to the specified path. All relative paths, bash commands, and the local wiki will resolve in the new directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Target absolute or relative directory path to switch to (e.g. '/mnt/data/DL-AI-workspace', '~/projects/myapp')."
+                    }
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "view_file",
             "description": "View the contents of a file from the local filesystem with optional line slicing.",
             "parameters": {
@@ -370,6 +387,7 @@ DL_PLAN_TOOLS = [
             }
         }
     },
+    next(t for t in DL_TOOLS if t["function"]["name"] == "switch_workspace"),
     next(t for t in DL_TOOLS if t["function"]["name"] == "view_file"),
     next(t for t in DL_TOOLS if t["function"]["name"] == "local_wiki"),
     next(t for t in DL_TOOLS if t["function"]["name"] == "exa_web_search"),
@@ -553,6 +571,44 @@ def tool_view_file(args: dict, workspace: Path) -> str:
         return f"File: {p} (lines {start}-{end} of {len(lines)})\n" + "\n".join(numbered)
     except Exception as e:
         return f"Error reading file {p}: {e}"
+
+
+def tool_switch_workspace(args: dict, workspace: Path, session_context: dict | None = None) -> str:
+    path_str = (args.get("path") or args.get("workspace") or "").strip()
+    if not path_str:
+        return "Error: path required"
+    new_path = Path(path_str).expanduser()
+    if not new_path.is_absolute():
+        new_path = (workspace / new_path).resolve()
+    else:
+        new_path = new_path.resolve()
+
+    if not new_path.exists():
+        try:
+            new_path.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            return f"Error creating target directory {new_path}: {e}"
+
+    if not new_path.is_dir():
+        return f"Error: Path {new_path} is not a directory"
+
+    try:
+        os.chdir(new_path)
+    except Exception as e:
+        return f"Error changing working directory to {new_path}: {e}"
+
+    # Update session context state if provided
+    wroot = resolve_wiki_root(new_path)
+    if session_context is not None:
+        session_context["workspace"] = new_path
+        messages = session_context.get("messages")
+        mode = session_context.get("mode", "act")
+        if messages and len(messages) > 0 and messages[0].get("role") == "system":
+            messages[0]["content"] = build_dl_system_prompt(new_path, mode=mode)
+        sync_current_chat_state(messages, new_path)
+
+    wiki_status = f"Local Wiki active ({wroot})" if wroot else "Local Wiki inactive (run /wiki or call local_wiki to initialize in this directory)"
+    return f"Working directory successfully switched to: {new_path}\n{wiki_status}"
 
 
 def tool_write_to_file(args: dict, workspace: Path) -> str:
@@ -754,7 +810,7 @@ def tool_context7_docs(args: dict) -> str:
     return call_context7_mcp_raw("get-library-docs", payload)
 
 
-def tool_local_wiki(args: dict, workspace: Path, mode: str = "act") -> str:
+def tool_local_wiki(args: dict, workspace: Path, mode: str = "act", session_context: dict | None = None) -> str:
     action = (args.get("action") or "").strip()
     if not action:
         return "Error: action required (search, read_page, new_page, lint, digest, init, env_list, log)"
@@ -768,13 +824,18 @@ def tool_local_wiki(args: dict, workspace: Path, mode: str = "act") -> str:
 
     wiki_root = resolve_wiki_root(workspace)
 
-    # If wiki is not active in this project folder, initialize it in the defined workspace when invoked
+    # If wiki is not active in this project folder, initialize it in the active workspace when invoked
     if not wiki_root and action != "init":
         target_root = (workspace / "wiki").resolve()
         init_cmd = ["python3", str(wiki_script), "init", "--root", str(target_root)]
         try:
             subprocess.run(init_cmd, cwd=workspace, capture_output=True, text=True, check=True)
             wiki_root = target_root
+            if session_context is not None:
+                messages = session_context.get("messages")
+                if messages and len(messages) > 0 and messages[0].get("role") == "system":
+                    messages[0]["content"] = build_dl_system_prompt(workspace, mode=mode)
+                sync_current_chat_state(messages, workspace)
         except subprocess.CalledProcessError as e:
             return f"Error initializing Local Wiki in {target_root}: {e.stderr or e.stdout}"
 
@@ -864,10 +925,12 @@ def tool_local_wiki(args: dict, workspace: Path, mode: str = "act") -> str:
         return f"Error executing wiki command: {e}"
 
 
-def dispatch_dl_tool(name: str, args: dict, workspace: Path, mode: str = "act") -> str:
+def dispatch_dl_tool(name: str, args: dict, workspace: Path, mode: str = "act", session_context: dict | None = None) -> str:
     if mode == "plan" and name in ("write_to_file", "replace_file_content"):
         return "Error: [PLAN MODE] File modifications are disabled. Research the codebase and present your implementation plan for approval before executing."
-    if name == "view_file":
+    if name == "switch_workspace":
+        return tool_switch_workspace(args, workspace, session_context=session_context)
+    elif name == "view_file":
         return tool_view_file(args, workspace)
     elif name == "write_to_file":
         return tool_write_to_file(args, workspace)
@@ -882,7 +945,7 @@ def dispatch_dl_tool(name: str, args: dict, workspace: Path, mode: str = "act") 
     elif name == "get_library_docs":
         return tool_context7_docs(args)
     elif name == "local_wiki":
-        return tool_local_wiki(args, workspace, mode=mode)
+        return tool_local_wiki(args, workspace, mode=mode, session_context=session_context)
     elif name == "syntax_guard":
         return tool_syntax_guard(args, workspace)
     elif name == "scan_secrets":
@@ -1033,11 +1096,12 @@ def format_args_preview(args: dict) -> str:
 
 def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                        workspace: Path, think_level: str = "medium", max_turns: int = 10,
-                       mode: str = "act"):
+                       mode: str = "act", session_context: dict | None = None) -> Path:
     turn = 0
     total_tokens = 0
     t_start = time.time()
-    active_tools = get_active_tools(workspace, mode=mode)
+    current_ws = workspace
+    active_tools = get_active_tools(current_ws, mode=mode)
 
     while turn < max_turns:
         turn += 1
@@ -1083,7 +1147,13 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
 
             print(f"{C_ACCENT}◆{C_RESET} {C_INK_SOFT}[Tool]{C_RESET} {C_BOLD}{fn_name}{C_RESET}({C_MUTED}{format_args_preview(args)}{C_RESET})")
 
-            result_str = dispatch_dl_tool(fn_name, args, workspace, mode=mode)
+            result_str = dispatch_dl_tool(fn_name, args, current_ws, mode=mode, session_context=session_context)
+
+            # Check if directory was switched
+            if session_context and session_context.get("workspace"):
+                if session_context["workspace"] != current_ws:
+                    current_ws = session_context["workspace"]
+                    active_tools = get_active_tools(current_ws, mode=mode)
 
             res_preview = result_str.strip()
             if len(res_preview) > 160:
@@ -1096,6 +1166,8 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                 "name": fn_name,
                 "content": result_str
             })
+
+    return current_ws
 
 
 def check_status(url: str, api_key: str):
@@ -1247,6 +1319,7 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 print(f"\n{C_BOLD}D.L. CLI Commands:{C_RESET}")
                 print(f"  /plan [query]         Toggle or enter Plan Mode (read-only research & design)")
                 print(f"  /act, /execute [query] Switch to Act Mode (full execution & code edits)")
+                print(f"  /cd <path>, cd <path> Switch active project working directory")
                 print(f"  /save, /export [file] Save current session as Markdown (with thinking & tools)")
                 print(f"  /health, /sys         Real-time RAM, VRAM, Swap, ROCm GPU & server health card")
                 print(f"  /diff, /audit         Semantic git diff audit (deletions, size, leaks, risks)")
@@ -1261,6 +1334,48 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 print(f"  /status               Check Strata server health")
                 print(f"  !<shell command>      Execute bash command directly in workspace")
                 print(f"  @filename             Inject file content into your prompt\n")
+                continue
+            elif prompt.startswith("/cd") or prompt.lower().startswith("cd ") or prompt == "cd":
+                target_str = ""
+                if prompt.startswith("/cd"):
+                    target_str = prompt[3:].strip()
+                elif prompt.lower().startswith("cd "):
+                    target_str = prompt[3:].strip()
+
+                if not target_str:
+                    target_str = str(Path.home())
+
+                cand = Path(target_str).expanduser()
+                if not cand.is_absolute():
+                    cand = (workspace / cand).resolve()
+                else:
+                    cand = cand.resolve()
+
+                if not cand.exists():
+                    try:
+                        cand.mkdir(parents=True, exist_ok=True)
+                        print(f"{C_MUTED}Created directory {cand}{C_RESET}")
+                    except Exception as e:
+                        print(f"{C_RED}Error: Directory not found and could not be created: {cand} ({e}){C_RESET}\n")
+                        continue
+
+                if not cand.is_dir():
+                    print(f"{C_RED}Error: {cand} is not a directory.{C_RESET}\n")
+                    continue
+
+                workspace = cand
+                try:
+                    os.chdir(workspace)
+                except Exception as e:
+                    print(f"{C_RED}Error chdir to {workspace}: {e}{C_RESET}\n")
+
+                messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
+                sync_current_chat_state(messages, workspace)
+
+                wroot = resolve_wiki_root(workspace)
+                wiki_badge = f"{C_GREEN}[Active: {wroot.name}]{C_RESET}" if wroot else f"{C_MUTED}[Inactive: run /wiki to init]{C_RESET}"
+                print(f"\n{C_GREEN}✓ Switched working directory to:{C_RESET} {C_BOLD}{workspace}{C_RESET}")
+                print(f"{C_MUTED}  • Wiki Status: {wiki_badge}{C_RESET}\n")
                 continue
             elif prompt.startswith("/plan"):
                 sub = prompt[5:].strip()
@@ -1482,14 +1597,18 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
             messages.append({"role": "user", "content": resolved_prompt})
 
             try:
-                execute_agent_loop(
+                session_ctx = {"workspace": workspace, "messages": messages, "mode": current_mode}
+                new_ws = execute_agent_loop(
                     messages=messages,
                     url=url,
                     api_key=api_key,
                     workspace=workspace,
                     think_level=think_level,
                     mode=current_mode,
+                    session_context=session_ctx,
                 )
+                if new_ws != workspace:
+                    workspace = new_ws
                 sync_current_chat_state(messages, workspace)
             except Exception as e:
                 print(f"{C_RED}Error during agent turn: {e}{C_RESET}\n")
