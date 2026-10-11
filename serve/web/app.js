@@ -262,7 +262,9 @@ function renderMobileCodeMessages(msgs) {
     } else if (Array.isArray(m.content)) {
       bodyText = m.content.map((p) => p.text || "").join("\n");
     }
-    const escaped = esc(bodyText);
+    // Strip ANSI terminal color escape codes if present
+    const cleanBody = bodyText.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "").replace(/\[\d+(?:;\d+)*m/g, "");
+    const escaped = esc(cleanBody);
     const withPre = escaped.replace(/```([\s\S]*?)```/g, "<pre><code>$1</code></pre>");
     html += `
       <div class="code-mobile-card code-mobile-card--${role}">

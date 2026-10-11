@@ -4940,6 +4940,12 @@ def make_handler(svc: Service):
                 except Exception:
                     pass
 
+                # Sanitize all messages to strip raw terminal ANSI color sequences
+                ansi_re = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+                for m in chat_payload.get("messages", []):
+                    if isinstance(m.get("content"), str):
+                        m["content"] = ansi_re.sub('', m["content"])
+
                 self._json(200, chat_payload)
                 return
             if path == "/api/code/export":
