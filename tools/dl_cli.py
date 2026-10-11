@@ -491,6 +491,27 @@ Active Workspaces:
 </guidelines>"""
 
 
+SENSITIVE_FILE_NAMES = {
+    ".env", ".envrc", ".netrc", "_netrc", ".pgpass", ".htpasswd",
+    "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "identity",
+    "credentials", "shadow", ".git-credentials", ".npmrc", ".pypirc",
+}
+SENSITIVE_EXTENSIONS = {
+    ".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".asc", ".gpg", ".kdbx",
+}
+SENSITIVE_DIRS = {".ssh", ".aws", ".gnupg", ".kube", ".docker"}
+
+
+def is_sensitive_file(p: Path) -> bool:
+    """Heuristically flag paths that typically hold credentials or private keys."""
+    name = p.name.lower()
+    if name in SENSITIVE_FILE_NAMES or p.suffix.lower() in SENSITIVE_EXTENSIONS:
+        return True
+    if name.startswith(".env."):
+        return True
+    return any(part.lower() in SENSITIVE_DIRS for part in p.parts)
+
+
 def resolve_file_references(prompt: str, workspace: Path) -> str:
     pattern = r"@([a-zA-Z0-9_\-\.\/]+)"
     matches = list(re.finditer(pattern, prompt))
@@ -505,6 +526,9 @@ def resolve_file_references(prompt: str, workspace: Path) -> str:
         if not p.is_file():
             p = Path(fpath_str).resolve()
         if p.is_file():
+            if is_sensitive_file(p):
+                sys.stderr.write(f"{C_RED}Blocked sensitive file injection: @{fpath_str} (credentials/private key guarded){C_RESET}\n")
+                continue
             try:
                 content = p.read_text(encoding="utf-8", errors="replace")
                 ext = p.suffix.lstrip(".") or "text"
@@ -1252,6 +1276,8 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
             pass
 
     current_mode = initial_mode
+    prefix_mode = False
+    custom_prefix = None
     system_prompt = build_dl_system_prompt(workspace, mode=current_mode)
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
     sync_current_chat_state(messages, workspace)
@@ -1297,11 +1323,32 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 print(f"  /wiki [search|lint|digest] Query or manage workspace Local Wiki")
                 print(f"  /clear, /reset        Reset conversation memory")
                 print(f"  /think <none|low|med|high> Set reasoning effort level")
+                print(f"  /prefix [toggle|text] Set assistant seed prefix to suppress chatter")
                 print(f"  /search <query>       Direct Exa AI live web search")
                 print(f"  /docs <library>       Direct Context7 library documentation lookup")
                 print(f"  /status               Check Strata server health")
                 print(f"  !<shell command>      Execute bash command directly in workspace")
                 print(f"  @filename             Inject file content into your prompt\n")
+                continue
+            elif prompt.startswith("/prefix"):
+                sub = prompt[7:].strip()
+                if not sub or sub.lower() in ("toggle", "switch"):
+                    if prefix_mode:
+                        prefix_mode = False
+                        custom_prefix = None
+                        print(f"{C_MUTED}Prefix mode disabled (natural conversational output).{C_RESET}\n")
+                    else:
+                        prefix_mode = True
+                        custom_prefix = "```"
+                        print(f"{C_GREEN}Prefix mode enabled (seeds assistant turn with direct code block).{C_RESET}\n")
+                elif sub.lower() in ("off", "disable", "stop"):
+                    prefix_mode = False
+                    custom_prefix = None
+                    print(f"{C_MUTED}Prefix mode disabled.{C_RESET}\n")
+                else:
+                    prefix_mode = True
+                    custom_prefix = sub
+                    print(f"{C_GREEN}Prefix mode set to:{C_RESET} {custom_prefix}\n")
                 continue
             elif prompt.startswith("/cd") or prompt.lower().startswith("cd ") or prompt == "cd":
                 target_str = ""
@@ -1563,6 +1610,10 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
             # File context injection
             resolved_prompt = resolve_file_references(prompt, workspace)
             messages.append({"role": "user", "content": resolved_prompt})
+
+            # DeepSeek-style Prefix Mode: seed assistant turn with prefix (e.g. ```) to suppress preamble chatter
+            if prefix_mode and custom_prefix:
+                messages.append({"role": "assistant", "content": custom_prefix, "prefix": True})
 
             try:
                 session_ctx = {"workspace": workspace, "messages": messages, "mode": current_mode}

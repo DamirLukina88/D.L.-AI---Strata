@@ -411,8 +411,7 @@ Your goal is to build, refactor, debug, and test code autonomously with pragmati
 - Start editing once you know the first change. A design worked out in files persists, while long thinking can be cut off and lost.
 - When one part of a task is blocked, finish everything that does not depend on the stuck part, and state clearly what is blocked.
 - For destructive actions or overwriting existing work, verify target files first.
-- End your turn when the request is done or nothing is left that you can do without the user.
-<total_tokens>15000000 tokens left</total_tokens>"""
+- End your turn when the request is done or nothing is left that you can do without the user."""
 
 
 def optimize_claude_code_system_prompt(system: str) -> str:
