@@ -24,6 +24,7 @@ import argparse
 import contextlib
 import collections
 import base64
+import datetime
 import hashlib
 import hmac
 import codecs
@@ -4893,6 +4894,88 @@ def make_handler(svc: Service):
                         {"id": "deepseek", "name": "DeepSeek CLI", "desc": "DeepSeek V4 Coding Engine", "model": "V4 Flash / Pro"},
                         {"id": "codex", "name": "Codex CLI", "desc": "OpenAI Codex CLI on Strata Responses API", "model": "Codex / Responses"}
                     ]
+                })
+                return
+            if path == "/api/code/export":
+                if not self._authorized():
+                    return
+                qs = parse_qs(urlsplit(self.path).query)
+                scaffold = qs.get("scaffold", [""])[0]
+                if not scaffold:
+                    try:
+                        res = subprocess.run(["tmux", "display-message", "-t", "dl-ai-code", "-p", "#{window_name}"],
+                                             capture_output=True, text=True, check=False)
+                        if res.returncode == 0 and res.stdout.strip():
+                            scaffold = res.stdout.strip()
+                    except Exception:
+                        scaffold = "agy"
+                if scaffold not in ("claude", "agy", "deepseek", "codex"):
+                    scaffold = "agy"
+
+                now = datetime.datetime.now()
+                now_str = now.strftime("%Y-%m-%d-%H-%M")
+                filename = f"strata-{scaffold}-chat-{now_str}.md"
+                md_text = ""
+
+                # 1. If agy scaffold and structured chat state file exists
+                if scaffold == "agy" and os.path.exists("/tmp/dl-cli-current-chat.json"):
+                    try:
+                        with open("/tmp/dl-cli-current-chat.json", "r", encoding="utf-8") as f:
+                            chat_data = json.load(f)
+                        raw_msgs = chat_data.get("messages", [])
+                        user_or_asst = [m for m in raw_msgs if m.get("role") in ("user", "assistant")]
+                        if user_or_asst:
+                            from dl_cli import format_messages_to_markdown
+                            md_text = format_messages_to_markdown(
+                                raw_msgs,
+                                model_name=chat_data.get("model", "Qwen3.8-Flash-Next Coder"),
+                                workspace=chat_data.get("workspace", str(WORKSPACE_DIR))
+                            )
+                    except Exception:
+                        pass
+
+                # 2. Fallback / other scaffolds: Capture terminal buffer from tmux
+                if not md_text:
+                    try:
+                        res = subprocess.run(["tmux", "capture-pane", "-p", "-S", "-", "-t", f"dl-ai-code:{scaffold}.0"],
+                                             capture_output=True, text=True, check=False)
+                        if res.returncode != 0:
+                            res = subprocess.run(["tmux", "capture-pane", "-p", "-S", "-", "-t", f"dl-ai-code:{scaffold}"],
+                                                 capture_output=True, text=True, check=False)
+                        if res.returncode == 0 and res.stdout.strip():
+                            raw_pane = res.stdout
+                            clean_pane = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', raw_pane)
+                            lines = [l.rstrip() for l in clean_pane.splitlines()]
+                            while lines and not lines[0]:
+                                lines.pop(0)
+                            while lines and not lines[-1]:
+                                lines.pop()
+
+                            header = [
+                                f"# Strata CLI Session: {scaffold.upper()}",
+                                f"- **Date**: {now.strftime('%Y-%m-%d %H:%M:%S')}",
+                                f"- **Scaffold**: {scaffold}",
+                                f"- **Workspace**: `{WORKSPACE_DIR}`",
+                                "",
+                                "---",
+                                "",
+                                "```text",
+                                "\n".join(lines),
+                                "```",
+                                ""
+                            ]
+                            md_text = "\n".join(header)
+                    except Exception as e:
+                        md_text = f"# Strata CLI Session: {scaffold}\n\nError capturing terminal: {e}\n"
+
+                if not md_text:
+                    md_text = f"# Strata CLI Session: {scaffold}\n\n(No session activity recorded yet)\n"
+
+                self._json(200, {
+                    "status": "ok",
+                    "markdown": md_text,
+                    "filename": filename,
+                    "scaffold": scaffold
                 })
                 return
             if path in ("/api/workspace/files", "/api/workspace"):

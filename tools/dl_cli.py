@@ -15,6 +15,7 @@ Runs 100% locally on the Strata engine with live SSE streaming.
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -25,6 +26,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Optional
 
 # Auditing & Debugging Suite Integration
 try:
@@ -410,7 +412,7 @@ def print_banner(workspace: Path, think_level: str, mode: str = "act"):
         _row(f"{C_MUTED}Workspace{C_RESET} : {C_INK_SOFT}{ws_str}{C_RESET}"),
         _row(f"{C_MUTED}Status{C_RESET}    : {mode_badge}  {C_MUTED}·{C_RESET}  Effort: {C_ACCENT_SOFT}{think_level}{C_RESET}  {C_MUTED}·{C_RESET}  Wiki: {wiki_badge}"),
         _row(f"{C_MUTED}Tools{C_RESET}     : {C_INK_SOFT}{tools_str}{C_RESET}"),
-        _row(f"{C_MUTED}Commands{C_RESET}  : {C_INK_SOFT}/plan, /act, /health, /diff, /test, /wiki, !<bash>{C_RESET}"),
+        _row(f"{C_MUTED}Commands{C_RESET}  : {C_INK_SOFT}/plan, /act, /save, /health, /diff, /test, /wiki, !<bash>{C_RESET}"),
         bot_border,
         "\n"
     ]
@@ -1111,6 +1113,95 @@ def check_status(url: str, api_key: str):
         print(f"{C_RED}Failed to reach Strata at {url}: {e}{C_RESET}\n")
 
 
+def format_messages_to_markdown(messages: list[dict], model_name: str = "Qwen3.8-Flash-Next Coder",
+                                workspace: Optional[Path | str] = None) -> str:
+    """Formats chat messages into Markdown matching Strata Web Chat export standard."""
+    timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ws_str = str(workspace) if workspace else os.getcwd()
+    header = [
+        f"# Strata CLI Chat Export",
+        f"- **Date**: {timestamp_str}",
+        f"- **Model**: {model_name}",
+        f"- **Workspace**: `{ws_str}`",
+        "",
+        "---",
+        ""
+    ]
+
+    # Map tool results by tool_call_id
+    tool_results: dict[str, dict] = {}
+    for m in messages:
+        if m.get("role") == "tool":
+            t_id = m.get("tool_call_id")
+            if t_id:
+                tool_results[t_id] = {
+                    "name": m.get("name", "tool"),
+                    "result": m.get("content", ""),
+                }
+
+    sections = []
+    for m in messages:
+        role = m.get("role")
+        if role == "user":
+            content = m.get("content", "").strip()
+            if content:
+                sections.append(f"## You\n\n{content}\n")
+        elif role == "assistant":
+            parts = [f"## {model_name}\n"]
+            # Collapsible thinking block
+            reasoning = m.get("reasoning_content") or m.get("reasoning")
+            if reasoning and str(reasoning).strip():
+                parts.append(f"<details><summary>Thinking</summary>\n\n{str(reasoning).strip()}\n\n</details>\n")
+
+            # Collapsible tool calls and outputs
+            tool_calls = m.get("tool_calls") or []
+            for tc in tool_calls:
+                t_id = tc.get("id")
+                fn = tc.get("function", {})
+                name = fn.get("name", "tool")
+                raw_args = fn.get("arguments", "{}")
+                try:
+                    args_obj = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                    args_formatted = json.dumps(args_obj, indent=2)
+                except Exception:
+                    args_formatted = str(raw_args)
+
+                res_obj = tool_results.get(t_id, {})
+                res_text = res_obj.get("result", "")
+
+                parts.append(
+                    f"<details><summary>Tool {name}</summary>\n\n"
+                    f"```json\n{args_formatted}\n```\n\n"
+                    f"```\n{res_text}\n```\n\n"
+                    f"</details>\n"
+                )
+
+            # Assistant content text
+            text = m.get("content") or ""
+            if text and str(text).strip():
+                parts.append(f"{str(text).strip()}\n")
+
+            if len(parts) > 1 or (len(parts) == 1 and text and str(text).strip()):
+                sections.append("\n".join(parts))
+
+    return "\n".join(header) + "\n" + "\n".join(sections)
+
+
+def sync_current_chat_state(messages: list[dict], workspace: Path, model_name: str = "Qwen3.8-Flash-Next Coder"):
+    """Persists active session state to /tmp/dl-cli-current-chat.json for Web Code export."""
+    try:
+        state_file = Path("/tmp/dl-cli-current-chat.json")
+        data = {
+            "model": model_name,
+            "workspace": str(workspace),
+            "updated_at": time.time(),
+            "messages": messages,
+        }
+        state_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str = "medium", initial_mode: str = "act"):
     history_file = Path.home() / ".config" / "dl" / "cli_history"
     history_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1123,6 +1214,7 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
     current_mode = initial_mode
     system_prompt = build_dl_system_prompt(workspace, mode=current_mode)
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
+    sync_current_chat_state(messages, workspace)
 
     print_banner(workspace, think_level, mode=current_mode)
 
@@ -1148,12 +1240,14 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 break
             elif prompt in ("/clear", "/reset"):
                 messages = [{"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}]
+                sync_current_chat_state(messages, workspace)
                 print(f"{C_GREEN}✓ D.L. memory reset ({current_mode.upper()} mode).{C_RESET}\n")
                 continue
             elif prompt == "/help":
                 print(f"\n{C_BOLD}D.L. CLI Commands:{C_RESET}")
                 print(f"  /plan [query]         Toggle or enter Plan Mode (read-only research & design)")
                 print(f"  /act, /execute [query] Switch to Act Mode (full execution & code edits)")
+                print(f"  /save, /export [file] Save current session as Markdown (with thinking & tools)")
                 print(f"  /health, /sys         Real-time RAM, VRAM, Swap, ROCm GPU & server health card")
                 print(f"  /diff, /audit         Semantic git diff audit (deletions, size, leaks, risks)")
                 print(f"  /secrets [path]       Scan codebase or file for leaked API keys, tokens & certs")
@@ -1336,6 +1430,42 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 args = {"files": file_list} if file_list else {}
                 print(tool_smart_test_runner(args, workspace) + "\n")
                 continue
+            elif prompt.startswith("/save") or prompt.startswith("/export") or prompt.startswith("/markdown"):
+                parts = prompt.split(maxsplit=1)
+                custom_name = parts[1].strip() if len(parts) > 1 else ""
+
+                user_or_asst = [m for m in messages if m.get("role") in ("user", "assistant")]
+                if not user_or_asst:
+                    print(f"{C_YELLOW}⚠ No chat messages to export yet.{C_RESET}\n")
+                    continue
+
+                now_str = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M")
+                if custom_name:
+                    out_p = Path(custom_name).expanduser()
+                    if not out_p.is_absolute():
+                        out_p = (workspace / out_p).resolve()
+                    if not out_p.suffix:
+                        out_p = out_p.with_suffix(".md")
+                else:
+                    out_p = workspace / f"strata-chat-{now_str}.md"
+
+                md_content = format_messages_to_markdown(messages, model_name="Qwen3.8-Flash-Next Coder", workspace=workspace)
+                try:
+                    out_p.parent.mkdir(parents=True, exist_ok=True)
+                    out_p.write_text(md_content, encoding="utf-8")
+                    card_width = 75
+                    print(f"\n{C_LINE}╭{'─' * card_width}╮{C_RESET}")
+                    print(f"{C_LINE}│{C_RESET}  {C_GREEN}✓ Chat successfully saved as Markdown:{C_RESET}{' ' * (card_width - 40)}{C_LINE}│{C_RESET}")
+                    file_str = str(out_p)
+                    if len(file_str) > card_width - 8:
+                        file_str = "..." + file_str[-(card_width - 11):]
+                    print(f"{C_LINE}│{C_RESET}  {C_BOLD}{file_str}{C_RESET}{' ' * (card_width - len(file_str) - 2)}{C_LINE}│{C_RESET}")
+                    meta_str = f"Size: {len(md_content):,} bytes · Messages: {len(user_or_asst)}"
+                    print(f"{C_LINE}│{C_RESET}  {C_MUTED}{meta_str}{C_RESET}{' ' * (card_width - len(meta_str) - 2)}{C_LINE}│{C_RESET}")
+                    print(f"{C_LINE}╰{'─' * card_width}╯{C_RESET}\n")
+                except Exception as e:
+                    print(f"{C_RED}Error saving chat to {out_p}: {e}{C_RESET}\n")
+                continue
             elif prompt.startswith("!"):
                 cmd = prompt[1:].strip()
                 if cmd:
@@ -1356,6 +1486,7 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                     think_level=think_level,
                     mode=current_mode,
                 )
+                sync_current_chat_state(messages, workspace)
             except Exception as e:
                 print(f"{C_RED}Error during agent turn: {e}{C_RESET}\n")
                 if messages and messages[-1].get("role") == "user":

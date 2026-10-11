@@ -178,6 +178,33 @@ if ($("code-restart-btn")) {
     }
   };
 }
+if ($("code-export-btn")) {
+  $("code-export-btn").onclick = async () => {
+    const scaffold = currentScaffold || "agy";
+    try {
+      const r = await fetch(`api/code/export?scaffold=${encodeURIComponent(scaffold)}`, {
+        headers: headers()
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      const md = data.markdown || "";
+      if (!md || md.trim().length === 0) {
+        toast("info", "Nothing to save yet", "No session activity recorded.");
+        return;
+      }
+      const filename = data.filename || `strata-${scaffold}-chat-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.md`;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([md], {type: "text/markdown"}));
+      a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      toast("success", "Chat saved", `Downloaded ${filename}`);
+    } catch (e) {
+      toast("error", "Export failed", e.message || String(e));
+    }
+  };
+}
+
 if ($("code-fullscreen-btn")) {
   $("code-fullscreen-btn").onclick = () => {
     const wrap = document.querySelector(".code-terminal-wrap");

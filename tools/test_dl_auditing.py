@@ -93,6 +93,24 @@ class TestDLAuditingSuite(unittest.TestCase):
         res = run_smart_tests(workspace=Path("."), target_files=["tools/test_setup_choices.py"])
         self.assertIn("PASSED", res)
 
+    def test_format_messages_to_markdown(self):
+        from tools.dl_cli import format_messages_to_markdown
+        msgs = [
+            {"role": "user", "content": "Hello world"},
+            {"role": "assistant", "content": "Done", "reasoning_content": "Deep thought", "tool_calls": [
+                {"id": "t1", "function": {"name": "run_command", "arguments": "{\"CommandLine\": \"echo 1\"}"}}
+            ]},
+            {"role": "tool", "tool_call_id": "t1", "name": "run_command", "content": "1"}
+        ]
+        md = format_messages_to_markdown(msgs, model_name="TestModel", workspace=self.workspace)
+        self.assertIn("## You\n\nHello world", md)
+        self.assertIn("## TestModel", md)
+        self.assertIn("<details><summary>Thinking</summary>", md)
+        self.assertIn("Deep thought", md)
+        self.assertIn("<details><summary>Tool run_command</summary>", md)
+        self.assertIn('"CommandLine": "echo 1"', md)
+        self.assertIn("Done", md)
+
 
 if __name__ == "__main__":
     unittest.main()
