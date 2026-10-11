@@ -8,6 +8,9 @@ bench/micro/*.obj
 bench/micro/*.bin
 bench/micro/*.dll
 bench/micro/*.txt
+bench/results/
+bench/traces/
+data/expert-profile-custom.bin
 *.log
 build*/
 pack/
