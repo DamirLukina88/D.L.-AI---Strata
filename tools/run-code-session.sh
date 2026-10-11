@@ -41,10 +41,21 @@ while true; do
     echo -e "\033[38;5;238m│\033[0m  \033[38;5;244mStatus\033[0m    : \033[38;5;78m[Connected]\033[0m  \033[38;5;215m[Fit Max Tokens Active]\033[0m                           \033[38;5;238m│\033[0m"
     echo -e "\033[38;5;238m╰─────────────────────────────────────────────────────────────────────────────╯\033[0m\n"
 
+    FABLE_PROMPT="/home/damirl/.claude/profiles/fable_system_prompt.md"
+    TOOLS_FLAG="Bash,Edit,Read,Write,Glob,Grep"
+
     if [ -x "$CLAUDE_BIN" ]; then
-        "$CLAUDE_BIN" --model "$STRATA_MODEL" || true
+        if [ -f "$FABLE_PROMPT" ]; then
+            "$CLAUDE_BIN" --model "$STRATA_MODEL" --tools "$TOOLS_FLAG" --system-prompt "$(cat "$FABLE_PROMPT")" || true
+        else
+            "$CLAUDE_BIN" --model "$STRATA_MODEL" --tools "$TOOLS_FLAG" || true
+        fi
     elif command -v claude >/dev/null 2>&1; then
-        claude --model "$STRATA_MODEL" || true
+        if [ -f "$FABLE_PROMPT" ]; then
+            claude --model "$STRATA_MODEL" --tools "$TOOLS_FLAG" --system-prompt "$(cat "$FABLE_PROMPT")" || true
+        else
+            claude --model "$STRATA_MODEL" --tools "$TOOLS_FLAG" || true
+        fi
     else
         echo -e "\033[1;31mError: claude binary not found ($CLAUDE_BIN)\033[0m"
     fi
