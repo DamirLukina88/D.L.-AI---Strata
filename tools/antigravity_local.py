@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """antigravity_local.py - Local Antigravity Agent CLI powered by Strata Qwen3.8-Flash-Next Coder.
 
-Provides an interactive Antigravity coding experience that runs 100% locally on
-the Strata engine at http://127.0.0.1:8080.
+Equipped with the authentic Antigravity DeepMind identity, tool schemas
+(run_command, view_file, write_to_file, replace_file_content), and an autonomous
+agent execution loop running 100% locally on Strata.
 """
 from __future__ import annotations
 
@@ -32,20 +33,148 @@ C_GRAY = "\033[90m"
 DEFAULT_URL = os.environ.get("STRATA_URL", "http://127.0.0.1:8080").removesuffix("/v1")
 DEFAULT_API_KEY = os.environ.get("STRATA_API_KEY", "REDACTED")
 
+# Official Antigravity Tool Definitions
+ANTIGRAVITY_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "run_command",
+            "description": "PROPOSE and execute a bash command in the workspace directory. Operating System: linux.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "CommandLine": {
+                        "type": "string",
+                        "description": "The exact shell command line string to execute."
+                    },
+                    "Cwd": {
+                        "type": "string",
+                        "description": "Working directory for the command (defaults to workspace)."
+                    },
+                    "toolSummary": {
+                        "type": "string",
+                        "description": "Brief 2-5 word noun phrase describing the specific task."
+                    }
+                },
+                "required": ["CommandLine"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "view_file",
+            "description": "View the contents of a file from the local filesystem with optional line slicing.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "AbsolutePath": {
+                        "type": "string",
+                        "description": "Path to file to view (absolute or relative to workspace)."
+                    },
+                    "StartLine": {
+                        "type": "integer",
+                        "description": "Optional start line number, 1-indexed inclusive."
+                    },
+                    "EndLine": {
+                        "type": "integer",
+                        "description": "Optional end line number, 1-indexed inclusive."
+                    }
+                },
+                "required": ["AbsolutePath"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_to_file",
+            "description": "Create a new file or completely overwrite an existing file with given code content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "TargetFile": {
+                        "type": "string",
+                        "description": "The target file to create and write code to."
+                    },
+                    "CodeContent": {
+                        "type": "string",
+                        "description": "The exact code contents to write to the file."
+                    },
+                    "Overwrite": {
+                        "type": "boolean",
+                        "description": "Set to true to overwrite an existing file."
+                    }
+                },
+                "required": ["TargetFile", "CodeContent", "Overwrite"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "replace_file_content",
+            "description": "Edit an existing file by replacing a single contiguous block of target text with replacement text.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "TargetFile": {
+                        "type": "string",
+                        "description": "The target file to modify."
+                    },
+                    "TargetContent": {
+                        "type": "string",
+                        "description": "The exact substring to be replaced."
+                    },
+                    "ReplacementContent": {
+                        "type": "string",
+                        "description": "The complete replacement content."
+                    }
+                },
+                "required": ["TargetFile", "TargetContent", "ReplacementContent"]
+            }
+        }
+    }
+]
 
-def print_banner(workspace: Path, model_name: str, think_level: str):
+
+def print_banner(workspace: Path, think_level: str):
     banner = f"""
-{C_PURPLE}      ▄▀▀▄        {C_BOLD}Antigravity Local Agent{C_RESET} {C_GRAY}(v2.0){C_RESET}
-{C_PURPLE}     ▀▀▀▀▀▀       {C_CYAN}Strata Qwen3.8-Flash-Next Coder (IQ1_M){C_RESET}
-{C_PURPLE}    ▀▀▀▀▀▀▀▀      {C_DIM}Engine:{C_RESET} {DEFAULT_URL} {C_GREEN}[ROCm Active]{C_RESET}
+{C_PURPLE}      ▄▀▀▄        {C_BOLD}Google Antigravity Agent{C_RESET} {C_GRAY}(Local Edition v2.0){C_RESET}
+{C_PURPLE}     ▀▀▀▀▀▀       {C_CYAN}Qwen3.8-Flash-Next Coder (IQ1_M){C_RESET}
+{C_PURPLE}    ▀▀▀▀▀▀▀▀      {C_DIM}Engine:{C_RESET} {DEFAULT_URL} {C_GREEN}[ROCm GPU Active]{C_RESET}
 {C_PURPLE}   ▄▀▀    ▀▀▄     {C_DIM}Workspace:{C_RESET} {workspace}
-{C_PURPLE}  ▄▀▀      ▀▀▄    {C_DIM}Reasoning Effort:{C_RESET} {C_YELLOW}{think_level}{C_RESET}
+{C_PURPLE}  ▄▀▀      ▀▀▄    {C_DIM}Reasoning Effort:{C_RESET} {C_YELLOW}{think_level}{C_RESET} {C_DIM}· Tools: run_command, view_file, write_to_file, replace{C_RESET}
 {C_GRAY}─────────────────────────────────────────────────────────────────────────────{C_RESET}
 {C_DIM}Commands: /clear, /think <level>, /status, /cloud (Gemini), !<cmd> (shell), @file{C_RESET}
 {C_GRAY}─────────────────────────────────────────────────────────────────────────────{C_RESET}
 """
     sys.stdout.write(banner)
     sys.stdout.flush()
+
+
+def build_antigravity_system_prompt(workspace: Path) -> str:
+    return f"""<identity>
+You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.
+You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.
+You run 100% locally on the user's workstation powered by Strata's Qwen3.8-Flash-Next Coder engine.
+</identity>
+
+<user_information>
+The USER's OS version is linux.
+Command Working Directory: {workspace}
+Active Workspaces:
+- {workspace}
+</user_information>
+
+<guidelines>
+- Always use the provided tools (`view_file`, `write_to_file`, `replace_file_content`, `run_command`) to inspect files, make changes, and run tests.
+- When inspecting a file, prefer `view_file`.
+- When writing a whole new file, use `write_to_file`.
+- When making targeted modifications to an existing file, use `replace_file_content`.
+- When checking system state or running build/test scripts, use `run_command`.
+- Keep explanations concise, clear, and focused on the results.
+</guidelines>"""
 
 
 def resolve_file_references(prompt: str, workspace: Path) -> str:
@@ -75,13 +204,112 @@ def resolve_file_references(prompt: str, workspace: Path) -> str:
     return new_prompt
 
 
-def stream_chat_completion(messages: list[dict], url: str, api_key: str,
-                           think_level: str = "low", max_tokens: int = 4096,
-                           temperature: float = 0.2):
+# Tool implementations
+def tool_view_file(args: dict, workspace: Path) -> str:
+    path_str = args.get("AbsolutePath") or args.get("path")
+    if not path_str:
+        return "Error: AbsolutePath required"
+    p = Path(path_str).expanduser()
+    if not p.is_absolute():
+        p = (workspace / p).resolve()
+    if not p.is_file():
+        return f"Error: File not found: {p}"
+    try:
+        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+        start = args.get("StartLine", 1) or 1
+        end = args.get("EndLine", len(lines)) or len(lines)
+        start = max(1, min(start, len(lines)))
+        end = max(start, min(end, len(lines)))
+        selected = lines[start - 1 : end]
+        numbered = [f"{i}: {line}" for i, line in enumerate(selected, start=start)]
+        return f"File: {p} (lines {start}-{end} of {len(lines)})\n" + "\n".join(numbered)
+    except Exception as e:
+        return f"Error reading file {p}: {e}"
+
+
+def tool_write_to_file(args: dict, workspace: Path) -> str:
+    path_str = args.get("TargetFile") or args.get("path")
+    if not path_str:
+        return "Error: TargetFile required"
+    p = Path(path_str).expanduser()
+    if not p.is_absolute():
+        p = (workspace / p).resolve()
+    overwrite = args.get("Overwrite", True)
+    if p.exists() and not overwrite:
+        return f"Error: File {p} already exists and Overwrite is False"
+    content = args.get("CodeContent") or args.get("content") or ""
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        return f"Successfully wrote {len(content)} characters to {p}"
+    except Exception as e:
+        return f"Error writing file {p}: {e}"
+
+
+def tool_replace_file_content(args: dict, workspace: Path) -> str:
+    path_str = args.get("TargetFile") or args.get("path")
+    if not path_str:
+        return "Error: TargetFile required"
+    p = Path(path_str).expanduser()
+    if not p.is_absolute():
+        p = (workspace / p).resolve()
+    if not p.is_file():
+        return f"Error: File not found: {p}"
+    target = args.get("TargetContent", "")
+    replacement = args.get("ReplacementContent", "")
+    try:
+        orig = p.read_text(encoding="utf-8", errors="replace")
+        if target not in orig:
+            return f"Error: TargetContent not found in {p}"
+        new_text = orig.replace(target, replacement, 1)
+        p.write_text(new_text, encoding="utf-8")
+        return f"Successfully updated {p}"
+    except Exception as e:
+        return f"Error updating file {p}: {e}"
+
+
+def tool_run_command(args: dict, workspace: Path) -> str:
+    cmd = args.get("CommandLine") or args.get("command")
+    if not cmd:
+        return "Error: CommandLine required"
+    cwd_str = args.get("Cwd")
+    cwd = Path(cwd_str).resolve() if cwd_str else workspace
+    try:
+        res = subprocess.run(cmd, shell=True, cwd=cwd, text=True, capture_output=True, timeout=120)
+        out = []
+        if res.stdout:
+            out.append(res.stdout)
+        if res.stderr:
+            out.append(f"Stderr:\n{res.stderr}")
+        out.append(f"[Command exited with code {res.returncode}]")
+        return "\n".join(out).strip()
+    except subprocess.TimeoutExpired:
+        return "Error: Command timed out after 120s"
+    except Exception as e:
+        return f"Error running command: {e}"
+
+
+def dispatch_antigravity_tool(name: str, args: dict, workspace: Path) -> str:
+    if name == "view_file":
+        return tool_view_file(args, workspace)
+    elif name == "write_to_file":
+        return tool_write_to_file(args, workspace)
+    elif name == "replace_file_content":
+        return tool_replace_file_content(args, workspace)
+    elif name == "run_command":
+        return tool_run_command(args, workspace)
+    else:
+        return f"Error: Unknown tool {name}"
+
+
+def stream_chat_turn(messages: list[dict], url: str, api_key: str,
+                     think_level: str = "low", max_tokens: int = 4096,
+                     temperature: float = 0.2):
     endpoint = f"{url.rstrip('/')}/v1/chat/completions"
     payload = {
         "model": "strata",
         "messages": messages,
+        "tools": ANTIGRAVITY_TOOLS,
         "max_tokens": max_tokens,
         "reasoning_effort": think_level,
         "temperature": temperature,
@@ -101,8 +329,9 @@ def stream_chat_completion(messages: list[dict], url: str, api_key: str,
     reasoning_closed = False
     full_reasoning = []
     full_content = []
+    tool_calls_dict = {}  # index -> {"id": ..., "name": ..., "arguments": ...}
     tok_count = 0
-    timings = {}
+    finish_reason = None
 
     try:
         with urllib.request.urlopen(req, timeout=600) as resp:
@@ -119,10 +348,10 @@ def stream_chat_completion(messages: list[dict], url: str, api_key: str,
                     except json.JSONDecodeError:
                         continue
 
-                    if "timings" in chunk:
-                        timings = chunk["timings"]
-
-                    delta = (chunk.get("choices") or [{}])[0].get("delta") or {}
+                    choice = (chunk.get("choices") or [{}])[0]
+                    delta = choice.get("delta") or {}
+                    if choice.get("finish_reason"):
+                        finish_reason = choice["finish_reason"]
 
                     # 1. Reasoning chunk
                     reasoning_chunk = delta.get("reasoning_content")
@@ -146,10 +375,33 @@ def stream_chat_completion(messages: list[dict], url: str, api_key: str,
                         sys.stdout.flush()
                         full_content.append(content_chunk)
 
+                    # 3. Tool call chunks
+                    tc_deltas = delta.get("tool_calls")
+                    if tc_deltas:
+                        if reasoning_started and not reasoning_closed:
+                            sys.stdout.write(f"{C_RESET}\n")
+                            reasoning_closed = True
+                        for tc_item in tc_deltas:
+                            idx = tc_item.get("index", 0)
+                            if idx not in tool_calls_dict:
+                                tool_calls_dict[idx] = {
+                                    "id": tc_item.get("id") or f"call_{idx}",
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc_item.get("function", {}).get("name", ""),
+                                        "arguments": ""
+                                    }
+                                }
+                            if tc_item.get("function", {}).get("name"):
+                                tool_calls_dict[idx]["function"]["name"] = tc_item["function"]["name"]
+                            if tc_item.get("function", {}).get("arguments"):
+                                tool_calls_dict[idx]["function"]["arguments"] += tc_item["function"]["arguments"]
+
             if reasoning_started and not reasoning_closed:
                 sys.stdout.write(f"{C_RESET}\n")
 
-            sys.stdout.write("\n")
+            if full_content:
+                sys.stdout.write("\n")
             sys.stdout.flush()
 
     except urllib.error.HTTPError as e:
@@ -160,30 +412,88 @@ def stream_chat_completion(messages: list[dict], url: str, api_key: str,
 
     dt = time.time() - t0
     rate = tok_count / dt if dt > 0 else 0
+    parsed_tool_calls = [tool_calls_dict[i] for i in sorted(tool_calls_dict.keys())]
+
     return {
         "reasoning": "".join(full_reasoning),
-        "content": "".join(full_content),
+        "content": "".join(full_content) if full_content else None,
+        "tool_calls": parsed_tool_calls,
+        "finish_reason": finish_reason or ("tool_calls" if parsed_tool_calls else "stop"),
         "tokens": tok_count,
         "wall_time": dt,
         "rate": rate,
-        "timings": timings,
     }
 
 
-def execute_shell_command(cmd: str, cwd: Path) -> str:
-    print(f"\n{C_PURPLE}Running:{C_RESET} {cmd}\n")
-    try:
-        res = subprocess.run(cmd, shell=True, cwd=cwd, text=True, capture_output=True)
-        if res.stdout:
-            sys.stdout.write(res.stdout)
-        if res.stderr:
-            sys.stderr.write(f"{C_RED}{res.stderr}{C_RESET}")
-        output = (res.stdout + ("\n" + res.stderr if res.stderr else "")).strip()
-        print(f"\n{C_DIM}[Command exited with code {res.returncode}]{C_RESET}\n")
-        return output
-    except Exception as e:
-        print(f"{C_RED}Error running command: {e}{C_RESET}")
-        return f"Error: {e}"
+def format_args_preview(args: dict) -> str:
+    parts = []
+    for k, v in args.items():
+        val_str = str(v)
+        if len(val_str) > 40:
+            val_str = val_str[:37] + "..."
+        parts.append(f"{k}={repr(val_str)}")
+    return ", ".join(parts)
+
+
+def execute_agent_loop(messages: list[dict], url: str, api_key: str,
+                       workspace: Path, think_level: str = "low", max_turns: int = 10):
+    turn = 0
+    total_tokens = 0
+    t_start = time.time()
+
+    while turn < max_turns:
+        turn += 1
+        res = stream_chat_turn(
+            messages=messages,
+            url=url,
+            api_key=api_key,
+            think_level=think_level,
+        )
+        total_tokens += res["tokens"]
+
+        # Append assistant turn
+        asst_msg = {"role": "assistant"}
+        if res["content"] is not None:
+            asst_msg["content"] = res["content"]
+        if res["reasoning"]:
+            asst_msg["reasoning_content"] = res["reasoning"]
+        if res["tool_calls"]:
+            asst_msg["tool_calls"] = res["tool_calls"]
+        messages.append(asst_msg)
+
+        # If no tool calls, turn is complete
+        if not res["tool_calls"]:
+            wall = time.time() - t_start
+            rate = total_tokens / wall if wall > 0 else 0
+            print(f"{C_GRAY}[{total_tokens} tokens in {wall:.1f}s · {rate:.1f} t/s]{C_RESET}\n")
+            break
+
+        # Process and execute each tool call
+        for tc in res["tool_calls"]:
+            fn = tc.get("function", {})
+            fn_name = fn.get("name", "")
+            raw_args = fn.get("arguments", "{}")
+            try:
+                args = json.loads(raw_args)
+            except Exception:
+                args = {}
+
+            print(f"{C_PURPLE}⚙ [Antigravity Tool]{C_RESET} {C_BOLD}{fn_name}{C_RESET}({format_args_preview(args)})")
+
+            result_str = dispatch_antigravity_tool(fn_name, args, workspace)
+
+            # Show a concise preview of the result in terminal
+            res_preview = result_str.strip()
+            if len(res_preview) > 160:
+                res_preview = res_preview[:160] + "..."
+            print(f"{C_DIM}  ↳ {res_preview}{C_RESET}\n")
+
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.get("id") or "call_1",
+                "name": fn_name,
+                "content": result_str
+            })
 
 
 def check_status(url: str, api_key: str):
@@ -201,20 +511,7 @@ def check_status(url: str, api_key: str):
         print(f"{C_RED}Failed to reach Strata at {url}: {e}{C_RESET}\n")
 
 
-def build_system_prompt(workspace: Path) -> str:
-    return (
-        "You are Antigravity Local Agent, an elite AI pair programmer and software engineer "
-        "powered by Strata's local Qwen3.8-Flash-Next Coder model running on local GPU acceleration.\n"
-        f"You are operating inside the developer's workspace at: {workspace}.\n\n"
-        "Guidelines:\n"
-        "- Give clear, concise, and direct explanations.\n"
-        "- When writing or modifying code, provide complete, robust implementations.\n"
-        "- When proposing bash shell commands to run, wrap them in ```bash ... ``` code blocks.\n"
-        "- Keep the workflow focused, fast, and helpful."
-    )
-
-
-def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str = "low", auto_exec: bool = False):
+def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str = "low"):
     history_file = Path.home() / ".gemini" / "antigravity_local_history"
     history_file.parent.mkdir(parents=True, exist_ok=True)
     if history_file.is_file():
@@ -223,10 +520,10 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
         except Exception:
             pass
 
-    system_prompt = build_system_prompt(workspace)
+    system_prompt = build_antigravity_system_prompt(workspace)
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
-    print_banner(workspace, "Qwen3.8-Flash-Next Coder", think_level)
+    print_banner(workspace, think_level)
 
     try:
         while True:
@@ -249,7 +546,7 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 break
             elif prompt in ("/clear", "/reset"):
                 messages = [{"role": "system", "content": system_prompt}]
-                print(f"{C_GREEN}✓ Conversation reset.{C_RESET}\n")
+                print(f"{C_GREEN}✓ Antigravity memory reset.{C_RESET}\n")
                 continue
             elif prompt == "/help":
                 print(f"\n{C_BOLD}Antigravity Local Commands:{C_RESET}")
@@ -257,7 +554,7 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 print(f"  /think <none|low|med|high> Set reasoning effort level")
                 print(f"  /status               Check Strata server health")
                 print(f"  /cloud                Switch to upstream Google Gemini agy")
-                print(f"  !<shell command>      Execute command directly in workspace")
+                print(f"  !<shell command>      Execute bash command directly in workspace")
                 print(f"  @filename             Inject file content into your prompt\n")
                 continue
             elif prompt.startswith("/think"):
@@ -277,54 +574,29 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
             elif prompt == "/cloud":
                 print(f"{C_YELLOW}Switching to Google Cloud agy CLI...{C_RESET}\n")
                 subprocess.run(["/home/damirl/.local/bin/agy"], cwd=workspace)
-                print_banner(workspace, "Qwen3.8-Flash-Next Coder", think_level)
+                print_banner(workspace, think_level)
                 continue
             elif prompt.startswith("!"):
                 cmd = prompt[1:].strip()
                 if cmd:
-                    execute_shell_command(cmd, workspace)
+                    out = tool_run_command({"CommandLine": cmd}, workspace)
+                    print(f"\n{out}\n")
                 continue
 
-            # File injection
+            # File context injection
             resolved_prompt = resolve_file_references(prompt, workspace)
             messages.append({"role": "user", "content": resolved_prompt})
 
             try:
-                res = stream_chat_completion(
+                execute_agent_loop(
                     messages=messages,
                     url=url,
                     api_key=api_key,
+                    workspace=workspace,
                     think_level=think_level,
                 )
-                assistant_text = res["content"]
-                messages.append({"role": "assistant", "content": assistant_text})
-
-                # Stats footer
-                rate_str = f" · {res['rate']:.1f} t/s" if res['rate'] > 0 else ""
-                print(f"{C_GRAY}[{res['tokens']} tokens in {res['wall_time']:.1f}s{rate_str}]{C_RESET}\n")
-
-                # Detect bash command proposal
-                bash_blocks = re.findall(r"```(?:bash|sh)\n([\s\S]*?)\n```", assistant_text)
-                if bash_blocks:
-                    for block in bash_blocks:
-                        cmd_to_run = block.strip()
-                        if auto_exec:
-                            execute_shell_command(cmd_to_run, workspace)
-                        else:
-                            try:
-                                ans = input(f"{C_CYAN}Run suggested command?{C_RESET} ({cmd_to_run}) [y/N]: ").strip().lower()
-                                if ans in ("y", "yes"):
-                                    cmd_out = execute_shell_command(cmd_to_run, workspace)
-                                    messages.append({
-                                        "role": "user",
-                                        "content": f"Command output from `{cmd_to_run}`:\n```\n{cmd_out}\n```"
-                                    })
-                            except (KeyboardInterrupt, EOFError):
-                                print("\nSkipped.")
-                                break
-
             except Exception as e:
-                print(f"{C_RED}Error during inference: {e}{C_RESET}\n")
+                print(f"{C_RED}Error during agent turn: {e}{C_RESET}\n")
                 if messages and messages[-1].get("role") == "user":
                     messages.pop()
 
@@ -336,13 +608,12 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Antigravity Local CLI on Strata Engine")
+    parser = argparse.ArgumentParser(description="Antigravity Local Agent CLI on Strata Engine")
     parser.add_argument("--workspace", default=os.getcwd(), help="Workspace directory")
     parser.add_argument("--url", default=DEFAULT_URL, help="Strata URL")
     parser.add_argument("--api-key", default=DEFAULT_API_KEY, help="Strata API Key")
     parser.add_argument("--think", default="low", choices=["none", "low", "medium", "high"], help="Reasoning effort")
     parser.add_argument("-p", "--prompt", help="Run single prompt non-interactively and exit")
-    parser.add_argument("--auto", "--dangerously-skip-permissions", action="store_true", help="Auto-run suggested commands")
 
     args = parser.parse_args()
     ws = Path(args.workspace).resolve()
@@ -350,17 +621,17 @@ def main():
     if args.prompt:
         resolved = resolve_file_references(args.prompt, ws)
         messages = [
-            {"role": "system", "content": build_system_prompt(ws)},
+            {"role": "system", "content": build_antigravity_system_prompt(ws)},
             {"role": "user", "content": resolved}
         ]
         try:
-            stream_chat_completion(messages, args.url, args.api_key, think_level=args.think)
+            execute_agent_loop(messages, args.url, args.api_key, ws, think_level=args.think)
             sys.exit(0)
         except Exception as e:
             sys.stderr.write(f"Error: {e}\n")
             sys.exit(1)
 
-    interactive_loop(ws, args.url, args.api_key, think_level=args.think, auto_exec=args.auto)
+    interactive_loop(ws, args.url, args.api_key, think_level=args.think)
 
 
 if __name__ == "__main__":
