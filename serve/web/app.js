@@ -1696,6 +1696,7 @@ async function uploadFilesToWorkspace(fileList) {
 }
 
 if ($("workspace-btn")) $("workspace-btn").onclick = () => openWorkspace(true);
+if ($("code-workspace-btn")) $("code-workspace-btn").onclick = () => openWorkspace(true);
 if ($("ws-close-btn")) $("ws-close-btn").onclick = () => openWorkspace(false);
 if ($("ws-refresh-btn")) $("ws-refresh-btn").onclick = () => loadWorkspaceFiles();
 if ($("ws-search")) $("ws-search").oninput = () => renderWorkspaceFiles();
