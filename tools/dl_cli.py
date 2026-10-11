@@ -1162,19 +1162,25 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
     return current_ws
 
 
-def check_status(url: str, api_key: str):
+def check_status(url: str, api_key: str) -> str:
     endpoint = f"{url.rstrip('/')}/health"
     req = urllib.request.Request(endpoint, headers={"Authorization": f"Bearer {api_key}"})
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            print(f"\n{C_BOLD}Strata Engine Status:{C_RESET}")
-            print(f"  • Status:     {C_GREEN}{data.get('status', 'ok')}{C_RESET}")
-            print(f"  • Model:      {C_ACCENT_SOFT}{data.get('model', 'unknown')}{C_RESET}")
-            print(f"  • Context:    {data.get('max_context', 0):,} tokens")
-            print(f"  • Accelerator: ROCm GPU + Resident RAM\n")
+            out = (
+                f"\n{C_BOLD}Strata Engine Status:{C_RESET}\n"
+                f"  • Status:     {C_GREEN}{data.get('status', 'ok')}{C_RESET}\n"
+                f"  • Model:      {C_ACCENT_SOFT}{data.get('model', 'unknown')}{C_RESET}\n"
+                f"  • Context:    {data.get('max_context', 0):,} tokens\n"
+                f"  • Accelerator: ROCm GPU + Resident RAM\n"
+            )
+            print(out)
+            return out.strip()
     except Exception as e:
-        print(f"{C_RED}Failed to reach Strata at {url}: {e}{C_RESET}\n")
+        err = f"{C_RED}Failed to reach Strata at {url}: {e}{C_RESET}\n"
+        print(err)
+        return err.strip()
 
 
 def format_messages_to_markdown(messages: list[dict], model_name: str = "Qwen3.8-Flash-Next Coder",
@@ -1324,8 +1330,8 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 print(f"  /clear, /reset        Reset conversation memory")
                 print(f"  /think <none|low|med|high> Set reasoning effort level")
                 print(f"  /prefix [toggle|text] Set assistant seed prefix to suppress chatter")
-                print(f"  /search <query>       Direct Exa AI live web search")
-                print(f"  /docs <library>       Direct Context7 library documentation lookup")
+                print(f"  /exa, /search <query> Direct Exa AI live web search")
+                print(f"  /context7, /docs <lib> Direct Context7 library documentation lookup")
                 print(f"  /status               Check Strata server health")
                 print(f"  !<shell command>      Execute bash command directly in workspace")
                 print(f"  @filename             Inject file content into your prompt\n")
@@ -1398,21 +1404,34 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                     if current_mode == "plan":
                         current_mode = "act"
                         messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
-                        print(f"{C_GREEN}⚡ Switched to ACT MODE. Full execution & file edits enabled.{C_RESET}\n")
+                        msg_text = "⚡ Switched to ACT MODE. Full execution & file edits enabled."
+                        print(f"{C_GREEN}{msg_text}{C_RESET}\n")
                     else:
                         current_mode = "plan"
                         messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
-                        print(f"{C_YELLOW}📋 Switched to PLAN MODE. File modifications disabled. Exploration & architecture enabled.{C_RESET}\n")
+                        msg_text = "📋 Switched to PLAN MODE. File modifications disabled. Exploration & architecture enabled."
+                        print(f"{C_YELLOW}{msg_text}{C_RESET}\n")
+                    messages.append({"role": "user", "content": prompt})
+                    messages.append({"role": "assistant", "content": msg_text})
+                    sync_current_chat_state(messages, workspace)
                     continue
                 elif sub.lower() in ("on", "start", "enable"):
                     current_mode = "plan"
                     messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
-                    print(f"{C_YELLOW}📋 Plan Mode enabled.{C_RESET}\n")
+                    msg_text = "📋 Plan Mode enabled."
+                    print(f"{C_YELLOW}{msg_text}{C_RESET}\n")
+                    messages.append({"role": "user", "content": prompt})
+                    messages.append({"role": "assistant", "content": msg_text})
+                    sync_current_chat_state(messages, workspace)
                     continue
                 elif sub.lower() in ("off", "stop", "disable"):
                     current_mode = "act"
                     messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
-                    print(f"{C_GREEN}⚡ Plan Mode disabled. Switched to ACT MODE.{C_RESET}\n")
+                    msg_text = "⚡ Plan Mode disabled. Switched to ACT MODE."
+                    print(f"{C_GREEN}{msg_text}{C_RESET}\n")
+                    messages.append({"role": "user", "content": prompt})
+                    messages.append({"role": "assistant", "content": msg_text})
+                    sync_current_chat_state(messages, workspace)
                     continue
                 else:
                     current_mode = "plan"
@@ -1431,7 +1450,8 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 current_mode = "act"
                 messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
                 if not sub:
-                    print(f"{C_GREEN}⚡ Switched to ACT MODE. Executing agreed plan...{C_RESET}\n")
+                    msg_text = "⚡ Switched to ACT MODE. Executing agreed plan..."
+                    print(f"{C_GREEN}{msg_text}{C_RESET}\n")
                     prompt = "Proceed with executing the plan now. Perform the necessary tool calls (edits, writes, tests, commands) to implement the agreed plan."
                 else:
                     print(f"{C_GREEN}⚡ Executing in ACT MODE: {sub}{C_RESET}\n")
@@ -1511,34 +1531,57 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 else:
                     print(f"Current reasoning effort: {think_level}. Usage: /think [none|low|medium|high]\n")
                 continue
-            elif prompt.startswith("/search"):
-                q = prompt[7:].strip()
+            elif prompt.startswith("/search") or prompt.startswith("/exa"):
+                if prompt.startswith("/search"):
+                    q = prompt[7:].strip()
+                else:
+                    q = prompt[4:].strip()
                 if q:
                     print(f"\n{C_CYAN}Searching Exa AI for:{C_RESET} {q}\n")
                     res = tool_exa_web_search({"query": q})
                     print(res)
+                    messages.append({"role": "user", "content": prompt})
+                    messages.append({"role": "assistant", "content": res})
+                    sync_current_chat_state(messages, workspace)
                 else:
-                    print("Usage: /search <query>")
+                    print("Usage: /exa <query> or /search <query>")
                 continue
-            elif prompt.startswith("/docs"):
-                lib = prompt[5:].strip()
+            elif prompt.startswith("/docs") or prompt.startswith("/context7"):
+                if prompt.startswith("/docs"):
+                    lib = prompt[5:].strip()
+                else:
+                    lib = prompt[9:].strip()
                 if lib:
                     print(f"\n{C_CYAN}Resolving Context7 docs for:{C_RESET} {lib}\n")
                     res = tool_context7_resolve({"libraryName": lib})
                     print(res)
+                    messages.append({"role": "user", "content": prompt})
+                    messages.append({"role": "assistant", "content": res})
+                    sync_current_chat_state(messages, workspace)
                 else:
-                    print("Usage: /docs <library_name>")
+                    print("Usage: /context7 <library_name> or /docs <library_name>")
                 continue
             elif prompt in ("/status", "/model"):
-                check_status(url, api_key)
+                out = check_status(url, api_key)
+                messages.append({"role": "user", "content": prompt})
+                messages.append({"role": "assistant", "content": out})
+                sync_current_chat_state(messages, workspace)
                 continue
             elif prompt in ("/health", "/sys"):
                 stats = get_system_health(url, api_key)
-                print(format_health_card(stats))
+                card = format_health_card(stats)
+                print(card)
+                messages.append({"role": "user", "content": prompt})
+                messages.append({"role": "assistant", "content": card})
+                sync_current_chat_state(messages, workspace)
                 continue
             elif prompt in ("/diff", "/audit"):
                 print(f"\n{C_ACCENT}✦ Semantic Git Diff Audit:{C_RESET}")
-                print(tool_git_diff_audit({}, workspace) + "\n")
+                diff_res = tool_git_diff_audit({}, workspace)
+                print(diff_res + "\n")
+                messages.append({"role": "user", "content": prompt})
+                messages.append({"role": "assistant", "content": diff_res})
+                sync_current_chat_state(messages, workspace)
                 continue
             elif prompt.startswith("/secrets") or prompt.startswith("/scan"):
                 parts = prompt.split(maxsplit=1)
