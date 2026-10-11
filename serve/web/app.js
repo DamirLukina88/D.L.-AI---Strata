@@ -241,7 +241,7 @@ function renderMobileCodeMessages(msgs) {
     container.innerHTML = `
       <div class="code-mobile-welcome">
         <div class="code-mobile-welcome-icon">✦</div>
-        <div class="code-mobile-welcome-title">D.L. Mobile Companion</div>
+        <div class="code-mobile-welcome-title">Mobile Companion</div>
         <div class="code-mobile-welcome-sub">Native touch feed connected to live autonomous session.</div>
       </div>`;
     return;
@@ -250,7 +250,7 @@ function renderMobileCodeMessages(msgs) {
   let html = "";
   for (const m of visible) {
     const role = m.role || "assistant";
-    const roleLabel = role === "user" ? "You" : "D.L. Agent";
+    const roleLabel = role === "user" ? "You" : "CLI";
     let bodyText = "";
     if (typeof m.content === "string") {
       bodyText = m.content;
@@ -292,6 +292,8 @@ async function sendMobileCodeInput() {
     ta.value = "";
     ta.style.height = "auto";
     setTimeout(pollMobileCodeChat, 500);
+    setTimeout(pollMobileCodeChat, 1500);
+    setTimeout(pollMobileCodeChat, 3000);
   } catch (e) {
     toast("error", "Failed to send", e.message || String(e));
   } finally {

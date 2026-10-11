@@ -4896,6 +4896,51 @@ def make_handler(svc: Service):
                             chat_payload = json.load(f)
                     except Exception:
                         pass
+
+                # If no user or assistant messages are stored yet, extract live session turns from tmux pane buffer
+                active_msgs = [m for m in chat_payload.get("messages", []) if m.get("role") in ("user", "assistant")]
+                if not active_msgs:
+                    try:
+                        res = subprocess.run(["tmux", "capture-pane", "-p", "-S", "-", "-t", "dl-ai-code:0"],
+                                             capture_output=True, text=True, check=False)
+                        if res.returncode == 0 and res.stdout.strip():
+                            clean = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', res.stdout)
+                            lines = clean.splitlines()
+                            turns = []
+                            current_role = None
+                            current_lines = []
+                            for line in lines:
+                                stripped = line.strip()
+                                m = re.match(r'^(?:dl|cli)\s*(?:\([^)]+\))?\s*›\s*(.*)$', stripped)
+                                if m:
+                                    user_cmd = m.group(1).strip()
+                                    if current_role and current_lines:
+                                        content = "\n".join(current_lines).strip()
+                                        if content:
+                                            turns.append({"role": current_role, "content": content})
+                                        current_lines = []
+                                    if user_cmd:
+                                        turns.append({"role": "user", "content": user_cmd})
+                                        current_role = "assistant"
+                                    else:
+                                        current_role = None
+                                    continue
+                                if current_role == "assistant":
+                                    if any(stripped.startswith(c) for c in ('╭', '│', '├', '╰', '─', '━')):
+                                        continue
+                                    if re.match(r'^\[\d+ tokens in .*\]', stripped):
+                                        continue
+                                    current_lines.append(line)
+                            if current_role and current_lines:
+                                content = "\n".join(current_lines).strip()
+                                if content:
+                                    turns.append({"role": current_role, "content": content})
+                            if turns:
+                                chat_payload["messages"] = turns
+                                chat_payload["updated_at"] = time.time()
+                    except Exception:
+                        pass
+
                 self._json(200, chat_payload)
                 return
             if path == "/api/code/export":
@@ -5310,8 +5355,9 @@ def make_handler(svc: Service):
                     if not text:
                         self._json(400, {"error": {"message": "text required"}})
                         return
-                    # Send input and Enter to dl-ai-code session window
-                    subprocess.run(["tmux", "send-keys", "-t", "dl-ai-code:0", text, "Enter"], check=False)
+                    # Send input literals and C-m to dl-ai-code session window
+                    subprocess.run(["tmux", "send-keys", "-t", "dl-ai-code:0", "-l", text], check=False)
+                    subprocess.run(["tmux", "send-keys", "-t", "dl-ai-code:0", "C-m"], check=False)
                     self._json(200, {"status": "ok", "sent": text, "target": "dl-ai-code"})
                 except Exception as e:
                     self._json(500, {"error": {"message": f"failed to send keys: {e}"}})
