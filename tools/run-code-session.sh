@@ -115,9 +115,9 @@ while true; do
     echo -e "\033[38;5;238m╰─────────────────────────────────────────────────────────────────────────────╯\033[0m\n"
 
     if [ -x "$DEEPSEEK_BIN" ]; then
-        "$DEEPSEEK_BIN" || true
+        "$DEEPSEEK_BIN" -s --think || true
     elif command -v deepseek >/dev/null 2>&1; then
-        deepseek || true
+        deepseek -s --think || true
     else
         echo -e "\033[1;31mError: deepseek binary not found ($DEEPSEEK_BIN)\033[0m"
     fi
