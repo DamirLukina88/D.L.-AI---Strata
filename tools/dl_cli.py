@@ -1297,8 +1297,8 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 current_mode = "act"
                 messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
                 if not sub:
-                    print(f"{C_GREEN}⚡ Switched to ACT MODE. Ready to execute.{C_RESET}\n")
-                    continue
+                    print(f"{C_GREEN}⚡ Switched to ACT MODE. Executing agreed plan...{C_RESET}\n")
+                    prompt = "Proceed with executing the plan now. Perform the necessary tool calls (edits, writes, tests, commands) to implement the agreed plan."
                 else:
                     print(f"{C_GREEN}⚡ Executing in ACT MODE: {sub}{C_RESET}\n")
                     prompt = sub
