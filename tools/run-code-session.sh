@@ -59,8 +59,9 @@ done
 EOF
 chmod +x "$CLAUDE_RUNNER"
 
-# 2. Antigravity CLI runner
+# 2. Antigravity CLI runner (Local Strata Qwen Agent)
 AGY_RUNNER="/tmp/dl-ai-agy-runner.sh"
+AGY_LOCAL_BIN="/home/damirl/Desktop/Strata/tools/antigravity_local.py"
 cat << EOF > "$AGY_RUNNER"
 #!/usr/bin/env bash
 export TERM="xterm-256color"
@@ -73,24 +74,24 @@ export OPENAI_BASE_URL="http://127.0.0.1:8080/v1"
 cd "$WORKSPACE_DIR"
 
 while true; do
-    echo -e "\033[1;36m=====================================================\033[0m"
-    echo -e "\033[1;35m  D.L. AI — Google Antigravity (AGY) Autonomous CLI  \033[0m"
-    echo -e "\033[0;37m  Workspace: $WORKSPACE_DIR\033[0m"
-    echo -e "\033[0;37m  Engine:    Antigravity 2.0 with Strata Local Coder \033[0m"
-    echo -e "\033[1;36m=====================================================\033[0m\n"
-
-    if [ -x "$AGY_BIN" ]; then
+    if [ -f "$AGY_LOCAL_BIN" ]; then
+        python3 "$AGY_LOCAL_BIN" --workspace "$WORKSPACE_DIR" --url "http://127.0.0.1:8080" --api-key "$STRATA_API_KEY" || true
+    elif [ -x "$AGY_BIN" ]; then
         "$AGY_BIN" || true
-    elif command -v agy >/dev/null 2>&1; then
-        agy || true
     else
-        echo -e "\033[1;31mError: agy binary not found ($AGY_BIN)\033[0m"
+        echo -e "\033[1;31mError: Antigravity local agent not found ($AGY_LOCAL_BIN)\033[0m"
     fi
 
     echo -e "\n\033[1;33mAntigravity CLI session ended.\033[0m"
-    echo -e "Press \033[1m[Enter]\033[0m to restart, or type \033[1mbash\033[0m for terminal:"
+    echo -e "Press \033[1m[Enter]\033[0m to restart, type \033[1mcloud\033[0m for Gemini agy, or \033[1mbash\033[0m for shell:"
     read -r user_choice
-    if [ "\$user_choice" = "bash" ] || [ "\$user_choice" = "sh" ]; then
+    if [ "\$user_choice" = "cloud" ]; then
+        if [ -x "$AGY_BIN" ]; then
+            "$AGY_BIN" || true
+        else
+            echo "Cloud agy not found."
+        fi
+    elif [ "\$user_choice" = "bash" ] || [ "\$user_choice" = "sh" ]; then
         echo -e "\033[1;34mStarting interactive workspace shell (type 'exit' to return)...\033[0m"
         bash -i || true
     fi
