@@ -133,11 +133,16 @@ if ($("code-restart-btn")) {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       toast("info", "Session restarted", "CLI session reset.");
       const frame = $("code-terminal-frame");
-      if (frame && (!frame.src || frame.src === "about:blank")) {
+      if (frame) {
         const key = store.get("apikey", DEFAULT_KEY);
         try { document.cookie = `strata_key=${encodeURIComponent(key)}; path=/; SameSite=Lax`; } catch (e) {}
-        frame.src = "/code/";
+        frame.src = "about:blank";
+        setTimeout(() => { frame.src = "/code/"; }, 100);
       }
+      lastMobileChatHash = "";
+      renderMobileCodeMessages([]);
+      setTimeout(pollMobileCodeChat, 500);
+      setTimeout(pollMobileCodeChat, 1500);
     } catch (e) {
       toast("error", "Restart failed", e.message);
     }

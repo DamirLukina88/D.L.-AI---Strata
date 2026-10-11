@@ -4926,8 +4926,6 @@ def make_handler(svc: Service):
                                         current_role = None
                                     continue
                                 if current_role == "assistant":
-                                    if any(stripped.startswith(c) for c in ('╭', '│', '├', '╰', '─', '━')):
-                                        continue
                                     if re.match(r'^\[\d+ tokens in .*\]', stripped):
                                         continue
                                     current_lines.append(line)
@@ -5342,6 +5340,11 @@ def make_handler(svc: Service):
                     if res.returncode != 0:
                         subprocess.run(["tmux", "kill-session", "-t", "dl-ai-code"], check=False)
                         subprocess.run(["systemctl", "--user", "restart", "claude-terminal"], check=False)
+                    if os.path.exists("/tmp/dl-cli-current-chat.json"):
+                        try:
+                            os.remove("/tmp/dl-cli-current-chat.json")
+                        except Exception:
+                            pass
                     self._json(200, {"status": "ok", "message": "CLI session restarted", "active": "dl-ai-code"})
                 except Exception as e:
                     self._json(500, {"error": {"message": f"failed to restart session: {e}"}})
