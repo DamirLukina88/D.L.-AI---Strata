@@ -1750,18 +1750,19 @@ async function attachFromWorkspace(f) {
 
 async function downloadFromWorkspace(f) {
   try {
-    toast("info", "Downloading…", f.name, 1500);
-    const r = await fetch(`api/workspace/download?file=${encodeURIComponent(f.path)}`, { headers: headers() });
+    // a single-use link the browser's own download manager fetches: streamed straight to disk, with progress and
+    // resume, instead of holding the whole file in page memory (large zips failed on mobile)
+    const r = await fetch("api/workspace/download-ticket", {
+      method: "POST", headers: headers(true), body: JSON.stringify({ file: f.path }),
+    });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const blob = await r.blob();
-    const url = URL.createObjectURL(blob);
+    const { url } = await r.json();
     const a = document.createElement("a");
     a.href = url;
     a.download = f.name;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
     toast("success", "Download started", f.name);
   } catch (err) {
     toast("error", "Download failed", err.message);

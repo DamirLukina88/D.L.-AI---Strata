@@ -39,6 +39,7 @@ import select
 import signal
 import socket
 import struct
+import secrets
 import shutil
 import subprocess
 import sys
@@ -51,7 +52,7 @@ from http.client import HTTPException
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Iterator, Protocol
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -82,6 +83,28 @@ WORKSPACE_TEXT_EXTS = {
     ".r", ".jl", ".scala", ".sql", ".sh", ".bash", ".zsh", ".fish", ".ps1", ".bat", ".cmd",
     ".diff", ".patch", ".dockerfile", ".gitignore", ".proto", ".graphql"
 }
+
+
+_download_tickets: dict[str, tuple[Path, float]] = {}
+_download_tickets_lock = threading.Lock()
+
+
+def new_download_ticket(target: Path, ttl: float = 60.0) -> str:
+    """A single-use, short-lived name for one workspace file, so a browser can download it by plain navigation
+    without the API key in the URL (the LAN case; behind Cloudflare Access the login cookie does it)."""
+    tok = secrets.token_urlsafe(24)
+    now = time.monotonic()
+    with _download_tickets_lock:
+        for k in [k for k, (_, exp) in _download_tickets.items() if exp < now]:
+            del _download_tickets[k]
+        _download_tickets[tok] = (target, now + ttl)
+    return tok
+
+
+def take_download_ticket(tok: str) -> Path | None:
+    with _download_tickets_lock:
+        target, exp = _download_tickets.pop(tok, (None, 0.0))
+    return target if target is not None and exp >= time.monotonic() else None
 
 
 def safe_workspace_path(rel_path: str) -> Path | None:
@@ -5190,6 +5213,56 @@ def make_handler(svc: Service):
             self.end_headers()
             self.wfile.write(body)
 
+        def _send_file_download(self, target: Path):
+            size = target.stat().st_size
+            start, end = 0, size - 1
+            rng = self.headers.get("Range", "")
+            m = re.fullmatch(r"bytes=(\d*)-(\d*)", rng.strip()) if rng else None
+            partial = bool(m and (m.group(1) or m.group(2)))
+            if partial:
+                if m.group(1):
+                    start = int(m.group(1))
+                    end = min(int(m.group(2)), size - 1) if m.group(2) else size - 1
+                else:                                       # bytes=-N: the last N bytes
+                    start = max(size - int(m.group(2)), 0)
+                if start > end or start >= size:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+            mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+            ascii_name = target.name.encode("ascii", "replace").decode().replace("?", "_").replace('"', "_")
+            try:
+                f = open(target, "rb")
+            except OSError as e:
+                self._json(500, {"error": {"message": f"download failed: {e}"}})
+                return
+            with f:
+                self.send_response(206 if partial else 200)
+                self.send_header("Content-Type", mime)
+                self.send_header("Content-Disposition",
+                                 f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(target.name)}")
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Cache-Control", "no-store")
+                if partial:
+                    self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+                self.send_header("Content-Length", str(end - start + 1))
+                self.end_headers()
+                if self.command == "HEAD":
+                    return
+                f.seek(start)
+                left = end - start + 1
+                try:
+                    while left > 0:
+                        chunk = f.read(min(1 << 20, left))
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        left -= len(chunk)
+                except (BrokenPipeError, ConnectionResetError):
+                    self.close_connection = True       # the browser cancelled or paused: it resumes with Range
+
         def _access_claims(self) -> dict | None:
             """D.L. AI: the Cloudflare Access login of this request, when Access is configured and the request came
             through the local tunnel connector (cloudflared connects from loopback)."""
@@ -5598,26 +5671,25 @@ def make_handler(svc: Service):
                     self._json(500, {"error": {"message": f"failed to list workspace: {e}"}})
                 return
             if path == "/api/workspace/download":
-                if not self._authorized():
-                    return
+                # D.L. AI: streamed from disk (a 263 MB zip was read whole into memory and the page then held it as a
+                # Blob, which mobile browsers gave up on), resumable with Range, any file name.  A browser download
+                # is a plain navigation: it is authorised by the Cloudflare Access login, or on the LAN by a
+                # single-use ticket from POST /api/workspace/download-ticket.
                 qs = parse_qs(urlsplit(self.path).query)
-                target_rel = (qs.get("file") or qs.get("path") or [""])[0]
-                target = safe_workspace_path(target_rel)
+                ticket = (qs.get("ticket") or [""])[0]
+                if ticket:
+                    target = take_download_ticket(ticket)
+                    if target is None:
+                        self._json(403, {"error": {"message": "download link expired: start the download again"}})
+                        return
+                else:
+                    if not self._authorized():
+                        return
+                    target = safe_workspace_path((qs.get("file") or qs.get("path") or [""])[0])
                 if not target or not target.is_file():
                     self._json(404, {"error": {"message": "file not found in workspace"}})
                     return
-                mime, _ = mimetypes.guess_type(target.name)
-                mime = mime or "application/octet-stream"
-                try:
-                    data = target.read_bytes()
-                    self.send_response(200)
-                    self.send_header("Content-Type", mime)
-                    self.send_header("Content-Disposition", f'attachment; filename="{target.name}"')
-                    self.send_header("Content-Length", str(len(data)))
-                    self.end_headers()
-                    self.wfile.write(data)
-                except Exception as e:
-                    self._json(500, {"error": {"message": f"download failed: {e}"}})
+                self._send_file_download(target)
                 return
             if path == "/api/workspace/file":
                 if not self._authorized():
@@ -5792,6 +5864,17 @@ def make_handler(svc: Service):
                     self._json(200, res)
                 except Exception as e:
                     self._json(500, {"error": {"type": "server_error", "message": str(e)}})
+                return
+            if path == "/api/workspace/download-ticket":
+                try:
+                    req = json.loads(self._body() or b"{}")
+                except ValueError:
+                    req = {}
+                target = safe_workspace_path(str(req.get("file") or req.get("path") or ""))
+                if not target or not target.is_file():
+                    self._json(404, {"error": {"message": "file not found in workspace"}})
+                    return
+                self._json(200, {"url": f"api/workspace/download?ticket={new_download_ticket(target)}"})
                 return
             if path == "/api/workspace/upload":
                 if self._foreign_origin():
