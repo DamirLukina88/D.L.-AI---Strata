@@ -4,6 +4,7 @@
 #include "strata/core/conversation_file.hpp"
 #include "strata/core/layer.hpp"
 #include "strata/core/session.hpp"
+#include "strata/core/state_codec.hpp"
 
 #include <string>
 
@@ -56,16 +57,31 @@ bool conversation_session_sizes(const ModelGeometry& g, const SessionState& sess
                                 std::string& error);
 bool conversation_checkpoint_validate(const ConversationCheckpoint& checkpoint, const SessionState& session,
                                       const ModelGeometry& g, std::string& error);
+// Saves the session's running state into `checkpoint`, coded the way `checkpoint.state_codec` says (fp32 unless the
+// caller set otherwise, which is what a stored copy asks for). The device is synchronized before the call.
 bool conversation_checkpoint_save(ConversationCheckpoint& checkpoint, const SessionState& session,
                                   const ModelGeometry& g, std::string& error);
 bool conversation_checkpoint_restore(const ConversationCheckpoint& checkpoint, SessionState& session,
                                      const ModelGeometry& g, std::string& error);
+// A stored copy of a checkpoint chain under `codec`: ids and images as they are, every running-state array coded the
+// way `codec` says, and `state_codec` set to say so. A chain already under `codec` is copied, not coded twice.
+// `Fp32` is the plain beating copy it has always been. Host code: the chain is already in host memory.
+bool conversation_checkpoints_store(const std::vector<ConversationCheckpoint>& chain, StateCodec codec,
+                                    std::vector<ConversationCheckpoint>& out, std::string& error);
+// The inverse, in place: every coded array back to fp32. What a mount does to the checkpoints it is about to hand
+// back to the engine's live chain, so the live chain is never coded. Fp32 checkpoints are left exactly as they are.
+bool conversation_checkpoints_widen(std::vector<ConversationCheckpoint>& chain, std::string& error);
 
 struct ConversationView {
     const std::vector<int32_t>& ids;
     const std::vector<ConversationImageKey>& images;
     const std::vector<ConversationCheckpoint>& checkpoints;
     bool cvec;
+    // How the stored copy is to hold the running state (strata/core/state_codec.hpp). Fp32 - the default every
+    // caller leaves in place - stores the bytes the engine computes, exactly as before. A capture asked for with
+    // another codec writes coded bytes and says so on every checkpoint it produces; nothing it produces is read
+    // as fp32 by anything else.
+    StateCodec codec = StateCodec::Fp32;
 };
 bool conversation_snapshot_bytes(const ConversationView& view, const SessionState& session,
                                  const ModelGeometry& g, const QsaState& draft, size_t& bytes, std::string& error);
