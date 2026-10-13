@@ -97,6 +97,10 @@ window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
 // The same session runs in the terminal (dl_cli.py --attach): this tab is one more client of it.
 const CODE_SESSION = "dl-ai-code";
 const code = { conn: null, state: {}, client: "", cur: null, retry: 0, renderQueued: false, approvals: {} };
+// thinking blocks start open; the ones you close stay closed (per session, kept in this browser)
+const thinkClosedKey = `code.thinkClosed.${CODE_SESSION}`;
+const codeThinkClosed = new Set(store.get(thinkClosedKey, []));
+function codeSaveThinkState() { store.set(thinkClosedKey, [...codeThinkClosed].slice(-500)); }
 
 function codeFeed() { return $("code-mobile-messages"); }
 function codeAtBottom() { const f = codeFeed(); return !f || f.scrollHeight - f.scrollTop - f.clientHeight < 80; }
@@ -115,7 +119,7 @@ function codeCard(cls, html) {
 function codeAssistant() {
   if (code.cur) return code.cur;
   const el = codeCard("code-mobile-card--assistant cs-reply",
-    `<details class="cs-think" hidden><summary>Thinking</summary><div class="cs-think-body"></div></details><div class="cs-text md"></div>`);
+    `<details class="cs-think" hidden open><summary>Thinking</summary><div class="cs-think-body"></div></details><div class="cs-text md"></div>`);
   code.cur = { el, thinking: "", text: "" };
   return code.cur;
 }
@@ -197,7 +201,16 @@ function codeSetState(st) {
 
 function codeEvent(ev, replay) {
   switch (ev.type) {
-    case "thinking": codeAssistant().thinking += ev.text; codeQueueRender(); break;
+    case "thinking": {
+      const c = codeAssistant();
+      if (ev.block != null && c.el.dataset.block == null) {
+        c.el.dataset.block = ev.block;
+        c.el.querySelector(".cs-think").open = !codeThinkClosed.has(ev.block);
+      }
+      c.thinking += ev.text;
+      codeQueueRender();
+      break;
+    }
     case "text": codeAssistant().text += ev.text; codeQueueRender(); break;
     case "user":
       codeEnd();
@@ -231,7 +244,11 @@ function codeEvent(ev, replay) {
     case "stats": codeEnd(); codeCard("cs-stats", `${ev.tokens} tokens · ${ev.seconds}s · ${ev.rate} t/s`); break;
     case "approval_request": codeEnd(); codeApprovalCard(ev); break;
     case "approval_resolved": codeResolve(ev.id, ev.ok); break;
-    case "cleared": codeFeed().innerHTML = ""; codeEnd(); break;
+    case "cleared":
+      codeFeed().innerHTML = "";
+      codeEnd();
+      if (!replay) { codeThinkClosed.clear(); codeSaveThinkState(); }   // a live /clear, not one in the history
+      break;
     case "turn_end": codeEnd(); break;
     case "state": codeSetState(ev); break;
   }
@@ -294,6 +311,15 @@ async function codeConnect() {
     setTimeout(codeConnect, 500 * 2 ** code.retry);
   }
 }
+
+codeFeed()?.addEventListener("toggle", (e) => {
+  const d = e.target;
+  if (d.tagName !== "DETAILS" || !d.classList.contains("cs-think")) return;
+  const block = Number(d.closest(".cs-reply")?.dataset.block);
+  if (Number.isNaN(block)) return;
+  if (d.open) codeThinkClosed.delete(block); else codeThinkClosed.add(block);
+  codeSaveThinkState();
+}, true);
 
 function codeDisconnect() { if (code.conn) code.conn.abort(); code.conn = null; }
 
@@ -1006,7 +1032,7 @@ function msgEl(m, i) {
     meta.textContent = `You · ${timeStr(m.time)}`;
     el.appendChild(meta);
   } else {
-    el.innerHTML = `<details class="st-collapse think" hidden><summary>${icon("thinking", "st-icon st-icon--sm")}<span class="think-title"></span>` +
+    el.innerHTML = `<details class="st-collapse think" hidden${(m.thinkOpen ?? settings.show !== false) ? " open" : ""}><summary>${icon("thinking", "st-icon st-icon--sm")}<span class="think-title"></span>` +
       `${icon("chevron", "st-icon st-icon--sm st-chev")}</summary><div class="st-collapse__body thinking"></div></details>` +
       `<div class="st-bubble"></div><div class="st-msg__meta"><span class="meta-text"></span>` +
       `<button class="st-btn st-btn--icon" data-msg-copy aria-label="Copy the answer" title="Copy">${icon("copy")}</button></div>`;
@@ -1072,9 +1098,10 @@ function updateAssistant(el, m, streaming) {
     const body = el.querySelector(".thinking");
     if (det.open || thinkingNow) body.textContent = m.reasoning;
     else body.dataset.pending = "1";
-    // open while it streams (if wanted), closed once the answer starts - unless the user toggled it themselves
-    if (thinkingNow && settings.show && !det.dataset.touched && !det.open) { det._auto = true; det.open = true; }
-    if (!thinkingNow && det.open && !det.dataset.touched) { det._auto = true; det.open = false; }
+    // open by default; a block the user closed stays closed (kept with the message, so it survives a reload)
+    const want = m.thinkOpen ?? settings.show !== false;
+    if (det.open !== want) { det._auto = true; det.open = want; }
+    if (det.open && body.dataset.pending) { body.textContent = m.reasoning; delete body.dataset.pending; }
   }
   const bubble = el.querySelector(".st-bubble");
   if (m.error) {
@@ -1118,7 +1145,8 @@ $("chat").addEventListener("toggle", (e) => {
   const d = e.target;
   if (d.tagName !== "DETAILS" || !d.classList.contains("think")) return;
   if (d._auto) { d._auto = false; return; }          // our own open/close, not the user's
-  d.dataset.touched = "1";
+  const m = messages[+d.closest(".st-msg").dataset.i];
+  if (m) { m.thinkOpen = d.open; saveChat(); }
   const body = d.querySelector(".thinking");
   if (d.open && body.dataset.pending) { body.textContent = messages[+d.closest(".st-msg").dataset.i].reasoning; delete body.dataset.pending; }
 }, true);

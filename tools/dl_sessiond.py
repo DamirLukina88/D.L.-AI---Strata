@@ -78,7 +78,10 @@ class Session:
             self.seq += 1
             ev = {**ev, "seq": self.seq, "ts": round(time.time(), 3)}
             last = self.events[-1] if self.events else None
-            if (last and ev["type"] in ("thinking", "text") and last["type"] == ev["type"]):
+            merge = bool(last and ev["type"] in ("thinking", "text") and last["type"] == ev["type"])
+            if ev["type"] in ("thinking", "text"):             # a stable id for the block, live and in replay
+                ev["block"] = last.get("block", last["seq"]) if merge else self.seq
+            if merge:
                 last["text"] += ev["text"]                     # replay keeps one block, live clients get deltas
                 last["seq"] = ev["seq"]
             else:
