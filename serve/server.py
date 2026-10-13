@@ -85,6 +85,7 @@ WORKSPACE_TEXT_EXTS = {
 }
 
 
+SESSIOND_SOCKET = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "dl-ai" / "sessiond.sock"
 _download_tickets: dict[str, tuple[Path, float]] = {}
 _download_tickets_lock = threading.Lock()
 
@@ -5290,86 +5291,60 @@ def make_handler(svc: Service):
             self._json(401, {"error": {"type": "authentication_error", "message": "missing or wrong API key"}})
             return False
 
-        def _proxy_http(self, port: int):
-            import urllib.request, urllib.error
+        def _session_events(self, name: str):
+            """D.L. AI Code tab: the shared CLI session's live events (tools/dl_sessiond.py) as Server-Sent Events.
+            The page reads it with fetch (EventSource cannot send the API key on the LAN)."""
+            conn = socket.socket(socket.AF_UNIX)
             try:
-                req_url = f"http://127.0.0.1:{port}{self.path}"
-                hdrs = {}
-                for k, v in self.headers.items():
-                    if k.lower() not in ("host", "authorization"):
-                        hdrs[k] = v
-                sub_req = urllib.request.Request(req_url, headers=hdrs, method="GET")
-                with urllib.request.urlopen(sub_req, timeout=10) as resp:
-                    body = resp.read()
-                    self.send_response(resp.status)
-                    for h, val in resp.getheaders():
-                        if h.lower() not in ("transfer-encoding", "content-length", "connection"):
-                            self.send_header(h, val)
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
-            except urllib.error.HTTPError as e:
-                body = e.read()
-                self.send_response(e.code)
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            except Exception as e:
-                self._json(502, {"error": {"message": f"backend error: {e}"}})
-
-        def _tunnel_ws(self, port: int):
-            import socket, select
-            backend = None
+                conn.connect(str(SESSIOND_SOCKET))
+                conn.sendall((json.dumps({"op": "attach", "session": name}) + "\n").encode())
+            except OSError as e:
+                conn.close()
+                self._json(503, {"error": {"message": f"the CLI session daemon is not running ({e}): "
+                                                      "systemctl --user start dl-ai-sessiond"}})
+                return
+            self.close_connection = True
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-transform")
+            self.send_header("X-Accel-Buffering", "no")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            buf = b""
             try:
-                backend = socket.create_connection(("127.0.0.1", port), timeout=10)
-                req_line = f"{self.command} {self.path} HTTP/1.1\r\n"
-                backend.sendall(req_line.encode("ascii"))
-                for k, v in self.headers.items():
-                    if k.lower() not in ("host",):
-                        backend.sendall(f"{k}: {v}\r\n".encode("utf-8"))
-                backend.sendall(f"Host: 127.0.0.1:{port}\r\n\r\n".encode("ascii"))
-
-                client_sock = self.connection
-                client_sock.setblocking(False)
-                backend.setblocking(False)
-
-                sockets = [client_sock, backend]
                 while True:
-                    r, _, x = select.select(sockets, [], sockets, 60)
-                    if x:
-                        break
-                    if not r:
+                    ready, _, _ = select.select([conn], [], [], 15)
+                    if not ready:
+                        self.wfile.write(b": ping\n\n")         # keeps proxies (Cloudflare) from closing it
+                        self.wfile.flush()
                         continue
-                    for s in r:
-                        other = backend if s is client_sock else client_sock
-                        try:
-                            data = s.recv(65536)
-                            if not data:
-                                return
-                            other.sendall(data)
-                        except (BlockingIOError, InterruptedError):
-                            continue
-                        except Exception:
-                            return
-            except Exception:
-                pass
+                    data = conn.recv(65536)
+                    if not data:
+                        self.wfile.write(b"event: gone\ndata: {}\n\n")
+                        self.wfile.flush()
+                        return
+                    buf += data
+                    *lines, buf = buf.split(b"\n")
+                    if lines:
+                        self.wfile.write(b"".join(b"data: " + ln + b"\n\n" for ln in lines if ln))
+                        self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return
             finally:
-                if backend:
-                    try:
-                        backend.close()
-                    except Exception:
-                        pass
-                self.close_connection = True
+                conn.close()
+
+        def _session_op(self, msg: dict) -> dict:
+            conn = socket.socket(socket.AF_UNIX)
+            conn.settimeout(30)
+            try:
+                conn.connect(str(SESSIOND_SOCKET))
+                conn.sendall((json.dumps(msg) + "\n").encode())
+                return json.loads(conn.makefile("rb").readline() or b"{}")
+            finally:
+                conn.close()
 
         def do_GET(self):
             raw_path = self.path.split("?")[0]
-            if raw_path == "/code":
-                query = urlsplit(self.path).query
-                redirect_url = "/code/" + (f"?{query}" if query else "")
-                self.send_response(302)
-                self.send_header("Location", redirect_url)
-                self.end_headers()
-                return
             if raw_path == "/api/whoami":
                 # D.L. AI: which credential this browser has - the web app hides the API key field behind Access
                 claims = self._access_claims()
@@ -5381,19 +5356,6 @@ def make_handler(svc: Service):
                     auth = self.headers.get("Authorization", "")
                     given = auth[7:].strip() if auth.lower().startswith("bearer ") else self.headers.get("x-api-key", "")
                     self._json(200, {"auth": "key" if given and key_matches(given, svc.api_key) else "required"})
-                return
-            if raw_path == "/code/token":
-                self._json(200, {"token": ""})
-                return
-            if raw_path.startswith("/code/"):
-                if not self._authorized():
-                    return
-                is_ws = (self.headers.get("Upgrade", "").lower() == "websocket" or
-                         "upgrade" in self.headers.get("Connection", "").lower())
-                if is_ws:
-                    self._tunnel_ws(7681)
-                    return
-                self._proxy_http(7681)
                 return
             path = raw_path.rstrip("/")
             if path in ("/favicon.ico", "/favicon.svg"):
@@ -5494,149 +5456,9 @@ def make_handler(svc: Service):
                 if self._authorized():
                     self._json(200, {"models": svc.available_models(), "current": svc.model})
                 return
-            if path == "/api/code/scaffold":
-                if not self._authorized():
-                    return
-                self._json(200, {
-                    "active": "dl-ai-code",
-                    "scaffolds": [
-                        {"id": "dl-ai-code", "name": "CLI", "desc": "Autonomous Engineering Agent", "model": "Qwen3.8 Coder"}
-                    ]
-                })
-                return
-            if path == "/api/code/chat":
-                if not self._authorized():
-                    return
-                # Return current chat state from /tmp/dl-cli-current-chat.json if available
-                chat_payload = {"messages": [], "model": "Qwen3.8-Flash-Next Coder", "workspace": str(WORKSPACE_DIR)}
-                if os.path.exists("/tmp/dl-cli-current-chat.json"):
-                    try:
-                        with open("/tmp/dl-cli-current-chat.json", "r", encoding="utf-8") as f:
-                            chat_payload = json.load(f)
-                    except Exception:
-                        pass
-
-                # If no user or assistant messages are stored yet, extract live session turns from tmux pane buffer
-                # Extract live session turns from tmux pane buffer if available
-                active_msgs = [m for m in chat_payload.get("messages", []) if m.get("role") in ("user", "assistant")]
-                try:
-                    res = subprocess.run(["tmux", "capture-pane", "-p", "-S", "-", "-t", "dl-ai-code:0"],
-                                         capture_output=True, text=True, check=False)
-                    if res.returncode == 0 and res.stdout.strip():
-                        clean = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', res.stdout)
-                        lines = clean.splitlines()
-                        turns = []
-                        current_role = None
-                        current_lines = []
-                        for line in lines:
-                            stripped = line.strip()
-                            m = re.match(r'^(?:dl|cli)\s*(?:\([^)]+\))?\s*›\s*(.*)$', stripped)
-                            if m:
-                                user_cmd = m.group(1).strip()
-                                if current_role and current_lines:
-                                    content = "\n".join(current_lines).strip()
-                                    if content:
-                                        turns.append({"role": current_role, "content": content})
-                                    current_lines = []
-                                if user_cmd:
-                                    turns.append({"role": "user", "content": user_cmd})
-                                    current_role = "assistant"
-                                else:
-                                    current_role = None
-                                continue
-                            if current_role == "assistant":
-                                if re.match(r'^\[\d+ tokens in .*\]', stripped):
-                                    continue
-                                current_lines.append(line)
-                        if current_role and current_lines:
-                            content = "\n".join(current_lines).strip()
-                            if content:
-                                turns.append({"role": current_role, "content": content})
-                        # If tmux has more activity (e.g. slash commands, prompts) than active_msgs, use tmux turns
-                        if turns and len(turns) >= len(active_msgs):
-                            chat_payload["messages"] = turns
-                            chat_payload["updated_at"] = time.time()
-                except Exception:
-                    pass
-
-                # Sanitize all messages to strip raw terminal ANSI color sequences
-                ansi_re = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-                for m in chat_payload.get("messages", []):
-                    if isinstance(m.get("content"), str):
-                        m["content"] = ansi_re.sub('', m["content"])
-
-                self._json(200, chat_payload)
-                return
-            if path == "/api/code/export":
-                if not self._authorized():
-                    return
-                qs = parse_qs(urlsplit(self.path).query)
-                scaffold = qs.get("scaffold", [""])[0] or "dl-ai-code"
-                now = datetime.datetime.now()
-                now_str = now.strftime("%Y-%m-%d-%H-%M")
-                filename = f"dl-ai-code-chat-{now_str}.md"
-                md_text = ""
-
-                # 1. If structured chat state file exists
-                if os.path.exists("/tmp/dl-cli-current-chat.json"):
-                    try:
-                        with open("/tmp/dl-cli-current-chat.json", "r", encoding="utf-8") as f:
-                            chat_data = json.load(f)
-                        raw_msgs = chat_data.get("messages", [])
-                        user_or_asst = [m for m in raw_msgs if m.get("role") in ("user", "assistant")]
-                        if user_or_asst:
-                            from dl_cli import format_messages_to_markdown
-                            md_text = format_messages_to_markdown(
-                                raw_msgs,
-                                model_name=chat_data.get("model", "Qwen3.8-Flash-Next Coder"),
-                                workspace=chat_data.get("workspace", str(WORKSPACE_DIR))
-                            )
-                    except Exception:
-                        pass
-
-                # 2. Fallback / other scaffolds: Capture terminal buffer from tmux
-                if not md_text:
-                    try:
-                        res = subprocess.run(["tmux", "capture-pane", "-p", "-S", "-", "-t", f"dl-ai-code:{scaffold}.0"],
-                                             capture_output=True, text=True, check=False)
-                        if res.returncode != 0:
-                            res = subprocess.run(["tmux", "capture-pane", "-p", "-S", "-", "-t", f"dl-ai-code:{scaffold}"],
-                                                 capture_output=True, text=True, check=False)
-                        if res.returncode == 0 and res.stdout.strip():
-                            raw_pane = res.stdout
-                            clean_pane = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', raw_pane)
-                            lines = [l.rstrip() for l in clean_pane.splitlines()]
-                            while lines and not lines[0]:
-                                lines.pop(0)
-                            while lines and not lines[-1]:
-                                lines.pop()
-
-                            header = [
-                                f"# Strata CLI Session: {scaffold.upper()}",
-                                f"- **Date**: {now.strftime('%Y-%m-%d %H:%M:%S')}",
-                                f"- **Scaffold**: {scaffold}",
-                                f"- **Workspace**: `{WORKSPACE_DIR}`",
-                                "",
-                                "---",
-                                "",
-                                "```text",
-                                "\n".join(lines),
-                                "```",
-                                ""
-                            ]
-                            md_text = "\n".join(header)
-                    except Exception as e:
-                        md_text = f"# Strata CLI Session: {scaffold}\n\nError capturing terminal: {e}\n"
-
-                if not md_text:
-                    md_text = f"# Strata CLI Session: {scaffold}\n\n(No session activity recorded yet)\n"
-
-                self._json(200, {
-                    "status": "ok",
-                    "markdown": md_text,
-                    "filename": filename,
-                    "scaffold": scaffold
-                })
+            if path == "/api/code/session/events":
+                if self._authorized():
+                    self._session_events((parse_qs(urlsplit(self.path).query).get("session") or ["dl-ai-code"])[0])
                 return
             if path in ("/api/workspace/files", "/api/workspace"):
                 if not self._authorized():
@@ -5950,60 +5772,22 @@ def make_handler(svc: Service):
                 except Exception as e:
                     self._json(500, {"error": {"message": f"failed to delete: {e}"}})
                 return
-            if path == "/api/code/scaffold":
-                if not self._own_page("Coding scaffold can be selected"):
+            if path == "/api/code/session":
+                if not self._own_page("the CLI session can be driven"):
                     return
                 try:
                     req = json.loads(self._body() or b"{}")
-                    scaffold = req.get("scaffold", "claude")
-                    if scaffold not in ("claude", "agy", "deepseek"):
-                        self._json(400, {"error": {"message": "unknown scaffold: use claude, agy, or deepseek"}})
-                        return
-                    res = subprocess.run(["tmux", "select-window", "-t", f"dl-ai-code:{scaffold}"],
-                                         capture_output=True, text=True, check=False)
-                    if res.returncode != 0:
-                        subprocess.run(["/home/damirl/Desktop/Strata/tools/run-code-session.sh"],
-                                       capture_output=True, text=True, check=False)
-                        res = subprocess.run(["tmux", "select-window", "-t", f"dl-ai-code:{scaffold}"],
-                                             capture_output=True, text=True, check=False)
-                    self._json(200, {"status": "ok", "active": scaffold})
-                except Exception as e:
-                    self._json(500, {"error": {"message": f"failed to switch scaffold: {e}"}})
-                return
-            if path == "/api/code/restart":
-                if not self._own_page("Coding session can be restarted"):
+                except ValueError:
+                    req = {}
+                op = req.get("op")
+                if op not in ("input", "approve", "deny", "interrupt", "export", "state"):
+                    self._json(400, {"error": {"message": "op must be input, approve, deny, interrupt, export or state"}})
                     return
+                msg = {k: req[k] for k in ("op", "session", "text", "id", "origin") if k in req}
                 try:
-                    req = json.loads(self._body() or b"{}") if self.headers.get("Content-Length") else {}
-                    res = subprocess.run(["tmux", "respawn-pane", "-k", "-t", "dl-ai-code:0"],
-                                         capture_output=True, text=True, check=False)
-                    if res.returncode != 0:
-                        subprocess.run(["tmux", "kill-session", "-t", "dl-ai-code"], check=False)
-                        subprocess.run(["systemctl", "--user", "restart", "claude-terminal"], check=False)
-                    if os.path.exists("/tmp/dl-cli-current-chat.json"):
-                        try:
-                            os.remove("/tmp/dl-cli-current-chat.json")
-                        except Exception:
-                            pass
-                    self._json(200, {"status": "ok", "message": "CLI session restarted", "active": "dl-ai-code"})
-                except Exception as e:
-                    self._json(500, {"error": {"message": f"failed to restart session: {e}"}})
-                return
-            if path == "/api/code/send":
-                if not self._own_page("Commands can be sent to coding session"):
-                    return
-                try:
-                    req = json.loads(self._body() or b"{}")
-                    text = (req.get("text") or "").strip()
-                    if not text:
-                        self._json(400, {"error": {"message": "text required"}})
-                        return
-                    # Send input literals and Enter to dl-ai-code session window
-                    subprocess.run(["tmux", "send-keys", "-t", "dl-ai-code:0", "-l", text], check=False)
-                    subprocess.run(["tmux", "send-keys", "-t", "dl-ai-code:0", "Enter"], check=False)
-                    self._json(200, {"status": "ok", "sent": text, "target": "dl-ai-code"})
-                except Exception as e:
-                    self._json(500, {"error": {"message": f"failed to send keys: {e}"}})
+                    self._json(200, self._session_op(msg))
+                except OSError as e:
+                    self._json(503, {"error": {"message": f"the CLI session daemon is not running ({e})"}})
                 return
             try:
                 req = json.loads(self._body() or b"{}")

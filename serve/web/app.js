@@ -77,18 +77,6 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
 });
 
 let tab = "chat";
-let codeLoaded = false;
-function loadCodeTerminal() {
-  const frame = $("code-terminal-frame");
-  if (!frame) return;
-  if (!codeLoaded || frame.src === "about:blank") {
-    const key = store.get("apikey", DEFAULT_KEY);
-    try { document.cookie = `strata_key=${encodeURIComponent(key)}; path=/; SameSite=Lax`; } catch (e) {}
-    frame.src = "/code/";
-    codeLoaded = true;
-  }
-}
-
 function showTab(name) {
   tab = ["chat", "code", "monitor", "about"].includes(name) ? name : "chat";
   for (const b of document.querySelectorAll(".st-tab")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
@@ -97,7 +85,7 @@ function showTab(name) {
   }
   if (location.hash.slice(1) !== tab) history.replaceState(null, "", tab === "chat" ? location.pathname : `#${tab}`);
   if (tab === "chat") $("input").focus();
-  if (tab === "code") { loadCodeTerminal(); syncCodeScaffold(); }
+  if (tab === "code") openCodeSession(); else codeDisconnect();
   if (tab === "monitor") loadMcp();
   if (tab === "about") loadConfig();
   if (lastMetrics) render(lastMetrics);
@@ -105,249 +93,281 @@ function showTab(name) {
 for (const b of document.querySelectorAll(".st-tab")) b.onclick = () => showTab(b.dataset.tab);
 window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
 
-let currentScaffold = "dl-ai-code";
-const SCAFFOLD_NAMES = {
-  "dl-ai-code": { title: "CLI", meta: "Session: dl-ai-code" },
-  agy: { title: "CLI", meta: "Session: dl-ai-code" }
-};
+// ------------------------------------------------------------------ Code: shared CLI session (tools/dl_sessiond.py)
+// The same session runs in the terminal (dl_cli.py --attach): this tab is one more client of it.
+const CODE_SESSION = "dl-ai-code";
+const code = { conn: null, state: {}, client: "", cur: null, retry: 0, renderQueued: false, approvals: {} };
 
-function setScaffoldUI() {
-  currentScaffold = "dl-ai-code";
-  if ($("code-scaffold-title")) $("code-scaffold-title").textContent = "CLI";
-  if ($("code-scaffold-meta")) $("code-scaffold-meta").innerHTML = `Session: <code>dl-ai-code</code>`;
+function codeFeed() { return $("code-mobile-messages"); }
+function codeAtBottom() { const f = codeFeed(); return !f || f.scrollHeight - f.scrollTop - f.clientHeight < 80; }
+function codeScroll(force) { const f = codeFeed(); if (f && (force || codeAtBottom())) f.scrollTop = f.scrollHeight; }
+
+function codeCard(cls, html) {
+  const el = document.createElement("div");
+  el.className = `code-mobile-card ${cls}`;
+  el.innerHTML = html;
+  const stick = codeAtBottom();
+  codeFeed().appendChild(el);
+  if (stick) codeScroll(true);
+  return el;
 }
 
-async function syncCodeScaffold() {
-  setScaffoldUI();
+function codeAssistant() {
+  if (code.cur) return code.cur;
+  const el = codeCard("code-mobile-card--assistant cs-reply",
+    `<details class="cs-think" hidden><summary>Thinking</summary><div class="cs-think-body"></div></details><div class="cs-text md"></div>`);
+  code.cur = { el, thinking: "", text: "" };
+  return code.cur;
 }
 
-if ($("code-restart-btn")) {
-  $("code-restart-btn").onclick = async () => {
-    if (!confirm("Restart CLI terminal session?")) return;
-    try {
-      const r = await fetch("api/code/restart", {
-        method: "POST",
-        headers: headers(true),
-        body: JSON.stringify({ scaffold: "dl-ai-code" })
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      toast("info", "Session restarted", "CLI session reset.");
-      const frame = $("code-terminal-frame");
-      if (frame) {
-        const key = store.get("apikey", DEFAULT_KEY);
-        try { document.cookie = `strata_key=${encodeURIComponent(key)}; path=/; SameSite=Lax`; } catch (e) {}
-        frame.src = "about:blank";
-        setTimeout(() => { frame.src = "/code/"; }, 100);
+function codeEnd() {                                      // close the open reply block, drawn in full
+  if (code.cur) codeRenderCur(code.cur);
+  code.cur = null;
+}
+
+function codeRenderCur(block) {
+  code.renderQueued = false;
+  const c = block || code.cur;
+  if (!c) return;
+  const stick = codeAtBottom();
+  const think = c.el.querySelector(".cs-think");
+  if (c.thinking) { think.hidden = false; think.querySelector(".cs-think-body").textContent = c.thinking; }
+  c.el.querySelector(".cs-text").innerHTML = c.text ? markdown(c.text) : "";
+  if (stick) codeScroll(true);
+}
+function codeQueueRender() {
+  if (!code.renderQueued) { code.renderQueued = true; requestAnimationFrame(() => codeRenderCur()); }
+}
+
+function codeBar(label, used, total, pct) {
+  const level = pct >= 90 ? "bad" : pct >= 75 ? "warn" : "ok";
+  return `<div class="cs-bar"><span class="cs-bar-label">${esc(label)}</span>
+    <span class="cs-bar-track"><span class="cs-bar-fill cs-bar-fill--${level}" style="width:${Math.min(100, pct).toFixed(1)}%"></span></span>
+    <span class="cs-bar-val">${used.toFixed(1)} / ${total.toFixed(1)} GB</span></div>`;
+}
+
+function codeHealth(d) {
+  const eng = d.engine || d.strata || {};
+  const rows = [
+    d.ram ? codeBar("RAM", d.ram.used_gb, d.ram.total_gb, d.ram.pct) : "",
+    d.vram ? codeBar("VRAM", d.vram.used_gb, d.vram.total_gb, d.vram.pct) : "",
+    d.swap ? codeBar("Swap", d.swap.used_gb, d.swap.total_gb, d.swap.pct) : "",
+  ].join("");
+  const cpu = d.cpu ? `<div class="cs-kv"><span>CPU load</span><span>${(d.cpu.load_1m || 0).toFixed(2)} (${d.cpu.cores} cores)</span></div>` : "";
+  const engine = eng.status ? `<div class="cs-kv"><span>Engine</span><span>${esc(eng.status)} ${esc(eng.model || "")}</span></div>` : "";
+  return `<div class="code-mobile-card-header"><span class="role-tag">System health</span></div>${rows}${cpu}${engine}`;
+}
+
+function codeApprovalCard(ev) {
+  const el = codeCard("cs-approval", `
+    <div class="cs-approval-title">${ev.kind === "plan" ? "📋" : "⚠"} ${esc(ev.summary)}</div>
+    <div class="cs-approval-reason">${esc(ev.reason || "")}</div>
+    <div class="cs-approval-actions">
+      <button type="button" class="st-btn st-btn--primary st-btn--sm" data-ok="1">${ev.kind === "plan" ? "Execute" : "Approve"}</button>
+      <button type="button" class="st-btn st-btn--secondary st-btn--sm" data-ok="0">${ev.kind === "plan" ? "Keep planning" : "Deny"}</button>
+    </div>`);
+  for (const b of el.querySelectorAll("button")) {
+    b.onclick = () => codeOp(b.dataset.ok === "1" ? "approve" : "deny", { id: ev.id });
+  }
+  code.approvals[ev.id] = el;
+}
+
+function codeResolve(id, ok) {
+  const el = code.approvals[id];
+  if (!el) return;
+  el.classList.add("cs-approval--done");
+  const act = el.querySelector(".cs-approval-actions");
+  if (act) act.innerHTML = `<span class="muted small">${ok ? "Approved" : "Not approved"}</span>`;
+  delete code.approvals[id];
+}
+
+function codeSetState(st) {
+  code.state = st || {};
+  const meta = $("code-scaffold-meta");
+  if (meta) {
+    const mode = (code.state.mode || "act").toUpperCase();
+    meta.innerHTML = `<span class="cs-mode cs-mode--${esc(code.state.mode || "act")}">${mode}</span>` +
+      (code.state.yolo ? ` <span class="cs-mode cs-mode--yolo">YOLO</span>` : "") +
+      ` <code title="${esc(code.state.workspace || "")}">${esc((code.state.workspace || "").split("/").slice(-2).join("/"))}</code>`;
+  }
+  const busy = !!code.state.busy;
+  if ($("code-stop-btn")) $("code-stop-btn").hidden = !busy;
+  document.querySelector(".code-dot")?.classList.toggle("code-dot--busy", busy);
+}
+
+function codeEvent(ev, replay) {
+  switch (ev.type) {
+    case "thinking": codeAssistant().thinking += ev.text; codeQueueRender(); break;
+    case "text": codeAssistant().text += ev.text; codeQueueRender(); break;
+    case "user":
+      codeEnd();
+      codeCard("code-mobile-card--user", `<div class="code-mobile-card-body">${esc(ev.text)}</div>`);
+      break;
+    case "tool_call": {
+      codeEnd();
+      const args = Object.entries(ev.args || {}).map(([k, v]) => `${k}=${String(v).slice(0, 60)}`).join(", ");
+      const el = codeCard("cs-tool", `<details><summary><span class="cs-tool-name">◆ ${esc(ev.name)}</span>
+        <span class="cs-tool-args">${esc(args)}</span></summary><pre class="cs-tool-result">…</pre></details>`);
+      el.dataset.callId = ev.id || "";
+      break;
+    }
+    case "tool_result": {
+      const cards = codeFeed().querySelectorAll(".cs-tool");
+      const el = [...cards].reverse().find((c) => c.dataset.callId === (ev.id || "")) || cards[cards.length - 1];
+      if (el) {
+        el.querySelector(".cs-tool-result").textContent = ev.text + (ev.truncated ? "\n…" : "");
+        if (/^(Error|Denied|SECURITY ERROR|SYNTAX ERROR)/.test(ev.text)) el.classList.add("cs-tool--err");
       }
-      lastMobileChatHash = "";
-      renderMobileCodeMessages([]);
-      setTimeout(pollMobileCodeChat, 500);
-      setTimeout(pollMobileCodeChat, 1500);
-    } catch (e) {
-      toast("error", "Restart failed", e.message);
+      break;
     }
-  };
-}
-if ($("code-export-btn")) {
-  $("code-export-btn").onclick = async () => {
-    const scaffold = currentScaffold || "agy";
-    try {
-      const r = await fetch(`api/code/export?scaffold=${encodeURIComponent(scaffold)}`, {
-        headers: headers()
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const data = await r.json();
-      const md = data.markdown || "";
-      if (!md || md.trim().length === 0) {
-        toast("info", "Nothing to save yet", "No session activity recorded.");
-        return;
-      }
-      const d = new Date();
-      const pad = (n) => String(n).padStart(2, "0");
-      const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}-${pad(d.getMinutes())}`;
-      const filename = data.filename || `dl-ai-code-chat-${dateStr}.md`;
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(new Blob([md], {type: "text/markdown"}));
-      a.download = filename;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-      toast("success", "Chat saved", `Downloaded ${filename}`);
-    } catch (e) {
-      toast("error", "Export failed", e.message || String(e));
-    }
-  };
-}
-
-if ($("code-fullscreen-btn")) {
-  $("code-fullscreen-btn").onclick = () => {
-    const wrap = document.querySelector(".code-terminal-wrap");
-    if (!wrap) return;
-    wrap.classList.toggle("code-terminal--fullscreen");
-  };
-}
-
-// ------------------------------------------------------------------ Companion Mobile Web Mode
-let mobileCodeChatTimer = null;
-let lastMobileChatHash = "";
-
-function setMobileCodeView(isMobileCard) {
-  const cardView = $("code-mobile-card-view");
-  const termBody = $("code-terminal-body");
-  const toggleBtn = $("code-view-toggle-btn");
-  if (!cardView || !termBody) return;
-
-  if (isMobileCard) {
-    cardView.hidden = false;
-    termBody.hidden = true;
-    if (toggleBtn) toggleBtn.classList.add("st-btn--active");
-    startMobileCodePolling();
-  } else {
-    cardView.hidden = true;
-    termBody.hidden = false;
-    if (toggleBtn) toggleBtn.classList.remove("st-btn--active");
-    stopMobileCodePolling();
+    case "output":
+      codeEnd();
+      codeCard("code-mobile-card--assistant", `<div class="code-mobile-card-header"><span class="role-tag">${esc(ev.title || "")}</span></div>
+        <div class="code-mobile-card-body">${esc(ev.text || "")}</div>`);
+      break;
+    case "health": codeEnd(); codeCard("code-mobile-card--assistant cs-health", codeHealth(ev.data || {})); break;
+    case "notice": codeEnd(); codeCard(`cs-notice cs-notice--${esc(ev.level || "info")}`, esc(ev.text)); break;
+    case "error": codeEnd(); codeCard("cs-notice cs-notice--error", esc(ev.text)); break;
+    case "stats": codeEnd(); codeCard("cs-stats", `${ev.tokens} tokens · ${ev.seconds}s · ${ev.rate} t/s`); break;
+    case "approval_request": codeEnd(); codeApprovalCard(ev); break;
+    case "approval_resolved": codeResolve(ev.id, ev.ok); break;
+    case "cleared": codeFeed().innerHTML = ""; codeEnd(); break;
+    case "turn_end": codeEnd(); break;
+    case "state": codeSetState(ev); break;
   }
 }
 
-function stopMobileCodePolling() {
-  if (mobileCodeChatTimer) {
-    clearInterval(mobileCodeChatTimer);
-    mobileCodeChatTimer = null;
+function codeHello(h) {
+  code.client = h.client || "";
+  codeFeed().innerHTML = "";
+  codeEnd();
+  code.approvals = {};
+  const events = h.events || [];
+  if (!events.length) {
+    codeFeed().innerHTML = `<div class="code-mobile-welcome"><div class="code-mobile-welcome-icon">✦</div>
+      <div class="code-mobile-welcome-title">CLI session</div>
+      <div class="code-mobile-welcome-sub">Ask for a change, or <b>/plan</b> one first. The terminal joins this same session with <code>dl_cli.py --attach</code>.</div></div>`;
   }
+  for (const ev of events) codeEvent(ev, true);
+  for (const p of (h.state || {}).pending || []) if (!code.approvals[p.id]) codeApprovalCard(p);
+  codeRenderCur();
+  codeSetState(h.state);
+  codeScroll(true);
 }
 
-function startMobileCodePolling() {
-  stopMobileCodePolling();
-  pollMobileCodeChat();
-  mobileCodeChatTimer = setInterval(pollMobileCodeChat, 2000);
-}
-
-async function pollMobileCodeChat() {
+async function codeConnect() {
+  if (code.conn) return;
+  const ctl = new AbortController();
+  code.conn = ctl;
   try {
-    const r = await fetch("api/code/chat", { headers: headers() });
-    if (!r.ok) return;
-    const data = await r.json();
-    const msgs = data.messages || [];
-    const hash = `${data.updated_at || ""}-${msgs.length}`;
-    if (hash === lastMobileChatHash) return;
-    lastMobileChatHash = hash;
-    renderMobileCodeMessages(msgs);
-  } catch (e) {
-    /* ignore polling errors */
-  }
-}
-
-function renderMobileCodeMessages(msgs) {
-  const container = $("code-mobile-messages");
-  if (!container) return;
-
-  const visible = msgs.filter((m) => m && (m.role === "user" || m.role === "assistant"));
-  if (visible.length === 0) {
-    container.innerHTML = `
-      <div class="code-mobile-welcome">
-        <div class="code-mobile-welcome-icon">✦</div>
-        <div class="code-mobile-welcome-title">Mobile Companion</div>
-        <div class="code-mobile-welcome-sub">Native touch feed connected to live autonomous session.</div>
-      </div>`;
-    return;
-  }
-
-  let html = "";
-  for (const m of visible) {
-    const role = m.role || "assistant";
-    const roleLabel = role === "user" ? "You" : "CLI";
-    let bodyText = "";
-    if (typeof m.content === "string") {
-      bodyText = m.content;
-    } else if (Array.isArray(m.content)) {
-      bodyText = m.content.map((p) => p.text || "").join("\n");
-    }
-    // Strip ANSI terminal color escape codes if present
-    const cleanBody = bodyText.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "").replace(/\[\d+(?:;\d+)*m/g, "");
-    const escaped = esc(cleanBody);
-    const withPre = escaped.replace(/```([\s\S]*?)```/g, "<pre><code>$1</code></pre>");
-    html += `
-      <div class="code-mobile-card code-mobile-card--${role}">
-        <div class="code-mobile-card-header">
-          <span class="role-tag">${roleLabel}</span>
-        </div>
-        <div class="code-mobile-card-body">${withPre}</div>
-      </div>`;
-  }
-  container.innerHTML = html;
-  container.scrollTop = container.scrollHeight;
-}
-
-async function sendMobileCodeInput() {
-  const ta = $("code-mobile-input");
-  if (!ta) return;
-  const text = ta.value.trim();
-  if (!text) return;
-
-  const btn = $("code-mobile-send-btn");
-  if (btn) btn.disabled = true;
-  try {
-    const r = await fetch("api/code/send", {
-      method: "POST",
-      headers: headers(true),
-      body: JSON.stringify({ text })
-    });
+    const r = await fetch(`api/code/session/events?session=${CODE_SESSION}`, { headers: headers(), signal: ctl.signal });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
       throw new Error(err.error?.message || `HTTP ${r.status}`);
     }
-    ta.value = "";
-    ta.style.height = "auto";
-    setTimeout(pollMobileCodeChat, 500);
-    setTimeout(pollMobileCodeChat, 1500);
-    setTimeout(pollMobileCodeChat, 3000);
+    code.retry = 0;
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const block = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        const data = block.split("\n").filter((l) => l.startsWith("data: ")).map((l) => l.slice(6)).join("\n");
+        if (!data) continue;
+        let ev;
+        try { ev = JSON.parse(data); } catch (e) { continue; }
+        if (ev.type === "hello") codeHello(ev); else codeEvent(ev, false);
+      }
+    }
   } catch (e) {
-    toast("error", "Failed to send", e.message || String(e));
+    if (e.name !== "AbortError" && code.retry === 0) toast("warn", "CLI session", e.message || String(e), 5000);
   } finally {
-    if (btn) btn.disabled = false;
+    code.conn = null;
+  }
+  if (tab === "code" && !ctl.signal.aborted) {            // reconnect: the daemon or the tunnel went away
+    code.retry = Math.min(code.retry + 1, 6);
+    setTimeout(codeConnect, 500 * 2 ** code.retry);
   }
 }
 
-if ($("code-view-toggle-btn")) {
-  $("code-view-toggle-btn").onclick = () => {
-    const cardView = $("code-mobile-card-view");
-    const isCurrentlyCard = cardView && !cardView.hidden;
-    setMobileCodeView(!isCurrentlyCard);
+function codeDisconnect() { if (code.conn) code.conn.abort(); code.conn = null; }
+
+async function codeOp(op, extra = {}) {
+  try {
+    const r = await fetch("api/code/session", {
+      method: "POST", headers: headers(true),
+      body: JSON.stringify({ op, session: CODE_SESSION, origin: code.client, ...extra }),
+    });
+    const res = await r.json().catch(() => ({}));
+    if (!r.ok || res.type === "error") throw new Error(res.error?.message || res.text || `HTTP ${r.status}`);
+    return res;
+  } catch (e) {
+    toast("error", "CLI session", e.message || String(e));
+    return null;
+  }
+}
+
+async function codeSend(text) {
+  const ta = $("code-mobile-input");
+  text = (text ?? ta.value).trim();
+  if (!text) return;
+  if (await codeOp("input", { text })) {
+    if (ta.value.trim() === text) { ta.value = ""; ta.style.height = "auto"; }
+  }
+}
+
+function openCodeSession() { setScaffoldUI(); codeConnect(); }
+
+function setScaffoldUI() {
+  if ($("code-scaffold-title")) $("code-scaffold-title").textContent = "CLI";
+}
+
+if ($("code-restart-btn")) {
+  $("code-restart-btn").onclick = () => { if (confirm("Clear this CLI conversation (in every client)?")) codeSend("/clear"); };
+}
+if ($("code-stop-btn")) $("code-stop-btn").onclick = () => codeOp("interrupt");
+if ($("code-export-btn")) {
+  $("code-export-btn").onclick = async () => {
+    const res = await codeOp("export");
+    if (!res) return;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([res.markdown || ""], { type: "text/markdown" }));
+    a.download = res.filename || "dl-ai-code-chat.md";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    toast("success", "Chat saved", a.download);
   };
 }
-
-if ($("code-mobile-send-btn")) {
-  $("code-mobile-send-btn").onclick = sendMobileCodeInput;
+if ($("code-fullscreen-btn")) {
+  $("code-fullscreen-btn").onclick = () => document.querySelector(".code-terminal-wrap")?.classList.toggle("code-terminal--fullscreen");
 }
-
+if ($("code-mobile-send-btn")) $("code-mobile-send-btn").onclick = () => codeSend();
 if ($("code-mobile-input")) {
   $("code-mobile-input").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMobileCodeInput();
-    }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); codeSend(); }
   });
-  $("code-mobile-input").addEventListener("input", function() {
+  $("code-mobile-input").addEventListener("input", function () {
     this.style.height = "auto";
-    this.style.height = Math.min(this.scrollHeight, 120) + "px";
+    this.style.height = Math.min(this.scrollHeight, 160) + "px";
   });
 }
-
 document.querySelectorAll(".code-mobile-chip").forEach((chip) => {
   chip.onclick = () => {
     const cmd = chip.dataset.cmd;
+    if ("run" in chip.dataset) { codeSend(cmd); return; }
     const input = $("code-mobile-input");
-    if (cmd && input) {
-      input.value = cmd + " ";
-      input.focus();
-    }
+    input.value = cmd + " ";
+    input.focus();
   };
 });
-
-// Auto-activate Mobile Card view on screens narrower than 680px
-if (window.innerWidth <= 680) {
-  setMobileCodeView(true);
-}
+document.addEventListener("visibilitychange", () => {     // phones suspend background tabs: reconnect on return
+  if (document.visibilityState === "visible" && tab === "code" && !code.conn) codeConnect();
+});
 
 // ------------------------------------------------------------------ server access
 const DEFAULT_KEY = "";

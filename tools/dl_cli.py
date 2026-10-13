@@ -1007,7 +1007,10 @@ def dispatch_dl_tool(name: str, args: dict, workspace: Path, mode: str = "act", 
 
 def stream_chat_turn(messages: list[dict], url: str, api_key: str,
                      think_level: str = "medium", max_tokens: int = 4096,
-                     temperature: float = 0.2, tools: list[dict] | None = None):
+                     temperature: float = 0.2, tools: list[dict] | None = None,
+                     emit=None, cancel=None):
+    """One streamed model reply.  `emit(event)` replaces terminal printing (the session daemon); `cancel` is a
+    threading.Event that stops the stream early."""
     endpoint = f"{url.rstrip('/')}/v1/chat/completions"
     active_tools = DL_TOOLS if tools is None else tools
     payload = {
@@ -1040,6 +1043,9 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str,
     try:
         with urllib.request.urlopen(req, timeout=600) as resp:
             for raw_line in resp:
+                if cancel is not None and cancel.is_set():
+                    finish_reason = "cancelled"
+                    break
                 line = raw_line.decode("utf-8", errors="replace").strip()
                 if not line or line.startswith(":"):
                     continue
@@ -1059,7 +1065,12 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str,
 
                     # 1. Reasoning chunk
                     reasoning_chunk = delta.get("reasoning_content")
-                    if reasoning_chunk:
+                    if reasoning_chunk and emit:
+                        tok_count += 1
+                        reasoning_started = True
+                        emit({"type": "thinking", "text": reasoning_chunk})
+                        full_reasoning.append(reasoning_chunk)
+                    elif reasoning_chunk:
                         tok_count += 1
                         if not reasoning_started:
                             sys.stdout.write(f"\n{C_ACCENT}🧠{C_RESET} {C_MUTED}Thinking:{C_RESET} {C_MUTED}")
@@ -1070,7 +1081,11 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str,
 
                     # 2. Main content chunk
                     content_chunk = delta.get("content")
-                    if content_chunk:
+                    if content_chunk and emit:
+                        tok_count += 1
+                        emit({"type": "text", "text": content_chunk})
+                        full_content.append(content_chunk)
+                    elif content_chunk:
                         tok_count += 1
                         if reasoning_started and not reasoning_closed:
                             sys.stdout.write(f"{C_RESET}\n\n")
@@ -1082,7 +1097,7 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str,
                     # 3. Tool call chunks
                     tc_deltas = delta.get("tool_calls")
                     if tc_deltas:
-                        if reasoning_started and not reasoning_closed:
+                        if reasoning_started and not reasoning_closed and not emit:
                             sys.stdout.write(f"{C_RESET}\n")
                             reasoning_closed = True
                         for tc_item in tc_deltas:
@@ -1101,12 +1116,12 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str,
                             if tc_item.get("function", {}).get("arguments"):
                                 tool_calls_dict[idx]["function"]["arguments"] += tc_item["function"]["arguments"]
 
-            if reasoning_started and not reasoning_closed:
-                sys.stdout.write(f"{C_RESET}\n")
-
-            if full_content:
-                sys.stdout.write("\n")
-            sys.stdout.flush()
+            if not emit:
+                if reasoning_started and not reasoning_closed:
+                    sys.stdout.write(f"{C_RESET}\n")
+                if full_content:
+                    sys.stdout.write("\n")
+                sys.stdout.flush()
 
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="replace")
@@ -1147,6 +1162,8 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
     t_start = time.time()
     current_ws = workspace
     active_tools = get_active_tools(current_ws, mode=mode)
+    emit = (session_context or {}).get("emit")
+    cancel = (session_context or {}).get("cancel")
 
     while turn < max_turns:
         turn += 1
@@ -1156,6 +1173,8 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             api_key=api_key,
             think_level=think_level,
             tools=active_tools,
+            emit=emit,
+            cancel=cancel,
         )
         total_tokens += res["tokens"]
 
@@ -1169,7 +1188,19 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             asst_msg["tool_calls"] = res["tool_calls"]
         messages.append(asst_msg)
 
+        if res["finish_reason"] == "cancelled":
+            if emit:
+                emit({"type": "notice", "level": "warn", "text": "Interrupted."})
+            else:
+                print(f"{C_YELLOW}Interrupted.{C_RESET}\n")
+            break
+
         # If no tool calls, turn is complete
+        if not res["tool_calls"] and emit:
+            wall = time.time() - t_start
+            emit({"type": "stats", "tokens": total_tokens, "seconds": round(wall, 1),
+                  "rate": round(total_tokens / wall, 1) if wall > 0 else 0})
+            break
         if not res["tool_calls"]:
             wall = time.time() - t_start
             rate = total_tokens / wall if wall > 0 else 0
@@ -1190,7 +1221,10 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             except Exception:
                 args = {}
 
-            print(f"{C_ACCENT}◆{C_RESET} {C_INK_SOFT}[Tool]{C_RESET} {C_BOLD}{fn_name}{C_RESET}({C_MUTED}{format_args_preview(args)}{C_RESET})")
+            if emit:
+                emit({"type": "tool_call", "id": tc.get("id"), "name": fn_name, "args": args})
+            else:
+                print(f"{C_ACCENT}◆{C_RESET} {C_INK_SOFT}[Tool]{C_RESET} {C_BOLD}{fn_name}{C_RESET}({C_MUTED}{format_args_preview(args)}{C_RESET})")
 
             result_str = dispatch_dl_tool(fn_name, args, current_ws, mode=mode, session_context=session_context)
 
@@ -1201,9 +1235,13 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                     active_tools = get_active_tools(current_ws, mode=mode)
 
             res_preview = result_str.strip()
-            if len(res_preview) > 160:
-                res_preview = res_preview[:160] + "..."
-            print(f"{C_MUTED}  ↳ {res_preview}{C_RESET}\n")
+            if emit:
+                emit({"type": "tool_result", "id": tc.get("id"), "name": fn_name, "text": res_preview[:4000],
+                      "truncated": len(res_preview) > 4000})
+            else:
+                if len(res_preview) > 160:
+                    res_preview = res_preview[:160] + "..."
+                print(f"{C_MUTED}  ↳ {res_preview}{C_RESET}\n")
 
             messages.append({
                 "role": "tool",
@@ -1760,8 +1798,13 @@ def main():
     parser.add_argument("--think", default="medium", choices=["none", "low", "medium", "high"], help="Reasoning effort")
     parser.add_argument("--plan", action="store_true", help="Start directly in Plan Mode")
     parser.add_argument("-p", "--prompt", help="Run single prompt non-interactively and exit")
+    parser.add_argument("--attach", nargs="?", const="dl-ai-code", metavar="SESSION",
+                        help="Join a shared session of the session daemon (the web app's Code tab shows the same one)")
 
     args = parser.parse_args()
+    if args.attach:
+        from dl_attach import attach
+        sys.exit(attach(args.attach))
     ws = Path(args.workspace).resolve()
     mode = "plan" if args.plan else "act"
 

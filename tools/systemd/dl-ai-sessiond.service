@@ -1,0 +1,19 @@
+# D.L. AI shared CLI session daemon (tools/dl_sessiond.py): one agent session for the terminal
+# (dl_cli.py --attach) and the web app's Code tab.  Install:
+#   cp tools/systemd/dl-ai-sessiond.service ~/.config/systemd/user/   (set the two paths below)
+#   systemctl --user daemon-reload && systemctl --user enable --now dl-ai-sessiond
+[Unit]
+Description=D.L. AI shared CLI session daemon
+After=strata-server.service
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/dl-ai/secrets.env
+Environment=STRATA_URL=http://127.0.0.1:8080
+Environment=STRATA_WORKSPACE_DIR=%h/DL-AI-workspace
+ExecStart=/usr/bin/python3 %h/Strata/tools/dl_sessiond.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
