@@ -5278,14 +5278,6 @@ def make_handler(svc: Service):
                 return True
             auth = self.headers.get("Authorization", "")
             given = auth[7:].strip() if auth.lower().startswith("bearer ") else self.headers.get("x-api-key", "")
-            if not given:
-                cookie_str = self.headers.get("Cookie", "")
-                if "strata_key=" in cookie_str:
-                    for part in cookie_str.split(";"):
-                        p = part.strip()
-                        if p.startswith("strata_key="):
-                            given = p[len("strata_key="):]
-                            break
             if key_matches(given, svc.api_key) or self._access_claims() is not None:
                 return True
             self._json(401, {"error": {"type": "authentication_error", "message": "missing or wrong API key"}})
