@@ -646,28 +646,28 @@ int main() {
             check(session_deepest_checkpoint(pinned_chain) == &pinned_chain[0], "save: a pinned shared prefix beats a deeper checkpoint");
             check(session_deepest_checkpoint(chain) == &chain[1], "save: no pin, the deepest as before");
         }
-        const uint64_t need = session_save_peak_bytes(&chain[1], live);
+        const uint64_t need = session_save_peak_bytes(&chain[1], live, StateCodec::Fp32);
         check(need >= 2 * (uint64_t) chain[1].bytes() + 5000 + 4000 + (16u << 20) &&
               need <= 2 * (uint64_t) chain[1].bytes() + 5000 + 4000 + (18u << 20),
               "save: the peak counts two checkpoint copies, the live state, tokens and the buffer");
         SessionSaveLive huge = live;
         huge.state_bytes = UINT64_MAX;
-        check(session_save_peak_bytes(&chain[1], huge) == UINT64_MAX, "save: the peak saturates");
+        check(session_save_peak_bytes(&chain[1], huge, StateCodec::Fp32) == UINT64_MAX, "save: the peak saturates");
         std::vector<ConversationCheckpoint> out(1);
         std::string why;
         uint64_t asked = 0;
         bool empty_when_asked = false;
         const auto refuse = [&](uint64_t n, std::string& w) { asked = n; empty_when_asked = out.empty(); w = "low RAM"; return false; };
-        check(!session_save_checkpoints(chain, live, refuse, out, why) && why == "low RAM" && asked == need,
+        check(!session_save_checkpoints(chain, live, StateCodec::Fp32, refuse, out, why) && why == "low RAM" && asked == need,
               "save: the preflight is asked for the peak and can refuse");
         check(empty_when_asked && out.empty(), "save: refused before any copy (nothing copied)");
         bool same_chain = chain.size() == before.size();
         for (size_t i = 0; same_chain && i < chain.size(); ++i) same_chain = same_checkpoint(chain[i], before[i]);
         check(same_chain, "save: a refusal leaves the live checkpoints untouched");
         const auto agree = [&](uint64_t, std::string&) { return true; };
-        check(session_save_checkpoints(chain, live, agree, out, why) && out.size() == 1 &&
+        check(session_save_checkpoints(chain, live, StateCodec::Fp32, agree, out, why) && out.size() == 1 &&
               same_checkpoint(out[0], chain[1]), "save: admitted, the deepest checkpoint is copied");
-        check(session_save_checkpoints({}, live, agree, out, why) && out.empty(), "save: no checkpoints, none copied");
+        check(session_save_checkpoints({}, live, StateCodec::Fp32, agree, out, why) && out.empty(), "save: no checkpoints, none copied");
 #if defined(__linux__) && !defined(__SANITIZE_ADDRESS__) && !defined(STRATA_NO_RLIMIT_TEST)
         // under a real address-space limit that cannot hold one more copy: the refusal comes first, no bad_alloc;
         // and the same limit with an admitting preflight does fail at the copy (the test can see the difference)
@@ -688,9 +688,9 @@ int main() {
             std::string w;
             const auto low = [](uint64_t n, std::string& m) { m = "need " + std::to_string(n); return false; };
             bool refused = false;
-            try { refused = !session_save_checkpoints(fat, live, low, o2, w) && o2.empty(); } catch (...) { ::_exit(11); }
+            try { refused = !session_save_checkpoints(fat, live, StateCodec::Fp32, low, o2, w) && o2.empty(); } catch (...) { ::_exit(11); }
             if (!refused) ::_exit(12);
-            try { session_save_checkpoints(fat, live, agree, o2, w); } catch (const std::bad_alloc&) { ::_exit(0); }
+            try { session_save_checkpoints(fat, live, StateCodec::Fp32, agree, o2, w); } catch (const std::bad_alloc&) { ::_exit(0); }
             ::_exit(13);   // the copy fitted: the limit did not bite, the test proves nothing
         }
         int status = 0;
@@ -712,7 +712,7 @@ int main() {
         check(session_file_write(before_path.string(), expected, id, written, error), "reclaim: baseline file written");
         ConversationCache parked(1u << 20, 4);
         SessionSaveLive sl; sl.state_bytes = source.live.bytes(); sl.tokens = source.live.ids.size();
-        const auto freed = session_save_reclaim(source.checkpoints, parked, sl, 0,
+        const auto freed = session_save_reclaim(source.checkpoints, parked, sl, StateCodec::Fp32, 0,
                                                 [] { return std::optional<uint64_t>(0); });
         check(freed.checkpoints == 1, "reclaim: a non-selected checkpoint released");
         check(same_checkpoint(source.live, live_before), "reclaim: live state remains intact");

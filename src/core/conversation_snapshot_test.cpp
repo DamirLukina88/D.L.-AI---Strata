@@ -15,6 +15,12 @@
 #include <string>
 #include <cstdlib>
 #include <limits>
+#include <new>
+#if defined(__linux__)
+#include <sys/resource.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 #include <vector>
 
 using namespace strata::core;
@@ -211,6 +217,18 @@ void full_session(int fmt, int mode, int experts) {
         check(c.bytes()<=coded,"the coded capture stays inside its admitted bound");
         check(coded<=plain+std::min(sizes.gdn,(size_t) kStateCodecChunkFloats*sizeof(float)),
               "and a coded capture costs no more than the fp32 one plus one slice");
+        // ...and the estimate follows the codec into the LIVE state and not only into the checkpoints. An estimate
+        // that still charged the live arrays at fp32 asked the cache for about twice what the park needs and refused
+        // parks that fit (a 116.6 MiB park turned away from a 128 MiB cache for being 172.9 MiB). The drop from the
+        // fp32 estimate is every coded array's own half, less the one slice held while it crosses the device.
+        const size_t slice = std::min(sizes.gdn, (size_t) kStateCodecChunkFloats * sizeof(float));
+        const size_t live_fp32 = sizes.gdn + (ss.ple_hist ? sizes.ple : 0)
+                               + (size_t) g.n_qsa_layers() * (sizes.tail + sizes.dead);
+        size_t ckpt_fp32 = 0;
+        for (const auto& k : checkpoints)
+            ckpt_fp32 += k.gdn.size() + k.ple.size() + k.tails.size() + k.dead.size();
+        check(plain > coded && plain - coded + slice >= (live_fp32 + ckpt_fp32) / 2,
+              "the estimate prices the live running state the way the capture stores it");
         check(c.live.state_codec==(uint8_t) StateCodec::Bf16 && c.checkpoints[0].state_codec==(uint8_t) StateCodec::Bf16,
               "the image says, on every checkpoint, how its running state is held");
         check(c.live.gdn.size()*2==a.live.gdn.size() && c.live.ple.size()*2==a.live.ple.size() &&
@@ -502,5 +520,34 @@ int main() {
     for (int fmt : {kKvF16,kKvInt8,kKvQ4}) for (int mode : {0,1}) for (int experts : {256,512})
         full_session(fmt,mode,experts);
     for (int experts : {256,512}) full_session(3,0,experts);
+#if defined(__linux__)
+    // ---- widening under memory pressure (review P2). The parked mount calls conversation_checkpoints_widen with
+    // nothing around it, and widening allocates the fp32 array beside the coded one: a throw there ended the engine.
+    // A child with its address space capped just above what it already holds is the honest way to make the
+    // allocation fail without pretending to control the allocator from outside.
+    {
+        constexpr size_t kCoded = 256u << 20;                      // 256 MiB of bf16 -> 512 MiB widened
+        ConversationCheckpoint c;                                   // built before the fork: the child must be able
+        c.ids.assign(64, 7);                                        // to fail at the widening and nowhere else
+        c.gdn.assign(kCoded, 0x11); c.ple = {1}; c.tails = {2}; c.dead = {3}; c.block_pos = {4};
+        c.state_codec = (uint8_t) StateCodec::Bf16;
+        std::vector<ConversationCheckpoint> chain{std::move(c)};
+        const pid_t pid = ::fork();
+        if (pid == 0) {
+            long pages = 0, rss = 0;
+            if (FILE* f = std::fopen("/proc/self/statm", "r")) { if (std::fscanf(f, "%ld %ld", &pages, &rss) != 2) pages = 0; std::fclose(f); }
+            rlimit rl {};
+            rl.rlim_cur = rl.rlim_max = (rlim_t) pages * (rlim_t) ::sysconf(_SC_PAGESIZE) + (64u << 20);
+            if (pages <= 0 || ::setrlimit(RLIMIT_AS, &rl) != 0) ::_exit(10);
+            std::string err; bool ok = false;
+            try { ok = conversation_checkpoints_widen(chain, err); } catch (...) { ::_exit(11); }
+            if (ok) ::_exit(12);                                    // the limit did not bite: proves nothing
+            ::_exit(chain[0].state_codec == (uint8_t) StateCodec::Bf16 && chain[0].gdn.size() == kCoded ? 0 : 13);
+        }
+        int status = 0;
+        check(pid > 0 && ::waitpid(pid, &status, 0) == pid && WIFEXITED(status) && WEXITSTATUS(status) == 0,
+              "a widen that cannot allocate is refused to its caller, not thrown past it");
+    }
+#endif
     std::printf("conversation_snapshot_test: %d checks passed\n",checks);
 }

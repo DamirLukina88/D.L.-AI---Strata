@@ -4,7 +4,9 @@
 
 #include <algorithm>
 #include <array>
+#include <exception>
 #include <limits>
+#include <new>
 
 namespace strata::core {
 namespace {
@@ -264,25 +266,43 @@ bool conversation_checkpoint_restore(const ConversationCheckpoint& c, SessionSta
 
 bool conversation_checkpoints_store(const std::vector<ConversationCheckpoint>& chain, StateCodec codec,
                                     std::vector<ConversationCheckpoint>& out, std::string& error) {
-    std::vector<ConversationCheckpoint> built;
-    built.reserve(chain.size());
-    for (const auto& c : chain)
-        if (!conversation_detail::copy_checkpoint_storing(c, codec, built.emplace_back(), error)) return false;
-    out = std::move(built);
+    // Every array below is a fresh allocation beside the one it comes from: a park or a SAVE under memory pressure
+    // can throw, and a throw that reaches the serve loop ends the engine. Reported as a refused capture instead.
+    try {
+        std::vector<ConversationCheckpoint> built;
+        built.reserve(chain.size());
+        for (const auto& c : chain)
+            if (!conversation_detail::copy_checkpoint_storing(c, codec, built.emplace_back(), error)) return false;
+        out = std::move(built);
+    } catch (const std::exception&) {
+        out = {};
+        // the refusal wants a heap block too, and this is the path where there is none: never let the report throw
+        try { error = "not enough memory to store the running state"; } catch (...) {}
+        return false;
+    }
     return true;
 }
 
 bool conversation_checkpoints_widen(std::vector<ConversationCheckpoint>& chain, std::string& error) {
-    for (auto& c : chain) {
-        StateCodec codec = StateCodec::Fp32;
-        if (!codec_of(c, codec, error)) return false;
-        if (codec == StateCodec::Fp32) continue;   // the live chain is these bytes already
-        if (!conversation_detail::convert_state(c.gdn, codec, c.gdn, StateCodec::Fp32, error) ||
-            !conversation_detail::convert_state(c.ple, codec, c.ple, StateCodec::Fp32, error) ||
-            !conversation_detail::convert_state(c.tails, codec, c.tails, StateCodec::Fp32, error) ||
-            !conversation_detail::convert_state(c.dead, codec, c.dead, StateCodec::Fp32, error)) return false;
-        c.state_codec = 0;
-        if (!conversation_checkpoints_widen(c.stage_parts, error)) return false;
+    // Widening allocates the fp32 array beside the coded one, so the same allocation failure as above can happen
+    // here - and the caller's choice on `false` is to drop the older resume points, which is not a fatal error.
+    // convert_state builds beside and swaps in, so a chain left half-widened still says per checkpoint how each
+    // array is held; the caller clears it either way.
+    try {
+        for (auto& c : chain) {
+            StateCodec codec = StateCodec::Fp32;
+            if (!codec_of(c, codec, error)) return false;
+            if (codec == StateCodec::Fp32) continue;   // the live chain is these bytes already
+            if (!conversation_detail::convert_state(c.gdn, codec, c.gdn, StateCodec::Fp32, error) ||
+                !conversation_detail::convert_state(c.ple, codec, c.ple, StateCodec::Fp32, error) ||
+                !conversation_detail::convert_state(c.tails, codec, c.tails, StateCodec::Fp32, error) ||
+                !conversation_detail::convert_state(c.dead, codec, c.dead, StateCodec::Fp32, error)) return false;
+            c.state_codec = 0;
+            if (!conversation_checkpoints_widen(c.stage_parts, error)) return false;
+        }
+    } catch (const std::exception&) {
+        try { error = "not enough memory to widen the running state"; } catch (...) {}
+        return false;
     }
     return true;
 }
@@ -301,7 +321,16 @@ bool conversation_snapshot_bytes(const ConversationView& view, const SessionStat
         !product(layers, {qsa + (draft ? 1 : 0), sizeof(ConversationKv)}) ||
         !product(tails, {qsa, z.tail}) || !product(dead, {qsa, z.dead}) ||
         !product(positions, {qsa, z.block_pos})) return fail(error, "snapshot metadata byte count overflow");
-    for (size_t n : {ids, images, checkpoints, layers, tails, dead, positions, z.gdn, ss.ple_hist ? z.ple : 0})
+    for (size_t n : {ids, images, checkpoints, layers, positions})
+        if (!add(bytes, n)) return fail(error, "snapshot byte count overflow");
+    // The live running state is written the way `view.codec` writes it, exactly like the checkpoints below, so it is
+    // estimated that way too: charging it at fp32 while capturing bf16 asks the cache for twice what the park needs
+    // and refuses a park that fits. `positions` is int32 block positions and stays its own size whatever the codec.
+    const size_t live_gdn = state_codec_size(z.gdn, view.codec);
+    const size_t live_ple = ss.ple_hist ? state_codec_size(z.ple, view.codec) : 0;
+    const size_t live_tails = state_codec_size(tails, view.codec);
+    const size_t live_dead = state_codec_size(dead, view.codec);
+    for (size_t n : {live_gdn, live_ple, live_tails, live_dead})
         if (!add(bytes, n)) return fail(error, "snapshot byte count overflow");
     for (const auto& c : view.checkpoints)
         if (!metadata_bytes(c, bytes, view.codec)) return fail(error, "checkpoint byte count overflow");

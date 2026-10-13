@@ -10003,7 +10003,7 @@ int main(int argc, char** argv) {
                         const uint64_t floor = (uint64_t) o.conversation_cache_min_free_mib << 20;
                         if (o.session_save_reclaim) {
                             const auto freed = strata::core::session_save_reclaim(
-                                checks, conversations, sl, floor, strata::core::available_host_bytes);
+                                checks, conversations, sl, session_codec, floor, strata::core::available_host_bytes);
                             if (freed.bytes || freed.checkpoints || freed.parked) {
                                 // A removed tail must not mark a later checkpoint at this length as a tail.
                                 if (tail_ckpt_len >= 0 && std::none_of(checks.begin(), checks.end(), [&](const auto& c) {
@@ -10026,7 +10026,7 @@ int main(int argc, char** argv) {
                         };
                         std::vector<ConvCheckpoint> disk_checks;
                         std::string why;
-                        if (!strata::core::session_save_checkpoints(checks, sl, admit, disk_checks, why)) {
+                        if (!strata::core::session_save_checkpoints(checks, sl, session_codec, admit, disk_checks, why)) {
                             refuse(why, strata::core::SessionError::memory);
                             continue;
                         }

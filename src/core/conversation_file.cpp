@@ -1163,9 +1163,35 @@ const ConversationCheckpoint* session_deepest_checkpoint(const std::vector<Conve
     return deepest;
 }
 
-uint64_t session_save_peak_bytes(const ConversationCheckpoint* deepest, const SessionSaveLive& live) {
+namespace {
+// What a stored copy of `c` holds under `dest`: the arrays bytes() counts, each sized the way `dest` sizes it.
+// UINT64_MAX for a checkpoint naming a codec this build does not know - the caller refuses those anyway.
+uint64_t checkpoint_bytes_under(const ConversationCheckpoint& c, StateCodec dest) {
+    StateCodec from = StateCodec::Fp32;
+    if (!state_codec_by_code(c.state_codec, from)) return UINT64_MAX;
+    uint64_t n = sat_mul(c.ids.capacity(), sizeof(int32_t));
+    n = sat_add(n, sat_mul(c.imgs.capacity(), sizeof(ConversationImageKey)));
+    // pointers, not a list of the arrays: this is an estimate, and copying what it measures would double the
+    // allocation it exists to price
+    for (const std::vector<uint8_t>* v : {&c.gdn, &c.ple, &c.tails, &c.dead})
+        n = sat_add(n, state_codec_size(state_codec_fp32_bytes(v->size(), from), dest));
+    n = sat_add(n, c.block_pos.capacity());                                    // int32 positions, never coded
+    for (const auto& part : c.stage_parts) n = sat_add(n, checkpoint_bytes_under(part, dest));
+    return n;
+}
+} // namespace
+
+uint64_t session_save_peak_bytes(const ConversationCheckpoint* deepest, const SessionSaveLive& live,
+                                 StateCodec save_codec) {
     uint64_t n = sat_add(kBlock, uint64_t(1) << 20);                          // write buffer, small vectors
-    if (deepest) n = sat_add(n, sat_mul(2, deepest->bytes()));                // the list and the image's copy
+    if (deepest) {
+        n = sat_add(n, sat_mul(2, deepest->bytes()));                         // the list and the image's copy
+        // and, when the file will hold the checkpoint wider than the chain does - checkpoints mounted from a coded
+        // file written by an engine configured fp32 - the widening on top. Zero when codec and chain agree, which is
+        // every save this flag is off for, so that figure is the one this function has always returned.
+        const uint64_t under = checkpoint_bytes_under(*deepest, save_codec);
+        if (under > deepest->bytes()) n = sat_add(n, under - deepest->bytes());
+    }
     n = sat_add(n, live.state_bytes);                                         // the live running state
     n = sat_add(n, sat_mul(live.tokens, sizeof(int32_t)));                    // its token list
     n = sat_add(n, sat_mul(live.images, sizeof(ConversationImageKey)));       // its images
@@ -1174,11 +1200,12 @@ uint64_t session_save_peak_bytes(const ConversationCheckpoint* deepest, const Se
 }
 
 bool session_save_checkpoints(const std::vector<ConversationCheckpoint>& chain, const SessionSaveLive& live,
+                              StateCodec save_codec,
                               const std::function<bool(uint64_t need_bytes, std::string& why)>& admit,
                               std::vector<ConversationCheckpoint>& out, std::string& why) {
     out.clear();
     const ConversationCheckpoint* deepest = session_deepest_checkpoint(chain);
-    if (admit && !admit(session_save_peak_bytes(deepest, live), why)) return false;
+    if (admit && !admit(session_save_peak_bytes(deepest, live, save_codec), why)) return false;
     if (deepest) out.push_back(*deepest);
     return true;
 }
