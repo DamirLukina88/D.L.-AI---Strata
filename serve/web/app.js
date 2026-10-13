@@ -359,6 +359,18 @@ function headers(json = false) {
   return h;
 }
 $("api-key").value = store.get("apikey", DEFAULT_KEY);
+// D.L. AI: behind Cloudflare Access the login is the credential - no key is kept or sent from this browser
+(async () => {
+  try {
+    const r = await fetch("api/whoami", { headers: headers() });
+    const who = r.ok ? await r.json() : null;
+    if (who && who.auth === "cf-access") {
+      store.set("apikey", "");
+      const field = $("api-key").closest(".st-field");
+      if (field) field.innerHTML = `<span class="st-label">Signed in with Cloudflare Access <output>${(who.email || "").replace(/[<>&"]/g, "")}</output></span>`;
+    }
+  } catch (e) { /* older server or offline: keep the key field */ }
+})();
 $("api-key").onchange = () => { store.set("apikey", $("api-key").value.trim()); toast("success", "API key saved", "Kept in this browser only."); };
 
 if ($("force-restart-btn")) {

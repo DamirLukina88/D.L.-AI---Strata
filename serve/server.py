@@ -61,6 +61,7 @@ from serve.frontend import (THINK_END, ChatTemplate, Event, OutputParser, anthro
                             tool_choice_of, unmark_think_literals)
 from serve.mcp import McpCancelled, hub_from_config  # noqa: E402
 from serve import runconfig  # noqa: E402
+from serve import cf_access  # noqa: E402
 from serve import logit_bias as bias_api  # noqa: E402
 from serve.winjob import contain  # noqa: E402
 from serve.structured import StructuredOutputError, prepare_format, validated_json  # noqa: E402
@@ -5189,14 +5190,20 @@ def make_handler(svc: Service):
             self.end_headers()
             self.wfile.write(body)
 
+        def _access_claims(self) -> dict | None:
+            """D.L. AI: the Cloudflare Access login of this request, when Access is configured and the request came
+            through the local tunnel connector (cloudflared connects from loopback)."""
+            verifier = getattr(svc, "cf_access", None)
+            if verifier is None or self.client_address[0] not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+                return None
+            tok = cf_access.token_of(self.headers)
+            return verifier.verify(tok) if tok else None
+
         def _authorized(self) -> bool:
             if not svc.api_key:
                 return True
             auth = self.headers.get("Authorization", "")
             given = auth[7:].strip() if auth.lower().startswith("bearer ") else self.headers.get("x-api-key", "")
-            if not given:
-                qs = parse_qs(urlsplit(self.path).query)
-                given = (qs.get("token") or qs.get("key") or qs.get("api_key") or [""])[0]
             if not given:
                 cookie_str = self.headers.get("Cookie", "")
                 if "strata_key=" in cookie_str:
@@ -5205,7 +5212,7 @@ def make_handler(svc: Service):
                         if p.startswith("strata_key="):
                             given = p[len("strata_key="):]
                             break
-            if key_matches(given, svc.api_key):
+            if key_matches(given, svc.api_key) or self._access_claims() is not None:
                 return True
             self._json(401, {"error": {"type": "authentication_error", "message": "missing or wrong API key"}})
             return False
@@ -5225,10 +5232,6 @@ def make_handler(svc: Service):
                     for h, val in resp.getheaders():
                         if h.lower() not in ("transfer-encoding", "content-length", "connection"):
                             self.send_header(h, val)
-                    qs = parse_qs(urlsplit(self.path).query)
-                    tok = (qs.get("token") or qs.get("key") or [""])[0]
-                    if tok and key_matches(tok, svc.api_key):
-                        self.send_header("Set-Cookie", f"strata_key={tok}; Path=/; SameSite=Lax")
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers()
                     self.wfile.write(body)
@@ -5293,6 +5296,18 @@ def make_handler(svc: Service):
                 self.send_response(302)
                 self.send_header("Location", redirect_url)
                 self.end_headers()
+                return
+            if raw_path == "/api/whoami":
+                # D.L. AI: which credential this browser has - the web app hides the API key field behind Access
+                claims = self._access_claims()
+                if claims is not None:
+                    self._json(200, {"auth": "cf-access", "email": claims.get("email", "")})
+                elif not svc.api_key:
+                    self._json(200, {"auth": "none"})
+                else:
+                    auth = self.headers.get("Authorization", "")
+                    given = auth[7:].strip() if auth.lower().startswith("bearer ") else self.headers.get("x-api-key", "")
+                    self._json(200, {"auth": "key" if given and key_matches(given, svc.api_key) else "required"})
                 return
             if raw_path == "/code/token":
                 self._json(200, {"token": ""})
@@ -7211,6 +7226,11 @@ def main() -> int:
     except ValueError as e:
         print(f'[strata] {e}: set a key, or leave --api-key / STRATA_API_KEY / "api_key" out', file=sys.stderr)
         return 2
+    svc.cf_access = cf_access.from_env()
+    if svc.cf_access is not None:
+        print(f"[strata] Cloudflare Access logins from {svc.cf_access.issuer} are accepted in place of the API key"
+              if svc.cf_access.auds else f"[strata] Cloudflare Access: STRATA_CF_ACCESS_AUD is not set; the first "
+              f"login from {svc.cf_access.issuer} logs its AUD tag", flush=True)
     if not svc.api_key and "api_key" in cfg:             # #569: written, but empty: the server has none (a warning, not a stop)
         print("[strata] the api_key in the config is empty: this server has no API key (anyone who can reach it can "
               "use it); set one, or leave api_key out", file=sys.stderr, flush=True)
