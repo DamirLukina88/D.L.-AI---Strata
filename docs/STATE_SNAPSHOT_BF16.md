@@ -88,6 +88,13 @@ flag, if the bf16 quality numbers leave headroom and 4,096-token spacing is want
   into an image or a file. Denser checkpoints is a separate change with a different risk (it is on every turn).
 - no kernel, no CUDA/HIP/SYCL code, no device-side encode. The touched files are host code; build CUDA and HIP
   anyway.
+- **the SYCL port does not implement the flag.** `sycl/` keeps hand-ported copies of `conversation_state.cpp` and
+  `conversation_snapshot.cpp` that predate this change and contain no codec code, and its `generate.cpp` has no
+  `--session-state-codec`, so a SYCL build never writes coded state and passes `StateCodec::Fp32` to the SAVE
+  preflight. It does share `src/core/conversation_file.cpp`, which reads the codec byte, so `src/core/state_codec.cpp`
+  is in that build's engine list. What a SYCL build does with a file written bf16 elsewhere has not been run here
+  (no oneAPI on this box); its own `conversation_checkpoint_validate` still expects fp32 array sizes, which is the
+  check that would have to catch it.
 - no int8/fp8, no per-channel scales, no rotation/Hadamard preprocessing.
 - no disk tier, no chunking, no prefix objects. This PR only makes the state half the size; where those bytes go is
   a later change.
