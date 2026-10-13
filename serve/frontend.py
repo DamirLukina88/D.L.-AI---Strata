@@ -242,7 +242,11 @@ THINK_TAGS = {"<think>": "\U000F0E01", "</think>": "\U000F0E02"}
 # the same special ids, so text with <|vision_start|><|image_pad|> before a picture took that picture's embeddings
 VISION_TAGS = {"<|vision_start|>": "\U000F0E03", "<|image_pad|>": "\U000F0E04", "<|vision_end|>": "\U000F0E05",
                "<|video_pad|>": "\U000F0E06"}
-LITERAL_TAGS = {**THINK_TAGS, **VISION_TAGS}
+# #2026: `</tool_call>` the same way.  A user asking for the string verbatim handed the model the real end-of-call token
+# (type 4, matched everywhere); it copied that token into its answer and the reply came back empty.  An assistant
+# message keeps its own: a client replaying the model's raw call text sends the tokens the model wrote.
+TOOL_LITERAL_TAGS = {"</tool_call>": "\U000F0E07"}
+LITERAL_TAGS = {**THINK_TAGS, **VISION_TAGS, **TOOL_LITERAL_TAGS}
 THINK_MARKS = {v: k for k, v in LITERAL_TAGS.items()}
 CONTROL_MARK0 = 0xF0E10      # the control tokens' marks start here, clear of the two sets above
 
@@ -292,17 +296,19 @@ def mark_think_literals(messages: list[dict], tools: list[dict] | None, tags: di
     if not _has_tag(messages, tags) and not _has_tag(tools, tags):
         return messages, tools, False
     out = []
+    own = {t: v for t, v in tags.items() if t not in TOOL_LITERAL_TAGS}     # what an assistant message keeps as written
     for m in messages:
         m = dict(m)
         content = m.get("content")
+        mine = own if m.get("role") == "assistant" else tags
         for k, v in m.items():
             if k != "role":
-                m[k] = _mark_deep(v, tags)
+                m[k] = _mark_deep(v, mine)
         if m.get("role") == "assistant" and isinstance(content, str) and content.lstrip().startswith("<think>") \
                 and "</think>" in content:
             i, j = content.index("<think>") + len("<think>"), content.index("</think>")
-            m["content"] = (content[:i] + _mark(content[i:j], tags) + "</think>" +
-                            _mark(content[j + len("</think>"):], tags))
+            m["content"] = (content[:i] + _mark(content[i:j], own) + "</think>" +
+                            _mark(content[j + len("</think>"):], own))
         out.append(m)
     return out, _mark_deep(tools, tags), True
 
@@ -468,31 +474,7 @@ def openai_to_messages(req: dict) -> tuple[list[dict], list[dict] | None, dict]:
     return _late_system_to_user(messages), tools, kwargs
 
 
-FABLE_STRIPPED_SYSTEM_PROMPT = """x-anthropic-billing-header: cc_version=2.1.296.ffff; cc_entrypoint=sdk-cli; cch=ffffffff;
-
-You are an autonomous software engineering agent pair programming with the user.
-Your goal is to build, refactor, debug, and test code autonomously with pragmatic, production-grade quality.
-
-# Core Directives
-- Text you output outside of tool use is displayed to the user as Github-flavored markdown in a terminal.
-- Reference code as `file_path:line_number` — it is clickable.
-- Write clean, idiom-matching code matching the surrounding conventions, naming, and comment density.
-- Execute tools sequentially: run one tool, verify the output, and decide the next step.
-- Report outcomes faithfully: if a test fails or command errors, state the exact error and diagnose it immediately.
-- When you have enough information to act, act immediately. Do not re-derive known facts or list discarded options.
-- Start editing once you know the first change. A design worked out in files persists, while long thinking can be cut off and lost.
-- When one part of a task is blocked, finish everything that does not depend on the stuck part, and state clearly what is blocked.
-- For destructive actions or overwriting existing work, verify target files first.
-- End your turn when the request is done or nothing is left that you can do without the user."""
-
-
-def optimize_claude_code_system_prompt(system: str) -> str:
-    """Replaces bloated 9KB Claude Code system prompt with stripped-down Fable 5.1 autonomous rules.
-    Removes cloud model listings, unused remote telemetry, and redundant cloud SDK instructions
-    while retaining the billing header and token markers required by Claude Code CLI."""
-    if not system.startswith(BILLING_HEADER):
-        return system
-    return FABLE_STRIPPED_SYSTEM_PROMPT
+BILLING_HEADER = "x-anthropic-billing-header:"
 
 
 def pin_billing_stamp(system: str) -> str:
@@ -504,8 +486,21 @@ def pin_billing_stamp(system: str) -> str:
     only inside its first 160 characters."""
     if not system.startswith(BILLING_HEADER):
         return system
-    # Intercept Claude Code system prompt and use stripped-down Fable 5.1 prompt for massive speedup
-    return optimize_claude_code_system_prompt(system)
+    s = list(system)
+    cch = system.find("cch=", len(BILLING_HEADER))
+    if 0 <= cch <= 160:
+        v, end = cch + 4, system.find(";", cch + 4)
+        if end > v and end - v <= 16:
+            s[v:end] = "f" * (end - v)
+    cv = system.find("cc_version=")
+    if 0 <= cv <= 160:
+        v, end = cv + len("cc_version="), system.find(";", cv)
+        if v < end and end - v <= 64:
+            parts = system[v:end].split(".")
+            if len(parts) > 3:
+                tail = v + len(".".join(parts[:3])) + 1
+                s[tail:end] = "f" * (end - tail)
+    return "".join(s)
 
 
 def anthropic_to_messages(req: dict, think_unasked: bool = True) -> tuple[list[dict], list[dict] | None, dict]:
@@ -558,12 +553,7 @@ def anthropic_to_messages(req: dict, think_unasked: bool = True) -> tuple[list[d
     # "output_config": {"effort": "low" | "medium" | "high"}
     thinking = req.get("thinking")
     effort = (req.get("output_config") or {}).get("effort") if isinstance(req.get("output_config"), dict) else None
-    is_cc = bool(isinstance(system, str) and BILLING_HEADER in system) or \
-            (isinstance(system, list) and any(isinstance(b, dict) and BILLING_HEADER in b.get("text", "") for b in system))
     if isinstance(thinking, dict) and thinking.get("type") == "disabled":
-        kwargs["enable_thinking"] = False
-    elif is_cc and thinking is None and not req.get("reasoning_budget_tokens"):
-        # Claude Code CLI: thinking is deactivated by default so tool calling and bash are instant
         kwargs["enable_thinking"] = False
     elif effort:
         kwargs.update(effort_kwargs(effort))
@@ -732,9 +722,17 @@ def function_end(text: str) -> int:
             return -1
 
 
+_JSON_FENCE = re.compile(r"```[ \t]*(?:json)?[ \t]*\r?\n\s*", re.I)
+
+
 def json_tool_call(body: str, schemas: dict) -> ToolCall | None:
     """`{"name": N, "arguments": {...}}` (or "parameters", or the arguments as a JSON string) of a declared tool -> its
-    call; anything else -> None."""
+    call; anything else -> None.  #2037: the object may sit in a Markdown fence (```json ... ```)."""
+    body = body.strip()
+    m = _JSON_FENCE.match(body)
+    if m:
+        body = body[m.end():].rstrip()
+        body = body[:-3] if body.endswith("```") else body
     try:
         obj = json.loads(body)
     except ValueError:
@@ -838,6 +836,15 @@ class OutputParser:
             return "param" if after[len(PARAM_START):gt] in self.schemas else "text"
         if after.startswith("{"):
             return "json" if self.schemas else "text"
+        if after.startswith("```") or (after and "```".startswith(after)):
+            # #2037: the JSON call inside a Markdown fence (```json ... ```) in the explicit wrapper
+            m = _JSON_FENCE.match(after)
+            if m:
+                rest = after[m.end():]
+                if rest.startswith("{"):
+                    return "json" if self.schemas else "text"
+                return "wait" if not rest else "text"
+            return "wait" if "\n" not in after else "text"
         if not after or FUNC_START.startswith(after) or PARAM_START.startswith(after):
             return "wait"
         return "text"
