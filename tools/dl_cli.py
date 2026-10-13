@@ -43,6 +43,8 @@ try:
         tool_syntax_guard,
         tool_system_health,
         validate_syntax,
+        classify_command,
+        classify_write,
     )
 except ImportError:
     from dl_auditing import (
@@ -58,6 +60,8 @@ except ImportError:
         tool_syntax_guard,
         tool_system_health,
         validate_syntax,
+        classify_command,
+        classify_write,
     )
 
 # ANSI colors & formatting (Strata Dark & Orange Aesthetic)
@@ -476,7 +480,7 @@ Active Workspaces:
   2. Proposed Changes & Technical Decisions
   3. Step-by-Step Implementation Phases
   4. Verification & Testing Strategy
-- Conclude by asking for approval, noting that the user can run `/act` to apply the plan.
+- End with the finished plan. The CLI then asks the user whether to execute it, and on yes switches to Act Mode and runs it.
 </plan_mode_guidelines>"""
 
     return f"""<identity>
@@ -935,9 +939,40 @@ def tool_local_wiki(args: dict, workspace: Path, mode: str = "act", session_cont
         return f"Error executing wiki command: {e}"
 
 
+def terminal_approve(kind: str, summary: str, reason: str) -> bool:
+    """Ask on this terminal before a gated action runs (the session daemon swaps in its own approver)."""
+    print(f"\n{C_YELLOW}⚠ Approval needed{C_RESET} {C_MUTED}({reason}){C_RESET}\n  {C_BOLD}{summary}{C_RESET}")
+    try:
+        return input(f"  {C_ACCENT_BOLD}Allow?{C_RESET} [y/N] ").strip().lower() in ("y", "yes")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+
+
+def approval_reason(name: str, args: dict, workspace: Path) -> tuple[str, str] | None:
+    """(what will run, why it needs approval) for a destructive or out-of-workspace action, else None."""
+    if name == "run_command":
+        cmd = args.get("CommandLine") or args.get("command") or ""
+        cwd = Path(args["Cwd"]).expanduser() if args.get("Cwd") else workspace
+        reason = classify_command(cmd, workspace) or (classify_write(cwd, workspace) and f"runs outside the workspace ({cwd})")
+        return (cmd, reason) if reason else None
+    if name in ("write_to_file", "replace_file_content"):
+        path_str = args.get("TargetFile") or args.get("path") or ""
+        p = Path(path_str).expanduser()
+        p = p if p.is_absolute() else (workspace / p)
+        reason = classify_write(p, workspace)
+        return (f"{name} {p}", reason) if reason else None
+    return None
+
+
 def dispatch_dl_tool(name: str, args: dict, workspace: Path, mode: str = "act", session_context: dict | None = None) -> str:
     if mode == "plan" and name in ("write_to_file", "replace_file_content"):
         return "Error: [PLAN MODE] File modifications are disabled. Research the codebase and present your implementation plan for approval before executing."
+    gated = approval_reason(name, args, workspace)
+    if gated and not (session_context or {}).get("yolo"):
+        approve = (session_context or {}).get("approve") or terminal_approve
+        if not approve("tool", gated[0], gated[1]):
+            return f"Denied by user: {gated[1]}. Do not retry it; ask the user or choose a non-destructive approach."
     if name == "switch_workspace":
         return tool_switch_workspace(args, workspace, session_context=session_context)
     elif name == "view_file":
@@ -1301,6 +1336,8 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
 
     current_mode = initial_mode
     prefix_mode = False
+    yolo = False                  # /yolo: destructive actions run without asking (this session only)
+    pending_prompt = None         # a command queued by the CLI itself (plan approved -> /act)
     custom_prefix = None
     system_prompt = build_dl_system_prompt(workspace, mode=current_mode)
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
@@ -1312,7 +1349,7 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
         while True:
             prompt_prefix = f"{C_ACCENT_BOLD}dl{C_RESET} {C_YELLOW}(plan){C_RESET} {C_MUTED}›{C_RESET} " if current_mode == "plan" else f"{C_ACCENT_BOLD}dl{C_RESET} {C_MUTED}›{C_RESET} "
             try:
-                raw_input = input(prompt_prefix)
+                raw_input, pending_prompt = (pending_prompt, None) if pending_prompt else (input(prompt_prefix), None)
             except EOFError:
                 print("\nExiting D.L. CLI.")
                 break
@@ -1351,8 +1388,14 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 print(f"  /exa, /search <query> Direct Exa AI live web search")
                 print(f"  /context7, /docs <lib> Direct Context7 library documentation lookup")
                 print(f"  /status               Check Strata server health")
+                print(f"  /yolo                 Toggle approvals for destructive commands (on by default)")
                 print(f"  !<shell command>      Execute bash command directly in workspace")
                 print(f"  @filename             Inject file content into your prompt\n")
+                continue
+            elif prompt == "/yolo":
+                yolo = not yolo
+                print(f"{C_RED}⚠ YOLO on: destructive commands and writes outside the workspace run without asking.{C_RESET}\n"
+                      if yolo else f"{C_GREEN}✓ Approvals back on for destructive actions.{C_RESET}\n")
                 continue
             elif prompt.startswith("/prefix"):
                 sub = prompt[7:].strip()
@@ -1677,7 +1720,7 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 messages.append({"role": "assistant", "content": custom_prefix, "prefix": True})
 
             try:
-                session_ctx = {"workspace": workspace, "messages": messages, "mode": current_mode}
+                session_ctx = {"workspace": workspace, "messages": messages, "mode": current_mode, "yolo": yolo}
                 new_ws = execute_agent_loop(
                     messages=messages,
                     url=url,
@@ -1690,6 +1733,13 @@ def interactive_loop(workspace: Path, url: str, api_key: str, think_level: str =
                 if new_ws != workspace:
                     workspace = new_ws
                 sync_current_chat_state(messages, workspace)
+                if current_mode == "plan" and messages and messages[-1].get("role") == "assistant":
+                    try:
+                        go = input(f"{C_YELLOW}📋 Execute this plan?{C_RESET} [y = execute / Enter = keep planning] ")
+                    except (EOFError, KeyboardInterrupt):
+                        go = ""
+                    if go.strip().lower() in ("y", "yes"):
+                        pending_prompt = "/act"
             except Exception as e:
                 print(f"{C_RED}Error during agent turn: {e}{C_RESET}\n")
                 if messages and messages[-1].get("role") == "user":

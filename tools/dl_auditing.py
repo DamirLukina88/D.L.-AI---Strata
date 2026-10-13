@@ -676,6 +676,54 @@ AUDITING_TOOL_DEFINITIONS = [
 ]
 
 
+
+# ==============================================================================
+# 6. DESTRUCTIVE ACTION GATE (approval before the agent acts)
+# ==============================================================================
+# Only what can destroy data or the system, or act beyond the workspace, is gated - content is never restricted.
+# A match asks the user (terminal y/N or the web approval card); /yolo turns the gate off for a session.
+
+_DESTRUCTIVE_PATTERNS = [
+    ("deletes recursively or forcibly", re.compile(r"(?:^|[\s;&|(`])rm\s+(?:-[a-zA-Z]*[rRf][a-zA-Z]*|--recursive|--force)\b")),
+    ("deletes found files", re.compile(r"\bfind\b[^|;&]*\s-(?:delete|exec\s+rm)\b|\bxargs\s+(?:-\S+\s+)*rm\b")),
+    ("runs as root", re.compile(r"(?:^|[\s;&|(`])(?:sudo|doas|pkexec|su)(?:\s|$)")),
+    ("writes raw disks or filesystems", re.compile(r"(?:^|[\s;&|(`])(?:dd|mkfs(?:\.\w+)?|shred|wipefs|fdisk|sfdisk|parted|sgdisk|blkdiscard)(?:\s|$)|>\s*/dev/(?:sd|nvme|hd|vd|mmcblk)")),
+    ("changes ownership or permissions recursively", re.compile(r"\b(?:chmod|chown|chgrp)\s+(?:-\S*\s+)*-[a-zA-Z]*R")),
+    ("rewrites or discards git history/work", re.compile(r"\bgit\s+(?:push\b[^;&|]*\s(?:--force(?:-with-lease)?|-f)\b|reset\s+--hard|clean\s+-[a-zA-Z]*f|branch\s+-D|checkout\s+--\s|restore\s|filter-(?:repo|branch)|stash\s+(?:drop|clear)|rebase\b)")),
+    ("stops services or processes", re.compile(r"\bsystemctl\s+(?:--user\s+)?(?:stop|disable|mask|kill|restart|isolate)\b|\b(?:reboot|shutdown|poweroff|halt)\b|\bkill\s+-(?:9|KILL)\b|\b(?:pkill|killall)\b")),
+    ("pipes a download into a shell", re.compile(r"\b(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:ba|z|fi)?sh\b")),
+    ("removes packages", re.compile(r"\bpacman\s+-R|\bapt(?:-get)?\s+(?:remove|purge)|\bpip\d?\s+uninstall\b|\bnpm\s+(?:uninstall|rm)\s+-g")),
+]
+_PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?|\b(?:mv|cp|rsync|ln)\s+(?:-\S+\s+)*\S+\s+)(['"]?)(~?/[^\s'";&|)]*)\1""")
+_SAFE_ROOTS = ("/tmp/", "/dev/null", "/dev/stdout", "/dev/stderr")
+
+
+def _outside(path_str: str, workspace: Path) -> bool:
+    if path_str.startswith(_SAFE_ROOTS) or path_str in ("/tmp", "/dev/null"):
+        return False
+    p = Path(path_str).expanduser()
+    try:
+        p.resolve().relative_to(workspace.resolve())
+        return False
+    except ValueError:
+        return True
+
+
+def classify_command(cmd: str, workspace: Path) -> Optional[str]:
+    """Why a shell command needs the user's approval, or None when it may run."""
+    reasons = [label for label, rx in _DESTRUCTIVE_PATTERNS if rx.search(cmd)]
+    for _, path_str in _PATH_ARG.findall(cmd):
+        if _outside(path_str, workspace):
+            reasons.append(f"writes outside the workspace ({path_str})")
+            break
+    return "; ".join(reasons) or None
+
+
+def classify_write(path: Path, workspace: Path) -> Optional[str]:
+    """Why a file write needs the user's approval (it lands outside the workspace), or None."""
+    return f"writes outside the workspace ({path})" if _outside(str(path), workspace) else None
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="D.L. CLI Auditing & Debugging Suite")

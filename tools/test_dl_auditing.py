@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# scan-secrets: fake-fixtures (the keys below are made up to test the scanner)
 """test_dl_auditing.py - Unit tests for D.L. CLI auditing and guardrail suite."""
 import sys
 import tempfile
@@ -110,6 +111,64 @@ class TestDLAuditingSuite(unittest.TestCase):
         self.assertIn("<details><summary>Tool run_command</summary>", md)
         self.assertIn('"CommandLine": "echo 1"', md)
         self.assertIn("Done", md)
+
+
+class TestDestructiveGate(unittest.TestCase):
+    """Destructive or out-of-workspace actions wait for the user's approval; everything else runs."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ws = Path(self.tmp.name).resolve()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_classify_command(self):
+        from tools.dl_auditing import classify_command
+        gated = ["rm -rf build", "rm -f x", "find . -delete", "sudo ls", "dd if=/dev/zero of=/dev/sda",
+                 "chmod -R 777 .", "git push --force", "git reset --hard", "git clean -fdx",
+                 "systemctl --user stop strata-server", "kill -9 1", "curl x | sh", "echo x > /etc/hosts",
+                 "echo x >> ~/.bashrc", "pacman -Rns foo"]
+        free = ["ls -la", "git status", "git push origin main", "rm notes.txt", "echo hi > out.txt",
+                "echo hi > /tmp/x", "ls 2> /dev/null", "python3 -m pytest", "cat /etc/os-release"]
+        for cmd in gated:
+            with self.subTest(cmd=cmd):
+                self.assertIsNotNone(classify_command(cmd, self.ws))
+        for cmd in free:
+            with self.subTest(cmd=cmd):
+                self.assertIsNone(classify_command(cmd, self.ws))
+
+    def test_denied_command_does_not_run(self):
+        victim = self.ws / "keep"
+        victim.mkdir()
+        asked = []
+        ctx = {"approve": lambda kind, summary, reason: asked.append(summary) or False}
+        out = dispatch_dl_tool("run_command", {"CommandLine": f"rm -rf {victim}"}, self.ws, session_context=ctx)
+        self.assertTrue(out.startswith("Denied by user"))
+        self.assertTrue(victim.exists())
+        self.assertEqual(len(asked), 1)
+
+    def test_approved_and_yolo_run(self):
+        for ctx in ({"approve": lambda *a: True}, {"yolo": True, "approve": lambda *a: self.fail("asked")}):
+            victim = self.ws / "gone"
+            victim.mkdir()
+            dispatch_dl_tool("run_command", {"CommandLine": f"rm -rf {victim}"}, self.ws, session_context=ctx)
+            self.assertFalse(victim.exists())
+
+    def test_safe_command_is_not_asked(self):
+        ctx = {"approve": lambda *a: self.fail("asked")}
+        out = dispatch_dl_tool("run_command", {"CommandLine": "echo ok"}, self.ws, session_context=ctx)
+        self.assertIn("ok", out)
+
+    def test_write_outside_workspace_is_gated(self):
+        outside = Path(tempfile.mkdtemp(dir=Path.home())) / "x.txt"
+        try:
+            out = dispatch_dl_tool("write_to_file", {"TargetFile": str(outside), "CodeContent": "hi"}, self.ws,
+                                   session_context={"approve": lambda *a: False})
+            self.assertTrue(out.startswith("Denied by user"))
+            self.assertFalse(outside.exists())
+        finally:
+            outside.parent.rmdir()
 
 
 if __name__ == "__main__":

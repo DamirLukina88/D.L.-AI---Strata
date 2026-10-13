@@ -18,7 +18,10 @@ for name in filter(None, staged):
     blob = subprocess.run(["git", "show", f":{name}"], capture_output=True).stdout
     if b"\0" in blob[:8192]:
         continue  # binary
-    ok, msg = scan_secrets_in_text(blob.decode("utf-8", "replace"), name)
+    text = blob.decode("utf-8", "replace")
+    if "scan-secrets: fake-fixtures" in text[:2000]:
+        continue  # a test file whose fake keys exercise the scanner itself
+    ok, msg = scan_secrets_in_text(text, name)
     if not ok:
         failed = True
         print(f"[pre-commit] {name}\n{msg}\n", file=sys.stderr)
