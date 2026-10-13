@@ -4,8 +4,11 @@
 #include <cuda_runtime.h>
 
 #include <array>
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -193,6 +196,131 @@ void full_session(int fmt, int mode, int experts) {
           restored.live.dead==a.live.dead && restored.live.block_pos==a.live.block_pos &&
           equal(restored.kv[0],a.kv[0]) && equal(restored.kv[1],a.kv[1]),"whole-session A/B/A exactness including spare key");
     check(ss.ple_prev[0]==64 && ss.ple_prev[1]==65,"PLE token window reconstructed");
+    {
+        // ---- the running-state codec (strata/core/state_codec.hpp). The state the session holds is fp32; a stored
+        // copy may hold it as bf16. The session itself is never coded, and a coded copy is only ever read by a
+        // restore, which widens it. Everything below compares against image `a`, the same state captured as fp32.
+        const ConversationView coded_view{ids,images,checkpoints,true,StateCodec::Bf16};
+        size_t plain=0,coded=0;
+        check(conversation_snapshot_bytes(view,ss,g,draft.state,plain,err) &&
+              conversation_snapshot_bytes(coded_view,ss,g,draft.state,coded,err),"a coded capture is estimable");
+        SavedConversation c;
+        check(conversation_snapshot_save(c,coded_view,ss,g,draft.state,err),"capture with the state coded");
+        // the estimate is what the caller admits before it captures: it must cover what the capture allocates,
+        // including the fp32 slice the coded copy crosses the device boundary through
+        check(c.bytes()<=coded,"the coded capture stays inside its admitted bound");
+        check(coded<=plain+std::min(sizes.gdn,(size_t) kStateCodecChunkFloats*sizeof(float)),
+              "and a coded capture costs no more than the fp32 one plus one slice");
+        check(c.live.state_codec==(uint8_t) StateCodec::Bf16 && c.checkpoints[0].state_codec==(uint8_t) StateCodec::Bf16,
+              "the image says, on every checkpoint, how its running state is held");
+        check(c.live.gdn.size()*2==a.live.gdn.size() && c.live.ple.size()*2==a.live.ple.size() &&
+              c.live.tails.size()*2==a.live.tails.size() && c.live.dead.size()*2==a.live.dead.size(),
+              "the coded arrays are half the fp32 ones");
+        check(c.live.block_pos==a.live.block_pos,"block_pos is int32 positions and is never coded");
+        check(c.bytes()<a.bytes(),"and the image is smaller than the same conversation held as fp32");
+        check(conversation_snapshot_validate(c,ss,g,draft.state,err),"a coded image validates");
+        auto relabelled=c; relabelled.live.state_codec=0;
+        check(!conversation_snapshot_validate(relabelled,ss,g,draft.state,err),
+              "a coded image read as fp32 is refused: its arrays are the wrong size for fp32");
+        // widen the fp32 image's own arrays and compare value by value: that is what the restore puts in the session
+        auto widened=[](const std::vector<uint8_t>& coded){
+            std::vector<float> f(coded.size()/2);
+            std::string e;
+            check(state_decode(coded.data(),f.size(),StateCodec::Bf16,f.data(),e),"a coded array decodes");
+            return f;
+        };
+        auto within=[](const std::vector<uint8_t>& fp32,const std::vector<float>& got){
+            const float* want=(const float*) fp32.data();
+            for(size_t i=0;i<got.size();++i){
+                const double a=want[i],b=got[i];
+                if(a==0.0f){ if(b!=0.0f) return false; continue; }
+                if(std::fabs((b-a)/a)>1.0/256) return false;
+            }
+            return true;
+        };
+        check(within(a.live.gdn,widened(c.live.gdn)) && within(a.live.dead,widened(c.live.dead)) &&
+              within(a.live.tails,widened(c.live.tails)) && within(a.live.ple,widened(c.live.ple)),
+              "every coded value is within 2^-8 of the fp32 value it stands for");
+        // restore it: the session's fp32 buffers get the widened values, and re-capturing as fp32 finds exactly them
+        check(conversation_snapshot_restore(c,ss,g,draft.state,err)==ConversationRestore::restored,
+              "restore an image whose running state is coded");
+        SavedConversation back;
+        check(conversation_snapshot_save(back,view,ss,g,draft.state,err),"capture again as fp32");
+        check(back.live.gdn.size()==c.live.gdn.size()*2 &&
+              std::equal(back.live.gdn.begin(),back.live.gdn.end(),a.live.gdn.begin())==false,
+              "the restored session holds the widened state, not the fp32 bytes it came from");
+        check(back.live.block_pos==a.live.block_pos && back.live.ids==a.live.ids &&
+              back.kv[0].k==a.kv[0].k && back.kv[0].v==a.kv[0].v &&
+              back.kv[0].k_scale==a.kv[0].k_scale && back.kv[0].v_scale==a.kv[0].v_scale,
+              "everything that is not running state came back exactly: the K/V pages and their scales");
+        // One thing does follow the coding, and it should: the indexer's spare pooled row is put back from the
+        // checkpoint's dead keys, which are running state. It is the only K/V plane that can differ.
+        check(equal(back.kv[0],a.kv[0]) || back.kv[0].pooled!=a.kv[0].pooled,
+              "if a K/V plane differs after a coded restore it is the pooled one, the row that comes from state");
+        // and coding that state again is stable: bf16 of a bf16 value is that value
+        SavedConversation again;
+        check(conversation_snapshot_save(again,coded_view,ss,g,draft.state,err),"capture the restored state coded again");
+        check(again.live.gdn==c.live.gdn && again.live.dead==c.live.dead && again.live.tails==c.live.tails &&
+              again.live.ple==c.live.ple,"coding a coded value changes nothing: a park does not degrade a park");
+        // the checkpoints on their own: store keeps a coded chain as it is, widen puts it back to fp32
+        std::vector<ConversationCheckpoint> kept,wide;
+        check(conversation_checkpoints_store(c.checkpoints,StateCodec::Bf16,kept,err) &&
+              kept[0].gdn==c.checkpoints[0].gdn && kept[0].state_codec==c.checkpoints[0].state_codec,
+              "a chain already under the codec is copied, not coded twice");
+        check(conversation_checkpoints_store(a.checkpoints,StateCodec::Bf16,kept,err) &&
+              kept[0].gdn.size()*2==a.checkpoints[0].gdn.size() && kept[0].state_codec==(uint8_t) StateCodec::Bf16,
+              "an fp32 chain is coded by a stored copy");
+        check(conversation_checkpoints_store(a.checkpoints,StateCodec::Fp32,kept,err) &&
+              kept[0].gdn==a.checkpoints[0].gdn && kept[0].state_codec==0,
+              "and with no codec asked for it is the plain copy it has always been");
+        wide=c.checkpoints;
+        auto floats_of=[](const std::vector<uint8_t>& fp32){
+            std::vector<float> f(fp32.size()/4);
+            std::memcpy(f.data(),fp32.data(),f.size()*sizeof(float));
+            return f;
+        };
+        check(conversation_checkpoints_widen(wide,err) && wide[0].state_codec==0 &&
+              wide[0].gdn.size()==c.checkpoints[0].gdn.size()*2 && wide[0].block_pos==a.checkpoints[0].block_pos &&
+              wide[0].ids==a.checkpoints[0].ids && within(a.checkpoints[0].gdn,floats_of(wide[0].gdn)) &&
+              within(a.checkpoints[0].dead,floats_of(wide[0].dead)),
+              "a mount widens a parked chain back to fp32: the sizes and the bytes that are not coded return "
+              "exactly, every coded value within 2^-8 of what the chain held");
+        wide=a.checkpoints;
+        check(conversation_checkpoints_widen(wide,err) && wide[0].gdn==a.checkpoints[0].gdn,
+              "widening a chain that is already fp32 leaves every byte alone");
+        // a coded session file: version 2, and the streamed and captured paths still agree
+        {
+            SavedConversation meta; std::vector<SessionKvSource> sources;
+            check(conversation_snapshot_sources(meta,sources,coded_view,ss,g,draft.state,err),"disk-save sources, coded");
+            check(meta.live.state_codec==(uint8_t) StateCodec::Bf16,"the disk-save path codes the live state too");
+            namespace fs=std::filesystem;
+            const fs::path dir=fs::temp_directory_path()/("strata-snap-coded-"+std::to_string(experts)+"-"+
+                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+            fs::create_directories(dir);
+            const SessionFileIdentity id{1,2};
+            const std::string p1=(dir/"streamed.bin").string(),p2=(dir/"captured.bin").string(),
+                            p3=(dir/"plain.bin").string();
+            auto slurp=[](const std::string& p){ std::ifstream f(p,std::ios::binary);
+                return std::vector<char>((std::istreambuf_iterator<char>(f)),std::istreambuf_iterator<char>()); };
+            size_t n1=0,n2=0,n3=0;
+            check(session_file_write(p1,meta,sources,id,n1,err) && session_file_write(p2,again,id,n2,err),
+                  "both coded writers succeed");
+            check(slurp(p1)==slurp(p2),"a coded streamed file is byte-identical to the coded captured file");
+            check(uint8_t(slurp(p1)[8])==2,"a coded session file is version 2");
+            check(session_file_write(p3,a,id,n3,err) && uint8_t(slurp(p3)[8])==1,
+                  "the same conversation with fp32 state is still a version 1 file");
+            check(n1<n3,"and it is smaller than that file");
+            SavedConversation x;
+            check(session_file_read(p1,id,x,n1,err) && x.live.gdn==again.live.gdn &&
+                  x.live.state_codec==(uint8_t) StateCodec::Bf16 && x.checkpoints[0].state_codec==x.live.state_codec,
+                  "a coded session file reads back with its codec and its bytes");
+            check(conversation_snapshot_restore(x,ss,g,draft.state,err)==ConversationRestore::restored,
+                  "and restores");
+            std::error_code ec; fs::remove_all(dir,ec);
+        }
+        check(conversation_snapshot_restore(a,ss,g,draft.state,err)==ConversationRestore::restored,
+              "the session is back to the fp32 image for the checks that follow");
+    }
     for (int64_t dirty : {65, 3, 0}) {
         check(conversation_snapshot_restore(a,ss,g,draft.state,err)==ConversationRestore::restored,"restore growth fixture base");
         ConversationKvReuse reuse{a.kv,65,dirty};

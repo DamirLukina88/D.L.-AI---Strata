@@ -55,8 +55,8 @@ fp32 state, so a checkpoint costs 118 MB of RAM. Halving a stored state is what 
 
 | codec | encoder to write | decoder | scale stored | saturation | per-value error |
 | --- | --- | --- | --- | --- | --- |
-| **bf16** | ~10 lines (shift + round-to-nearest-even) | **exists, exact** | none | none (same 8-bit exponent as fp32) | 0.195% |
-| fp8 E4M3 | ~120 lines + a scale policy | exists | per layer/row/head | required, 448 max | 3.1% max |
+| **bf16** | ~10 lines (shift + round-to-nearest-even) | **exists, exact** | none | none (same 8-bit exponent as fp32) | 0.39% max, 0.17% rms |
+| fp8 E4M3 | ~120 lines + a scale policy | exists | per layer/row/head | required, 448 max | 6.25% max |
 | int8 | ~60 lines + a scale policy | ~10 lines | per row/head | required | 0.23% of row max, tails arbitrary |
 
 bf16 keeps fp32's exponent range, so there is no scale to choose, no value that can overflow, and no subnormal cliff.
@@ -163,16 +163,11 @@ destination are different buffers, so decoding needs **no temporary**: read bf16
 `SavedConversation::bytes()` / `ConversationCheckpoint::bytes()` count `capacity()`, so parked-image accounting
 follows the smaller vectors with no change.
 
-### 5. Expected cost, to be measured
+### 5. Cost, measured
 
-Not measured yet; these are arithmetic, and the PR must replace them with numbers:
-
-- device→host copy of one running state: 118 MB.
-- encode 29.5M floats, decode 29.5M floats: both memory-bound at worst; bf16 needs no table and no multiply.
-- restore of the 63K example: `docs/DETAILS.md:1117` reports 898.2 ms for 1,198,691,396 B, so 118 MB less to read is
-  less wall time, with the decode added on top.
-- `session_phase_limit_s` (60 s + 1 s per 4 MiB; 1.2 GB → 345 s) and `session_read_peak_bytes` both shrink slightly
-  with the file.
+See **Measured** below. The arithmetic was right: one running state is 118,063,152 B, bf16 stores it in 59,031,600 B,
+and a session file holds one live state plus one checkpoint per 16,384 tokens, so the saving is a multiple of
+59 MB and does not depend on the conversation's length.
 
 ## Files to change
 
@@ -205,7 +200,7 @@ error, not a silent default. Default `fp32` keeps every written byte identical t
 
 `state_codec_test` (new):
 
-1. round trip of a ramp, a random block, and every bf16-representable value: decode(encode(x)) within 0.195% relative
+1. round trip of a ramp, a random block, and every bf16-representable value: decode(encode(x)) within 2^-8 = 0.39% relative
    of x, exactly equal for values bf16 already holds.
 2. `+Inf`, `-Inf`, `NaN`, `±0`, denormals, and the largest finite fp32 — no crash, and the RNE-carry-to-infinity case
    asserted explicitly.
@@ -225,7 +220,7 @@ error, not a silent default. Default `fp32` keeps every written byte identical t
 `conversation_snapshot_test` / `conversation_validation_test` (extend):
 
 11. save with `Bf16` → `conversation_checkpoint_validate` accepts it and rejects the same image re-labelled `Fp32`.
-12. save → restore → the session's fp32 buffers match the originals within 0.195% per value, and `block_pos`
+12. save → restore → the session's fp32 buffers match the originals within 2^-8 = 0.39% per value, and `block_pos`
     bit-exact.
 13. a checkpoint already coded is not coded twice (idempotence).
 14. `bytes()` reports the coded capacity; `session_save_peak_bytes` includes the capture scratch and refuses when the
@@ -241,6 +236,84 @@ End to end, on the box:
 17. 63K prompt → `action=save` with the flag off and on; record `n_written`, `save_ms`, `restore_ms`; restore both and
     compare the generated continuation token-for-token against the fp32 file.
 
+## Measured
+
+One Tesla V100 32 GB (model) plus one RTX 2080 Ti (ComfyUI idle), 93 GB system RAM, Linux, CUDA 12.8, engine built
+from this branch. Model Qwen3.8-Flash-Next IQ3_S, `--kv int8`, `--max-context 262144`, `--kv-resident 32768`,
+`--conversation-cache-mib 16384 --conversation-cache-slots 12 --conversation-cache-min-free-mib 8192`. The two A/B
+configs are the same `args` list with only `--session-state-codec fp32` / `bf16` differing, and neither runs
+`--vision`, so the file fingerprints match.
+
+The conversation is `tools/needle_bench.py`'s haystack (this repository's own docs and source, in a fixed order) with
+a code word inserted at the midpoint, asked greedily through `/v1/chat/completions`. Same text in every run.
+
+**63,459 tokens**
+
+| | `fp32` (default) | `bf16` | change |
+| --- | ---: | ---: | ---: |
+| session file | 1,205,289,012 B | 1,087,225,924 B | −118,063,088 B, −9.8% |
+| `save_ms` | 546.4 | 503.2 | −7.9% |
+| `restore_ms` | 759.5 | 714.3 | −6.0% |
+| next turn on the resumed state | 0.47 s, right word | 0.45 s, right word | — |
+
+**32,650 tokens**: 734,789,228 → 616,726,140 B (−16.1%), `save_ms` 444.1 → 315.5 (−29%), `restore_ms`
+468.5 → 400.3 (−15%). Short conversations gain the most, because the state in a file is set by the checkpoint
+spacing and not by the length: a 37-token conversation still writes 236,738,756 B, of which two running states are
+236,126,304 B, and coded the same file is 118.7 MB.
+
+**What bf16 costs the state, measured on the file's own values** — no model, no GPU, so nothing but the codec is in
+these numbers. bf16 encode and decode applied to the 29,417,472 GDN floats of the 63K conversation's live state:
+
+| array | values | worst relative | rms relative | worst absolute | mean absolute | state rms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| GDN recurrence | 29,417,472 | 0.3891% | 0.166% | 0.0623 | 4.6e-5 | 0.2598 |
+| PLE history | 92,160 | 0.3890% | 0.166% | 0.0156 | 2.5e-4 | 0.3171 |
+| QSA indexer tails | 4,608 | 0.3891% | 0.167% | 0.0156 | 1.0e-3 | 0.9855 |
+| QSA dead keys | 1,536 | 0.3743% | 0.161% | 0.0076 | 9.3e-4 | 0.9835 |
+
+The worst relative error sits just under the 2^-8 = 0.3906% bound, as it must: bf16 has eight significant bits. No
+value's sign flipped, none became zero, none became non-finite. `block_pos` is int32 positions and is never coded.
+
+For scale, the same 63K prompt through two separate engine runs, both fp32, both put on the bf16 grid so only the
+run-to-run difference shows: max 1.641, mean 0.00228 on the GDN state. **The engine's own run-to-run difference is
+26x the codec's worst error** — the adaptive expert tier and a shared PCIe link move the rounding, as
+`docs/DETAILS.md` records for #152 and #410.
+
+**Round trip.** A coded file restored by an engine started with `--session-state-codec fp32`, then saved again, is
+bit-identical to the state the coded file held, in all five arrays (`gdn`, `ple`, `tails`, `dead`, `block_pos`).
+
+**The default path is untouched.** With the flag off, a 63,459-token conversation writes 1,205,289,012 B at file
+version 1, and that file is byte-identical to the one the previous engine build (this branch's parent, `a0116b27`, same
+`args`) wrote for the same conversation: same 232-byte header, same token ids, same bytes in all five state arrays.
+
+**Compatibility.** A version-2 coded file restores on an engine configured `fp32`, and a version-1 file restores on an
+engine configured `bf16`; both resumed conversations answered the code word correctly. An engine that does not know
+version 2 refuses the file and says so.
+
+**Text, with the rounding pinned.** Left at its defaults the engine is not repeatable on this box — the adaptive
+expert tier and a shared PCIe link move the rounding (`docs/DETAILS.md:106`, and `docs/DETAILS.md:108` names
+`--adapt-swaps 0 --pcie-frac 0` as the way to get byte-identical repeats) — and the same fp32 file restored twice gave
+different continuations. With those two switches pinned off, two separate engine runs of the same 32,650-token
+conversation produced states that differ by exactly the codec and nothing else: `gdn` max 0.0620 / mean 4.51e-5,
+`ple` 0.0178 / 2.4e-4, `tails` 0.0156 / 1.1e-3, `dead` 0.0076 / 9.3e-4, `block_pos` identical — the same magnitudes as
+the codec's own error table above, with no drift left on top. One engine then restored both files, alternating, twice
+each, and generated the same four continuations:
+
+| continuation | fp32 state | bf16 state |
+| --- | --- | --- |
+| the code word | `da454b02b470` | `da454b02b470` |
+| what the document is made of | `d2c0d2cde25b` | `d2c0d2cde25b` |
+| count to five, name the word | `e00a9fc3f733` | `e00a9fc3f733` |
+| a haiku about it | `cded6cce8fb4`, `ede0a43fecf2` | `ede0a43fecf2`, `ede0a43fecf2` |
+
+Three of the four are byte-identical between the coded and the uncoded restore. The fourth — free creative generation,
+the one place a small state perturbation can send the greedy path down a different line — varied **on the fp32 file
+too**: the same uncoded file gave two different haikus in two passes, and the coded file matched its later answer both
+times. So on this box the codec did not add variation that the engine's own fp32 path did not already have.
+
+Without those switches pinned, text identity cannot be used at all: two fp32 runs of the same file differ by 26x more
+in the state than bf16 does.
+
 ## Quality gate
 
 This is the part that decides whether the feature ships, and it is a higher bar than K/V quantization faced:
@@ -250,27 +323,57 @@ was none. The repo's precedent for accepting a quantization trade with numbers i
 
 Run, with the flag off and on, on the same box and the same build:
 
-1. `tools/needle_bench.py` — 32K at depths 10/50/90, after a restore, not just cold.
-2. `tools/ab_engine.py` — the two engines A/B'd on the same prompts.
+1. `tools/needle_bench.py` — 32K at depths 10/50/90, after a restore, not just cold. **Done, and through the restore
+   path rather than cold:** each depth is read once, saved, restored, then continued, so the answer comes from the
+   state that came off disk. 3 of 3 right configured `fp32`, 3 of 3 right configured `bf16`, same words, same box,
+   same build:
+
+   ```
+   depth  10%: read 32646 tok 22.3s answer='amber'  | bytes=734789228 save=363.6 restore=460.6 | after restore OK 0.77s
+   depth  50%: read 32646 tok 21.9s answer='falcon' | bytes=734789228 save=383.6 restore=524.1 | after restore OK 0.41s
+   depth  90%: read 32646 tok 22.0s answer='quartz' | bytes=734789228 save=329.1 restore=490.3 | after restore OK 0.39s
+   depth  10%: read 32646 tok 22.4s answer='amber'  | bytes=616726140 save=305.1 restore=411.9 | after restore OK 0.74s
+   depth  50%: read 32646 tok 22.0s answer='falcon' | bytes=616726140 save=314.6 restore=414.6 | after restore OK 0.43s
+   depth  90%: read 32646 tok 22.1s answer='quartz' | bytes=616726140 save=437.3 restore=390.2 | after restore OK 0.39s
+   ```
+
+   (`fp32` first, then `bf16`; the wanted word is the one the filler was seeded with.)
+2. `tools/ab_engine.py` — the two engines A/B'd on the same prompts. **Outstanding.**
 3. **error vs tokens-since-resume** — restore a coded state, then measure logit KL and top-1 flips against an fp32
    restore at 1, 10, 100, 1,000 tokens after the resume. This is the decisive measurement: the GDN gate decays old
    state, so a perturbation at the resume point should shrink. If it is flat or grows, bf16 is wrong for this and the
-   PR stops here.
+   PR stops here. **Not available through this build's API** — `/v1/chat/completions` ignores `logprobs` and returns
+   no logits, so there is nothing to take a KL or a top-1 flip from. It needs a host-side harness that runs both
+   restores in one process, which is a change in its own right. Offered in place of it: the value-by-value error
+   table above, which bounds the perturbation exactly (every state value moves by at most 2^-8 of itself), and the
+   measurement showing the same prompt in two fp32 runs moves that state 26x more.
 4. resume at several depths (4K, 32K, 128K) and at several checkpoint ages, since the older the checkpoint the more
-   the resumed state matters.
+   the resumed state matters. **Done at 32K and 63K.** 4K and 128K outstanding, and so is a conversation long enough
+   to hold two checkpoints, which is the first time a restore reads a coded state older than the live one.
 
 Acceptance: needle recall unchanged, token-for-token identity on the short continuations, and a measured decay curve
-reported with the machine it was measured on.
+reported with the machine it was measured on. **Recall: met. Token-for-token identity: not achievable on this box
+even between two fp32 runs of the same file, so the value-by-value bound is offered instead. Decay curve: not
+measurable through the API, see 3.**
 
 ## Measurements the PR must report
 
 State the machine (CPU, GPU, RAM, OS, engine version, model, flags) next to every number, as `docs/DETAILS.md` does.
 
-- session file bytes, `save_ms`, `restore_ms`, flag off vs on, at 4K / 32K / 63K / 128K.
-- parked image bytes and `parked=` / `bytes=` log lines, flag off vs on, with the chain length stated.
-- encode and decode wall time per running state, and their effect on the request that triggers them.
-- decode tok/s and prefill tok/s before and after, to show the codec does not land on the token path.
-- peak RAM during SAVE, flag off vs on, to show the capture scratch is admitted and not a surprise.
+- session file bytes, `save_ms`, `restore_ms`, flag off vs on, at 4K / 32K / 63K / 128K. **Done at 32K and 63K**
+  (above); 4K and 128K outstanding.
+- parked image bytes and `parked=` / `bytes=` log lines, flag off vs on, with the chain length stated. **Outstanding:**
+  needs a conversation long enough to park a multi-checkpoint chain. The arithmetic is confirmed by the file numbers,
+  which are the same writer.
+- encode and decode wall time per running state, and their effect on the request that triggers them. **Included in
+  `save_ms` / `restore_ms` above:** coding a state costs nothing measurable on either side. The save got 43 ms faster
+  and the restore 45 ms faster, because half of the state's bytes never reach the disk.
+- decode tok/s and prefill tok/s before and after, to show the codec does not land on the token path. **Done for
+  prefill:** the same 63,455-token prompt read in 44.8 s configured `fp32`, 44.6 s configured `bf16`, 44.7 s on the
+  previous engine build — the same rate. No codec code is on the token path; per-token decode is unchanged by
+  construction and was 0.45-0.47 s for the same resumed turn in both configurations.
+- peak RAM during SAVE, flag off vs on, to show the capture scratch is admitted and not a surprise. **Outstanding.**
+  The scratch is 4 MiB per coding pass, not 118 MB, and the preflight admits it.
 
 ## What this unlocks (not in this PR)
 

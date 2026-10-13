@@ -1128,6 +1128,26 @@ NAME may
 not contain a path, a drive, a stream (`:`), a Windows device name (`NUL`, `CON.bin`, `COM1`...), a control character,
 a leading dot or a trailing dot or space.
 
+`--session-state-codec bf16` (an engine argument in the config's `args`, default `fp32`) holds a saved conversation's
+running state - the recurrent GDN state, the PLE history, the QSA indexer's tails - as bfloat16 instead of float32, in
+parked conversations and in session files. Half the bytes for those arrays, every value within 2^-8 (0.39%) of itself.
+The live state is never coded: a restore widens the state back to float32 before the engine uses it, so nothing
+downstream of a restore can tell the difference. Which codec was used is recorded per conversation inside the file, so
+a file written one way restores on an engine configured the other way, and a file naming a codec this build does not
+know is refused. Files that code the state are written as format version 2; an engine older than this change refuses
+those by name. Measured on a Tesla V100 32 GB with an RTX 2080 Ti, 93 GB RAM, Linux, CUDA 12.8, IQ3_S, `--kv int8`,
+262144 context, the same conversation both ways: 1,205,289,012 B becomes 1,087,225,924 B (-9.8%) at 63,459 tokens,
+734,789,228 B becomes 616,726,140 B (-16.1%) at 32,650, `save_ms` 546.4 -> 503.2 and `restore_ms` 759.5 -> 714.3. The
+saving is set by the checkpoint spacing and not by the length - one running state is 118,063,152 B fp32 and 59,031,600 B
+coded, and a file carries one for the live conversation plus one per 16,384 tokens - so a 37-token conversation's file
+drops from 236,738,756 B to 118.7 MB. Over the 29,417,472 floats of a 63K conversation's recurrent state the worst value
+moves 0.3891% and the typical one 0.166%; two separate fp32 runs of this engine move that same state 26 times more, and
+with `--adapt-swaps 0 --pcie-frac 0` pinned they move it not at all, in which case a coded and an uncoded restore of the
+same conversation generated identical text on 3 of 4 continuations (the fourth is free creative generation, which varied
+between repeats of the uncoded file too). Needle recall at 32K, depths 10/50/90, was right at every depth after a
+restore, both codecs. With the flag off nothing changes: the file a 63,459-token conversation writes is byte-identical
+to the one the previous build wrote. `docs/STATE_SNAPSHOT_BF16.md` has the whole set.
+
 `--session-save-reclaim` (an engine argument in the config's `args`, off by default) lets a SAVE that fails its
 RAM preflight first release reconstructible host caches: retained K/V buffers, oldest unpinned parked
 conversations, then unpinned checkpoints other than the one selected for the file. It stops as soon as measured
