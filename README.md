@@ -31,7 +31,7 @@ Measured on the workstation this fork is built for, with `tools/strata_bench.py`
 
 Each column adds switches to the one before it:
 
-| Metric | A: baseline | B: + adaptive overlap | C: + route tail skip 7 | D1: + route resident 0.5 | E: + fusions, coding expert profile | F: + RDNA3 switches, core isolation | v0.1.43.1, Arm E config |
+| Metric | A: baseline | B: + adaptive overlap | C: + route tail skip 7 | D1: + route resident 0.5 | E: + fusions, coding expert profile | F: + RDNA3 switches, core isolation | v0.1.43.1, current config |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Chat decode (median) | 20.0 tok/s | 20.7 | 22.7 | 21.0 | 20.9 (peak 31.2) | 18.4 (peak 28.0) | 18.3 (peak 29.8) |
 | Chat time to first token | 2.03 s | 1.93 | 2.13 | 2.03 | 1.86 | 1.81 | **1.62** |
@@ -42,11 +42,11 @@ Each column adds switches to the one before it:
 | Agent turn time to first token | 13.3 s | 13.0 | 12.9 | 12.9 | 12.8 | 12.9 | **12.3** |
 
 Numbers are medians over the bench's runs: columns A-F on Strata v0.1.43 (2026-10-11), the last column on
-v0.1.43.1 with the Arm E configuration (2026-10-13). Decode medians vary a lot between runs on this card (the
-v0.1.43.1 chat runs ranged from 15.9 to 29.8 tok/s), so compare peaks and prompt numbers before decode medians. The configuration in use is
-Arm E (`STRATA_ADAPT_OVERLAP=1`, `STRATA_ADAPT_OVERLAP_RESIDENT=1`, `STRATA_ROUTE_TAIL_SKIP=7`,
-`STRATA_ROUTE_RESIDENT=0.5` and a custom expert profile built from 12 coding traces with
-`tools/make_profile_mix.py`).
+v0.1.43.1 with the configuration in use (2026-10-13). Decode medians vary a lot between runs on this card (the
+v0.1.43.1 chat runs ranged from 15.9 to 29.8 tok/s), so compare peaks and prompt numbers before decode medians. The configuration in use combines Arm E and Arm F: `STRATA_ADAPT_OVERLAP=1`,
+`STRATA_ADAPT_OVERLAP_RESIDENT=1`, `STRATA_ROUTE_TAIL_SKIP=7`, `STRATA_ROUTE_RESIDENT=0.5`, the fusion and RDNA3
+switches, core isolation (`STRATA_AUX_CPUS=auto`), and a custom expert profile built from 12 coding traces with
+`tools/make_profile_mix.py`.
 
 ## What it adds to Strata
 
