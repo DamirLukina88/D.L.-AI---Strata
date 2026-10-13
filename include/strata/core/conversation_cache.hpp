@@ -3,6 +3,7 @@
 #pragma once
 
 #include "strata/core/conversation_buffer.hpp"
+#include "strata/core/conversation_memory.hpp"
 
 #include <algorithm>
 #include <array>
@@ -24,6 +25,11 @@ struct ConversationCheckpoint {
     std::vector<int32_t> ids;
     std::vector<ConversationImageKey> imgs;
     std::vector<uint8_t> gdn, ple, tails, dead, block_pos;
+    // How gdn/ple/tails/dead are stored (strata/core/state_codec.hpp): 0 = fp32, the bytes the engine computes.
+    // A checkpoint the engine holds live is always 0; a stored copy (a parked image, a session file) may say
+    // otherwise, and every size check, estimate and restore reads it from here. block_pos is int32 positions and is
+    // never coded. A target codec is asked for by setting this before conversation_checkpoint_save.
+    uint8_t state_codec = 0;
     uint64_t used = 0; // upstream root-pinned/LRU checkpoint retention
     // A shared-prefix pin (the request key pin=N): this checkpoint is the read-only prefix many suffix queries branch
     // from, so retention never evicts it (conv_cache.hpp) and a parked conversation holding it stays parked.  A run-time
@@ -100,6 +106,8 @@ inline ConversationCheckpointSplit conversation_checkpoints_split(std::vector<Co
         for (size_t k = 0; k < stages; ++k) {
             ConversationCheckpoint part;
             part.ids = c.ids; part.imgs = c.imgs; part.used = c.used; part.pinned = c.pinned;
+            // the part's own arrays come from its own checkpoint, so its own coding travels with them
+            part.state_codec = c.stage_parts[k].state_codec;
             out.parts[k].push_back(std::move(part));
         }
     }
@@ -289,6 +297,42 @@ public:
         return true;
     }
 
+    // What evict_oldest() could give back in all: everything parked that is not a pinned shared prefix.
+    size_t evictable_bytes() const {
+        size_t n = 0;
+        for (const auto& e : entries_) if (!e.pinned()) n += e.bytes();
+        return n;
+    }
+
+    // The physical-RAM gate of the parking path: may a snapshot of `allocation` bytes be built while the host keeps
+    // `floor` bytes free?  `available()` reads the host's free RAM and `release()` hands what the allocator still
+    // holds of freed memory back to the kernel.  Where the first reading refuses, it releases once (make_room may
+    // have dropped a conversation just before, and glibc keeps a freed 16 MiB segment - ConversationBuffer's grain -
+    // in its heap once its mmap threshold has risen) and reads again.  If that is not enough, parked conversations
+    // leave, least recently active first, each followed by a release and a new reading, until the snapshot fits.
+    // Nothing leaves if there is no figure to measure by or if what may leave holds less than is missing, as the
+    // snapshot would be refused anyway.  `evicted` counts the ones that left.
+    template<class Available, class Release>
+    bool admit_ram(Available&& available, Release&& release, uint64_t allocation, uint64_t floor, size_t& evicted) {
+        auto have = available();
+        if (conversation_memory_admit(have, allocation, floor)) return true;
+        if (!have) return false;
+        release();
+        have = available();
+        if (conversation_memory_admit(have, allocation, floor)) return true;
+        if (!have) return false;
+        const uint64_t short_by = *have < floor ? floor - *have + allocation : allocation - (*have - floor);
+        if (short_by > evictable_bytes()) return false;
+        while (evict_oldest()) {
+            ++evicted;
+            release();
+            have = available();
+            if (conversation_memory_admit(have, allocation, floor)) return true;
+            if (!have) return false;
+        }
+        return false;
+    }
+
     // #879: every parked conversation (pinned ones too) and the retained K/V go - after non-finite logits any of them
     // may carry the poison.  Returns how many were parked.
     size_t clear() {
@@ -335,6 +379,26 @@ public:
         return dropped;
     }
     size_t superseded() const { return superseded_; }
+    /// --conversation-cache-park-gain N: the longest parked entry this conversation's outgoing state supersedes, in
+    /// tokens, 0 when it has none.  It is the entry drop_superseded() would remove, so the caller can tell whether a
+    /// park now would only rewrite what a turn from now drops: the prefix such an entry holds is this conversation's
+    /// prefix, and the conversation only appends, so the copy stays usable for the reuse it was made for.
+    size_t parked_prefix_tokens(const std::vector<int32_t>& ids, const std::vector<ConversationImageKey>& images,
+                                const std::vector<ConversationCheckpoint>& checkpoints, bool cvec) const {
+        size_t longest = 0;
+        for (const auto& e : entries_) {
+            if (e.cvec != cvec) continue;
+            const ConversationCheckpoint* deepest = nullptr;
+            for (const auto& c : e.checkpoints)
+                if (!deepest || c.ids.size() > deepest->ids.size()) deepest = &c;
+            if (!deepest || deepest->ids.empty()) continue;
+            bool holds = deepest->ids == ids && deepest->imgs == images;
+            for (const auto& k : checkpoints)
+                if (!holds && k.ids == deepest->ids && k.imgs == deepest->imgs) holds = true;
+            if (holds) longest = std::max(longest, deepest->ids.size());
+        }
+        return longest;
+    }
 
     bool put(SavedConversation&& image, size_t held = 0) {
         const size_t n = image.bytes();

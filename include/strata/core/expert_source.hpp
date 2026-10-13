@@ -58,12 +58,13 @@ inline constexpr uint64_t kNoCacheComplement = ~uint64_t{0};
 struct CgroupMemoryStat {
     uint64_t current = 0;
     uint64_t inactive_file = 0;
+    uint64_t active_file = 0;
     uint64_t file_dirty = 0;
     uint64_t file_writeback = 0;
     bool valid = false;
 };
 
-/// Calculate additional bytes under a finite cgroup limit after reclaiming only clean inactive file cache.
+/// Calculate additional bytes under a finite cgroup limit after reclaiming clean file cache, active and inactive.
 /// Returns false when the required memory.stat counters were unavailable.
 bool cgroup_available_bytes(uint64_t limit, const CgroupMemoryStat& stat, uint64_t& bytes);
 
@@ -661,6 +662,14 @@ public:
     /// 32 measured 2.35 GB/s with experts.bin mapped and 3.57 GB/s without.  After this every file read goes through
     /// read_direct (mapped_blob answers nullptr).  Returns whether the view was closed; `why` says why not.
     bool drop_mapping(std::string& why);
+    /// --drop-file-cache (Linux): hand the mapped model files' cached pages back to the kernel, once the startup
+    /// reads are done - `madvise(MADV_DONTNEED)` over each view, then `posix_fadvise(POSIX_FADV_DONTNEED)` on that
+    /// file (one alone releases nothing: a mapped page is skipped, and an unmapped clean page stays on the LRU).
+    /// Call it only when no expert reads the files any more (everything in VRAM or in the RAM copy), which is what
+    /// makes the file cache a third copy of the same bytes.  The pages are clean and file-backed, so a later read
+    /// faults them back in from the drive.  Returns the bytes whose pages were advised - not a measurement of what
+    /// the kernel reclaimed; 0 (and `why`) where the platform or the state does not apply.  Opt-in, off by default.
+    uint64_t drop_file_cache(std::string& why);
     /// Windows, experts.bin, a file tier that reads through the file cache (--resident-experts): the startup reads -
     /// the GPU cache's fill from the profile and the RAM copy (pin_cache_complement) - go unbuffered (read_direct)
     /// with the view closed meanwhile.  Through the mapping they put the file's pages in the working set beside the

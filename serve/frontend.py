@@ -65,6 +65,18 @@ class ChatTemplate:
         return self.template.render(messages=messages, tools=tools, add_generation_prompt=add_generation_prompt,
                                     **kwargs)
 
+    def gen_prompt_tail(self, enable_thinking: bool) -> str:
+        """What add_generation_prompt adds to this template: the generation prompt's tail.
+
+        The raw /v1/completions prompt is passed through untouched; this is what a chat render would have
+        appended when the client asks thinking off. The probe message keeps the render the template needs;
+        both renders get the same kwargs, so the difference is the generation prompt alone.
+        """
+        probe = [{"role": "user", "content": "x"}]
+        base = self.render(probe, add_generation_prompt=False, enable_thinking=enable_thinking)
+        full = self.render(probe, add_generation_prompt=True, enable_thinking=enable_thinking)
+        return full[len(base):]
+
     def _detect_caps(self) -> dict[str, bool]:
         """llama.cpp's capability names, checked at load time against this template and Strata's tool-call format.
         These are rendering hints, not a guarantee that the model will follow a request."""
@@ -334,14 +346,6 @@ def unmark_think_literals(prompt: str, tags: dict[str, str] = LITERAL_TAGS) -> t
     return "".join(out), spans
 
 
-def _late_system_to_user(messages: list[dict]) -> list[dict]:
-    """The chat template takes a system message only at the start ("System message must be at the beginning").
-    Clients also send them mid-conversation - Claude Code's hook context as {"role": "system"} after the first user
-    turn, some OpenAI clients a late "developer" message (issue #56) - so those become user messages, in place:
-    merging them into the first one would change the prompt's start and cost the conversation cache every turn."""
-    return [dict(m, role="user") if m.get("role") == "system" and i > 0 else m for i, m in enumerate(messages)]
-
-
 def _object_list(value, name: str) -> list[dict]:
     """#460: a request's "messages" (or a message's "tool_calls") as a list of objects.  Some clients send the array
     double-encoded, as a JSON string, which used to be iterated character by character and crashed on m.get: such a
@@ -471,7 +475,7 @@ def openai_to_messages(req: dict) -> tuple[list[dict], list[dict] | None, dict]:
             kwargs = {"enable_thinking": False}
         elif k == "reasoning_effort" and "enable_thinking" not in kwargs:
             kwargs.update(effort_kwargs(v))
-    return _late_system_to_user(messages), tools, kwargs
+    return messages, tools, kwargs
 
 
 BILLING_HEADER = "x-anthropic-billing-header:"
@@ -567,7 +571,7 @@ def anthropic_to_messages(req: dict, think_unasked: bool = True) -> tuple[list[d
         # A config's reasoning_effort still applies: Service.with_shared sets output_config before this runs.  A
         # request that gives its own reasoning_budget_tokens (#123) asks for thinking, so it thinks as before.
         kwargs["enable_thinking"] = False
-    return _late_system_to_user(messages), tools, kwargs
+    return messages, tools, kwargs
 
 
 # ------------------------------------------------------------------------------------------------ output parser
@@ -796,6 +800,14 @@ class OutputParser:
         self.buf = ""
         self.lead = False
         self.schemas = {t.get("name"): t for t in tools or []}
+        # Accept the native namespace__member spelling without advertising duplicate tools.
+        aliases = {}
+        for name in self.schemas:
+            if isinstance(name, str) and "." in name:
+                namespace, member = name.rsplit(".", 1)
+                aliases.setdefault(f"{namespace}__{member}", set()).add(name)
+        self.aliases = {alias: next(iter(names)) for alias, names in aliases.items()
+                        if len(names) == 1 and alias not in self.schemas}
         # stream_tools: a tool call is also reported while it is being written - "tool_start" (its name and id) as
         # soon as the name is known, then "tool_args" pieces of its JSON arguments (string parameters character by
         # character; other types whole, once complete) - before the final "tool_call".  Without it, a client sees
@@ -856,8 +868,10 @@ class OutputParser:
         while p >= 0:
             if self._ok_at(p):
                 gt = self.buf.find(">", p)
-                name = self.buf[p + len(FUNC_START):gt if gt >= 0 else len(self.buf)]
-                if gt < 0 and not any(c.isspace() for c in name):
+                raw_name = self.buf[p + len(FUNC_START):gt if gt >= 0 else len(self.buf)]
+                name = raw_name.strip()
+                name = self.aliases.get(name, name)
+                if gt < 0 and re.fullmatch(r"\s*[^<>\s]*\s*", raw_name):
                     return p, False
                 if gt >= 0 and name in self.schemas:
                     return p, True
@@ -976,7 +990,11 @@ class OutputParser:
                 b = rest.find(">", a + 10) if a >= 0 else -1
                 if b < 0:
                     return out
-                name = rest[a + 10:b]
+                raw_name = rest[a + 10:b]
+                name = raw_name.strip()
+                name = self.aliases.get(name, name)
+                if raw_name != raw_name.strip() and name not in self.schemas:
+                    return out
                 self.scall = ToolCall(name=name, arguments={})
                 props = ((self.schemas.get(name) or {}).get("parameters") or {}).get("properties") or {}
                 self.sdeclared = {k: (v or {}).get("type") for k, v in props.items()}
@@ -1087,8 +1105,10 @@ class OutputParser:
                     call = None
                     try:
                         name = body[:end].strip()[len("<function="):].split(">", 1)[0].strip()
+                        name = self.aliases.get(name, name)
                         if name in self.schemas:
                             call = parse_tool_call(body[:end], self.schemas.get(name))
+                            call.name = name
                     except ValueError:
                         pass
                     raw = self.buf[:len(CALL_START) + end + len(CALL_END)]
@@ -1227,11 +1247,19 @@ class OutputParser:
                     continue
                 if kind == "wait":
                     after = ""
-                if after and not after.startswith(FUNC_START) and not FUNC_START.startswith(after):
+                is_call = re.match(r"<function=(\s*[^<>\s]+\s*)>", after)
+                if is_call:
+                    raw_name = is_call.group(1)
+                    name = raw_name.strip()
+                    name = self.aliases.get(name, name)
+                    if raw_name != raw_name.strip() and name not in self.schemas:
+                        is_call = None     # only declared names gain whitespace normalization
+                is_partial = FUNC_START.startswith(after) or re.fullmatch(r"<function=\s*[^<>\s]*\s*", after)
+                if not is_call and not is_partial:
                     out.append(Event("content", self._track(self.buf[:i + len(CALL_START)])))
                     self.buf = self.buf[i + len(CALL_START):]
                     continue
-                if not after.startswith(FUNC_START):
+                if not is_call:
                     j = i
                     while j > 0 and self.buf[j - 1] == "\n":
                         j -= 1
@@ -1270,6 +1298,13 @@ class OutputParser:
                     i = call_end(self.buf)
                     if i >= 0:
                         drop = len(CALL_END)
+                    # A missing wrapper closer must not merge a later call's arguments
+                    # into this function. Keep partial closers and recovery batches open.
+                    f = function_end(self.buf)
+                    nxt = self.buf[f:].lstrip() if f >= 0 else ""
+                    if nxt and not any(t.startswith(nxt) or nxt.startswith(t)
+                                       for t in (CALL_END, FUNC_START, PARAM_START)):
+                        i, drop = f, 0
                     if self.recover:                # a batch in one wrapper: the next call follows this one's
                         f = function_end(self.buf)  # </function> (or opens as <parameter=NAME>)
                         nxt = self.buf[f:].lstrip() if f >= 0 else ""
@@ -1332,10 +1367,15 @@ class OutputParser:
     def _finish_call(self, body: str) -> list[Event]:
         """A whole call body in the template's form -> its tool_call event.  With recover, one that still does not
         parse is the text it is instead of an error that ends the request."""
-        name = body.strip()[len(FUNC_START):].split(">", 1)[0].strip()
+        raw_name = body.strip()[len(FUNC_START):].split(">", 1)[0]
+        name = raw_name.strip()
+        name = self.aliases.get(name, name)
         bare, self.bare = self.bare, False
         try:
+            if raw_name != raw_name.strip() and name not in self.schemas:
+                raise ValueError("whitespace tool name is not declared")
             call = parse_tool_call(body, self.schemas.get(name))
+            call.name = name
         except ValueError:
             if not self.recover:
                 raise

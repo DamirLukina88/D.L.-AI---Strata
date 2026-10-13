@@ -74,7 +74,8 @@ class MaxTokens(unittest.TestCase):
             return s, b, u.get("prompt_tokens"), u.get("completion_tokens")
         s, b = self.post("/v1/messages", {"model": "m", "messages": msgs, **budget})
         u = b.get("usage", {})
-        return s, b, u.get("input_tokens"), u.get("output_tokens")
+        prompt = sum(u.get(k) or 0 for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+        return s, b, prompt if u else None, u.get("output_tokens")
 
     def test_anthropic_thinks_only_when_asked(self):
         # #278: Anthropic's thinking is opt-in; "thinking", an effort or a reasoning_budget_tokens (#123) asks for it
@@ -97,6 +98,104 @@ class MaxTokens(unittest.TestCase):
         s2, _, n_in, _ = self.call("anthropic", "how many tokens is this?", max_tokens=8)
         self.assertEqual(s2, 200)
         self.assertEqual(b["input_tokens"], n_in)
+
+    def test_legacy_completions_raw_prompt_nonstream_echo_and_stream(self):
+        prompt = "raw <|im_start|>user"
+        status, body = self.post("/v1/completions", {"model": "m", "prompt": prompt,
+                                                       "max_tokens": 16, "temperature": 0,
+                                                       "enable_thinking": False})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["object"], "text_completion")
+        self.assertTrue(body["choices"][0]["text"])
+        tail_len = len(self.svc.tok.encode(self.svc.template.gen_prompt_tail(False), parse_special=True))
+        self.assertEqual(body["usage"]["prompt_tokens"],                                                 # asked off: the tail
+                         len(self.svc.tok.encode(prompt, parse_special=True)) + tail_len)               # a chat render adds
+        status, echoed = self.post("/v1/completions", {"model": "m", "prompt": prompt, "max_tokens": 8,
+                                                        "temperature": 0, "enable_thinking": False,
+                                                        "echo": True})
+        self.assertEqual(status, 200)
+        self.assertTrue(echoed["choices"][0]["text"].startswith(prompt))
+        req = urllib.request.Request(self.base + "/v1/completions", data=json.dumps({
+            "model": "m", "prompt": "stream me", "max_tokens": 8, "temperature": 0,
+            "enable_thinking": False, "stream": True}).encode(),
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as response:
+            stream = response.read().decode()
+        self.assertIn('"object": "text_completion"', stream)
+        self.assertIn('"usage"', stream)
+        self.assertIn("data: [DONE]", stream)
+
+    def test_legacy_completions_rejects_unsupported_shapes(self):
+        for body in ({"model": "m", "prompt": ["a"]}, {"model": "m", "prompt": "a", "n": 2},
+                     {"model": "m", "prompt": "a", "suffix": "b"}):
+            with self.subTest(body=body):
+                status, _ = self.post("/v1/completions", body)
+                self.assertEqual(status, 400)
+
+    def test_legacy_completions_honors_disabled_thinking(self):
+        cases = ({"reasoning_effort": "none"}, {"chat_template_kwargs": {"enable_thinking": False}},
+                 {"enable_thinking": False}, {"thinking": {"type": "disabled"}})
+        for options in cases:
+            seen = []
+            original = self.svc.run
+
+            def capture(ids, thinking, tools, max_new, sampling, cancel, force=None):
+                seen.append(thinking)
+                yield from original(ids, thinking, tools, max_new, sampling, cancel, force=force)
+
+            with self.subTest(options=options), mock.patch.object(self.svc, "run", side_effect=capture):
+                status, _ = self.post("/v1/completions", {"model": "m", "prompt": "raw", "max_tokens": 8,
+                                                           "temperature": 0, **options})
+                self.assertEqual(status, 200)
+                self.assertEqual(seen, [False])
+
+    def test_legacy_completions_stream_options_accepted_when_asked(self):
+        # include_usage is the only field OpenAI defines for it; the stream's usage chunk is there anyway
+        req = urllib.request.Request(self.base + "/v1/completions", data=json.dumps({
+            "model": "m", "prompt": "hi", "max_tokens": 8, "temperature": 0, "stream": True,
+            "stream_options": {"include_usage": True}}).encode(),
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as response:
+            stream = response.read().decode()
+        self.assertIn('"usage"', stream)
+        self.assertIn("data: [DONE]", stream)
+        # it belongs to the stream: a non-stream request carrying it, or one carrying a field the
+        # API does not define, stays a 400
+        status, _ = self.post("/v1/completions", {"model": "m", "prompt": "hi", "max_tokens": 8,
+                                                  "temperature": 0, "stream_options": {"include_usage": False}})
+        self.assertEqual(status, 400)
+        status, _ = self.post("/v1/completions", {"model": "m", "prompt": "hi", "max_tokens": 8,
+                                                  "temperature": 0, "stream": True,
+                                                  "stream_options": {"include_thinking": True}})
+        self.assertEqual(status, 400)
+
+    def test_legacy_completions_thinking_off_appends_the_no_think_tail(self):
+        # the raw prompt passes through untouched; asked off, it gets the tail a chat render would add
+        # (and asked off when it already ends with either tail - thinking on or off - nothing is added)
+        tail_off_text = self.svc.template.gen_prompt_tail(False)
+        tail_on_text = self.svc.template.gen_prompt_tail(True)
+        encode = lambda text: list(self.svc.tok.encode(text, parse_special=True))  # noqa: E731
+        tail_off, tail_on = encode(tail_off_text), encode(tail_on_text)
+
+        def run_ids(body):
+            seen = []
+            original = self.svc.run
+
+            def capture(ids, thinking, tools, max_new, sampling, cancel, force=None):
+                seen.append(list(ids))
+                yield from original(ids, thinking, tools, max_new, sampling, cancel, force=force)
+
+            with mock.patch.object(self.svc, "run", side_effect=capture):
+                status, _ = self.post("/v1/completions", {"model": "m", "max_tokens": 8,
+                                                          "temperature": 0, **body})
+            self.assertEqual(status, 200)
+            return seen[0]
+
+        self.assertEqual(run_ids({"prompt": "hi", "enable_thinking": False}), encode("hi") + tail_off)
+        self.assertEqual(run_ids({"prompt": "hi"}), encode("hi"))        # not asked: untouched
+        self.assertEqual(run_ids({"prompt": "hi", "reasoning_effort": "none"}), encode("hi") + tail_off)
+        for tail in (tail_off_text, tail_on_text):                       # already ends with a tail: no second one
+            self.assertEqual(run_ids({"prompt": "hi" + tail, "enable_thinking": False}), encode("hi") + encode(tail))
 
     def test_request_line_parses_the_engine_summary(self):
         line = ("strata serve: prompt 1200 tokens = 1000 reused + 200 read in 50 ms (4000.0 tok/s), 30 generated in "
@@ -1091,9 +1190,10 @@ class ToolCallRecovery(unittest.TestCase):
 
     def test_bare_function_without_the_wrapper(self):
         # corpus 395efd4c / 6e71eed4 (x5 each): <function=...> with no <tool_call> around it
-        self.check(f"Writing it now.\n\n<function=write>\n{self.PARAMS}", [("write", self.CALL)], "Writing it now.")
-        self.check(f"<function=write>\n{self.PARAMS}\n</tool_call>", [("write", self.CALL)], "")   # stray closer
-        self.check(f"<function=write>\n{self.PARAMS}\nDone.", [("write", self.CALL)], "Done.")
+        for name in ("write", " write ", "\twrite\t"):
+            self.check(f"Writing it now.\n\n<function={name}>\n{self.PARAMS}", [("write", self.CALL)], "Writing it now.")
+            self.check(f"<function={name}>\n{self.PARAMS}\n</tool_call>", [("write", self.CALL)], "")   # stray closer
+            self.check(f"<function={name}>\n{self.PARAMS}\nDone.", [("write", self.CALL)], "Done.")
 
     def test_two_calls_in_one_wrapper(self):
         # corpus 0912870b / 51b155c9: a batch inside one <tool_call> - the second call's parameters were merged into
@@ -1112,6 +1212,9 @@ class ToolCallRecovery(unittest.TestCase):
         self.check(inline, [], inline)
         unknown = "<function=format_disk>\n<parameter=x>\n1\n</parameter>\n</function>"
         self.check(unknown, [], unknown)
+        for text in (fenced, inline, unknown):
+            padded = text.replace("<function=write>", "<function= write >").replace("<function=format_disk>", "<function= format_disk >")
+            self.check(padded, [], padded)
 
 
 class ToolCallRecoveryOff(unittest.TestCase):
@@ -1293,7 +1396,7 @@ class ClientShapes(unittest.TestCase):
                 return e.code, json.loads(e.read())
 
     def prompt_text(self):
-        return bytes(i for i in self.engine.last_ids if i < 256).decode("utf-8", "replace")
+        return self.svc.tok.decode(self.engine.last_ids)
 
     def test_query_string(self):
         body = {"model": "x", "max_tokens": 20, "messages": [{"role": "user", "content": "hi"}]}
@@ -1313,7 +1416,7 @@ class ClientShapes(unittest.TestCase):
         self.assertEqual(status, 200, b)
         text = self.prompt_text()
         self.assertIn("You are terse.", text)
-        self.assertIn("<system-reminder>answer in digits</system-reminder>", text)
+        self.assertIn("<|im_start|>system\n<system-reminder>answer in digits</system-reminder><|im_end|>", text)
         self.assertLess(text.index("You are terse."), text.index("1+1?"))          # the first system stays first
         self.assertLess(text.index("1+1?"), text.index("answer in digits"))        # the late one stays in place
 
@@ -1325,8 +1428,16 @@ class ClientShapes(unittest.TestCase):
                          {"role": "system", "content": "Also this."}, {"role": "user", "content": "1+1?"}]})
         self.assertEqual(status, 200, b)
         text = self.prompt_text()
-        for part in ("Be brief.", "Now use digits.", "Also this.", "1+1?"):
+        parts = ["<|im_start|>system\nNow use digits.<|im_end|>",
+                 "<|im_start|>system\nAlso this.<|im_end|>",
+                 "<|im_start|>user\n1+1?<|im_end|>"]
+        for part in parts:
             self.assertIn(part, text)
+        positions = [text.index(part) for part in parts]
+        self.assertLess(text.index("hi<|im_end|>"), positions[0])
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(text.count("Now use digits."), 1)
+        self.assertEqual(text.count("Also this."), 1)
 
     def test_no_user_turn_is_a_400(self):
         # #365: the template's own refusal (Qwen's "No user query found in messages." when no turn is a user's query)
@@ -3229,7 +3340,9 @@ class UsageAndStatus(unittest.TestCase):
     def test_anthropic(self):
         u = self.chat("/v1/messages")["usage"]
         self.assertEqual(u["cache_read_input_tokens"], ClockedEngine.REUSED)
-        self.assertEqual(u["input_tokens"] + u["cache_read_input_tokens"], len(self.engine.last_prompt))
+        self.assertEqual(u["input_tokens"], 1)                     # what was read now is kept: written to the cache
+        self.assertEqual(u["input_tokens"] + u["cache_creation_input_tokens"] + u["cache_read_input_tokens"],
+                         len(self.engine.last_prompt))
         self.assertGreater(u["output_tokens"], 0)
 
     def test_v1_status(self):
@@ -3644,6 +3757,17 @@ class ThinkingBudget(unittest.TestCase):
         self.assertEqual(second, first + self.tok.encode(ThinkingEngine.THOUGHT[:20]) + extra)   # a prefix + more
         self.assertEqual(b["usage"]["completion_tokens"], 20 + len(extra) + len(ThinkingEngine.ANSWER) + 1)
         self.assertEqual(b["usage"]["prompt_tokens"], len(first))
+
+    def test_llama_cpp_thinking_budget_tokens_is_the_same_budget(self):
+        """llama.cpp's name (pi-llama-cpp sends it): the same wrap-up; reasoning_budget_tokens wins when both are set."""
+        from serve.server import REASONING_WRAP_UP
+        wrap = REASONING_WRAP_UP.split("</think>")[0]
+        code, b = self.openai(thinking_budget_tokens=20)
+        self.assertEqual(code, 200, b)
+        self.assertEqual(b["choices"][0]["message"]["reasoning_content"], ThinkingEngine.THOUGHT[:20] + wrap)
+        code, b = self.openai(reasoning_budget_tokens=10, thinking_budget_tokens=20)
+        self.assertEqual(code, 200, b)
+        self.assertEqual(b["choices"][0]["message"]["reasoning_content"], ThinkingEngine.THOUGHT[:10] + wrap)
 
     def test_a_stop_string_is_found_in_the_answer_after_the_wrap_up(self):
         """#454: the continuation after the thinking budget is cut at a stop string too."""

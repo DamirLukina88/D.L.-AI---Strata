@@ -449,6 +449,11 @@ struct Options {
     /// not hold that the expert profile ranks hottest are copied into RAM, the rest are read from the files in place
     /// (the GGUF shards when the pack has no experts.bin).  0 = the whole complement (--resident-experts).
     uint64_t resident_budget = 0;
+    /// `--drop-file-cache` (Linux): once the startup reads are done, hand the mapped model files' cached pages back
+    /// to the kernel (FileExpertSource::drop_file_cache).  Every expert is in VRAM or in the RAM copy by then, so the
+    /// file cache holds a third copy of the same bytes - 55 GiB of them on the 48-layer packs - and it is the copy
+    /// the kernel cannot take back cheaply.  **Off by default, and off is byte-identical to before.**
+    bool drop_file_cache = false;
     /// R4: slots of VRAM-resident experts.  **0 = off, and off is the default.**
     /// **THE COMMENT THAT USED TO BE HERE WAS FALSE AND ROUND 328 MEASURED IT.**  It said "the cache has no
     /// consumer yet - `moe_hit_grouped_s2` does not exist - so switching it on costs the fill traffic and
@@ -620,12 +625,22 @@ struct Options {
     /// conversation_cache_slots whatever its length, so without it a client that interleaves short side requests
     /// with one long conversation evicts the long one (oldest first).  0 = park every conversation.
     int64_t conversation_cache_min_tokens = 0;
+    /// --serve: park only after the conversation has advanced this many tokens past the copy it would supersede.
+    /// A conversation that moved a few hundred tokens writes a full snapshot again, and the turn after that drops it
+    /// (drop_superseded) after writing the same bytes once more, so on a long single conversation every turn pays a
+    /// whole-snapshot copy for nothing.  0 = park every turn, as before.
+    int64_t conversation_cache_park_gain = 0;
     /// --memory-limit-mib N / STRATA_MEMORY_LIMIT_MIB: the total RAM this engine's container or cgroup may use, for a
     /// container that cannot see its real limit (0 or unset = none; the flag wins over the variable)
     int64_t memory_limit_mib = -1;
     /// --serve SAVE: disk space a session file must leave free where it is written (MiB; 0 = no check)
     int64_t session_min_free_mib = 4096;
     bool session_save_reclaim = false;
+    /// --serve: how a stored conversation's running state is held - "fp32" (the bytes the engine computes) or
+    /// "bf16" (half the bytes, every value within 2^-8 of what it was). Parked conversation-cache images and
+    /// session files only: the state the engine computes on, and its live checkpoint chain, are always fp32.
+    std::string session_state_codec = "fp32";
+    strata::core::StateCodec session_state_codec_id = strata::core::StateCodec::Fp32;   // resolved from the name above
     /// --serve: also keep a checkpoint every N freshly read prompt tokens (0 = only at the last turn boundary)
     int64_t prompt_cache_every = 16384;
     bool prompt_cache_tail = false;   // optional extra checkpoint at an existing near-tail chunk boundary
@@ -774,8 +789,14 @@ void usage() {
                  "                       wins; 0 = none). Parking and session save/restore keep their floor under it\n"
                  "  --conversation-cache-min-tokens N  --serve: park only conversations of at least N tokens, so\n"
                  "                       short side requests do not take the slots a long one needs (default 0 = park any)\n"
+                 "  --conversation-cache-park-gain N  --serve: park only after the conversation advanced N tokens past\n"
+                 "                       the copy it would supersede, so a turn that grew by a few hundred tokens does not\n"
+                 "                       write a whole snapshot that the next turn drops (default 0 = park every turn)\n"
                  "  --session-min-free-mib N  --serve: disk space a SAVE must leave free (default 4096; 0 = no check)\n"
                  "  --session-save-reclaim  --serve: reclaim unpinned host caches if SAVE needs RAM (opt-in)\n"
+                 "  --session-state-codec NAME  --serve: how a stored conversation's running state is held:\n"
+                 "                       fp32 (default) or bf16 (half the bytes, within 2^-8 per value). Affects what\n"
+                 "                       is parked and what a SAVE writes; the live state is never coded\n"
                  "  --vram-elastic       --serve (#533, opt-in, NVIDIA): the expert cache in segments (--vram-segment-mib,\n"
                  "                       default 512), so the command `VRAM <reserve_mib>` (the server's POST /v1/vram) can\n"
                  "                       give VRAM back to other programs between requests and take it back later\n"
@@ -921,7 +942,14 @@ void usage() {
                  "                       the one it replaces by more than F (default 1.5; higher = fewer, surer swaps)\n"
                  "  --adapt-async 1      --serve with the resident RAM mode (opt-in): the adaptive tier's swaps\n"
                  "                       advance between verify windows instead of a window waiting for a whole\n"
-                 "                       round.  Not bit-exact run to run.  0 (default) = the blocking tier.\n");
+                 "                       round.  Not bit-exact run to run.  0 (default) = the blocking tier.\n"
+                 "  --drop-file-cache    Linux: once the startup reads are done, hand the mapped model files' cached\n"
+                 "                       pages back to the kernel.  Every expert is in VRAM or in the RAM copy by\n"
+                 "                       then, so the file cache holds a third copy of the same bytes (55 GiB on the\n"
+                 "                       48-layer packs), and it is the copy the kernel cannot take back cheaply.\n"
+                 "                       Needs a resident mode that holds the whole complement in RAM: with experts\n"
+                 "                       left in the files, their reads go through this cache.  A prompt's lend-region\n"
+                 "                       refill then reads those pages from the drive once.  Off by default.\n");
 }
 
 // --lookup-chain: the context's last tokens for the draft sources (at most 64), the MTP's pending drafts last
@@ -2049,11 +2077,13 @@ int main(int argc, char** argv) {
         else if (a == "--prompt-cache") o.prompt_cache = std::max(0, std::atoi(next("--prompt-cache")));
         else if (a == "--conversation-cache-mib" || a == "--conversation-cache-slots" ||
                  a == "--conversation-cache-min-free-mib" || a == "--conversation-cache-min-tokens" ||
+                 a == "--conversation-cache-park-gain" ||
                  a == "--session-min-free-mib" || a == "--memory-limit-mib") {
             const std::string value = next(a.c_str());
             int64_t number = 0;
             const auto result = std::from_chars(value.data(), value.data() + value.size(), number);
-            const int64_t limit = (a == "--conversation-cache-slots" || a == "--conversation-cache-min-tokens")
+            const int64_t limit = (a == "--conversation-cache-slots" || a == "--conversation-cache-min-tokens" ||
+                                   a == "--conversation-cache-park-gain")
                                       ? INT32_MAX : INT64_MAX / (1024 * 1024);
             if (result.ec != std::errc{} || result.ptr != value.data() + value.size() || number < 0 || number > limit) {
                 std::fprintf(stderr, "%s needs a nonnegative integer within range\n", a.c_str());
@@ -2062,11 +2092,20 @@ int main(int argc, char** argv) {
             if (a == "--conversation-cache-mib") o.conversation_cache_mib = number;
             else if (a == "--conversation-cache-min-free-mib") o.conversation_cache_min_free_mib = number;
             else if (a == "--conversation-cache-min-tokens") o.conversation_cache_min_tokens = number;
+            else if (a == "--conversation-cache-park-gain") o.conversation_cache_park_gain = number;
             else if (a == "--session-min-free-mib") o.session_min_free_mib = number;
             else if (a == "--memory-limit-mib") o.memory_limit_mib = number;
             else o.conversation_cache_slots = (int) number;
         }
         else if (a == "--prompt-cache-tail") o.prompt_cache_tail = true;
+        else if (a == "--session-state-codec") {
+            const std::string value = next(a.c_str());
+            if (!strata::core::state_codec_by_name(value, o.session_state_codec_id)) {
+                std::fprintf(stderr, "%s wants fp32 or bf16 (got '%s')\n", a.c_str(), value.c_str());
+                return 2;
+            }
+            o.session_state_codec = value;
+        }
         else if (a == "--prompt-cache-every") o.prompt_cache_every = std::max(0LL, std::atoll(next("--prompt-cache-every")));
         else if (a == "--prompt-cache-root") o.prompt_cache_root = std::max(0LL, std::atoll(next("--prompt-cache-root")));
         else if (a == "--turn-token") o.turn_token = std::atoll(next("--turn-token"));
@@ -2169,6 +2208,7 @@ int main(int argc, char** argv) {
             if (const char* v = std::getenv("STRATA_RESIDENT_HEADROOM_GIB"); v != nullptr && std::atof(v) >= 0.0)
                 o.resident_headroom = (uint64_t) (std::atof(v) * 1073741824.0);
         }
+        else if (a == "--drop-file-cache") o.drop_file_cache = true;
         else if (a == "--stats") o.stats = true;
         else if (a == "--shared-late") o.shared_late = true;
         else if (a == "--keep-canonical") o.keep_canonical = true;
@@ -6896,6 +6936,46 @@ int main(int argc, char** argv) {
                                  "reads stay serialized (--ple-io direct, the default, keeps no mapping)\n",
                          o.ple_io.c_str(), o.ple_gguf.c_str());
     }
+    // --drop-file-cache: the file cache holds a third copy of the experts once the startup reads are done - every one
+    // of them is in VRAM or in the RAM copy - and it is the copy the kernel cannot take back cheaply, so it is the
+    // one that fills a machine that pages under load.  Opt-in, and only when no expert's reads go through the files:
+    // with experts left in them the file cache IS the tier that serves those reads, and dropping it would put every
+    // one of them on the drive.  The check below is the same question the startup's own read-ahead asks, same grid.
+    if (o.drop_file_cache) {
+        int64_t from_files = 0;
+        if (srcp == &src)
+            for (int64_t l = 0; l < g.n_layers; ++l)
+                for (int64_t e = 0; e < g.n_expert; ++e)
+                    // a layer split keeps the later stages' experts out of the RAM copy and they do read the files:
+                    // they are counted here, and then the pages stay
+                    if (xcache.slot_of(l, e) < 0 && !src.has_resident(l, e)) ++from_files;
+        if (srcp != &src) {
+            std::fprintf(stderr, "strata generate: --drop-file-cache off: the experts come from %s, not from mapped "
+                                 "model files\n",
+                         srcp == nullptr ? "no file tier" : "the resident arena");
+        } else if (from_files > 0) {
+            std::fprintf(stderr, "strata generate: --drop-file-cache off: %lld of the %lld experts are in neither the "
+                                 "GPU cache nor the RAM copy, and their reads go through the file cache "
+                                 "(--resident-cpu-experts with the whole complement in RAM drops it)\n",
+                         (long long) from_files, (long long) (g.n_layers * g.n_expert));
+        } else {
+            std::string why;
+            const auto drop_t0 = std::chrono::steady_clock::now();
+            const uint64_t freed = src.drop_file_cache(why);
+            const double drop_ms =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - drop_t0).count();
+            if (freed > 0)
+                std::fprintf(stderr, "strata generate: --drop-file-cache: %.2f GiB of the model files' pages advised "
+                                     "back to the kernel in %.0f ms (the bytes advised, not a measurement of what the "
+                                     "kernel reclaimed; every expert is in VRAM or in the RAM copy, and the "
+                                     "lend-region refill reads them again)%s\n",
+                             (double) freed / 1073741824.0, drop_ms,
+                             why.empty() ? "" : "; see the lines above");
+            else
+                std::fprintf(stderr, "strata generate: --drop-file-cache off: %s\n",
+                             why.empty() ? "the model files hold no cached pages" : why.c_str());
+        }
+    }
     // 0.1.42 (H11): the default CPU share is armed only when the host has the memory for it.  One line says why not;
     // an explicit STRATA_PREFILL_CPU_SHARE (other than 0) is armed anyway, with a warning when memory is short.
     auto share_default_ok = [&]() -> bool {
@@ -7804,6 +7884,15 @@ int main(int argc, char** argv) {
         strata::core::ConversationCache conversations(
             o.prompt_cache > 0 ? (size_t) o.conversation_cache_mib * 1024 * 1024 : 0,
             (size_t) o.conversation_cache_slots, o.conversation_cache_min_tokens);
+        // How a stored conversation's running state is held (strata/core/state_codec.hpp). The name was checked when
+        // the flags were read, so it resolves here. fp32 - the default - leaves every byte of every parked image and
+        // every session file exactly as the last release wrote it; bf16 halves the running state in both, and says so
+        // in the image and in the file so that anything reading them knows. The live state and the live checkpoint
+        // chain are fp32 whatever this says.
+        const strata::core::StateCodec session_codec = o.session_state_codec_id;
+        if (session_codec != strata::core::StateCodec::Fp32)
+            std::fprintf(stderr, "strata serve: stored conversation state: %s (parked images and session files; "
+                                 "the live state stays fp32)\n", strata::core::state_codec_name(session_codec));
         // Disk sessions: what a session file is bound to.  The model fingerprint samples every model input this
         // engine loaded, by role (conversation_file.hpp), once; the config fingerprint covers the RESOLVED settings
         // that change what the saved bytes mean - the rope (K is cached post-RoPE), the loaded control vector, the
@@ -7919,7 +8008,8 @@ int main(int argc, char** argv) {
                 strata::core::ConversationCheckpointSplit& cs; std::vector<ConvCheckpoint>& checks; bool on;
                 ~MergeBack() { if (on && !strata::core::conversation_checkpoints_merge(std::move(cs), checks)) checks.clear(); }
             } merge_back{cs, checks, n_st > 0};
-            const strata::core::ConversationView view{live, live_imgs, n_st > 0 ? cs.stage0 : checks, cvec_cached};
+            const strata::core::ConversationView view{live, live_imgs, n_st > 0 ? cs.stage0 : checks, cvec_cached,
+                                                      session_codec};
             auto reuse = conversations.take_reuse();
             std::vector<strata::core::ConversationKvReuse> stage_reuse = std::move(reuse.stages);
             stage_reuse.resize(n_st);
@@ -7929,7 +8019,7 @@ int main(int argc, char** argv) {
             for (size_t k = 0; k < n_st; ++k) {
                 auto& st = stages[k];
                 const strata::core::OnDevice on(st->dev);
-                const strata::core::ConversationView view_k{live, live_imgs, cs.parts[k], cvec_cached};
+                const strata::core::ConversationView view_k{live, live_imgs, cs.parts[k], cvec_cached, session_codec};
                 size_t b = 0;
                 if (!strata::core::conversation_snapshot_bytes(view_k, st->ss, g, draft_of(k), b, err)) {
                     std::fprintf(stderr, "strata serve: conversation cache: skip parking (stage CUDA%d: %s)\n",
@@ -7984,23 +8074,23 @@ int main(int argc, char** argv) {
                 // above only balanced the cache's own budget, so a full cache leaves this one short even
                 // though every parked conversation could give its RAM back - and refusing here throws
                 // away the whole prompt read that produced this snapshot (measured: 270k tokens, 96 s).
-                // Evict the least recently active parked conversations until it fits, or until none are
-                // left.  Each ConversationBuffer is a list of 16 MiB segments, each segment its own
-                // allocation, so an evicted entry is back with the kernel before the next check reads
-                // /proc/meminfo; no waiting is needed.  slots() bounds the loop, and the two lines
-                // below say what it did either way.  The reading is the guard's (MemAvailable, the cgroup
+                // Parked conversations leave, least recently active first, each followed by a release of what
+                // the allocator still holds and a new reading, until the snapshot fits.  The release matters:
+                // a ConversationBuffer is a list of 16 MiB segments, and once glibc's mmap threshold has
+                // risen (to 32 MiB) freeing one only moves the bytes onto the allocator's free list - measured
+                // here, dropping a 64 MiB snapshot in the middle of the heap moved RSS by -0.3 MB, and
+                // malloc_trim(0) then returned 127.7 MB.  Nothing leaves when what may leave holds less than
+                // is missing, so a full cache is not emptied for a snapshot that would be refused anyway.
+                // See ConversationCache::admit_ram.  The reading is the guard's (MemAvailable, the cgroup
                 // limits above the engine, --memory-limit-mib); `mem` keeps the last one for the refusal line.
                 size_t evicted = 0;
                 std::optional<strata::core::HostMemoryReading> mem;
-                auto admit = [&] {
+                auto available = [&] {
                     mem = strata::core::sample_host_memory();
-                    return strata::core::conversation_memory_admit(
-                        mem ? std::optional<uint64_t>(mem->available) : std::nullopt, additional, floor);
+                    return mem ? std::optional<uint64_t>(mem->available) : std::nullopt;
                 };
-                while (!admit() && conversations.size() > 0 && evicted < conversations.slots() &&
-                       conversations.evict_oldest())
-                    ++evicted;
-                if (!admit()) {
+                if (!conversations.admit_ram(available, strata::core::conversation_release_freed_memory,
+                                             additional, floor, evicted)) {
                     std::fprintf(stderr, "strata serve: conversation cache: skip parking (physical RAM admission; need %zu MiB plus %lld MiB floor, %s; evicted %zu, %zu still parked)\n",
                                  additional >> 20, (long long) o.conversation_cache_min_free_mib, ram_note(mem).c_str(),
                                  evicted, conversations.size());
@@ -8018,7 +8108,7 @@ int main(int argc, char** argv) {
                     auto& st = stages[k];
                     const strata::core::OnDevice on(st->dev);
                     if (cudaDeviceSynchronize() != cudaSuccess) { err = "stage sync failed"; return false; }
-                    const strata::core::ConversationView view_k{live, live_imgs, cs.parts[k], cvec_cached};
+                    const strata::core::ConversationView view_k{live, live_imgs, cs.parts[k], cvec_cached, session_codec};
                     strata::core::SavedConversation part;
                     if (!strata::core::conversation_snapshot_save(part, view_k, st->ss, g, draft_of(k), err,
                             std::move(stage_reuse[k]), &reused_bytes))
@@ -9977,7 +10067,7 @@ int main(int argc, char** argv) {
                         const uint64_t floor = (uint64_t) o.conversation_cache_min_free_mib << 20;
                         if (o.session_save_reclaim) {
                             const auto freed = strata::core::session_save_reclaim(
-                                checks, conversations, sl, floor, strata::core::available_host_bytes);
+                                checks, conversations, sl, session_codec, floor, strata::core::available_host_bytes);
                             if (freed.bytes || freed.checkpoints || freed.parked) {
                                 // A removed tail must not mark a later checkpoint at this length as a tail.
                                 if (tail_ckpt_len >= 0 && std::none_of(checks.begin(), checks.end(), [&](const auto& c) {
@@ -10000,12 +10090,13 @@ int main(int argc, char** argv) {
                         };
                         std::vector<ConvCheckpoint> disk_checks;
                         std::string why;
-                        if (!strata::core::session_save_checkpoints(checks, sl, admit, disk_checks, why)) {
+                        if (!strata::core::session_save_checkpoints(checks, sl, session_codec, admit, disk_checks, why)) {
                             refuse(why, strata::core::SessionError::memory);
                             continue;
                         }
                         kept = disk_checks.size();
-                        const strata::core::ConversationView view{live, live_imgs, disk_checks, cvec_cached};
+                        const strata::core::ConversationView view{live, live_imgs, disk_checks, cvec_cached,
+                                                                  session_codec};
                         strata::core::SavedConversation meta;
                         std::vector<strata::core::SessionKvSource> sources;
                         // the live running state comes off the device in one synchronous copy
@@ -10442,7 +10533,17 @@ int main(int argc, char** argv) {
                 resume == req_pin && live_ok)
                 for (const ConvCheckpoint& c : checks)
                     if ((int64_t) c.ids.size() == resume && c.pinned) pin_sibling = true;
-            if ((!from_live || incoming || slot_source >= 0) && !pin_sibling && !park_current(incoming ? incoming->bytes() : 0)) {
+            // --conversation-cache-park-gain N: a park now would supersede the entry parked_prefix_tokens() reports (the copy
+            // this conversation wrote last), so a conversation that advanced fewer than N tokens since then keeps it:
+            // it still holds this conversation's prefix, and re-parking writes the whole snapshot only for the next
+            // turn to drop it again.  0 (the default) parks every turn, as before.
+            const size_t park_held = o.conversation_cache_park_gain > 0
+                                         ? conversations.parked_prefix_tokens(live, live_imgs, checks, cvec_cached)
+                                         : 0;
+            const bool park_worth = o.conversation_cache_park_gain <= 0 || park_held == 0 ||
+                                    (int64_t) live.size() >= (int64_t) park_held + o.conversation_cache_park_gain;
+            if ((!from_live || incoming || slot_source >= 0) && !pin_sibling && park_worth &&
+                !park_current(incoming ? incoming->bytes() : 0)) {
                 std::printf("ERR %s\n", err.c_str());
                 return 1;
             }
@@ -10534,6 +10635,15 @@ int main(int argc, char** argv) {
                     if (!strata::core::conversation_checkpoints_merge(std::move(cs), checks)) checks.clear();
                 }
                 cvec_cached = incoming->cvec;
+                // A parked image may hold its running state coded (strata/core/state_codec.hpp); the engine's own
+                // checkpoint chain does not. Widening here is what keeps a coded park from reaching a prompt-cache
+                // resume: from this line on, the chain is the fp32 bytes it has always been.
+                if (!strata::core::conversation_checkpoints_widen(checks, err)) {
+                    std::fprintf(stderr, "strata serve: conversation cache: could not widen the parked checkpoints "
+                                         "(%s); this conversation keeps no older resume point\n", err.c_str());
+                    err.clear();
+                    checks.clear();
+                }
                 resume = parked.tokens;
                 from_live = parked.live;
                 if (std::getenv("STRATA_SNAPSHOT_FULL_CAPTURE") == nullptr) {
