@@ -155,6 +155,11 @@ SECRET_PATTERNS = [
     ("Slack API Token", re.compile(r"\b(xox[baprs]-[0-9a-zA-Z]{10,48})\b")),
     ("Private Key Block", re.compile(r"-----BEGIN (?:[A-Z ]+)?PRIVATE KEY-----")),
     ("Hardcoded Generic Secret", re.compile(r"(?i)\b(?:api_key|apikey|secret_key|auth_token|client_secret)\s*=\s*['\"]([a-zA-Z0-9_\-\.]{24,})['\"]")),
+    ("Context7 API Key", re.compile(r"\b(ctx7sk-[a-zA-Z0-9-]{20,})\b")),
+    # os.environ.get("SOME_KEY", "<literal>") - the 2026-10-13 leak
+    ("Hardcoded Env Default", re.compile(r"""environ\.get\(\s*['"][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*['"]\s*,\s*['"]([A-Za-z0-9_\-\.]{20,})['"]""")),
+    # ${SOME_KEY:-<literal>} in shell scripts
+    ("Hardcoded Shell Default", re.compile(r"\$\{[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*:-([A-Za-z0-9_\-\.]{20,})\}")),
 ]
 
 # Whitelist safe false positives (mock keys, env placeholders)

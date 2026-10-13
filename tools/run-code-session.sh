@@ -6,7 +6,7 @@ set -e
 WORKSPACE_DIR="${STRATA_WORKSPACE_DIR:-$(pwd)}"
 SESSION_NAME="${STRATA_SESSION_NAME:-dl-ai-code}"
 DL_CLI_BIN="/home/damirl/Desktop/Strata/tools/dl_cli.py"
-STRATA_API_KEY="${STRATA_API_KEY:-REDACTED}"
+STRATA_API_KEY="${STRATA_API_KEY:?set STRATA_API_KEY in ~/.config/dl-ai/secrets.env}"
 
 mkdir -p "$WORKSPACE_DIR"
 cd "$WORKSPACE_DIR"

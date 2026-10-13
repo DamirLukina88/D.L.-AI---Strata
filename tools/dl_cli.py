@@ -78,11 +78,27 @@ C_BLUE = "\033[38;5;111m"         # Info soft blue
 C_CYAN = "\033[38;5;80m"          # Cyan
 C_GRAY = C_MUTED
 
+def load_env_file(path: Path = Path.home() / ".config" / "dl-ai" / "secrets.env") -> None:
+    """Load KEY=VALUE lines from the local secrets file; variables already in the environment win."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+
+load_env_file()
+
 DEFAULT_URL = os.environ.get("STRATA_URL", "http://127.0.0.1:8080").removesuffix("/v1")
-DEFAULT_API_KEY = os.environ.get("STRATA_API_KEY", "REDACTED")
-DEFAULT_EXA_KEY = os.environ.get("EXA_API_KEY", "REDACTED")
-DEFAULT_CONTEXT7_KEY = os.environ.get("CONTEXT7_API_KEY", "REDACTED")
-DEFAULT_CLIENT_IP_KEY = os.environ.get("CLIENT_IP_ENCRYPTION_KEY", "REDACTED")
+DEFAULT_API_KEY = os.environ.get("STRATA_API_KEY", "")
+DEFAULT_EXA_KEY = os.environ.get("EXA_API_KEY", "")
+DEFAULT_CONTEXT7_KEY = os.environ.get("CONTEXT7_API_KEY", "")
+DEFAULT_CLIENT_IP_KEY = os.environ.get("CLIENT_IP_ENCRYPTION_KEY", "")
 
 # Official D.L. AI Tool Definitions
 DL_TOOLS = [
@@ -693,6 +709,8 @@ def tool_exa_web_search(args: dict) -> str:
         return "Error: query required"
     num_results = min(int(args.get("num_results", 5) or 5), 10)
     api_key = DEFAULT_EXA_KEY
+    if not api_key:
+        return "Error: EXA_API_KEY is not set (add it to ~/.config/dl-ai/secrets.env)"
     url = "https://api.exa.ai/search"
     headers = {
         "x-api-key": api_key,
