@@ -47,7 +47,7 @@ def _key() -> str:
     k = os.environ.get("DEEPL_API_KEY", "")
     if not k:
         try:
-            for line in SECRETS_ENV.read_text(encoding="utf-8").splitlines():
+            for line in SECRETS_ENV.read_text(encoding="utf-8", errors="replace").splitlines():
                 line = line.strip().removeprefix("export ").strip()
                 if line.startswith("DEEPL_API_KEY="):
                     k = line.partition("=")[2].strip().strip("'\"")

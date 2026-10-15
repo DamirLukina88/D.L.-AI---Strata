@@ -189,7 +189,13 @@ def load_catalog(path: Path | None = None) -> tuple[dict[str, Entry], dict, list
     except (OSError, ValueError) as e:
         return {}, dict(SETTINGS), [f"{path}: {e}"]
     servers, problems = {}, []
-    for name, raw in (data.get("servers") or {}).items():
+    if not isinstance(data, dict):
+        return {}, dict(SETTINGS), [f"{path}: expected a JSON object with \"servers\""]
+    raw_servers = data.get("servers", {})
+    if not isinstance(raw_servers, dict):
+        problems.append(f"{path}: \"servers\" must be an object")
+        raw_servers = {}
+    for name, raw in raw_servers.items():
         if not isinstance(raw, dict) or raw.get("disabled") is True:
             continue
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", name) or name == META_NAME:
@@ -197,10 +203,15 @@ def load_catalog(path: Path | None = None) -> tuple[dict[str, Entry], dict, list
             continue
         try:
             servers[name] = Entry(name, raw)
-        except (SystemExit, re.error, TypeError, ValueError) as e:
+        except (SystemExit, re.error, TypeError, ValueError, AttributeError) as e:
             problems.append(f"{path}: server {name!r}: {e}")
     settings = dict(SETTINGS)
-    settings.update({k: v for k, v in (data.get("settings") or {}).items() if k in SETTINGS})
+    raw_settings = data.get("settings", {})
+    for k, v in (raw_settings.items() if isinstance(raw_settings, dict) else []):
+        if k in SETTINGS and type(v) in (int, float) and v >= 0:      # a typo keeps the default
+            settings[k] = v
+    if not isinstance(raw_settings, dict):
+        problems.append(f"{path}: \"settings\" must be an object")
     return servers, settings, problems
 
 

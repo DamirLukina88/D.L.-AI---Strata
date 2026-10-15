@@ -188,7 +188,7 @@ def known_secret_values() -> List[Tuple[str, str]]:
     found: Dict[str, str] = {}
     for env_file, where in ((SECRETS_ENV, "secrets.env"), (WIKI_PRIVATE_ENV, "wiki/private/.env")):
         try:
-            for line in env_file.read_text(encoding="utf-8").splitlines():
+            for line in env_file.read_text(encoding="utf-8", errors="replace").splitlines():
                 line = line.strip()
                 if line.startswith("export "):
                     line = line[7:].strip()

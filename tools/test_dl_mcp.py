@@ -222,6 +222,21 @@ class Environment(unittest.TestCase):
             del os.environ["EXA_API_KEY"], os.environ["DL_TEST_KEY"]
 
 
+class CatalogueTypos(unittest.TestCase):
+    """A typo in mcp.json leaves one entry out (with a problem line); it never stops every session."""
+
+    def test_wrong_types(self):
+        d = Path(tempfile.mkdtemp())
+        for text in ('[1]', '{"servers": []}', '{"servers": {"a": {"builtin": "x", "fixed_args": [1]}}}',
+                     '{"servers": {"a": {"builtin": "x", "ask_always_args": [1]}}, "settings": []}',
+                     '{"servers": {"a": {"builtin": "x", "triggers": 5}}, "settings": {"max_tools": "lots"}}'):
+            (d / "mcp.json").write_text(text)
+            servers, settings, problems = dl_mcp.load_catalog(d / "mcp.json")
+            self.assertEqual(servers, {}, text)
+            self.assertTrue(problems, text)
+            self.assertEqual(settings["max_tools"], dl_mcp.SETTINGS["max_tools"], text)
+
+
 class Robustness(unittest.TestCase):
     def test_crash_restarts_on_next_call(self):
         cat = {"servers": {"s": server(allow=["echo", "die"])}}

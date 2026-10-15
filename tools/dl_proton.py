@@ -95,7 +95,7 @@ class ProtonError(Exception):
 def _secrets_file() -> dict:
     out = {}
     try:
-        for line in SECRETS_ENV.read_text(encoding="utf-8").splitlines():
+        for line in SECRETS_ENV.read_text(encoding="utf-8", errors="replace").splitlines():
             line = line.strip()
             if line.startswith("export "):
                 line = line[7:].strip()
@@ -422,7 +422,7 @@ def compose(s: dict, a: dict, original=None) -> EmailMessage:
     if not body and not html:
         raise ProtonError("the email is empty: give `body`, `html` or `html_file`")
     try:
-        sig = s["signature"].read_text(encoding="utf-8").strip()
+        sig = s["signature"].read_text(encoding="utf-8", errors="replace").strip()
     except OSError:
         sig = ""
     if sig and sig not in body:

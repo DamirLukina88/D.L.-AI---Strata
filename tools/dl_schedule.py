@@ -36,12 +36,23 @@ DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 _lock = threading.RLock()
 
 
+_LIMITS = {"max_late_h": (0, 24 * 366), "retry_min": (0, 24 * 60), "warmup_s": (0, 3600), "tick_s": (1, 3600)}
+
+
 def settings() -> dict:
+    """~/.config/dl-ai/schedule.json over the defaults; a value of the wrong type or out of range keeps its default
+    (a typo must not stop the scheduler or switch jobs off)."""
     try:
         cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         cfg = {}
-    return {**DEFAULTS, **{k: v for k, v in cfg.items() if k in DEFAULTS}}
+    out = dict(DEFAULTS)
+    for k, v in (cfg.items() if isinstance(cfg, dict) else []):
+        if k == "notify_email" and isinstance(v, str):
+            out[k] = v.strip()
+        elif k in _LIMITS and type(v) in (int, float) and _LIMITS[k][0] <= v <= _LIMITS[k][1]:
+            out[k] = v
+    return out
 
 
 # ---------------------------------------------------------------------- when
@@ -303,7 +314,7 @@ def until(ts: float, now: float | None = None) -> str:
 # ---------------------------------------------------------------------- store
 def load() -> dict:
     try:
-        raw = STORE.read_text(encoding="utf-8")
+        raw = STORE.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return {"next_id": 1, "jobs": []}
     try:
@@ -376,7 +387,7 @@ def valid_job(j) -> bool:
 def _last_unreadable() -> str:
     copies = sorted(STORE.parent.glob(f"{STORE.name}.unreadable-*"))
     try:
-        return copies[-1].read_text(encoding="utf-8") if copies else ""
+        return copies[-1].read_text(encoding="utf-8", errors="replace") if copies else ""
     except OSError:
         return ""
 

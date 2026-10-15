@@ -210,6 +210,15 @@ class Store(Temp):
         S.load()                                                             # the same damage is copied once
         self.assertEqual(len(list(S.STORE.parent.glob("schedule.json.unreadable-*"))), 1)
 
+    def test_bad_settings_keep_their_defaults(self):
+        S.CONFIG.write_text('{"tick_s": "15s", "warmup_s": -3, "max_late_h": null, "retry_min": 1e9, '
+                            '"notify_email": 5, "other": 1}')
+        self.assertEqual(S.settings(), S.DEFAULTS)
+        S.CONFIG.write_text('[1, 2]')
+        self.assertEqual(S.settings(), S.DEFAULTS)
+        S.CONFIG.write_text('{"tick_s": 30, "notify_email": " me@example.com "}')
+        self.assertEqual((S.settings()["tick_s"], S.settings()["notify_email"]), (30, "me@example.com"))
+
     def test_store_is_private(self):
         S.add("in 2h ping", now=NOW)
         self.assertEqual(S.STORE.stat().st_mode & 0o777, 0o600)

@@ -135,18 +135,40 @@ class Session:
     def load(cls, name: str, default_ws: Path) -> "Session":
         p = STATE_DIR / f"{name}.json"
         try:
-            data = json.loads(p.read_text())
-        except (OSError, ValueError):
+            raw = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return cls(name, default_ws)
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            data = None
+        if not (isinstance(data, dict) and isinstance(data.get("workspace") or "", str)
+                and isinstance(data.get("messages") or [], list) and isinstance(data.get("events") or [], list)):
+            # damaged: keep a private copy (the next save would replace it), start the session fresh
+            if raw.strip():
+                try:
+                    keep = p.with_name(f"{p.name}.unreadable-{time.strftime('%Y%m%d-%H%M%S')}")
+                    fd = os.open(keep, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                        fh.write(raw)
+                except OSError:
+                    pass
             return cls(name, default_ws)
         ws = Path(data.get("workspace") or default_ws)
         s = cls(name, ws if ws.is_dir() else default_ws)
-        s.mode = data.get("mode", "act")
+        s.mode = data.get("mode") if data.get("mode") in ("act", "plan") else "act"
         s.effort = data.get("effort") if data.get("effort") in EFFORTS else None
         s.yolo = data.get("yolo") is True             # YOLO stays on until it is turned off, also after restarts
-        s.messages = data.get("messages") or s.messages
-        s.messages[0] = {"role": "system", "content": cli.build_dl_system_prompt(s.workspace, s.mode)}
-        s.events = data.get("events") or []
-        s.seq = int(data.get("seq") or len(s.events))
+        msgs = [m for m in data.get("messages") or [] if isinstance(m, dict) and isinstance(m.get("role"), str)]
+        s.messages = msgs or s.messages
+        system = {"role": "system", "content": cli.build_dl_system_prompt(s.workspace, s.mode)}
+        if s.messages[0].get("role") == "system":
+            s.messages[0] = system
+        else:
+            s.messages.insert(0, system)
+        s.events = [e for e in data.get("events") or [] if isinstance(e, dict)]
+        seq = data.get("seq")
+        s.seq = seq if type(seq) is int and seq >= len(s.events) else len(s.events)
         return s
 
     # ---------------------------------------------------------------- approvals

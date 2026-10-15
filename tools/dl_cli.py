@@ -391,9 +391,12 @@ def user_profile() -> dict:
     """~/.config/dl-ai/profile.json: who "me" is ({"name", "email", "timezone"}); missing means no profile lines."""
     try:
         data = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: data[k].strip() for k in ("name", "email", "timezone")
+            if isinstance(data.get(k), str) and data[k].strip()}           # text only: a typo never breaks the prompt
 
 
 def now_line() -> str:
