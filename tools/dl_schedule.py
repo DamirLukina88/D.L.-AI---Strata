@@ -329,6 +329,7 @@ def add(when: str, prompt: str = "", action: dict | None = None, email_result: b
         job = {"id": data["next_id"], "when": when.strip(), "spec": spec, "prompt": prompt, "action": action,
                "email_result": bool(email_result), "workspace": workspace, "enabled": True, "next": first,
                "created": now, "runs": 0, "last": None, "yolo": bool(yolo)}
+        summary(job)                                   # can be shown: a job that cannot is never saved
         data["next_id"] += 1
         data["jobs"].append(job)
         save(data)

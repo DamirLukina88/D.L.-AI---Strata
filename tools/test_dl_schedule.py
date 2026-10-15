@@ -165,6 +165,12 @@ class Store(Temp):
             self.assertIn("cannot remove jobs", S.call("remove", {"id": 1}))
         self.assertEqual(len(S.load()["jobs"]), 1)
 
+    def test_a_job_that_cannot_be_shown_is_not_saved(self):
+        with mock.patch.object(S, "summary", side_effect=ValueError("year 10000")):
+            with self.assertRaises(ValueError):
+                S.add("in 2h x", now=NOW)
+        self.assertEqual(S.load()["jobs"], [])
+
     def test_a_damaged_entry_does_not_hide_the_others(self):
         S.add("in 2h fine", now=NOW)
         data = S.load()
