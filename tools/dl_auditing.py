@@ -177,6 +177,10 @@ SECRET_JSON_KEYS = {"token", "access_token", "refresh_token", "id_token", "clien
 MIN_SECRET_LEN = 12
 
 
+NOT_SECRET_NAME = re.compile(r"(_|^)(USER|USERNAME|LOGIN|EMAIL|ADDRESS|HOST|PORT|URL|FROM|TO)$", re.I)
+EMAIL_VALUE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+
+
 def known_secret_values() -> List[Tuple[str, str]]:
     """[(label, value)] of the credentials stored on this PC, read fresh each time (access tokens change hourly)."""
     found: Dict[str, str] = {}
@@ -188,6 +192,8 @@ def known_secret_values() -> List[Tuple[str, str]]:
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, val = line.split("=", 1)
+            if NOT_SECRET_NAME.search(key.strip()):         # a user name or address is not a credential
+                continue
             found.setdefault(val.strip().strip("'\""), f"value of {key.strip()} (secrets.env)")
     except OSError:
         pass
@@ -211,9 +217,11 @@ def known_secret_values() -> List[Tuple[str, str]]:
             walk(json.loads(f.read_text(encoding="utf-8")))
         except (OSError, ValueError):
             pass
-    # paths, URLs and sentences are not credentials (GNOME_KEYRING_CONTROL=/run/user/...)
+    # paths, URLs, sentences and email addresses are not credentials (GNOME_KEYRING_CONTROL=/run/user/...,
+    # PROTON_BRIDGE_USER=info@...: blocking it blocked every email to the user)
     return [(label, val) for val, label in found.items()
-            if len(val) >= MIN_SECRET_LEN and not re.search(r"\s|://", val) and val[0] not in "/~."]
+            if len(val) >= MIN_SECRET_LEN and not re.search(r"\s|://", val) and val[0] not in "/~."
+            and not EMAIL_VALUE.match(val)]
 
 
 def find_known_secrets(text: str) -> List[str]:

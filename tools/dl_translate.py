@@ -24,7 +24,8 @@ TOOLS = [
         "Translate with DeepL. Give the WHOLE finished text in one call (an email, a document, a table as HTML), "
         "never single words or fragments: DeepL needs the context. Use the result exactly as returned; never edit "
         "or re-translate it. With `file` and `out_file` the text is read from and written to workspace files, so "
-        "you need not retype it (e.g. translate email_en.html to email_hr.html, then send it with html_file)."),
+        "you need not retype it (e.g. translate email_en.html to email_hr.html, then send it with html_file). For an email "
+        "put the subject in the HTML <title> so it is translated with the text, and leave send_mail's subject out."),
      "inputSchema": {"type": "object", "properties": {
          "text": {"type": "string", "description": "The text to translate (or give `file`)"},
          "file": {"type": "string", "description": "A workspace file to translate instead of `text`"},

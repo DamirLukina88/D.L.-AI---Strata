@@ -368,7 +368,9 @@ class Credentials(unittest.TestCase):
 
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp())
-        (self.dir / "secrets.env").write_text(f"# keys\nDL_FAKE_API_KEY={self.KEY}\nDL_FAKE_URL=http://127.0.0.1:8080/v1\n")
+        (self.dir / "secrets.env").write_text(f"# keys\nDL_FAKE_API_KEY={self.KEY}\nDL_FAKE_URL=http://127.0.0.1:8080/v1\n"
+                                              "DL_FAKE_BRIDGE_USER=someone.long@example.com\n"
+                                              "DL_FAKE_NOTIFY=another.address@example.com\n")
         (self.dir / "google").mkdir()
         (self.dir / "google" / "me.json").write_text(json.dumps(
             {"token": self.ACCESS, "refresh_token": self.REFRESH, "scopes": ["https://www.googleapis.com/auth/drive"]}))
@@ -382,6 +384,13 @@ class Credentials(unittest.TestCase):
         self.r.close()
         for mod, env, gdir in self.saved:
             mod.SECRETS_ENV, mod.GOOGLE_TOKEN_DIR = env, gdir
+
+    def test_a_user_name_or_address_is_not_a_credential(self):
+        # PROTON_BRIDGE_USER=info@... in secrets.env blocked every email to the user (live run, 2026-10-15)
+        self.r.route("pošalji mail")
+        for to in ("someone.long@example.com", "another.address@example.com"):
+            self.assertIsNone(self.r.leak({"to": to, "text": "hi"}), to)
+        self.assertIsNotNone(self.r.leak({"to": "me@example.com", "text": self.KEY}))
 
     def test_a_token_in_an_email_or_a_url_is_blocked(self):
         self.r.route("pošalji mail")

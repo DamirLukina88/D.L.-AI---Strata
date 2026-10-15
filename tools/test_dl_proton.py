@@ -198,7 +198,8 @@ class Writing(Base):
         self.assertEqual(msg.get_content_type(), "multipart/alternative")
         plain = msg.get_body(("plain",)).get_content()
         html = msg.get_body(("html",)).get_content()
-        self.assertIn("14:00", plain)                              # the plain part is made from the HTML
+        self.assertIn("14:00 | 17 °C", plain)                      # the plain part is made from the HTML
+        self.assertIn("border-collapse", html)                     # a bare table gets grid lines
         self.assertIn("<td>17 °C</td>", html)
         self.assertIn("Sent by a personal AI assistant.", html)    # signature in both parts
         self.assertIn("Sent by a personal AI assistant.", plain)
@@ -213,6 +214,12 @@ class Writing(Base):
             self.assertIn("not found", dl_proton.call("send_mail", {"to": "a@example.com", "subject": "s",
                                                                     "html_file": "nope.html"}))
         self.assertIn("empty", dl_proton.call("send_mail", {"to": "a@example.com", "subject": "s"}))
+
+    def test_subject_from_the_html_title(self):
+        out = dl_proton.call("send_mail", {"to": "a@example.com",
+                                           "html": "<html><head><title>Vremenska prognoza</title></head><body>x</body></html>"})
+        self.assertTrue(out.startswith("Sent"), out)
+        self.assertEqual(FakeSmtp.sent[0][0]["Subject"], "Vremenska prognoza")
 
     def test_no_recipient(self):
         self.assertTrue(dl_proton.call("send_mail", {"to": "", "subject": "x", "body": "y"}).startswith("Error"))

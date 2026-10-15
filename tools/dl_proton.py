@@ -68,7 +68,7 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {
          "to": _ADDR, "cc": _ADDR, "bcc": _ADDR, "subject": {"type": "string"}, **_CONTENT,
          "reply_to_uid": {"type": "integer", "description": "UID of the message this answers (in `folder`)"},
-         "folder": _FOLDER}, "required": ["subject"]}},
+         "folder": _FOLDER}}},
     {"name": "update_mail", "description": "Move messages to another folder or mark them read/unread or starred. "
                                            "Cannot move to Trash or Spam.",
      "inputSchema": {"type": "object", "properties": {
@@ -77,12 +77,13 @@ TOOLS = [
          "required": ["uids"]}},
     {"name": "send_mail", "description": "Send an email from the assistant's Proton address. Give `body` (plain text) "
                                          "and/or `html` / `html_file` (an HTML email, e.g. with a table; the plain-text "
-                                         "part is made from it). The signature is added automatically. For a reply "
-                                         "give reply_to_uid.",
+                                         "part is made from it). Without `subject` the HTML <title> is the subject, so a "
+                                         "translated HTML email carries its translated subject. The signature is added "
+                                         "automatically. For a reply give reply_to_uid.",
      "inputSchema": {"type": "object", "properties": {
          "to": _ADDR, "cc": _ADDR, "bcc": _ADDR, "subject": {"type": "string"}, **_CONTENT,
          "reply_to_uid": {"type": "integer", "description": "UID of the message this answers (in `folder`)"},
-         "folder": _FOLDER}, "required": ["to", "subject"]}},
+         "folder": _FOLDER}, "required": ["to"]}},
 ]
 
 
@@ -236,6 +237,10 @@ class _Text(HTMLParser):
     def handle_endtag(self, tag):
         if tag in ("script", "style", "head") and self.skip:
             self.skip -= 1
+        elif tag in ("td", "th") and not self.skip:      # table cells: "14:00 | 17.1 | Djelomično oblačno"
+            self.parts.append(" | ")
+        elif tag == "tr" and self.parts and self.parts[-1] == " | ":
+            self.parts.pop()
 
     def handle_data(self, data):
         if not self.skip:
@@ -392,6 +397,10 @@ def compose(s: dict, a: dict, original=None) -> EmailMessage:
         if _addrs(a.get(key)):
             msg[h] = ", ".join(_addrs(a.get(key)))
     subject = str(a.get("subject") or "").strip()
+    html = _html_of(a)
+    if not subject and html:
+        t = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
+        subject = html_to_text(t.group(1)).strip() if t else ""
     if original is not None:
         if not subject:
             subject = _header(original, "Subject")
@@ -404,7 +413,6 @@ def compose(s: dict, a: dict, original=None) -> EmailMessage:
     msg["Subject"] = subject
     msg["Date"] = email.utils.formatdate(localtime=True)
     msg["Message-ID"] = email.utils.make_msgid(domain=sender.rpartition("@")[2] or None)
-    html = _html_of(a)
     body = str(a.get("body") or "").rstrip() or (html_to_text(html) if html else "")
     if not body and not html:
         raise ProtonError("the email is empty: give `body`, `html` or `html_file`")
@@ -421,6 +429,12 @@ def compose(s: dict, a: dict, original=None) -> EmailMessage:
             html += f'\n<p style="color:#666;font-size:90%">{sig_html}</p>'
         if not re.search(r"<html", html, re.I):
             html = f'<!doctype html><html><head><meta charset="utf-8"></head><body>{html}</body></html>'
+        if re.search(r"<table(?![^>]*(border|style))", html, re.I) and "<style" not in html.lower():
+            # a bare <table> shows without any lines in mail clients: give it a plain grid
+            css = ('<style>table{border-collapse:collapse}th,td{border:1px solid #bbb;padding:3px 8px;'
+                   'text-align:left}th{background:#f2f2f2}</style>')
+            html = re.sub(r"</head>", css + "</head>", html, count=1, flags=re.I) if re.search(
+                r"</head>", html, re.I) else css + html
         msg.add_alternative(html, subtype="html")
     return msg
 
