@@ -490,7 +490,6 @@ class Scheduler:
         self.thread: threading.Thread | None = None
 
     def start(self) -> None:
-        self.recover()
         self.thread = threading.Thread(target=self._loop, name="dl-schedule", daemon=True)
         self.thread.start()
 
@@ -517,6 +516,10 @@ class Scheduler:
         return [j.get("id") for j in found]
 
     def _loop(self) -> None:
+        try:
+            self.recover()                             # here, not in start(): its notice email must not delay the daemon
+        except Exception as e:  # noqa: BLE001
+            self.post("Scheduler error", f"{type(e).__name__}: {e}", "warn")
         while not self.stop.is_set():
             try:
                 self.tick()
