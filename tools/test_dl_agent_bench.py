@@ -140,6 +140,16 @@ def sse(delta: dict, finish: str | None = None) -> bytes:
     return f"data: {json.dumps({'choices': [{'delta': delta, 'finish_reason': finish}]})}\n\n".encode()
 
 
+class MailApproval(unittest.TestCase):
+    def test_only_a_send_to_the_given_address(self):
+        ok = bench.mail_approver("me@example.com")
+        send = "gmail: send_gmail_message\n  to: me@example.com\n  subject: s\n  body:\n    see other@example.org"
+        self.assertTrue(ok({"summary": send, "reason": "sends on your behalf"}))
+        self.assertFalse(ok({"summary": send.replace("  subject", "  bcc: x@evil.test\n  subject"), "reason": ""}))
+        self.assertFalse(ok({"summary": send, "reason": "ADDRESS NOT FROM YOU: me@example.com"}))
+        self.assertFalse(ok({"summary": "gmail: manage_gmail_label\n  to: me@example.com", "reason": ""}))
+
+
 class FakeModel(BaseHTTPRequestHandler):
     """'loop' keeps calling a tool until the cap note; 'stubborn' never stops calling tools; 'rm' asks for a
     gated command once; anything else gets an answer."""

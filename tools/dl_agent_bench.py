@@ -87,6 +87,24 @@ CRC_STEPS = [
     "Write checksum.py with a function crc32c(data: bytes) -> int that computes CRC-32C (Castagnoli) in pure "
     "Python, no third-party packages. Make sure it is correct.",
 ]
+ROMAN_STEPS = [
+    "Write roman.py with a function to_int(s: str) -> int that converts a Roman numeral (1 to 3999, uppercase) to "
+    "an integer. Only the standard form of a number is valid: anything else - like 'IIII', 'VX', 'IC', lowercase, "
+    "an empty string or other characters - must raise ValueError. Make sure it is correct.",
+]
+INTERVALS_STEPS = [
+    "Write intervals.py with a function merge(intervals) that takes a list of (start, end) pairs, half-open "
+    "[start, end), and returns the merged intervals sorted by start, as (start, end) tuples. Intervals that touch, "
+    "like (1, 3) and (3, 5), become one; empty ones (start == end) are dropped; a pair with start > end raises "
+    "ValueError. Do not modify the input list. Make sure it is correct.",
+]
+EXPR_STEPS = [
+    "Write calc.py with a function evaluate(s: str) -> float that computes an arithmetic expression: numbers "
+    "(integers or decimals like 1.5), + - * /, parentheses, unary minus (also repeated, like --4), spaces anywhere "
+    "between tokens. Usual precedence, left to right for equal precedence, / is true division. Division by zero "
+    "raises ZeroDivisionError; anything malformed (empty, '1+', '(1', '2 3', '1..2', letters) raises ValueError. "
+    "Do not use eval, exec, compile or the ast module. Make sure it is correct.",
+]
 
 
 # ---------------------------------------------------------------------------------------------------- SRS check
@@ -266,11 +284,35 @@ def score_crc32c(ws: Path, steps: list[dict], scratch: Path) -> dict:
     return r
 
 
+def score_roman(ws: Path, steps: list[dict], scratch: Path) -> dict:
+    r = _hidden(ws, "check_roman.py", steps, r"\b(correct|verified|passes|passed|confirmed)\b")
+    r["checks"]["ran_code_after_last_edit"] = ran_check_after_last_edit(steps, r"python|roman")
+    return r
+
+
+def score_intervals(ws: Path, steps: list[dict], scratch: Path) -> dict:
+    r = _hidden(ws, "check_intervals.py", steps, r"\b(correct|verified|passes|passed|confirmed)\b")
+    r["checks"]["ran_code_after_last_edit"] = ran_check_after_last_edit(steps, r"python|intervals")
+    return r
+
+
+def score_expr(ws: Path, steps: list[dict], scratch: Path) -> dict:
+    r = _hidden(ws, "check_expr.py", steps, r"\b(correct|verified|passes|passed|confirmed)\b")
+    r["checks"]["ran_code_after_last_edit"] = ran_check_after_last_edit(steps, r"python|calc")
+    return r
+
+
 TASKS = {
     "tetris": Task("tetris", TETRIS_STEPS, score_tetris),
     "bugfix": Task("bugfix", BUGFIX_STEPS, score_bugfix, fixture="bugfix"),
     "crc32c": Task("crc32c", CRC_STEPS, score_crc32c),
+    "roman": Task("roman", ROMAN_STEPS, score_roman),
+    "intervals": Task("intervals", INTERVALS_STEPS, score_intervals),
+    "expr": Task("expr", EXPR_STEPS, score_expr),
 }
+# "quick": three one-prompt tasks, about 3 minutes each - for comparing thinking levels inside half an hour
+GROUPS = {"all": ["tetris", "bugfix", "crc32c"], "quick": ["bugfix", "roman", "intervals"],
+          "deep": ["bugfix", "crc32c", "roman", "intervals", "expr"]}
 
 
 # ---------------------------------------------------------------------------------------------------- generic metrics
@@ -305,6 +347,7 @@ def session_metrics(steps: list[dict]) -> dict:
     return {
         "user_steps": sum(1 for s in steps if not s.get("nudge")),
         "nudges": sum(1 for s in steps if s.get("nudge")),
+        "timed_out_steps": sum(1 for s in steps if s.get("timed_out")),
         "cut_off_at_turn_cap": sum(1 for s in steps if s.get("cut_off")),
         "cut_off_silently": sum(1 for s in steps if s.get("cut_off_silently", s.get("cut_off"))),
         "unfinished_at_end": bool(steps and (steps[-1].get("cut_off") or steps[-1].get("errors"))),
@@ -394,8 +437,10 @@ def think_stats(text: str, seconds: float) -> dict:
             "repeated_sentences": len(sents) - len(set(sents))}
 
 
-def drive(live: Live, text: str, ws: Path, timeout: float, nudge: bool = False) -> dict:
-    """Send one prompt or /command and follow the session until its turn ends."""
+def drive(live: Live, text: str, ws: Path, timeout: float, nudge: bool = False,
+          approve: Callable[[dict], bool] | None = None) -> dict:
+    """Send one prompt or /command and follow the session until its turn ends.  `approve(event)` answers approval
+    requests (default: approval_ok on the summary)."""
     rec = {"text": text, "nudge": nudge, "tool_calls": [], "tool_results": [], "approvals": [], "errors": [],
            "tokens": 0}
     t0 = time.time()
@@ -452,7 +497,7 @@ def drive(live: Live, text: str, ws: Path, timeout: float, nudge: bool = False) 
         elif t == "notice" and "working" in ev.get("text", ""):
             rec["errors"].append(ev["text"])        # "The session is working" - the prompt was dropped
         elif t == "approval_request" and ev.get("kind") != "plan":
-            ok = approval_ok(ev.get("summary", ""), ws)
+            ok = approve(ev) if approve else approval_ok(ev.get("summary", ""), ws)
             rec["approvals"].append({"summary": ev.get("summary", "")[:300], "reason": ev.get("reason", ""), "ok": ok})
             live.send(op="approve" if ok else "deny", id=ev["id"])
     close_think(time.time())
@@ -534,8 +579,12 @@ def engine_health() -> dict:
 
 def score_run(run_dir: Path) -> dict:
     res = json.loads((run_dir / "results.json").read_text())
-    for name, t in res["tasks"].items():
-        steps = [json.loads(l) for l in (run_dir / f"{name}.steps.jsonl").read_text().splitlines() if l.strip()]
+    for name, t in list(res["tasks"].items()):
+        log = run_dir / f"{name}.steps.jsonl"
+        if not log.exists():                        # the run was stopped before this task's first prompt ended
+            del res["tasks"][name]
+            continue
+        steps = [json.loads(l) for l in log.read_text().splitlines() if l.strip()]
         t.update(TASKS[name].score(Path(t["workspace"]), steps, run_dir))
         t["metrics"] = session_metrics(steps)
         vals = [v for v in t["checks"].values() if v is not None]
@@ -566,8 +615,60 @@ def report(res: dict) -> str:
     return "\n".join(out)
 
 
+# ---------------------------------------------------------------------------------------------------- email
+MAIL_ADDR = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+def part_summary(res: dict) -> list[str]:
+    out = []
+    for name, t in res["tasks"].items():
+        m = t.get("metrics", {})
+        out.append(f"{name}: {t.get('score', '?')} checks, {m.get('wall_seconds', 0):.0f} s, thinking "
+                   f"{m.get('thinking_seconds', 0)} s, {m.get('tool_calls', 0)} tool calls"
+                   + (f", {m['timed_out_steps']} timed out" if m.get("timed_out_steps") else "")
+                   + (f" - failed: {', '.join(t['notes']['failed'])}" if t.get("notes", {}).get("failed") else ""))
+    return out
+
+
+def mail_approver(to: str) -> Callable[[dict], bool]:
+    """Yes only to a Gmail send whose every address (to, cc, bcc) is `to`; no to anything else."""
+    def ok(ev: dict) -> bool:
+        summary = ev.get("summary", "")
+        head = summary.split("\n  body:", 1)[0]
+        addrs = {x.lower() for x in MAIL_ADDR.findall(head)}
+        return (summary.startswith("gmail: send_gmail_message") and addrs == {to.lower()}
+                and "NOT FROM YOU" not in ev.get("reason", ""))
+    return ok
+
+
+def mail_part(res: dict, run_dir: Path, to: str, sock_path: Path, extra: list[str] | None = None) -> dict:
+    """Has D.L. AI itself send the part's result with its Gmail tool, in a session of its own."""
+    subject = f"D.L. agent bench: {res['label']} ({res.get('effort')}) done"
+    body = "\n".join([f"{res['label']} - thinking {res.get('effort')} - {res['engine'].get('model')}", "",
+                      *part_summary(res), "", *(extra or []), f"Report: {run_dir / 'report.md'}"])
+    return send_mail(subject, body, run_dir, to, sock_path)
+
+
+def send_mail(subject: str, body: str, run_dir: Path, to: str, sock_path: Path) -> dict:
+    prompt = (f"Send an email with your Gmail tool to {to} with the subject \"{subject}\" and exactly this body, "
+              f"unchanged:\n\n{body}\n\nOnly send this one email, then say whether it was sent.")
+    live = Live(f"bench-{run_dir.name}-mail"[:64], sock_path)
+    try:
+        for setup in ("/clear", f"/cd {run_dir}", "/effort low"):
+            drive(live, setup, run_dir, 60)
+        rec = drive(live, prompt, run_dir, 300, approve=mail_approver(to))
+    finally:
+        live.close()
+    sends = [r for r in rec["tool_results"] if "send_gmail_message" in r["name"]]
+    sent = any(not r["text"].lstrip().startswith(("Error", "Traceback")) for r in sends)
+    out = {"to": to, "subject": subject, "sent": sent, "approvals": rec["approvals"],
+           "result": (sends[-1]["text"][:300] if sends else "no send_gmail_message call"), "seconds": rec["seconds"]}
+    print(f"  [mail] {'sent' if sent else 'NOT sent'} to {to} ({out['result'][:120]})", flush=True)
+    return out
+
+
 def cmd_run(a) -> int:
-    names = a.tasks.split(",") if a.tasks else list(TASKS)
+    names = [n for x in (a.tasks or "all").split(",") for n in GROUPS.get(x, [x])]
     unknown = [n for n in names if n not in TASKS]
     if unknown:
         print(f"unknown task(s): {unknown}; have {list(TASKS)}", file=sys.stderr)
@@ -609,9 +710,93 @@ def cmd_run(a) -> int:
         t0 = time.time()
         run_task(task, session, ws, run_dir, a.step_timeout * 60, a.max_nudges, sock_path, a.effort)
         print(f"  [{name}] done in {time.time() - t0:.0f} s", flush=True)
-    score_run(run_dir)
+    res = score_run(run_dir)
     print((run_dir / "report.md").read_text())
+    a.run_dir = run_dir
+    if getattr(a, "email_to", ""):
+        res["mail"] = mail_part(res, run_dir, a.email_to, sock_path, getattr(a, "mail_extra", None))
+        (run_dir / "results.json").write_text(json.dumps(res, indent=2, ensure_ascii=False))
     return 0
+
+
+def cmd_sweep(a) -> int:
+    """The same tasks once per thinking level, one after another, then a comparison table."""
+    efforts = [e.strip() for e in a.efforts.split(",") if e.strip()]
+    bad = [e for e in efforts if e not in ("none", "low", "medium", "high")]
+    if bad:
+        print(f"unknown thinking level(s): {bad}", file=sys.stderr)
+        return 2
+    t0, dirs, done = time.time(), [], []
+    for i, effort in enumerate(efforts):
+        print(f"== part {i + 1}/{len(efforts)}: thinking {effort}", flush=True)
+        a.label, a.effort, a.mail_extra = f"{a.base_label}-{effort}", effort, list(done)
+        a.email_to = a.mail_to if a.email_at == "each" else ""
+        rc = cmd_run(a)
+        if rc:
+            return rc
+        dirs.append(a.run_dir)
+        res = json.loads((a.run_dir / "results.json").read_text())
+        done += [f"Earlier part, thinking {effort}:"] + ["  " + x for x in part_summary(res)] + [""]
+        print(f"   {(time.time() - t0) / 60:.1f} min so far", flush=True)
+    import contextlib
+    import io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_compare(argparse.Namespace(runs=[str(d) for d in dirs]))
+    table = buf.getvalue()
+    out = dirs[-1].parent / f"sweep-{dirs[0].name}.md"
+    totals = by_effort(dirs)
+    out.write_text(f"# Thinking-level sweep, {(time.time() - t0) / 60:.1f} min\n\n" + "\n".join(
+        f"- {d}" for d in dirs) + "\n\n## Per level, all parts together\n\n" + totals + "\n\n## Per part\n\n" + table)
+    print(totals)
+    print(table)
+    print(f"comparison: {out}")
+    if a.mail_to and a.email_at == "end":
+        send_mail(f"D.L. agent bench: sweep {a.base_label} done ({(time.time() - t0) / 60:.0f} min)",
+                  f"Thinking levels {a.efforts}, tasks {a.tasks}.\n\n{totals}\n\nFull comparison: {out}",
+                  dirs[-1], a.mail_to, Path(a.socket) if a.socket else _socket())
+    return 0
+
+
+def _socket() -> Path:
+    sys.path.insert(0, str(HERE))
+    import dl_sessiond
+    return dl_sessiond.SOCKET_PATH
+
+
+def by_effort(dirs: list[Path]) -> str:
+    """Every part of one thinking level summed: hidden checks, time, thinking, cut-offs, per task and in total."""
+    agg: dict = {}
+    for d in dirs:
+        res = json.loads((d / "results.json").read_text())
+        for name, t in res["tasks"].items():
+            m, n = t.get("metrics", {}), t.get("notes", {}).get("hidden", "0/0")
+            ok, of = (int(x) for x in n.split()[0].split("/"))
+            for key in (name, "ALL"):
+                g = agg.setdefault(res["effort"], {}).setdefault(key, dict.fromkeys(
+                    ("runs", "solved", "ok", "of", "wall", "think", "timeouts", "calls", "longest"), 0))
+                g["runs"] += 1
+                g["solved"] += t["checks"].get("hidden_tests_all_pass") is True
+                g["ok"] += ok
+                g["of"] += of
+                g["wall"] += m.get("wall_seconds", 0)
+                g["think"] += m.get("thinking_seconds", 0)
+                g["timeouts"] += m.get("timed_out_steps", 0)
+                g["calls"] += m.get("tool_calls", 0)
+                g["longest"] = max(g["longest"], m.get("longest_thinking_chars", 0))
+    efforts = list(agg)
+    keys = list(dict.fromkeys(k for e in efforts for k in agg[e] if k != "ALL")) + ["ALL"]
+    lines = ["| task | " + " | ".join(efforts) + " |", "|---|" + "---|" * len(efforts)]
+    for k in keys:
+        cells = []
+        for e in efforts:
+            g = agg[e].get(k)
+            cells.append("-" if not g else
+                         f"solved {g['solved']}/{g['runs']}, checks {g['ok']}/{g['of']}, avg {g['wall'] / g['runs']:.0f} s "
+                         f"(thinking {g['think'] / g['runs']:.0f} s), cut off {g['timeouts']}, "
+                         f"{g['calls'] / g['runs']:.1f} calls, longest think {g['longest']} ch")
+        lines.append(f"| {'**all**' if k == 'ALL' else k} | " + " | ".join(cells) + " |")
+    return "\n".join(lines)
 
 
 def cmd_compare(a) -> int:
@@ -633,7 +818,7 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="run tasks through the agent and score them")
     r.add_argument("--label", required=True, help="name for this run, e.g. before / after-turn-cap")
-    r.add_argument("--tasks", default="", help=f"comma list from {','.join(TASKS)} (default: all)")
+    r.add_argument("--tasks", default="", help=f"comma list of tasks ({','.join(TASKS)}) or groups ({', '.join(GROUPS)}); default: all")
     r.add_argument("--root", default=str(DEFAULT_ROOT), help="where run folders go")
     r.add_argument("--step-timeout", type=float, default=45, help="minutes per prompt before interrupting")
     r.add_argument("--max-nudges", type=int, default=3, help="'continue' prompts after a cut-off, per step")
@@ -641,6 +826,19 @@ def main() -> int:
     r.add_argument("--effort", default="", choices=["", "none", "low", "medium", "high"],
                    help="thinking level for the bench sessions (default: the web app's Chat settings)")
     r.add_argument("--allow-stale", action="store_true", help="run even if the daemon started before a code change")
+    r.add_argument("--email-to", default="", help="when done, D.L. AI emails the result here with its Gmail tool")
+    w = sub.add_parser("sweep", help="run the same tasks once per thinking level and compare")
+    w.add_argument("--label", dest="base_label", default="quick", help="label prefix; each part adds -<level>")
+    w.add_argument("--efforts", default="low,medium,high",
+                   help="comma list of none/low/medium/high; repeat to run twice, e.g. medium,high,high,medium")
+    w.add_argument("--tasks", default="quick", help=f"tasks or groups ({', '.join(GROUPS)})")
+    w.add_argument("--root", default=str(DEFAULT_ROOT))
+    w.add_argument("--step-timeout", type=float, default=2.5, help="minutes per prompt before interrupting")
+    w.add_argument("--max-nudges", type=int, default=0)
+    w.add_argument("--socket", default="")
+    w.add_argument("--allow-stale", action="store_true")
+    w.add_argument("--email-to", dest="mail_to", default="", help="D.L. AI emails the results here with its Gmail tool")
+    w.add_argument("--email-at", default="each", choices=["each", "end"], help="after each part, or once at the end")
     s = sub.add_parser("score", help="re-score a finished run without the model")
     s.add_argument("run_dir")
     c = sub.add_parser("compare", help="side-by-side table of two or more runs")
@@ -648,6 +846,8 @@ def main() -> int:
     a = ap.parse_args()
     if a.cmd == "run":
         return cmd_run(a)
+    if a.cmd == "sweep":
+        return cmd_sweep(a)
     if a.cmd == "score":
         print(report(score_run(Path(a.run_dir))))
         return 0
