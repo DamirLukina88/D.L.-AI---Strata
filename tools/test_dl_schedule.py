@@ -182,7 +182,8 @@ class Store(Temp):
         S.save(data)
         out = S.list_text()
         self.assertIn("#1 ", out)
-        self.assertIn("#99 (unreadable entry", out)
+        self.assertIn("1 unreadable entry kept aside", out)
+        self.assertEqual([j["id"] for j in S.load()["unreadable"]], [99])     # kept in the file, never run
 
     def test_missing_counter_is_repaired(self):
         S.STORE.parent.mkdir(parents=True, exist_ok=True)
@@ -275,7 +276,7 @@ class Runner(Temp):
         sched.tick()
         self.assertEqual(held, [False])
 
-    def test_a_damaged_entry_is_switched_off_once(self):
+    def test_a_damaged_entry_is_set_aside(self):
         sched = self.make()
         S.add("in 1m fine", now=NOW)
         data = S.load()
@@ -284,14 +285,13 @@ class Runner(Temp):
         self.clock[0] = NOW + 61
         self.assertEqual(sched.tick(), [1])                                     # the good job still runs
         self.assertEqual(sched.tick(), [])
-        bad = next(j for j in S.load()["jobs"] if j["id"] == 50)
-        self.assertEqual((bad["enabled"], bad["last"]["status"]), (False, "error"))
-        self.assertEqual(sum("switched off" in p[0] for p in self.posts), 1)  # reported once, not every tick
+        self.assertEqual([j["id"] for j in S.load()["unreadable"]], [50])      # set aside, never processed
+        self.assertFalse(any("Scheduler error" in p[0] for p in self.posts))
         data = S.load()
         data["jobs"].append("not a job")
         S.save(data)
         self.assertEqual(sched.tick(), [])                                      # skipped, no error
-        self.assertIn("unreadable entry", S.list_text())
+        self.assertIn("2 unreadable entries kept aside", S.list_text())
 
     def test_warms_the_model_before_a_prompt_job(self):
         sched = self.make()

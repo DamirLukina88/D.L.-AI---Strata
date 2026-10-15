@@ -309,8 +309,16 @@ def load() -> dict:
     try:
         data = json.loads(raw)
         if isinstance(data, dict) and isinstance(data.get("jobs"), list):
-            ids = [j["id"] for j in data["jobs"] if isinstance(j, dict) and isinstance(j.get("id"), int)]
-            if not isinstance(data.get("next_id"), int) or data["next_id"] <= max(ids, default=0):
+            # only well-formed jobs are processed; anything else is kept aside in the file, never acted on
+            bad = [j for j in data["jobs"] if not valid_job(j)]
+            data["jobs"] = [j for j in data["jobs"] if valid_job(j)]
+            kept = data.get("unreadable") if isinstance(data.get("unreadable"), list) else []
+            data["unreadable"] = kept + bad
+            if not data["unreadable"]:
+                data.pop("unreadable")
+            ids = [j["id"] for j in data["jobs"]] + [j["id"] for j in data.get("unreadable", [])
+                                                     if isinstance(j, dict) and type(j.get("id")) is int]
+            if type(data.get("next_id")) is not int or data["next_id"] <= max(ids, default=0):
                 data["next_id"] = max(ids, default=0) + 1       # a missing or stale counter never reuses a number
             return data
     except ValueError:
@@ -326,6 +334,43 @@ def load() -> dict:
         pass
     ids = [int(x) for x in re.findall(r'"id":\s*(\d+)', raw)]
     return {"next_id": max(ids, default=0) + 1, "jobs": []}      # new jobs never reuse an old number
+
+
+_TS_MAX = 4102444800.0                                # 2100-01-01: no real job time lies beyond it
+
+
+def _ts(v, none_ok: bool = False) -> bool:
+    if v is None:
+        return none_ok
+    return type(v) in (int, float) and 0 <= v <= _TS_MAX
+
+
+def valid_job(j) -> bool:
+    """A job entry this module wrote (or one just like it): the shape every operation relies on."""
+    if not isinstance(j, dict) or type(j.get("id")) is not int or j["id"] < 1:
+        return False
+    sp = j.get("spec")
+    if not isinstance(sp, dict):
+        return False
+    kind = sp.get("kind")
+    if kind == "once":
+        ok = _ts(sp.get("at")) and _ts(sp.get("planned"), True)
+    elif kind == "every":
+        ok = (type(sp.get("seconds")) in (int, float) and 60 <= sp["seconds"] <= MAX_AHEAD_S
+              and _ts(sp.get("start")))
+    elif kind == "days":
+        ok = (isinstance(sp.get("time"), str) and bool(_HM.match(sp["time"])) and isinstance(sp.get("days"), list)
+              and bool(sp["days"]) and all(type(d) is int and 0 <= d <= 6 for d in sp["days"]))
+    else:
+        ok = False
+    act = j.get("action")
+    return bool(ok and _ts(j.get("next"), True) and type(j.get("enabled")) is bool
+                and isinstance(j.get("prompt", ""), str) and isinstance(j.get("workspace", ""), str)
+                and (act is None or (isinstance(act, dict) and isinstance(act.get("tool"), str)
+                                     and isinstance(act.get("args"), dict)))
+                and (j.get("last") is None or isinstance(j["last"], dict))
+                and type(j.get("runs", 0)) is int and _ts(j.get("running_since"), True)
+                and all(type(j.get(k, False)) is bool for k in ("yolo", "email_result")))
 
 
 def _last_unreadable() -> str:
@@ -408,16 +453,20 @@ def summary(job: dict) -> str:
 
 
 def list_text() -> str:
-    jobs = load()["jobs"]
+    data = load()
+    jobs = data["jobs"]
+    aside = len(data.get("unreadable") or [])
+    note = (f"\n({aside} unreadable entr{'y' if aside == 1 else 'ies'} kept aside in {STORE}, never run)"
+            if aside else "")
     if not jobs:
-        return "No scheduled jobs."
+        return "No scheduled jobs." + note
     rows = []
     for j in jobs:
         try:
             rows.append(summary(j))
         except Exception as e:  # noqa: BLE001 - one damaged entry must not hide the others
             rows.append(f"#{j.get('id', '?') if isinstance(j, dict) else '?'} (unreadable entry: {type(e).__name__})")
-    return "\n".join(rows)
+    return "\n".join(rows) + note
 
 
 # ---------------------------------------------------------------------- the built-in tool
