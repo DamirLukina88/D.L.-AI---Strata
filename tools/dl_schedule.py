@@ -309,6 +309,9 @@ def load() -> dict:
     try:
         data = json.loads(raw)
         if isinstance(data, dict) and isinstance(data.get("jobs"), list):
+            ids = [j["id"] for j in data["jobs"] if isinstance(j, dict) and isinstance(j.get("id"), int)]
+            if not isinstance(data.get("next_id"), int) or data["next_id"] <= max(ids, default=0):
+                data["next_id"] = max(ids, default=0) + 1       # a missing or stale counter never reuses a number
             return data
     except ValueError:
         pass
@@ -369,7 +372,7 @@ def add(when: str, prompt: str = "", action: dict | None = None, email_result: b
 def remove(job_id: int) -> dict | None:
     with _lock:
         data = load()
-        job = next((j for j in data["jobs"] if j["id"] == int(job_id)), None)
+        job = next((j for j in data["jobs"] if isinstance(j, dict) and j.get("id") == int(job_id)), None)
         if job:
             data["jobs"].remove(job)
             save(data)
@@ -380,7 +383,7 @@ def set_enabled(job_id: int, on: bool, now: float | None = None) -> dict | None:
     now = time.time() if now is None else now
     with _lock:
         data = load()
-        job = next((j for j in data["jobs"] if j["id"] == int(job_id)), None)
+        job = next((j for j in data["jobs"] if isinstance(j, dict) and j.get("id") == int(job_id)), None)
         if job:
             job["enabled"] = on
             if on and (not job.get("next") or job["next"] < now):
@@ -562,6 +565,8 @@ class Scheduler:
             data = load()
             due, changed = [], False
             for job in data["jobs"]:
+                if not isinstance(job, dict):              # not a job at all: /schedule list shows it as unreadable
+                    continue
                 try:
                     item = self._check(job, now, cfg, reports)
                 except Exception as e:  # noqa: BLE001 - a damaged entry is switched off, not retried every tick
@@ -594,7 +599,7 @@ class Scheduler:
         with _lock:
             data = load()
             for j in data["jobs"]:
-                if j.get("id") == job_id:
+                if isinstance(j, dict) and j.get("id") == job_id:
                     if on:
                         j["running_since"] = self.clock()
                     else:
@@ -684,7 +689,7 @@ class Scheduler:
         with _lock:
             data = load()
             for j in data["jobs"]:
-                if j["id"] == job_id:
+                if isinstance(j, dict) and j.get("id") == job_id:
                     j["runs"] = int(j.get("runs") or 0) + 1
                     j["last"] = {"at": self.clock(), "status": status, "text": (text or "")[:500]}
             save(data)

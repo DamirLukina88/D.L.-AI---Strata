@@ -184,6 +184,20 @@ class Store(Temp):
         self.assertIn("#1 ", out)
         self.assertIn("#99 (unreadable entry", out)
 
+    def test_missing_counter_is_repaired(self):
+        S.STORE.parent.mkdir(parents=True, exist_ok=True)
+        S.STORE.write_text('{"jobs": [{"id": 7, "spec": {"kind": "once", "at": 1}, "next": null, "enabled": false}]}')
+        self.assertEqual(S.add("in 2h x", now=NOW)["id"], 8)
+
+    def test_entries_without_an_id_do_not_break_commands(self):
+        S.add("in 2h x", now=NOW)
+        data = S.load()
+        data["jobs"].insert(0, {"when": "broken"})
+        S.save(data)
+        self.assertIsNotNone(S.set_enabled(1, False, now=NOW))
+        self.assertIsNotNone(S.remove(1))
+        self.assertIsNone(S.remove(2))
+
     def test_an_unreadable_store_is_kept_not_lost(self):
         S.add("in 2h x", now=NOW)
         S.STORE.write_text('{"next_id": 5, "jobs": [{"id": 4, "when": broken')
@@ -273,6 +287,11 @@ class Runner(Temp):
         bad = next(j for j in S.load()["jobs"] if j["id"] == 50)
         self.assertEqual((bad["enabled"], bad["last"]["status"]), (False, "error"))
         self.assertEqual(sum("switched off" in p[0] for p in self.posts), 1)  # reported once, not every tick
+        data = S.load()
+        data["jobs"].append("not a job")
+        S.save(data)
+        self.assertEqual(sched.tick(), [])                                      # skipped, no error
+        self.assertIn("unreadable entry", S.list_text())
 
     def test_warms_the_model_before_a_prompt_job(self):
         sched = self.make()

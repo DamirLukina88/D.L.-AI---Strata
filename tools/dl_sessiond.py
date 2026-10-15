@@ -450,7 +450,7 @@ def schedule_command(arg: str, workspace: Path, yolo: bool = False) -> str:
         if sub == "run":
             with dl_schedule._lock:
                 data = dl_schedule.load()
-                job = next((j for j in data["jobs"] if j["id"] == n), None)
+                job = next((j for j in data["jobs"] if isinstance(j, dict) and j.get("id") == n), None)
                 if not job:
                     return f"No job #{n}."
                 job.update(enabled=True, next=time.time())
