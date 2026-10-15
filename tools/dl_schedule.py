@@ -3,16 +3,21 @@
 The jobs live in ~/.local/state/dl-ai/schedule.json (mode 600).  The session daemon (dl_sessiond.py) runs them;
 `/schedule` there and the on-demand built-in "schedule" (mcp.json {"builtin": "schedule"}) add and remove them.
 
-When:   "2026-10-16 09:00", "09:00" (today, or tomorrow once it has passed), "today 18:30", "tomorrow 07:00",
-        "fri 09:00" (the next Friday), "in 2h", "in 1h30m", "in 45m", "in 3d"            -> once
-        "daily 08:00", "weekdays 07:30", "mon-fri 07:30", "every mon,wed 18:00", "weekends 10:00",
+When:   "2026-10-16 09:00", "16.10.2026. 09:00", "16.10. 09:00", "09:00" (today, or tomorrow once it has passed),
+        "today 18:30" / "danas", "tomorrow 07:00" / "sutra", "fri 09:00" / "pet" (the next Friday), "in 2h" / "za 2h",
+        "in 1h30m", "in 3d"                                                                 -> once (at most a year ahead)
+        "daily 08:00", "weekdays 07:30", "mon-fri 07:30" / "pon-pet", "every mon,wed 18:00", "weekends 10:00",
         "every 2h", "every 30m"                                                             -> repeating
 Rules (the user's, 2026-10-15):
-- An action job ({"tool", "args"}) is approved when it is scheduled and runs exactly that, without the model.
-- A prompt job runs the agent; anything it decides on its own still asks on the Code tab's approval card.
-- The model is loaded WARMUP_S before a prompt job; a server that is down is waited for up to RETRY_S, then the
-  job fails and a notice goes out.  A job the server dropped half-way is run once more only if it had not acted.
-- Missed while the PC or daemon was off: run once at the next start; more than MAX_LATE_S late is skipped.
+- An action job ({"tool", "args"}) is approved when it is scheduled (on the card, or by YOLO) and runs exactly that,
+  without the model.
+- A prompt job runs the agent; outside YOLO what it decides on its own asks on the Code tab's card.  A job scheduled
+  while YOLO was on runs without asking.  A job cannot schedule or remove jobs.
+- The model is loaded `warmup_s` before a prompt job; a server that is down is waited for up to `retry_min`, then the
+  job fails and a notice goes out.  A job the server dropped half-way is run once more only if it had not acted; one
+  the daemon itself stopped during is recorded as interrupted at the next start.
+- Missed while the PC or daemon was off: run once at the next start; more than `max_late_h` late is skipped.
+  (Settings: ~/.config/dl-ai/schedule.json.)
 """
 from __future__ import annotations
 
@@ -162,7 +167,7 @@ def _parse_when(text: str, now: float | None = None, anchor: float | None = None
             try:
                 return once(anchor + _duration("".join(words[1:1 + n])), 1 + n)
             except WhenError as e:
-                if "passed" in str(e):
+                if "passed" in str(e) or "year ahead" in str(e):
                     raise
                 continue
         raise WhenError(f"not a duration after 'in': {' '.join(words[1:3])!r}")
@@ -298,12 +303,34 @@ def until(ts: float, now: float | None = None) -> str:
 # ---------------------------------------------------------------------- store
 def load() -> dict:
     try:
-        data = json.loads(STORE.read_text(encoding="utf-8"))
+        raw = STORE.read_text(encoding="utf-8")
+    except OSError:
+        return {"next_id": 1, "jobs": []}
+    try:
+        data = json.loads(raw)
         if isinstance(data, dict) and isinstance(data.get("jobs"), list):
             return data
-    except (OSError, ValueError):
+    except ValueError:
         pass
-    return {"next_id": 1, "jobs": []}
+    # unreadable (a hand edit gone wrong): keep a copy before the next save replaces it, never lose jobs silently
+    keep = STORE.with_name(f"{STORE.name}.unreadable-{time.strftime('%Y%m%d-%H%M%S')}")
+    try:
+        if raw.strip() and raw != _last_unreadable():          # each damaged version is kept once
+            fd = os.open(keep, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(raw)
+    except OSError:
+        pass
+    ids = [int(x) for x in re.findall(r'"id":\s*(\d+)', raw)]
+    return {"next_id": max(ids, default=0) + 1, "jobs": []}      # new jobs never reuse an old number
+
+
+def _last_unreadable() -> str:
+    copies = sorted(STORE.parent.glob(f"{STORE.name}.unreadable-*"))
+    try:
+        return copies[-1].read_text(encoding="utf-8") if copies else ""
+    except OSError:
+        return ""
 
 
 def save(data: dict) -> None:

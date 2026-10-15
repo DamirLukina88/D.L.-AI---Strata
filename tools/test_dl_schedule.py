@@ -77,6 +77,10 @@ class When(unittest.TestCase):
         self.assertEqual(S.parse_when("pon-pet 07:30 x", NOW)[0]["days"], [0, 1, 2, 3, 4])
         self.assertEqual(S.fmt(at(2026, 10, 16, 21, 30)), "pet 16.10.2026. 21:30")
 
+    def test_too_far_says_so(self):
+        with self.assertRaisesRegex(S.WhenError, "year ahead"):
+            S.parse_when("in 400d x", NOW)
+
     def test_only_whole_weekday_words(self):
         for bad in ("wedding 18:00 x", "monitor 09:00 x", "sunny 10:00 x"):
             with self.assertRaises(S.WhenError, msg=bad):
@@ -179,6 +183,17 @@ class Store(Temp):
         out = S.list_text()
         self.assertIn("#1 ", out)
         self.assertIn("#99 (unreadable entry", out)
+
+    def test_an_unreadable_store_is_kept_not_lost(self):
+        S.add("in 2h x", now=NOW)
+        S.STORE.write_text('{"next_id": 5, "jobs": [{"id": 4, "when": broken')
+        data = S.load()
+        self.assertEqual((data["jobs"], data["next_id"]), ([], 5))         # new jobs do not reuse #4
+        copies = list(S.STORE.parent.glob("schedule.json.unreadable-*"))
+        self.assertEqual(len(copies), 1)
+        self.assertIn('"id": 4', copies[0].read_text())
+        S.load()                                                             # the same damage is copied once
+        self.assertEqual(len(list(S.STORE.parent.glob("schedule.json.unreadable-*"))), 1)
 
     def test_store_is_private(self):
         S.add("in 2h ping", now=NOW)
