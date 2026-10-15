@@ -157,6 +157,18 @@ class Reading(Base):
         self.assertNotIn("Folders,", out)
         self.assertEqual(dl_proton._utf7("Folders/Računi"), "Folders/Ra&AQ0-uni")
 
+    def test_unknown_charset_is_still_read(self):
+        raw = (b"From: a@example.com\r\nSubject: x\r\nMIME-Version: 1.0\r\n"
+               b"Content-Type: multipart/mixed; boundary=B\r\n\r\n--B\r\n"
+               b"Content-Type: text/plain; charset=unknown-8bit\r\n\r\nPla\xe6eno\r\n--B\r\n"
+               b"Content-Type: text/plain; charset=x-nope\r\nContent-Disposition: attachment; filename=n.txt\r\n\r\n"
+               b"line\r\n--B--\r\n")
+        self.imap.boxes["INBOX"][13] = raw
+        out = dl_proton.call("read_mail", {"uid": 13})
+        self.assertIn("Pla", out)
+        self.assertFalse(out.startswith("Error"), out)
+        self.assertIn("line", dl_proton.call("get_attachment", {"uid": 13, "name": "n.txt"}))
+
     def test_unknown_folder(self):
         self.assertIn("no folder", dl_proton.call("search_mail", {"folder": "Nope"}))
 
@@ -240,6 +252,10 @@ class Writing(Base):
                                            "html": "<html><head><title>Vremenska\n  prognoza</title></head><body>x</body></html>"})
         self.assertTrue(out.startswith("Sent"), out)
         self.assertEqual(FakeSmtp.sent[0][0]["Subject"], "Vremenska prognoza")
+
+    def test_unclosed_head_does_not_hide_the_body(self):
+        self.assertEqual(dl_proton.html_to_text("<html><head><title>T</title><body><p>Bok</p></body></html>"), "Bok")
+        self.assertEqual(dl_proton.html_to_text("<p>a</p><style>x{}</style><p>b</p>"), "a\nb")
 
     def test_imap_dates_are_english_whatever_the_locale(self):
         self.assertEqual(dl_proton._date("2026-10-16"), "16-Oct-2026")

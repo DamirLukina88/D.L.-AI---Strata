@@ -234,7 +234,9 @@ class _Text(HTMLParser):
         self.parts, self.skip = [], 0
 
     def handle_starttag(self, tag, attrs):
-        if tag in ("script", "style", "head"):
+        if tag == "body":
+            self.skip = 0                                # <body> ends a <head> left open, as browsers do
+        elif tag in ("script", "style", "head"):
             self.skip += 1
         elif tag in ("br", "p", "div", "tr", "li", "h1", "h2", "h3", "blockquote"):
             self.parts.append("\n")
@@ -264,6 +266,19 @@ def _fetch(m, uid: int):
     if typ != "OK" or raw is None:
         raise ProtonError(f"no message with UID {uid} in this folder")
     return email.message_from_bytes(raw, policy=email.policy.default)
+
+
+def _part_text(part, data: bytes | None = None) -> str:
+    """A text part as str; a charset Python does not know ("unknown-8bit") is read as UTF-8 with replacements."""
+    if data is None:
+        try:
+            return part.get_content()
+        except (LookupError, UnicodeError):
+            data = part.get_payload(decode=True) or b""
+    try:
+        return data.decode(part.get_content_charset() or "utf-8", errors="replace")
+    except LookupError:
+        return data.decode("utf-8", errors="replace")
 
 
 def _attachments(msg) -> list:
@@ -342,7 +357,7 @@ def read_mail(m, a: dict) -> str:
     body = msg.get_body(preferencelist=("plain", "html"))
     text = ""
     if body is not None:
-        text = body.get_content()
+        text = _part_text(body)
         if body.get_content_type() == "text/html":
             text = html_to_text(text)
     att = [f"{p.get_filename() or '(no name)'} ({p.get_content_type()}, {len(p.get_payload(decode=True) or b'')} bytes)"
@@ -369,7 +384,7 @@ def get_attachment(m, a: dict) -> str:
     data = part.get_payload(decode=True) or b""
     if not (part.get_content_maintype() == "text" or want.endswith(TEXT_EXT)):
         return f"{part.get_filename()}: {part.get_content_type()}, {len(data)} bytes; not text, so not shown."
-    text = data.decode(part.get_content_charset() or "utf-8", errors="replace")
+    text = _part_text(part, data)
     if want.endswith((".html", ".htm")):
         text = html_to_text(text)
     return text[:MAX_BODY] + (f"\n… ({len(text) - MAX_BODY} more characters)" if len(text) > MAX_BODY else "")
