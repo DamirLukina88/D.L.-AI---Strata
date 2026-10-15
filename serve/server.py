@@ -3521,8 +3521,12 @@ class Service:
         """List all available model configurations on this server."""
         configs = []
         for cfg_file in sorted(ROOT.glob("strata-*.json")):
+            if cfg_file.name.endswith(".shared-settings.json"):     # the Chat settings, not a model
+                continue
             try:
                 data = json.loads(cfg_file.read_text(encoding="utf-8-sig"))
+                if not (isinstance(data, dict) and data.get("exe") and isinstance(data.get("args"), list)):
+                    continue                                         # only engine configs, as strata_bench.find_configs
                 m_id = data.get("model_name") or cfg_file.stem.replace("strata-", "")
                 d_name = data.get("display_name") or m_id
                 configs.append({

@@ -95,7 +95,9 @@ window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
 
 // ------------------------------------------------------------------ Code: shared CLI session (tools/dl_sessiond.py)
 // The same session runs in the terminal (dl_cli.py --attach): this tab is one more client of it.
-const CODE_SESSION = "dl-ai-code";
+// ?session=NAME shows another daemon session (the agent bench's bench-* sessions); the default is the shared one
+const CODE_SESSION = /^[A-Za-z0-9_.-]{1,64}$/.test(new URLSearchParams(location.search).get("session") || "")
+  ? new URLSearchParams(location.search).get("session") : "dl-ai-code";
 const code = { conn: null, state: {}, client: "", cur: null, retry: 0, renderQueued: false, approvals: {} };
 // thinking blocks start open; the ones you close stay closed (per session, kept in this browser)
 const thinkClosedKey = `code.thinkClosed.${CODE_SESSION}`;
@@ -103,6 +105,12 @@ const codeThinkClosed = new Set(store.get(thinkClosedKey, []));
 function codeSaveThinkState() { store.set(thinkClosedKey, [...codeThinkClosed].slice(-500)); }
 
 function codeFeed() { return $("code-mobile-messages"); }
+// a box with its own scroll bar (the thinking text) follows new text while you are at its bottom; scrolled up, it stays
+function followText(box, text) {
+  const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+  box.textContent = text;
+  if (atEnd) box.scrollTop = box.scrollHeight;
+}
 function codeAtBottom() { const f = codeFeed(); return !f || f.scrollHeight - f.scrollTop - f.clientHeight < 80; }
 function codeScroll(force) { const f = codeFeed(); if (f && (force || codeAtBottom())) f.scrollTop = f.scrollHeight; }
 
@@ -135,7 +143,7 @@ function codeRenderCur(block) {
   if (!c) return;
   const stick = codeAtBottom();
   const think = c.el.querySelector(".cs-think");
-  if (c.thinking) { think.hidden = false; think.querySelector(".cs-think-body").textContent = c.thinking; }
+  if (c.thinking) { think.hidden = false; followText(think.querySelector(".cs-think-body"), c.thinking); }
   c.el.querySelector(".cs-text").innerHTML = c.text ? markdown(c.text) : "";
   if (stick) codeScroll(true);
 }
@@ -163,9 +171,15 @@ function codeHealth(d) {
 }
 
 function codeApprovalCard(ev) {
-  const el = codeCard("cs-approval", `
+  // "mcp-always": sending email - the whole message is shown, and it asks even in YOLO
+  const mail = ev.kind === "mcp-always";
+  const [reason, foreign] = String(ev.reason || "").split(" · ADDRESS NOT FROM YOU: ");
+  const el = codeCard("cs-approval", (mail ? `
+    <div class="cs-approval-title">✉ Send this?</div>
+    <pre class="cs-approval-mail">${esc(ev.summary)}</pre>
+    <div class="cs-approval-reason">${esc(reason)}${foreign ? ` · <span class="cs-approval-foreign">address not from you: ${esc(foreign)}</span>` : ""}</div>` : `
     <div class="cs-approval-title">${ev.kind === "plan" ? "📋" : "⚠"} ${esc(ev.summary)}</div>
-    <div class="cs-approval-reason">${esc(ev.reason || "")}</div>
+    <div class="cs-approval-reason">${esc(ev.reason || "")}</div>`) + `
     <div class="cs-approval-actions">
       <button type="button" class="st-btn st-btn--primary st-btn--sm" data-ok="1">${ev.kind === "plan" ? "Execute" : "Approve"}</button>
       <button type="button" class="st-btn st-btn--secondary st-btn--sm" data-ok="0">${ev.kind === "plan" ? "Keep planning" : "Deny"}</button>
@@ -192,6 +206,7 @@ function codeSetState(st) {
     const mode = (code.state.mode || "act").toUpperCase();
     meta.innerHTML = `<span class="cs-mode cs-mode--${esc(code.state.mode || "act")}">${mode}</span>` +
       (code.state.yolo ? ` <span class="cs-mode cs-mode--yolo">YOLO</span>` : "") +
+      (code.state.mcp || []).map((m) => ` <span class="cs-mode cs-mode--mcp" title="${esc(m.description)} (${esc(m.why || "on")})">${esc(m.name)}</span>`).join("") +
       ` <code title="${esc(code.state.workspace || "")}">${esc((code.state.workspace || "").split("/").slice(-2).join("/"))}</code>`;
   }
   const busy = !!code.state.busy;
@@ -1096,7 +1111,7 @@ function updateAssistant(el, m, streaming) {
     el.querySelector(".think-title").textContent = thinkingNow ? "Thinking…" :
       m.thinkSecs != null ? `Thought for ${fmt(m.thinkSecs, 1)} s` : "Thoughts";
     const body = el.querySelector(".thinking");
-    if (det.open || thinkingNow) body.textContent = m.reasoning;
+    if (det.open || thinkingNow) followText(body, m.reasoning);
     else body.dataset.pending = "1";
     // open by default; a block the user closed stays closed (kept with the message, so it survives a reload)
     const want = m.thinkOpen ?? settings.show !== false;
@@ -1415,7 +1430,7 @@ function openDrawer(open) {
   $("drawer").dataset.open = String(open);
   $("drawer").setAttribute("aria-hidden", String(!open));
   $("scrim").hidden = !open;
-  if (open) { loadDrawer(); loadShared(); loadMcp(); }
+  if (open) { loadDrawer(); syncShared().then(loadDrawer); loadMcp(); }
 }
 function loadDrawer(s = settings) {
   for (const b of $("s-thinking").children) b.setAttribute("aria-checked", String(b.dataset.v === s.thinking));
@@ -1425,17 +1440,30 @@ function loadDrawer(s = settings) {
   $("s-esp").setAttribute("aria-checked", String(s.esp !== false));
   $("esp-row").hidden = !projectionLoaded();
   $("s-mcp").setAttribute("aria-checked", String(s.mcp !== false));
-  $("s-share").setAttribute("aria-checked", String(sharedOn));
   outputs();
 }
-// "Use for other apps too": the server keeps these settings as every client's defaults (GET/POST /settings)
-let sharedOn = false;
-async function loadShared() {
+// D.L. AI: the Chat settings live on the server (GET/POST /settings), so every browser and the CLI (Code tab, terminal),
+// which sends no sampling fields of its own, use the same ones.  The server's copy wins; with none yet, this browser's
+// settings are published.  "show" and "mcp" stay per browser (display and the web app's own MCP tools).
+function fromShared(d) {
+  return {thinking: d.reasoning_effort || DEFAULTS.thinking,
+          temperature: d.temperature ?? DEFAULTS.temperature,
+          top_p: d.top_p ?? settings.top_p, top_k: d.top_k ?? settings.top_k,
+          max: d.max_tokens ? String(d.max_tokens) : "", seed: d.seed != null ? String(d.seed) : "",
+          esp: d.experimental_speed_projection ?? settings.esp};
+}
+async function syncShared() {
   try {
     const r = await fetch("settings", {headers: headers()});
-    if (r.ok) sharedOn = !!(await r.json()).shared;
-  } catch (e) { /* an older server: the switch just stays off */ }
-  $("s-share").setAttribute("aria-checked", String(sharedOn));
+    if (!r.ok) return;                                   // no key yet, or an older server
+    const j = await r.json();
+    if (j.shared && j.defaults) {
+      settings = {...settings, ...fromShared(j.defaults)};
+      store.set("sampling", settings);
+    } else {
+      await saveShared(settings);
+    }
+  } catch (e) { /* offline: keep this browser's copy */ }
 }
 function sharedDefaults(s) {
   const d = {reasoning_effort: s.thinking, temperature: +s.temperature};
@@ -1445,15 +1473,14 @@ function sharedDefaults(s) {
   if (projectionLoaded()) d.experimental_speed_projection = s.esp !== false;
   return d;
 }
-async function saveShared(on, s) {
+async function saveShared(s) {
   const r = await fetch("settings", {method: "POST", headers: headers(true),
-                                      body: JSON.stringify({defaults: on ? sharedDefaults(s) : null})});
+                                      body: JSON.stringify({defaults: sharedDefaults(s)})});
   if (!r.ok) {
     let msg = `HTTP ${r.status}`;
     try { msg = (await r.json()).error.message || msg; } catch (e) { /* not json */ }
     throw new Error(msg);
   }
-  sharedOn = !!(await r.json()).shared;
 }
 // the engine was started with the experimental-speed-projection control vector (INFO cvec=...)
 function projectionLoaded() {
@@ -1474,8 +1501,8 @@ for (const id of ["s-temp", "s-topp", "s-topk"]) $(id).oninput = outputs;
 $("s-show").onclick = () => $("s-show").setAttribute("aria-checked", String($("s-show").getAttribute("aria-checked") !== "true"));
 $("s-esp").onclick = () => $("s-esp").setAttribute("aria-checked", String($("s-esp").getAttribute("aria-checked") !== "true"));
 $("s-mcp").onclick = () => $("s-mcp").setAttribute("aria-checked", String($("s-mcp").getAttribute("aria-checked") !== "true"));
-$("s-share").onclick = () => $("s-share").setAttribute("aria-checked", String($("s-share").getAttribute("aria-checked") !== "true"));
-$("s-reset").onclick = () => loadDrawer(DEFAULTS);
+// the recommended coding-agent settings (DEFAULTS), applied and saved for Chat and the CLI at once
+$("s-reset").onclick = () => { loadDrawer(DEFAULTS); $("s-apply").click(); };
 $("s-apply").onclick = async () => {
   const sel = [...$("s-thinking").children].find((b) => b.getAttribute("aria-checked") === "true");
   settings = {thinking: sel ? sel.dataset.v : "high", temperature: +$("s-temp").value, top_p: +$("s-topp").value,
@@ -1484,19 +1511,15 @@ $("s-apply").onclick = async () => {
               esp: $("s-esp").getAttribute("aria-checked") === "true",
               mcp: $("s-mcp").getAttribute("aria-checked") === "true"};
   store.set("sampling", settings);
-  const share = $("s-share").getAttribute("aria-checked") === "true";
   openDrawer(false);
-  if (share || sharedOn) {
-    try {
-      await saveShared(share, settings);
-      toast("success", "Sampling saved", share ? "Other apps (omp, API clients) use these settings from their next request."
-                                               : "Other apps use their own settings again.");
-    } catch (e) {
-      toast("error", "Saved here, but not for other apps", e.message, 6000);
-    }
+  try {
+    await saveShared(settings);
+  } catch (e) {
+    toast("error", "Saved here, but not on the server", `The CLI keeps the previous settings: ${e.message}`, 6000);
     return;
   }
-  toast("success", "Sampling saved", settings.temperature === 0 ? "Greedy: the same question gives the same answer." : "");
+  toast("success", "Sampling saved", (settings.temperature === 0 ? "Greedy: the same question gives the same answer. " : "") +
+        "The CLI uses them from its next request.");
 };
 // ------------------------------------------------------------------ Server Workspace
 let wsFiles = [];
@@ -1986,6 +2009,8 @@ document.addEventListener("keydown", (e) => {
 });
 
 $("sampling-btn").onclick = () => openDrawer(true);
+if ($("code-sampling-btn")) $("code-sampling-btn").onclick = () => openDrawer(true);   // the same settings drive the CLI
+syncShared();                                            // the server's Chat settings, or publish this browser's
 $("drawer-close").onclick = () => openDrawer(false);
 $("scrim").onclick = () => openDrawer(false);
 

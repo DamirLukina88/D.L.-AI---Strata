@@ -108,6 +108,9 @@
           <button type="button" class="st-btn st-btn--icon code-action-btn" id="code-export-btn" title="Save this chat as Markdown" aria-label="Save this chat as Markdown">
             <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-download"/></svg>
           </button>
+          <button type="button" class="st-btn st-btn--icon code-action-btn" id="code-sampling-btn" title="Sampling and thinking (shared with Chat)" aria-label="Sampling and thinking">
+            <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-settings"/></svg>
+          </button>
           <button type="button" class="st-btn st-btn--secondary st-btn--sm code-action-btn" id="code-stop-btn" title="Interrupt the running turn" hidden>
             <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-stop"/></svg><span>Stop</span>
           </button>
@@ -137,8 +140,9 @@
             <button type="button" class="code-mobile-chip" data-cmd="/wiki">/wiki</button>
             <button type="button" class="code-mobile-chip" data-cmd="/exa">/exa</button>
             <button type="button" class="code-mobile-chip" data-cmd="/context7">/context7</button>
+            <button type="button" class="code-mobile-chip" data-cmd="/mcp" data-run>/mcp</button>
             <button type="button" class="code-mobile-chip" data-cmd="/cd">/cd</button>
-            <button type="button" class="code-mobile-chip" data-cmd="/think">/think</button>
+            <button type="button" class="code-mobile-chip" data-cmd="/continue" data-run>/continue</button>
             <button type="button" class="code-mobile-chip" data-cmd="/yolo" data-run>/yolo</button>
             <button type="button" class="code-mobile-chip" data-cmd="/help" data-run>/help</button>
           </div>
@@ -310,11 +314,11 @@
     <div class="toggle-row" id="esp-row" hidden><span>Experimental speed projection<br><span class="muted small">the
       engine's control vector; off = the stock model. Switching reads the chat again once</span></span>
       <button class="st-toggle" id="s-esp" role="switch" aria-checked="true" aria-label="Experimental speed projection"></button></div>
-    <div class="toggle-row"><span>Use for other apps too<br><span class="muted small">omp and other API clients get
-      these settings for anything they don't set themselves</span></span>
-      <button class="st-toggle" id="s-share" role="switch" aria-checked="false" aria-label="Use for other apps too"></button></div>
+    <p class="muted small" id="s-shared-note">Saved on the server: the CLI (Code tab and terminal) uses these settings,
+      and other apps get them for anything they don't set themselves.</p>
     <div class="drawer-actions">
-      <button class="st-btn st-btn--secondary" id="s-reset" type="button">Reset</button>
+      <button class="st-btn st-btn--secondary" id="s-reset" type="button"
+        title="Thinking high, temperature 0.6, top-p 0.95, top-k 20, max tokens auto, no seed - saved for Chat and the CLI">Reset to defaults</button>
       <button class="st-btn st-btn--primary" id="s-apply" type="button">Apply</button>
     </div>
   </div>

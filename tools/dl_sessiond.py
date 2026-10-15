@@ -33,6 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dl_cli as cli  # noqa: E402
+import dl_mcp  # noqa: E402
 from dl_auditing import format_health_card, get_system_health  # noqa: E402
 
 RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "dl-ai"
@@ -44,6 +45,7 @@ APPROVAL_TIMEOUT = 30 * 60        # an unanswered approval is a "no"
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 NAME_OK = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
+EFFORTS = ("none", "low", "medium", "high")
 EXECUTE_PLAN = ("Proceed with executing the plan now. Perform the necessary tool calls (edits, writes, tests, "
                 "commands) to implement the agreed plan.")
 
@@ -60,8 +62,8 @@ class Session:
         self.name = name
         self.workspace = workspace
         self.mode = "act"
-        self.think = "medium"
         self.yolo = False
+        self.effort: str | None = None            # /effort: this session's thinking level; None = the Chat settings
         self.messages: list[dict] = [{"role": "system", "content": cli.build_dl_system_prompt(workspace, "act")}]
         self.events: list[dict] = []
         self.seq = 0
@@ -71,6 +73,9 @@ class Session:
         self.cancel = threading.Event()
         self.pending: dict[str, dict] = {}       # approval id -> {"event", "ok", "kind", ...}
         self.plan_offer: str | None = None       # id of an open "Execute this plan?" offer
+        # MCP servers, on while a request needs them; "code": Google (Gmail) is allowed here, not in the REPL
+        self.mcp = dl_mcp.McpRegistry(surface="code", notify=lambda t, level="info": self.notice(f"MCP {t}", level))
+        self.mcp.on_change = self.emit_state
 
     # ---------------------------------------------------------------- events
     def emit(self, ev: dict) -> None:
@@ -93,8 +98,9 @@ class Session:
 
     def state(self) -> dict:
         return {"type": "state", "session": self.name, "workspace": str(self.workspace), "mode": self.mode,
-                "think": self.think, "yolo": self.yolo, "busy": self.busy,
+                "settings": cli.chat_settings_summary(), "effort": self.effort, "yolo": self.yolo, "busy": self.busy,
                 "wiki": str(cli.resolve_wiki_root(self.workspace) or ""),
+                "mcp": [m for m in self.mcp.status() if m["on"]],
                 "pending": [{"id": k, "kind": v["kind"], "summary": v["summary"], "reason": v["reason"]}
                             for k, v in self.pending.items()]}
 
@@ -113,7 +119,7 @@ class Session:
 
     def save(self) -> None:
         with self.lock, _save_lock:
-            data = {"name": self.name, "workspace": str(self.workspace), "mode": self.mode, "think": self.think,
+            data = {"name": self.name, "workspace": str(self.workspace), "mode": self.mode, "effort": self.effort,
                     "messages": self.messages, "events": self.events[-REPLAY_MAX:], "seq": self.seq}
             STATE_DIR.mkdir(parents=True, exist_ok=True)
             tmp = self.path().with_suffix(".tmp")
@@ -131,7 +137,7 @@ class Session:
         ws = Path(data.get("workspace") or default_ws)
         s = cls(name, ws if ws.is_dir() else default_ws)
         s.mode = data.get("mode", "act")
-        s.think = data.get("think", "medium")
+        s.effort = data.get("effort") if data.get("effort") in EFFORTS else None
         s.messages = data.get("messages") or s.messages
         s.messages[0] = {"role": "system", "content": cli.build_dl_system_prompt(s.workspace, s.mode)}
         s.events = data.get("events") or []
@@ -224,9 +230,10 @@ class Session:
     def _agent(self, prompt: str) -> None:
         self.messages.append({"role": "user", "content": cli.resolve_file_references(prompt, self.workspace)})
         ctx = {"workspace": self.workspace, "messages": self.messages, "mode": self.mode, "yolo": self.yolo,
-               "emit": self.emit, "cancel": self.cancel, "approve": self.approve}
+               "effort": self.effort,
+               "emit": self.emit, "cancel": self.cancel, "approve": self.approve, "mcp": self.mcp, "user_text": prompt}
         new_ws = cli.execute_agent_loop(messages=self.messages, url=cli.DEFAULT_URL, api_key=cli.DEFAULT_API_KEY,
-                                        workspace=self.workspace, think_level=self.think, mode=self.mode,
+                                        workspace=self.workspace, mode=self.mode,
                                         session_context=ctx)
         if new_ws != self.workspace:
             self.workspace = new_ws
@@ -267,6 +274,19 @@ class Session:
                 self.notice("Plan Mode: read-only research and design. Ask for a plan.")
                 return None
             return arg
+        if cmd == "/continue":
+            return arg or cli.CONTINUE_PROMPT
+        if cmd == "/effort":
+            if arg in ("", "show"):
+                self.notice(f"Thinking level: {self.effort or 'the Chat settings (' + cli.chat_settings_summary() + ')'}")
+                return None
+            if arg not in EFFORTS and arg != "default":
+                self.notice(f"Usage: /effort {'|'.join(EFFORTS)}|default", "warn")
+                return None
+            self.effort = None if arg == "default" else arg
+            self.notice(f"Thinking level for this session: {self.effort or 'the Chat settings'}")
+            self.emit_state()
+            return None
         if cmd == "/yolo":
             self.yolo = not self.yolo
             self.notice("YOLO on: destructive actions run without asking." if self.yolo
@@ -277,15 +297,17 @@ class Session:
             with self.lock:
                 self.events = []
             self.emit({"type": "cleared"})
+            self.mcp.close()                     # a new conversation starts with only the default servers
             self.notice(f"Memory reset ({self.mode} mode).")
+            self.emit_state()
+            return None
+        if cmd == "/mcp":
+            self.output("/mcp", self.mcp.command(arg))
             return None
         if cmd == "/think":
-            val = {"med": "medium"}.get(arg.lower(), arg.lower())
-            if val in ("none", "low", "medium", "high"):
-                self.think = val
-                self.notice(f"Reasoning effort: {val}.")
-            else:
-                self.notice(f"Reasoning effort is {self.think}. Usage: /think none|low|medium|high")
+            self.notice("/think is gone: the CLI follows the web app's Chat settings "
+                        f"({cli.chat_settings_summary()}). Change them under Chat > Settings, or set this "
+                        "session's own level with /effort none|low|medium|high.")
             return None
         if cmd == "/cd":
             cand = Path(arg or str(Path.home())).expanduser()
@@ -365,15 +387,20 @@ class Session:
 
 
 HELP = """/plan [task]      Plan Mode: read-only research, ends with "Execute this plan?"
-/act [task]       Act Mode (executes the agreed plan when given no task)
+/act [task]       Act Mode (executes the agreed plan when given no task); also /execute
 /yolo             Toggle approvals for destructive actions
-/think <level>    none | low | medium | high
+/mcp [on|off N]   On-demand tools: web search (Exa), library docs (Context7), Fetch, DeepL, browser,
+                  Gmail, Drive, Docs (list, turn on/off; they also start when a request needs them)
 /cd <path>        Change the working directory (the wiki follows it)
-/status /health   Engine status, hardware health
-/exa <q>          Web search      /context7 <lib>  Library docs
-/diff /secrets /test [files] /wiki [search|lint|digest]
-/save [file]      Save the chat as Markdown in the workspace
-/clear            Reset the conversation
+/status /health   Engine status (also /model), hardware health (also /sys)
+/exa <q>          Web search (also /search)     /context7 <lib>  Library docs (also /docs)
+/diff             Git diff audit (also /audit)   /secrets [path]  Secret scan (also /scan)
+/test [files]     Targeted tests                 /wiki [search|lint|digest]  Local Wiki
+/save [file]      Save the chat as Markdown in the workspace (also /export)
+/effort [level]   This session's thinking level: none, low, medium, high, or default (the Chat settings)
+/continue         Go on after the agent stopped at its tool-round limit (DL_MAX_TURNS)
+/clear            Reset the conversation (also /reset)
+/help             This list
 !<command>        Run a shell command in the workspace"""
 
 
@@ -502,6 +529,7 @@ def main() -> int:
                 s.save()
             except OSError:
                 pass
+            s.mcp.close()                    # no browser or Google process outlives the daemon
         sock.unlink(missing_ok=True)
     return 0
 

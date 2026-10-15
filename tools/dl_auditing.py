@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -160,7 +161,67 @@ SECRET_PATTERNS = [
     ("Hardcoded Env Default", re.compile(r"""environ\.get\(\s*['"][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*['"]\s*,\s*['"]([A-Za-z0-9_\-\.]{20,})['"]""")),
     # ${SOME_KEY:-<literal>} in shell scripts
     ("Hardcoded Shell Default", re.compile(r"\$\{[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*:-([A-Za-z0-9_\-\.]{20,})\}")),
+    # Google OAuth (the Gmail/Drive/Docs MCP server) and DeepL
+    ("Google OAuth Client Secret", re.compile(r"\b(GOCSPX-[A-Za-z0-9_-]{20,})")),
+    ("Google OAuth Access Token", re.compile(r"\b(ya29\.[A-Za-z0-9_-]{20,})")),
+    ("Google OAuth Refresh Token", re.compile(r"(?<![A-Za-z0-9])(1//0[A-Za-z0-9_-]{30,})")),
+    ("DeepL API Key", re.compile(r"\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:fx)\b")),
 ]
+
+# The real values on this PC: every value in secrets.env, secret-looking environment variables and the Google sign-in
+# tokens.  A match is caught whatever its format, also URL-encoded (a fetch URL).
+SECRETS_ENV = Path.home() / ".config" / "dl-ai" / "secrets.env"
+GOOGLE_TOKEN_DIR = Path.home() / ".config" / "dl-ai" / "google"
+SECRET_ENV_NAME = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|PASSWD")
+SECRET_JSON_KEYS = {"token", "access_token", "refresh_token", "id_token", "client_secret"}
+MIN_SECRET_LEN = 12
+
+
+def known_secret_values() -> List[Tuple[str, str]]:
+    """[(label, value)] of the credentials stored on this PC, read fresh each time (access tokens change hourly)."""
+    found: Dict[str, str] = {}
+    try:
+        for line in SECRETS_ENV.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("export "):
+                line = line[7:].strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            found.setdefault(val.strip().strip("'\""), f"value of {key.strip()} (secrets.env)")
+    except OSError:
+        pass
+    for key, val in os.environ.items():
+        if SECRET_ENV_NAME.search(key):
+            found.setdefault(val.strip(), f"value of ${key}")
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k in SECRET_JSON_KEYS and isinstance(v, str):
+                    found.setdefault(v.strip(), f"Google sign-in {k}")
+                else:
+                    walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    for f in sorted(GOOGLE_TOKEN_DIR.glob("*.json")) if GOOGLE_TOKEN_DIR.is_dir() else []:
+        try:
+            walk(json.loads(f.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            pass
+    # paths, URLs and sentences are not credentials (GNOME_KEYRING_CONTROL=/run/user/...)
+    return [(label, val) for val, label in found.items()
+            if len(val) >= MIN_SECRET_LEN and not re.search(r"\s|://", val) and val[0] not in "/~."]
+
+
+def find_known_secrets(text: str) -> List[str]:
+    """Labels of the stored credentials whose exact value appears in `text` (as is or URL-decoded)."""
+    if not text:
+        return []
+    variants = {text, urllib.parse.unquote(text), urllib.parse.unquote_plus(text)}
+    return [label for label, val in known_secret_values() if any(val in v for v in variants)]
 
 # Whitelist safe false positives (mock keys, env placeholders)
 SAFE_SECRET_WHITELIST = {
@@ -190,6 +251,11 @@ def scan_secrets_in_text(content: str, file_path: Path | str = "") -> Tuple[bool
                 continue
             masked = val_strip[:6] + "..." + val_strip[-4:] if len(val_strip) > 10 else "******"
             violations.append(f"  • {label}: matched token '{masked}'")
+
+    # an env file is where a stored value belongs (the pattern check above still applies there)
+    if not (p_name == "secrets.env" or p_name == ".env" or p_name.endswith(".env")):
+        for label in find_known_secrets(content):
+            violations.append(f"  • {label}: the exact value of a stored credential")
 
     if violations:
         msg = f"Potential secret leak detected in {p_name}:\n" + "\n".join(violations[:5])
@@ -713,6 +779,10 @@ def classify_command(cmd: str, workspace: Path) -> Optional[str]:
     """Why a shell command needs the user's approval, or None when it may run."""
     reasons = [label for label, rx in _DESTRUCTIVE_PATTERNS if rx.search(cmd)]
     for _, path_str in _PATH_ARG.findall(cmd):
+        # "> /x" also matches text inside quoted code, such as the regex in sed -n '/^<script>/,/^<\/script>/p':
+        # only a path whose top folder exists can be a redirect target (no new folder appears in / without root)
+        if not path_str.startswith("~") and not Path("/" + path_str.strip("/").split("/")[0]).exists():
+            continue
         if _outside(path_str, workspace):
             reasons.append(f"writes outside the workspace ({path_str})")
             break

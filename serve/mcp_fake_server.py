@@ -4,7 +4,7 @@
     python serve/mcp_fake_server.py --http 8765      Streamable HTTP on 127.0.0.1:8765/mcp
 
 Tools: echo (returns its text), fail (a tool error, isError), sleep (answers after `seconds`), big (`n` characters),
-die (the process exits mid-call), add (two integers).  tools/list pages two tools at a time (`--page N`), so the
+die (the process exits mid-call), add (two integers), getenv (one of its environment variables).  tools/list pages two tools at a time (`--page N`), so the
 client's pagination is exercised.  `--crash-at-start` exits before answering anything.  With FAKE_MCP_LOG set, the
 server appends what it saw (calls, cancellations) to that file, one JSON line each.
 """
@@ -28,6 +28,8 @@ TOOLS = [
     {"name": "die", "description": "Ends the server.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "add", "description": "Adds two integers.",
      "inputSchema": {"type": "object", "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}}}},
+    {"name": "getenv", "description": "Returns an environment variable of the server, or <unset>.",
+     "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}}},
 ]
 PAGE = 2
 cancelled: set = set()
@@ -80,6 +82,8 @@ def handle(msg: dict):
             os._exit(3)
         elif name == "add":
             result = text(str(int(args.get("a", 0)) + int(args.get("b", 0))))
+        elif name == "getenv":
+            result = text(os.environ.get(str(args.get("name", "")), "<unset>"))
         else:
             return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32602, "message": f"unknown tool {name}"}}
         return {"jsonrpc": "2.0", "id": rid, "result": result}

@@ -168,6 +168,26 @@ class Client(unittest.TestCase):
         self.assertTrue(any("cancelled" in e for e in seen), seen)   # notifications/cancelled reached the server
 
 
+class EnvInherit(unittest.TestCase):
+    """`env_inherit`: a server gets only the listed variables (plus its own `env`); without it, all of ours."""
+
+    def test_only_listed_variables_reach_the_server(self):
+        os.environ["STRATA_TEST_SECRET"] = "s3cret"
+        try:
+            hub = McpHub({"all": stdio(), "some": stdio(env_inherit=["PATH"], env={"OWN": "1"})}, {"timeout_s": 10})
+            hub.start(wait=True)
+            try:
+                hub.routes()
+                self.assertEqual(hub.call("all__getenv", {"name": "STRATA_TEST_SECRET"})["text"], "s3cret")
+                self.assertEqual(hub.call("some__getenv", {"name": "STRATA_TEST_SECRET"})["text"], "<unset>")
+                self.assertEqual(hub.call("some__getenv", {"name": "OWN"})["text"], "1")
+                self.assertNotEqual(hub.call("some__getenv", {"name": "PATH"})["text"], "<unset>")
+            finally:
+                hub.close()
+        finally:
+            del os.environ["STRATA_TEST_SECRET"]
+
+
 class HttpClient(unittest.TestCase):
     """Streamable HTTP: JSON answers, an event-stream answer, the session id."""
 

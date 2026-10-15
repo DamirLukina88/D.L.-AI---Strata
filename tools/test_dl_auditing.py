@@ -171,5 +171,18 @@ class TestDestructiveGate(unittest.TestCase):
             outside.parent.rmdir()
 
 
+class TestApprovalPaths(unittest.TestCase):
+    def test_quoted_regex_is_not_a_redirect(self):
+        from tools.dl_auditing import classify_command
+        ws = Path("/mnt/data/DL-AI-workspace/bench/x")
+        for cmd in ["sed -n '/^<script>/,/^<\\/script>/p' t.html | sed '1d;$d' > /tmp/t.js",
+                    'node -e "eval(/<script>(.*)<\\/script>/.exec(html)[1])"',
+                    "echo x > out.txt"]:
+            self.assertIsNone(classify_command(cmd, ws), cmd)
+        for cmd, path in [("echo hi > /etc/motd", "/etc/motd"), ("cp a ~/x", "~/x"),
+                          ("echo x > /mnt/data/other/f", "/mnt/data/other/f")]:
+            self.assertEqual(classify_command(cmd, ws), f"writes outside the workspace ({path})")
+
+
 if __name__ == "__main__":
     unittest.main()

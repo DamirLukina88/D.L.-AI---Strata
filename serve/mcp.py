@@ -91,7 +91,9 @@ class StdioTransport:
         self.protocol = PROTOCOL
 
     def start(self):
-        env = dict(os.environ)
+        # `env_inherit` (opt-in): pass only these variables of ours, so a server does not see every key we hold
+        inherit = self.cfg.get("env_inherit")
+        env = dict(os.environ) if inherit is None else {k: os.environ[k] for k in inherit if k in os.environ}
         env.update({str(k): str(v) for k, v in (self.cfg.get("env") or {}).items()})
         command = str(self.cfg["command"])
         # On Windows `npx`, `uvx` and friends are .cmd files that CreateProcess finds only with their extension
