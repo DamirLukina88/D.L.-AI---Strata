@@ -22,9 +22,11 @@ Rules (the user's, 2026-10-15):
 from __future__ import annotations
 
 import datetime as dt
+import fcntl
 import json
 import os
 import re
+import sys
 import threading
 import time
 from pathlib import Path
@@ -33,7 +35,49 @@ STORE = Path.home() / ".local" / "state" / "dl-ai" / "schedule.json"
 CONFIG = Path.home() / ".config" / "dl-ai" / "schedule.json"
 DEFAULTS = {"notify_email": "", "max_late_h": 12, "retry_min": 30, "warmup_s": 180, "tick_s": 15}
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-_lock = threading.RLock()
+
+
+class _StoreLock:
+    """One lock for the job store: shared by the module's two copies in the daemon (dl_schedule for the scheduler and
+    /schedule, tools.dl_schedule for the model's schedule tool) and, through a lock file, by other processes - else
+    two load-change-save rounds could overwrite each other and a new job vanish.  Re-entrant within a thread."""
+
+    def __init__(self):
+        self._rlock = threading.RLock()
+        self._depth = 0
+        self._fh = None
+
+    def __enter__(self):
+        self._rlock.acquire()
+        if self._depth == 0:
+            try:
+                STORE.parent.mkdir(parents=True, exist_ok=True)
+                fd = os.open(STORE.with_name(STORE.name + ".lock"), os.O_RDWR | os.O_CREAT, 0o600)
+                self._fh = os.fdopen(fd, "r+")
+                fcntl.flock(self._fh, fcntl.LOCK_EX)
+            except OSError:
+                self._fh = None                        # no lock file (read-only disk): the thread lock still holds
+        self._depth += 1
+        return self
+
+    def __exit__(self, *exc):
+        self._depth -= 1
+        if self._depth == 0 and self._fh is not None:
+            try:
+                fcntl.flock(self._fh, fcntl.LOCK_UN)
+                self._fh.close()
+            except OSError:
+                pass
+            self._fh = None
+        self._rlock.release()
+        return False
+
+    def _is_owned(self) -> bool:                        # for the tests
+        return self._rlock._is_owned()
+
+
+_twin = sys.modules.get("tools.dl_schedule" if __name__ == "dl_schedule" else "dl_schedule")
+_lock = getattr(_twin, "_lock", None) or _StoreLock()
 
 
 _LIMITS = {"max_late_h": (0, 24 * 366), "retry_min": (0, 24 * 60), "warmup_s": (0, 3600), "tick_s": (1, 3600)}
@@ -624,6 +668,7 @@ class Scheduler:
         with _lock:
             data = load()
             due, changed = [], False
+            runnable = []
             for job in data["jobs"]:
                 if not isinstance(job, dict):              # not a job at all: /schedule list shows it as unreadable
                     continue
@@ -639,8 +684,16 @@ class Scheduler:
                 if item == "changed":
                     changed = True
                 elif item:
-                    due.append(item)
-                    changed = True
+                    runnable.append((item[0], item[1], job))
+            if runnable:
+                # one job per tick: a later due job is read again at the next tick, so a /schedule off or rm made
+                # while this one runs is honoured
+                scheduled, late, job = min(runnable, key=lambda r: r[0])
+                job["next"] = next_run(job["spec"], now)    # repeating: one catch-up run, not every missed one
+                if job["next"] is None:
+                    job["enabled"] = False
+                due.append((dict(job), late))
+                changed = True
             if changed:
                 save(data)
         for report in reports:
@@ -667,7 +720,8 @@ class Scheduler:
             save(data)
 
     def _check(self, job: dict, now: float, cfg: dict, reports: list):
-        """One entry at a tick: None (nothing now), "changed" (skipped as too late), or (job, late) to run."""
+        """One entry at a tick: None (nothing now), "changed" (skipped as too late), or (scheduled, late) when it
+        is due to run (the entry is changed only when tick() picks it)."""
         if not job.get("enabled") or not job.get("next"):
             return None
         if (not job.get("action") and 0 < job["next"] - now <= float(cfg["warmup_s"])
@@ -678,10 +732,10 @@ class Scheduler:
             return None
         scheduled = last_due(job["spec"], job["next"], now)
         late = now - scheduled
-        job["next"] = next_run(job["spec"], now)        # repeating: one catch-up run, not every missed one
-        if job["next"] is None:
-            job["enabled"] = False
         if late > float(cfg["max_late_h"]) * 3600:
+            job["next"] = next_run(job["spec"], now)
+            if job["next"] is None:
+                job["enabled"] = False
             job["last"] = {"at": now, "status": "skipped", "text": f"{late / 3600:.1f} h late"}
             text = (f"{summary(job)}\nIt was due {fmt(scheduled)} and is {late / 3600:.1f} h late "
                     f"(the limit is {cfg['max_late_h']} h).")
@@ -690,7 +744,7 @@ class Scheduler:
             reports.append(lambda i=job["id"], t=text: self.post(f"Skipped job #{i}", t, "warn"))
             reports.append(lambda i=job["id"], m=mail: self.notify(f"D.L. AI: job #{i} skipped", m))
             return "changed"
-        return (dict(job), late)
+        return (scheduled, late)
 
     def _warm(self) -> None:
         try:

@@ -219,6 +219,28 @@ class Store(Temp):
         S.CONFIG.write_text('{"tick_s": 30, "notify_email": " me@example.com "}')
         self.assertEqual((S.settings()["tick_s"], S.settings()["notify_email"]), (30, "me@example.com"))
 
+    def test_no_lost_jobs_across_module_copies_threads_and_processes(self):
+        import importlib, subprocess, threading
+        sys.path.insert(0, str(HERE.parent))
+        other = importlib.import_module("tools.dl_schedule")       # the copy the model's schedule tool uses
+        self.assertIs(other._lock, S._lock)
+        with mock.patch.object(other, "STORE", S.STORE):
+            def adder(mod, n):
+                for _ in range(n):
+                    mod.add("in 2h x")
+            ts = [threading.Thread(target=adder, args=(m, 40)) for m in (S, other, S, other)]
+            code = (f"import sys; sys.path.insert(0, {str(HERE)!r}); import dl_schedule as S; from pathlib import Path; "
+                    f"S.STORE = Path({str(S.STORE)!r}); [S.add('in 2h y') for _ in range(40)]")
+            proc = subprocess.Popen([sys.executable, "-c", code])
+            for t in ts:
+                t.start()
+            for t in ts:
+                t.join()
+            proc.wait(60)
+        ids = [j["id"] for j in S.load()["jobs"]]
+        self.assertEqual(len(ids), 200)
+        self.assertEqual(len(set(ids)), 200)
+
     def test_store_is_private(self):
         S.add("in 2h ping", now=NOW)
         self.assertEqual(S.STORE.stat().st_mode & 0o777, 0o600)
@@ -275,6 +297,18 @@ class Runner(Temp):
         self.clock[0] = NOW + 61
         sched.tick()
         self.assertNotIn("running_since", S.load()["jobs"][0])
+
+    def test_one_job_per_tick_so_a_switch_off_is_honoured(self):
+        sched = self.make()
+        S.add("in 1m first", now=NOW)
+        S.add("in 2m second", now=NOW)
+        self.clock[0] = NOW + 121
+        self.assertEqual(sched.tick(), [1])                    # the earlier one only
+        S.set_enabled(2, False, now=self.clock[0])             # switched off while #1 ran
+        self.assertEqual(sched.tick(), [])
+        self.assertEqual(self.prompts, [1])
+        S.add("in 1m third", now=NOW)
+        self.assertEqual(sched.tick(), [3])                    # a due job is still picked up at the next tick
 
     def test_reports_go_out_after_the_lock(self):
         sched = self.make()
@@ -379,6 +413,7 @@ class Runner(Temp):
         sched.make = None
         self.clock[0] = NOW + 61
         with mock.patch.object(sched, "health", lambda: True):
+            sched.tick()                                       # one due job per tick
             sched.tick()
         self.assertEqual(self.actions, [action])
         self.assertEqual([m[1] for m in self.mails], ["done"])     # the action sends nothing extra

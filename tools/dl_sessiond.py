@@ -480,6 +480,7 @@ def schedule_command(arg: str, workspace: Path, yolo: bool = False) -> str:
                 job.update(enabled=True, next=time.time())
                 if job["spec"]["kind"] == "once":
                     job["spec"]["at"] = time.time()
+                    job["spec"].pop("planned", None)       # a run by hand is not late
                 dl_schedule.save(data)
             return f"#{n} runs within {dl_schedule.settings()['tick_s']} s."
         job = dl_schedule.set_enabled(n, sub == "on")
