@@ -217,6 +217,15 @@ class Runner(Temp):
         self.assertIn("done", self.posts[-1][1])
         self.assertEqual(self.mails, [])
 
+    def test_reports_go_out_after_the_lock(self):
+        sched = self.make()
+        held = []
+        sched.notify = lambda subj, body: held.append(S._lock._is_owned())
+        S.add("2026-10-15 20:30 late", now=NOW)
+        self.clock[0] = at(2026, 10, 16, 9, 0)                 # 12.5 h late: skipped, with a notice email
+        sched.tick()
+        self.assertEqual(held, [False])
+
     def test_a_damaged_entry_is_switched_off_once(self):
         sched = self.make()
         S.add("in 1m fine", now=NOW)

@@ -63,7 +63,7 @@ class Entry:
         self.readonly_tools = set(raw.get("readonly_tools") or [])
         self.ask = set(raw.get("ask") or [])
         self.ask_always = set(raw.get("ask_always") or [])
-        # {"tool": ["arg", ...]}: the call always asks when one of these arguments is set (e.g. trashed=true)
+        # {"tool": ["arg", ...]}: outside YOLO the call shows the full card when one of these is set (e.g. trashed=true)
         self.ask_always_args = {str(k): list(v) for k, v in (raw.get("ask_always_args") or {}).items()}
         # "ask" tools run without asking while the server's page is local (file://, localhost): the agent testing
         # its own work in a browser.  Opt-in per server; anything else, or a page not known yet, still asks.

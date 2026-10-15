@@ -125,7 +125,9 @@ class Session:
                     "messages": self.messages, "events": self.events[-REPLAY_MAX:], "seq": self.seq}
             STATE_DIR.mkdir(parents=True, exist_ok=True)
             tmp = self.path().with_suffix(".tmp")
-            tmp.write_text(json.dumps(data, ensure_ascii=False))
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)   # private from the start
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(data, ensure_ascii=False))
             os.chmod(tmp, 0o600)
             tmp.replace(self.path())
 
@@ -525,7 +527,7 @@ class JobRunner:
             main.notice(f"⏰ {title}", "warn")
         try:
             main.save()
-        except OSError:
+        except Exception:  # noqa: BLE001 - the user's turn may be changing the history right now; its own save follows
             pass
 
     def notify(self, subject: str, body: str) -> None:

@@ -309,8 +309,11 @@ def load() -> dict:
 def save(data: dict) -> None:
     STORE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STORE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.chmod(tmp, 0o600)
+    # created private (0600) from the start: the jobs hold whole emails
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(data, ensure_ascii=False, indent=1))
+    os.chmod(tmp, 0o600)                               # an older .tmp left with other permissions
     tmp.replace(STORE)
 
 
@@ -394,8 +397,8 @@ TOOLS = [
         "'mon-fri 07:30', 'every mon,wed 18:00', 'every 2h' (local time, 24-hour). `prompt`: what the assistant "
         "does then. To get the result by email set email_result, don't ask the job to send mail. To send one exact "
         "email or do one exact action at that time, give `action` {tool, args} with a tool you have (e.g. "
-        "proton__send_mail; turn its server on first): the user approves it now, and it runs exactly so, without the "
-        "model. Always give the time the user asked for, even if it has passed while you worked: the job then runs at "
+        "proton__send_mail; turn its server on first): it is approved now (on the user's card, or by YOLO) and runs "
+        "exactly so, without the model. Always give the time the user asked for, even if it has passed while you worked: the job then runs at "
         "once and the delay is reported (and noted in an email it sends). Never move it to tomorrow or ask."),
      "inputSchema": {"type": "object", "properties": {
          "when": {"type": "string"}, "prompt": {"type": "string"},
@@ -501,16 +504,18 @@ class Scheduler:
     def tick(self) -> list[int]:
         """Warm up for jobs coming soon, then run what is due.  Returns the ids that ran (for the tests)."""
         cfg, now = settings(), self.clock()
+        reports = []                                   # posts and emails go out after the lock (SMTP can take 30 s)
         with _lock:
             data = load()
             due, changed = [], False
             for job in data["jobs"]:
                 try:
-                    item = self._check(job, now, cfg)
+                    item = self._check(job, now, cfg, reports)
                 except Exception as e:  # noqa: BLE001 - a damaged entry is switched off, not retried every tick
                     job["enabled"] = False
                     job["last"] = {"at": now, "status": "error", "text": f"unreadable entry: {type(e).__name__}"}
-                    self.post(f"Job #{job.get('id', '?')} switched off", f"Its entry is damaged ({e}).", "warn")
+                    reports.append(lambda j=job.get("id", "?"), e=e: self.post(
+                        f"Job #{j} switched off", f"Its entry is damaged ({e}).", "warn"))
                     changed = True
                     continue
                 if item == "changed":
@@ -520,13 +525,15 @@ class Scheduler:
                     changed = True
             if changed:
                 save(data)
+        for report in reports:
+            report()
         ran = []
         for job, late in due:
             self._run(job, late)
             ran.append(job["id"])
         return ran
 
-    def _check(self, job: dict, now: float, cfg: dict):
+    def _check(self, job: dict, now: float, cfg: dict, reports: list):
         """One entry at a tick: None (nothing now), "changed" (skipped as too late), or (job, late) to run."""
         if not job.get("enabled") or not job.get("next"):
             return None
@@ -543,11 +550,12 @@ class Scheduler:
             job["enabled"] = False
         if late > float(cfg["max_late_h"]) * 3600:
             job["last"] = {"at": now, "status": "skipped", "text": f"{late / 3600:.1f} h late"}
-            self.post(f"Skipped job #{job['id']}", f"{summary(job)}\nIt was due {fmt(scheduled)} and is "
-                      f"{late / 3600:.1f} h late (the limit is {cfg['max_late_h']} h).", "warn")
-            self.notify(f"D.L. AI: job #{job['id']} skipped",
-                        f"The scheduled job #{job['id']} was due {fmt(scheduled)} but the PC or the daemon "
-                        f"was off; it is {late / 3600:.1f} h late, so it was skipped.\n\n{job.get('prompt')}")
+            text = (f"{summary(job)}\nIt was due {fmt(scheduled)} and is {late / 3600:.1f} h late "
+                    f"(the limit is {cfg['max_late_h']} h).")
+            mail = (f"The scheduled job #{job['id']} was due {fmt(scheduled)} but the PC or the daemon was off; it is "
+                    f"{late / 3600:.1f} h late, so it was skipped.\n\n{job.get('prompt')}")
+            reports.append(lambda i=job["id"], t=text: self.post(f"Skipped job #{i}", t, "warn"))
+            reports.append(lambda i=job["id"], m=mail: self.notify(f"D.L. AI: job #{i} skipped", m))
             return "changed"
         return (dict(job), late)
 
