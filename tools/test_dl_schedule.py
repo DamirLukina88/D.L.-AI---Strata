@@ -105,7 +105,8 @@ class When(unittest.TestCase):
             S.parse_when("2026-10-15 21:00 x", now, anchor=asked)
 
     def test_errors(self):
-        for bad in ("", "soon do it", "2026-10-14 09:00 past", "today 19:00 past", "every 10s x", "25:00 x",
+        for bad in ("in 99999999d x", "every 99999999d x", "31.12.9999. 23:59 x", "9999-12-31 23:59 x", "in 400d x",
+                    "", "soon do it", "2026-10-14 09:00 past", "today 19:00 past", "every 10s x", "25:00 x",
                     "in forever x", "2026-13-01 09:00 x"):
             with self.assertRaises(S.WhenError, msg=bad):
                 S.parse_when(bad, NOW)
@@ -164,6 +165,15 @@ class Store(Temp):
             self.assertIn("cannot remove jobs", S.call("remove", {"id": 1}))
         self.assertEqual(len(S.load()["jobs"]), 1)
 
+    def test_a_damaged_entry_does_not_hide_the_others(self):
+        S.add("in 2h fine", now=NOW)
+        data = S.load()
+        data["jobs"].append({"id": 99, "spec": {"kind": "once", "at": 1e15}, "next": 1e15, "enabled": True})
+        S.save(data)
+        out = S.list_text()
+        self.assertIn("#1 ", out)
+        self.assertIn("#99 (unreadable entry", out)
+
     def test_store_is_private(self):
         S.add("in 2h ping", now=NOW)
         self.assertEqual(S.STORE.stat().st_mode & 0o777, 0o600)
@@ -200,6 +210,19 @@ class Runner(Temp):
         self.assertEqual((job["enabled"], job["runs"], job["last"]["status"]), (False, 1, "ok"))
         self.assertIn("done", self.posts[-1][1])
         self.assertEqual(self.mails, [])
+
+    def test_a_damaged_entry_is_switched_off_once(self):
+        sched = self.make()
+        S.add("in 1m fine", now=NOW)
+        data = S.load()
+        data["jobs"].append({"id": 50, "next": NOW, "enabled": True})          # no spec
+        S.save(data)
+        self.clock[0] = NOW + 61
+        self.assertEqual(sched.tick(), [1])                                     # the good job still runs
+        self.assertEqual(sched.tick(), [])
+        bad = next(j for j in S.load()["jobs"] if j["id"] == 50)
+        self.assertEqual((bad["enabled"], bad["last"]["status"]), (False, "error"))
+        self.assertEqual(sum("switched off" in p[0] for p in self.posts), 1)  # reported once, not every tick
 
     def test_warms_the_model_before_a_prompt_job(self):
         sched = self.make()

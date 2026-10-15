@@ -116,7 +116,19 @@ _HR_DATE = re.compile(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})?\.?$")
 _HR_DAY_MONTH = re.compile(r"^(\d{1,2})\.(\d{1,2})()$")         # "16.10" followed by a time: a date, not 16:10
 
 
+MAX_AHEAD_S = 366 * 86400
+
+
 def parse_when(text: str, now: float | None = None, anchor: float | None = None) -> tuple[dict, str]:
+    try:
+        return _parse_when(text, now, anchor)
+    except (OverflowError, ValueError, OSError) as e:   # a date the calendar cannot hold (year 10000, 31.02.)
+        if isinstance(e, WhenError):
+            raise
+        raise WhenError(f"not a valid time: {e}") from None
+
+
+def _parse_when(text: str, now: float | None = None, anchor: float | None = None) -> tuple[dict, str]:
     """'tomorrow 07:00 check my mail' -> (spec, 'check my mail').  The spec is stored; next_run() reads it.
 
     `anchor`: when the user asked (the start of the turn).  A time still ahead then but passed by now - the work took
@@ -132,6 +144,8 @@ def parse_when(text: str, now: float | None = None, anchor: float | None = None)
 
     def once(at, used: int):
         t = at.timestamp() if isinstance(at, dt.datetime) else float(at)
+        if t > now + MAX_AHEAD_S:
+            raise WhenError("schedule at most a year ahead")
         if t <= anchor:
             raise WhenError(f"{fmt(t)} had already passed when you asked")
         rest = " ".join(words[used:])
@@ -157,9 +171,11 @@ def parse_when(text: str, now: float | None = None, anchor: float | None = None)
             secs = _duration(words[1])
             if secs < 60:
                 raise WhenError("the shortest repeat is every 1m")
+            if secs > MAX_AHEAD_S:
+                raise WhenError("the longest repeat is every 365d")
             return {"kind": "every", "seconds": secs, "start": now}, " ".join(words[2:])
         except WhenError as e:
-            if "shortest" in str(e):
+            if "shortest" in str(e) or "longest" in str(e):
                 raise
         if len(words) > 2 and _is_days(words[1]):
             h, m = _hm(words[2])
@@ -361,7 +377,13 @@ def list_text() -> str:
     jobs = load()["jobs"]
     if not jobs:
         return "No scheduled jobs."
-    return "\n".join(summary(j) for j in jobs)
+    rows = []
+    for j in jobs:
+        try:
+            rows.append(summary(j))
+        except Exception as e:  # noqa: BLE001 - one damaged entry must not hide the others
+            rows.append(f"#{j.get('id', '?') if isinstance(j, dict) else '?'} (unreadable entry: {type(e).__name__})")
+    return "\n".join(rows)
 
 
 # ---------------------------------------------------------------------- the built-in tool
@@ -482,29 +504,19 @@ class Scheduler:
             data = load()
             due, changed = [], False
             for job in data["jobs"]:
-                if not job.get("enabled") or not job.get("next"):
-                    continue
-                if (not job.get("action") and 0 < job["next"] - now <= float(cfg["warmup_s"])
-                        and self.warmed.get(job["id"]) != job["next"]):
-                    self.warmed[job["id"]] = job["next"]
-                    threading.Thread(target=self._warm, daemon=True).start()
-                if job["next"] > now:
-                    continue
-                scheduled = last_due(job["spec"], job["next"], now)
-                late = now - scheduled
-                job["next"] = next_run(job["spec"], now)        # repeating: one catch-up run, not every missed one
-                if job["next"] is None:
+                try:
+                    item = self._check(job, now, cfg)
+                except Exception as e:  # noqa: BLE001 - a damaged entry is switched off, not retried every tick
                     job["enabled"] = False
-                changed = True
-                if late > float(cfg["max_late_h"]) * 3600:
-                    job["last"] = {"at": now, "status": "skipped", "text": f"{late / 3600:.1f} h late"}
-                    self.post(f"Skipped job #{job['id']}", f"{summary(job)}\nIt was due {fmt(scheduled)} and is "
-                              f"{late / 3600:.1f} h late (the limit is {cfg['max_late_h']} h).", "warn")
-                    self.notify(f"D.L. AI: job #{job['id']} skipped",
-                                f"The scheduled job #{job['id']} was due {fmt(scheduled)} but the PC or the daemon "
-                                f"was off; it is {late / 3600:.1f} h late, so it was skipped.\n\n{job.get('prompt')}")
+                    job["last"] = {"at": now, "status": "error", "text": f"unreadable entry: {type(e).__name__}"}
+                    self.post(f"Job #{job.get('id', '?')} switched off", f"Its entry is damaged ({e}).", "warn")
+                    changed = True
                     continue
-                due.append((dict(job), late))
+                if item == "changed":
+                    changed = True
+                elif item:
+                    due.append(item)
+                    changed = True
             if changed:
                 save(data)
         ran = []
@@ -512,6 +524,31 @@ class Scheduler:
             self._run(job, late)
             ran.append(job["id"])
         return ran
+
+    def _check(self, job: dict, now: float, cfg: dict):
+        """One entry at a tick: None (nothing now), "changed" (skipped as too late), or (job, late) to run."""
+        if not job.get("enabled") or not job.get("next"):
+            return None
+        if (not job.get("action") and 0 < job["next"] - now <= float(cfg["warmup_s"])
+                and self.warmed.get(job["id"]) != job["next"]):
+            self.warmed[job["id"]] = job["next"]
+            threading.Thread(target=self._warm, daemon=True).start()
+        if job["next"] > now:
+            return None
+        scheduled = last_due(job["spec"], job["next"], now)
+        late = now - scheduled
+        job["next"] = next_run(job["spec"], now)        # repeating: one catch-up run, not every missed one
+        if job["next"] is None:
+            job["enabled"] = False
+        if late > float(cfg["max_late_h"]) * 3600:
+            job["last"] = {"at": now, "status": "skipped", "text": f"{late / 3600:.1f} h late"}
+            self.post(f"Skipped job #{job['id']}", f"{summary(job)}\nIt was due {fmt(scheduled)} and is "
+                      f"{late / 3600:.1f} h late (the limit is {cfg['max_late_h']} h).", "warn")
+            self.notify(f"D.L. AI: job #{job['id']} skipped",
+                        f"The scheduled job #{job['id']} was due {fmt(scheduled)} but the PC or the daemon "
+                        f"was off; it is {late / 3600:.1f} h late, so it was skipped.\n\n{job.get('prompt')}")
+            return "changed"
+        return (dict(job), late)
 
     def _warm(self) -> None:
         try:
