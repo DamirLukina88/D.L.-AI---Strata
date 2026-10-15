@@ -149,6 +149,13 @@ class Store(Temp):
             self.assertTrue(S.call("add", {"when": "in 1h", "action": {"tool": "proton__send_mail", "args": {
                 "to": "a@example.com", "subject": "s", "html": "<b>x</b>"}}}).startswith("Scheduled"))
 
+    def test_a_job_cannot_schedule_or_remove_jobs(self):
+        S.add("in 2h keep me", now=NOW)
+        with mock.patch.object(S, "_context", lambda: {"job": 7, "yolo": True}):
+            self.assertIn("cannot schedule jobs", S.call("add", {"when": "in 1h", "prompt": "again"}))
+            self.assertIn("cannot remove jobs", S.call("remove", {"id": 1}))
+        self.assertEqual(len(S.load()["jobs"]), 1)
+
     def test_store_is_private(self):
         S.add("in 2h ping", now=NOW)
         self.assertEqual(S.STORE.stat().st_mode & 0o777, 0o600)
@@ -316,6 +323,23 @@ class Approval(unittest.TestCase):
         self.assertIn("The report is attached.", summary)
         self.assertIn("ADDRESS NOT FROM YOU: boss@example.com", reason)
         self.assertIn("approved now", reason)
+
+    def test_card_shows_an_html_file_email(self):
+        ws = Path(self.tmp.name)
+        (ws / "mail.html").write_text("<html><head><title>T</title></head><body><p>Vremenska prognoza</p>"
+                                      "<table><tr><td>14:00</td><td>17</td></tr></table></body></html>")
+        args = {"when": "tomorrow 09:00", "action": {"tool": "proton__send_mail", "args": {
+            "to": "a@example.com", "html_file": "mail.html"}}}
+        with mock.patch.object(dl_mcp, "call_context", lambda: {"workspace": ws}):
+            summary, reason, _ = self.reg.approval("schedule__add", args, ["send to a@example.com"])
+        self.assertIn("Vremenska prognoza", summary)
+        self.assertIn("14:00 | 17", summary)
+        self.assertNotIn("ADDRESS NOT FROM YOU", reason)
+
+    def test_recipient_must_match_a_whole_address(self):
+        args = {"when": "in 1h", "action": {"tool": "proton__send_mail", "args": {"to": "a@example.com", "body": "x"}}}
+        _, reason, _ = self.reg.approval("schedule__add", args, ["send it to ba@example.com"])
+        self.assertIn("ADDRESS NOT FROM YOU: a@example.com", reason)
 
     def test_prompt_job_asks_unless_yolo(self):
         ask = self.reg.approval("schedule__add", {"when": "daily 08:00", "prompt": "summarise mail"})

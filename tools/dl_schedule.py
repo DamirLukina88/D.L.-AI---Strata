@@ -413,6 +413,8 @@ def call(tool: str, args: dict) -> str:
             if action and str(action["tool"]).startswith("schedule__"):
                 return "Error: a job cannot schedule jobs"
             ctx = _context()
+            if ctx.get("job"):                         # else a YOLO job could keep scheduling new ones by itself
+                return f"Error: scheduled job #{ctx['job']} cannot schedule jobs; tell the user instead"
             if action:
                 bad = check_action(action, ctx.get("registry"))
                 if bad:
@@ -424,6 +426,8 @@ def call(tool: str, args: dict) -> str:
         if tool == "list":
             return list_text()
         if tool == "remove":
+            if _context().get("job"):
+                return "Error: a scheduled job cannot remove jobs"
             job = remove(int(a.get("id") or 0))
             return f"Removed #{job['id']}." if job else f"Error: no job #{a.get('id')}"
     except WhenError as e:

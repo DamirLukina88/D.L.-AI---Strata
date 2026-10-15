@@ -235,7 +235,7 @@ class Session:
     def _agent(self, prompt: str) -> None:
         # what built-ins (schedule, deepl, proton) need to know about this turn; the user asked "now"
         dl_mcp.CALL.ctx = {"workspace": self.workspace, "yolo": self.yolo, "request_time": time.time(),
-                           "registry": self.mcp}
+                           "registry": self.mcp, "job": getattr(self, "job_id", None)}
         self.messages.append({"role": "user",
                               "content": cli.with_now(cli.resolve_file_references(prompt, self.workspace))})
         ctx = {"workspace": self.workspace, "messages": self.messages, "mode": self.mode, "yolo": self.yolo,
@@ -594,6 +594,7 @@ class JobRunner:
             return main.approve(kind, f"[scheduled job #{job['id']}] {summary}", reason, cancel=s.cancel)
 
         s.emit, s.approve = emit, approve
+        s.job_id = job["id"]                           # a job cannot schedule jobs (dl_schedule refuses it)
         s.yolo = bool(job.get("yolo"))                 # scheduled while YOLO was on: runs without asking too
         late = float(job.get("late_s") or 0)
         late_note = (f" It was planned for {dl_schedule.fmt(job['planned_at'])} and runs {late / 60:.0f} min late: "

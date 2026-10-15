@@ -385,6 +385,19 @@ class Credentials(unittest.TestCase):
         for mod, env, gdir in self.saved:
             mod.SECRETS_ENV, mod.GOOGLE_TOKEN_DIR = env, gdir
 
+    def test_browser_profiles_and_bridge_vault_are_private(self):
+        for d in (".config/protonmail/bridge-v3/vault.enc", ".mozilla/firefox/x/cookies.sqlite",
+                  ".local/state/dl-ai/sessions/dl-ai-code.json"):
+            f = Path.home() / d
+            self.assertTrue(any(f.is_relative_to(p) for p in dl_mcp.PRIVATE_DIRS), d)
+
+    def test_a_server_turned_off_mid_call_is_an_error_not_a_crash(self):
+        self.r.route("pošalji mail")
+        name = next(n for n in self.r.routes if n.startswith("google__"))
+        with self.r.lock:
+            self.r.enabled.pop("google")                         # the idle timer got there first
+        self.assertIn("just turned off", self.r.call(name, {"text": "x"}))
+
     def test_a_user_name_or_address_is_not_a_credential(self):
         # PROTON_BRIDGE_USER=info@... in secrets.env blocked every email to the user (live run, 2026-10-15)
         self.r.route("pošalji mail")

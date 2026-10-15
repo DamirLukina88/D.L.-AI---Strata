@@ -15,8 +15,8 @@ the servers in ~/.config/dl-ai/mcp.json (DL_MCP_CONFIG overrides the path) are n
 The MCP client is serve/mcp.py's McpServer (stdio and Streamable HTTP, restart after a crash).  A server gets only
 PATH, HOME and a few more of our variables (`env_inherit`) plus the keys it names in `env_from_secrets`, never the
 whole secrets file.  `surfaces` limits where a server may run ("code": the shared session daemon, the web Code tab
-and `dl_cli.py --attach`; "terminal": the stand-alone REPL).  Tools in `ask` need the user's approval (YOLO skips it);
-tools in `ask_always` need it every time, YOLO or not (sending email).
+and `dl_cli.py --attach`; "terminal": the stand-alone REPL).  Outside YOLO, tools in `ask` need the user's approval
+and `ask_always` tools (sending email, sharing) show the whole message on the card; a YOLO session asks nothing.
 
 No catalogue file: no `mcp` tool, and D.L. CLI offers exactly the tools it did before.
 """
@@ -125,6 +125,29 @@ def _profile_email() -> str:
         return ""
 
 
+def _email_text(args: dict) -> str:
+    """The readable text of an HTML email in a tool call (`html`, or a workspace `html_file`), for the approval card."""
+    html = args.get("html") if isinstance(args.get("html"), str) else ""
+    if not html and isinstance(args.get("html_file"), str):
+        try:
+            ws = Path(call_context().get("workspace") or os.getcwd())
+            f = Path(os.path.expanduser(args["html_file"]))
+            f = (f if f.is_absolute() else ws / f).resolve()
+            html = f.read_text(encoding="utf-8", errors="replace")[:200_000] if f.is_file() else ""
+        except OSError:
+            html = ""
+    if not html:
+        return ""
+    try:
+        from tools.dl_proton import html_to_text
+    except ImportError:
+        try:
+            from dl_proton import html_to_text
+        except ImportError:
+            return re.sub(r"<[^>]+>", " ", html)
+    return html_to_text(html)
+
+
 def call_context() -> dict:
     return getattr(CALL, "ctx", None) or {}
 
@@ -194,8 +217,11 @@ def _strings(value):
 
 # A local file a tool reads and sends on (a mail attachment's "path", a Drive upload's file_path / file:// URL)
 FILE_KEY = re.compile(r"^(path|file|file_?path|file_?url|fileUrl|url|source|local_?path|\w+_file)$", re.I)
-PRIVATE_DIRS = [Path.home() / ".config" / "dl-ai", Path.home() / ".ssh", Path.home() / ".gnupg",
-                Path.home() / ".aws", Path.home() / ".kube", Path.home() / ".docker"]
+PRIVATE_DIRS = [Path.home() / d for d in (
+    ".config/dl-ai", ".ssh", ".gnupg", ".aws", ".kube", ".docker",
+    ".config/protonmail", ".local/state/dl-ai",                       # Bridge's vault and keys; session histories
+    ".local/share/keyrings", ".password-store",                       # the desktop keyring, pass
+    ".mozilla", ".config/google-chrome", ".config/chromium", ".config/BraveSoftware")]   # browser cookies
 MAX_SCAN_BYTES = 20 * 1024 * 1024
 
 
@@ -520,9 +546,10 @@ class McpRegistry:
         if bad:
             return bad
         with self.lock:
-            self.enabled[name]["turn"] = self.turn
-            self.enabled[name]["used"] = time.monotonic()
-            srv = self.servers[name]
+            on, srv = self.enabled.get(name), self.servers.get(name)
+            if on is None or srv is None:                    # turned off (idle, tool limit) since it was routed
+                return f"error: {name} was just turned off; call the tool again"
+            on["turn"], on["used"] = self.turn, time.monotonic()
         try:
             args = {**(args if isinstance(args, dict) else {}), **self.catalog[name].fixed_args}
             res = srv.call(tool, args, float(self.settings["timeout_s"]), cancel)
@@ -588,11 +615,12 @@ class McpRegistry:
                     rcpt += [a for s in _strings(v) for a in EMAIL.findall(s)]
                 elif BODY_KEY.match(str(k)) and not body:
                     body = " ".join(_strings(v))
+            body = body or _email_text(args)                 # an HTML email (html / html_file): its text, in full
             said = " ".join(user_texts).lower() + " " + _profile_email()      # "send me": the user's own address
-            foreign = [a for a in rcpt if a.lower() not in said]
+            foreign = [a for a in rcpt if not re.search(rf"(?<![\w.%+-]){re.escape(a.lower())}(?![\w.-])", said)]
             lines = [f"{name}: {tool}"]
             for k, v in (args or {}).items():
-                if not BODY_KEY.match(str(k)):
+                if not BODY_KEY.match(str(k)) and k != "html":
                     lines.append(f"  {k}: {' '.join(_strings(v)) if not isinstance(v, (int, float)) else v}"[:300])
             if body:
                 lines.append("  body:\n    " + body[:1500].replace("\n", "\n    ") + (" …" if len(body) > 1500 else ""))

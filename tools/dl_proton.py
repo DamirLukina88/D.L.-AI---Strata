@@ -208,11 +208,16 @@ def _select(m, folder: str | None, readonly: bool = True) -> None:
         raise ProtonError(f"no folder {folder!r} (list_folders shows the names)")
 
 
+_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
 def _date(s: str) -> str:
+    """YYYY-MM-DD -> IMAP's 16-Oct-2026 (English month names whatever the locale)."""
     try:
-        return time.strftime("%d-%b-%Y", time.strptime(s.strip(), "%Y-%m-%d"))
+        t = time.strptime(s.strip(), "%Y-%m-%d")
     except ValueError:
         raise ProtonError(f"dates are YYYY-MM-DD, not {s!r}") from None
+    return f"{t.tm_mday:02d}-{_MONTHS[t.tm_mon - 1]}-{t.tm_year}"
 
 
 def _quote(s: str) -> str:
@@ -410,7 +415,7 @@ def compose(s: dict, a: dict, original=None) -> EmailMessage:
         if mid:
             msg["In-Reply-To"] = mid
             msg["References"] = (_header(original, "References") + " " + mid).strip()
-    msg["Subject"] = subject
+    msg["Subject"] = " ".join(subject.split())              # one line: a <title> may wrap
     msg["Date"] = email.utils.formatdate(localtime=True)
     msg["Message-ID"] = email.utils.make_msgid(domain=sender.rpartition("@")[2] or None)
     body = str(a.get("body") or "").rstrip() or (html_to_text(html) if html else "")

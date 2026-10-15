@@ -235,6 +235,16 @@ class Writing(Base):
         self.assertTrue(out.startswith("Sent"), out)
         self.assertEqual(FakeSmtp.sent[0][0]["Subject"], "Vremenska prognoza")
 
+    def test_wrapped_title_is_one_subject_line(self):
+        out = dl_proton.call("send_mail", {"to": "a@example.com",
+                                           "html": "<html><head><title>Vremenska\n  prognoza</title></head><body>x</body></html>"})
+        self.assertTrue(out.startswith("Sent"), out)
+        self.assertEqual(FakeSmtp.sent[0][0]["Subject"], "Vremenska prognoza")
+
+    def test_imap_dates_are_english_whatever_the_locale(self):
+        self.assertEqual(dl_proton._date("2026-10-16"), "16-Oct-2026")
+        self.assertEqual(dl_proton._date("2026-03-05"), "05-Mar-2026")
+
     def test_no_recipient(self):
         self.assertTrue(dl_proton.call("send_mail", {"to": "", "subject": "x", "body": "y"}).startswith("Error"))
 
