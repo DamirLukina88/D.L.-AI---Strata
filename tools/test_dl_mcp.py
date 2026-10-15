@@ -266,28 +266,37 @@ class CliHooks(unittest.TestCase):
         self.assertTrue(self.cli.dispatch_dl_tool("mcp", {}, ws, session_context={"mcp": empty})
                         .startswith("Error: Unknown tool mcp."))      # followed by the tools it does have
 
-    def test_dispatch_routes_and_send_asks_even_in_yolo(self):
+    def test_dispatch_routes_and_yolo_never_asks(self):
         ws = Path(tempfile.mkdtemp())
         r = registry()
         asked = []
-        ctx = {"mcp": r, "yolo": True, "approve": lambda kind, summary, reason: asked.append(kind) or False}
+        ctx = {"mcp": r, "yolo": False, "approve": lambda kind, summary, reason: asked.append(kind) or False}
         try:
             r.route("pošalji mail na me@example.com")
             names = [t["function"]["name"] for t in self.cli.get_active_tools(ws, "act", registry=r)]
             self.assertIn("mcp", names)
             self.assertIn("google__echo", names)
-            out = self.cli.dispatch_dl_tool("google__echo", {"to": "me@example.com", "body": "hi"}, ws,
-                                            session_context=ctx)
-            self.assertEqual(asked, ["mcp-always"])
+            out = self.cli.dispatch_dl_tool("google__echo", {"text": "hi to me@example.com"}, ws, session_context=ctx)
+            self.assertEqual(asked, ["mcp-always"])            # sending asks outside YOLO
             self.assertTrue(out.startswith("Denied by user"))
             r.enable("browser")
-            self.assertEqual(self.cli.dispatch_dl_tool("browser__add", {"a": 2, "b": 3}, ws, session_context=ctx), "5")
-            self.assertEqual(asked, ["mcp-always"])        # YOLO skips the browser's ask
-            ctx["yolo"] = False
             self.assertTrue(self.cli.dispatch_dl_tool("browser__add", {"a": 2, "b": 3}, ws,
                                                       session_context=ctx).startswith("Denied"))
             self.assertEqual(asked, ["mcp-always", "tool"])
+            ctx["yolo"] = True                                  # YOLO: fully autonomous, sending included
+            self.assertEqual(self.cli.dispatch_dl_tool("google__echo", {"text": "hi"}, ws, session_context=ctx), "hi")
+            self.assertEqual(self.cli.dispatch_dl_tool("browser__add", {"a": 2, "b": 3}, ws, session_context=ctx), "5")
+            self.assertEqual(asked, ["mcp-always", "tool"])
             self.assertIn("deepl", self.cli.dispatch_dl_tool("mcp", {"action": "list"}, ws, session_context=ctx))
+            # a parameter the tool does not have is refused, not silently dropped
+            out = self.cli.dispatch_dl_tool("google__echo", {"text": "x", "html_body": "<b>x</b>"}, ws,
+                                            session_context=ctx)
+            self.assertIn("no parameter 'html_body'", out)
+            self.assertIn("Its parameters: text", out)
+            # several servers in one call
+            r.disable("browser")
+            self.assertEqual(r.handle_meta({"action": "enable", "server": "browser, deepl"}).count("\n"), 1)
+            self.assertIn("deepl", r.enabled)
         finally:
             r.close()
 
@@ -400,7 +409,7 @@ class Credentials(unittest.TestCase):
                 if "attachments" in args and not Path(args["attachments"][0]["path"]).is_file():
                     continue                                  # no ~/.config/dl-ai on this machine
                 self.assertTrue(self.r.call("google__echo", args).startswith("error: BLOCKED"))
-        self.assertFalse(self.r.call("google__echo", {"attachments": [{"path": str(clean)}]}).startswith("error"))
+        self.assertNotIn("BLOCKED", self.r.call("google__echo", {"attachments": [{"path": str(clean)}]}))
 
     def test_blocked_before_the_approval_card(self):
         ws = Path(tempfile.mkdtemp())

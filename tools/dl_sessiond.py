@@ -34,6 +34,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dl_cli as cli  # noqa: E402
 import dl_mcp  # noqa: E402
+import dl_schedule  # noqa: E402
 from dl_auditing import format_health_card, get_system_health  # noqa: E402
 
 RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "dl-ai"
@@ -120,6 +121,7 @@ class Session:
     def save(self) -> None:
         with self.lock, _save_lock:
             data = {"name": self.name, "workspace": str(self.workspace), "mode": self.mode, "effort": self.effort,
+                    "yolo": self.yolo,
                     "messages": self.messages, "events": self.events[-REPLAY_MAX:], "seq": self.seq}
             STATE_DIR.mkdir(parents=True, exist_ok=True)
             tmp = self.path().with_suffix(".tmp")
@@ -138,6 +140,7 @@ class Session:
         s = cls(name, ws if ws.is_dir() else default_ws)
         s.mode = data.get("mode", "act")
         s.effort = data.get("effort") if data.get("effort") in EFFORTS else None
+        s.yolo = data.get("yolo") is True             # YOLO stays on until it is turned off, also after restarts
         s.messages = data.get("messages") or s.messages
         s.messages[0] = {"role": "system", "content": cli.build_dl_system_prompt(s.workspace, s.mode)}
         s.events = data.get("events") or []
@@ -228,7 +231,11 @@ class Session:
         self.messages.append({"role": "assistant", "content": plain(out)})
 
     def _agent(self, prompt: str) -> None:
-        self.messages.append({"role": "user", "content": cli.resolve_file_references(prompt, self.workspace)})
+        # what built-ins (schedule, deepl, proton) need to know about this turn; the user asked "now"
+        dl_mcp.CALL.ctx = {"workspace": self.workspace, "yolo": self.yolo, "request_time": time.time(),
+                           "registry": self.mcp}
+        self.messages.append({"role": "user",
+                              "content": cli.with_now(cli.resolve_file_references(prompt, self.workspace))})
         ctx = {"workspace": self.workspace, "messages": self.messages, "mode": self.mode, "yolo": self.yolo,
                "effort": self.effort,
                "emit": self.emit, "cancel": self.cancel, "approve": self.approve, "mcp": self.mcp, "user_text": prompt}
@@ -289,8 +296,10 @@ class Session:
             return None
         if cmd == "/yolo":
             self.yolo = not self.yolo
-            self.notice("YOLO on: destructive actions run without asking." if self.yolo
-                        else "Approvals back on for destructive actions.", "warn" if self.yolo else "info")
+            self.notice("YOLO on: nothing asks any more, sending email included, until you turn it off "
+                        "(also after restarts; jobs scheduled now run without asking too)." if self.yolo
+                        else "Approvals back on.", "warn" if self.yolo else "info")
+            self.emit_state()
             return None
         if cmd in ("/clear", "/reset"):
             self.messages = [{"role": "system", "content": cli.build_dl_system_prompt(self.workspace, self.mode)}]
@@ -303,6 +312,9 @@ class Session:
             return None
         if cmd == "/mcp":
             self.output("/mcp", self.mcp.command(arg))
+            return None
+        if cmd == "/schedule":
+            self.output("/schedule", schedule_command(arg, self.workspace, self.yolo))
             return None
         if cmd == "/think":
             self.notice("/think is gone: the CLI follows the web app's Chat settings "
@@ -386,22 +398,225 @@ class Session:
                 cli.format_messages_to_markdown(self.messages, workspace=self.workspace))
 
 
-HELP = """/plan [task]      Plan Mode: read-only research, ends with "Execute this plan?"
+HELP = """Modes
+/plan [task]      Plan Mode: read-only research, ends with "Execute this plan?"
 /act [task]       Act Mode (executes the agreed plan when given no task); also /execute
-/yolo             Toggle approvals for destructive actions
+/yolo             Fully autonomous: nothing asks (sending email included) until you turn it off again
+/effort [level]   This session's thinking level: none, low, medium, high, or default (the Chat settings)
+
+Tools and jobs
 /mcp [on|off N]   On-demand tools: web search (Exa), library docs (Context7), Fetch, DeepL, browser,
-                  Gmail, Drive, Docs (list, turn on/off; they also start when a request needs them)
+                  Proton Mail, Gmail, Drive, Docs, schedule (list, turn on/off; they also start when needed)
+/schedule ...     Scheduled jobs: /schedule [--email] <when> <task>; /schedule list; /schedule off|on|run|rm N
+                  when: 2026-10-16 09:00, tomorrow 07:00, fri 09:00, in 2h, daily 08:00, mon-fri 07:30, every 2h
+
+Workspace
 /cd <path>        Change the working directory (the wiki follows it)
-/status /health   Engine status (also /model), hardware health (also /sys)
-/exa <q>          Web search (also /search)     /context7 <lib>  Library docs (also /docs)
 /diff             Git diff audit (also /audit)   /secrets [path]  Secret scan (also /scan)
 /test [files]     Targeted tests                 /wiki [search|lint|digest]  Local Wiki
-/save [file]      Save the chat as Markdown in the workspace (also /export)
-/effort [level]   This session's thinking level: none, low, medium, high, or default (the Chat settings)
+!<command>        Run a shell command in the workspace
+
+Session
+/status /health   Engine status (also /model), hardware health (also /sys)
 /continue         Go on after the agent stopped at its tool-round limit (DL_MAX_TURNS)
+/save [file]      Save the chat as Markdown in the workspace (also /export)
 /clear            Reset the conversation (also /reset)
 /help             This list
-!<command>        Run a shell command in the workspace"""
+
+Direct lookups, without the model: /exa <query> (also /search), /context7 <library> (also /docs)"""
+
+
+def schedule_command(arg: str, workspace: Path, yolo: bool = False) -> str:
+    """/schedule: the user typed it, so adding a prompt job needs no approval card."""
+    sub, _, rest = arg.strip().partition(" ")
+    rest = rest.strip()
+    if sub in ("", "list", "ls"):
+        return dl_schedule.list_text()
+    if sub in ("off", "on", "run", "rm", "remove", "delete") and rest.lstrip("#").isdigit():
+        n = int(rest.lstrip("#"))
+        if sub in ("rm", "remove", "delete"):
+            return f"Removed #{n}." if dl_schedule.remove(n) else f"No job #{n}."
+        if sub == "run":
+            with dl_schedule._lock:
+                data = dl_schedule.load()
+                job = next((j for j in data["jobs"] if j["id"] == n), None)
+                if not job:
+                    return f"No job #{n}."
+                job.update(enabled=True, next=time.time())
+                if job["spec"]["kind"] == "once":
+                    job["spec"]["at"] = time.time()
+                dl_schedule.save(data)
+            return f"#{n} runs within {dl_schedule.settings()['tick_s']} s."
+        job = dl_schedule.set_enabled(n, sub == "on")
+        return dl_schedule.summary(job) if job else f"No job #{n}."
+    email = "--email" in arg.split()
+    text = " ".join(w for w in arg.split() if w != "--email")
+    try:
+        job = dl_schedule.add(text, workspace=str(workspace), email_result=email, yolo=yolo)
+    except dl_schedule.WhenError as e:
+        return f"{e}\nUsage: /schedule [--email] <when> <task> · /schedule list · /schedule off|on|run|rm N"
+    return f"Scheduled {dl_schedule.summary(job)}"
+
+
+def add_late_note(args: dict, planned: float, sent: float) -> dict:
+    """A line at the top of a scheduled email that went out late, in the email's own language (DeepL detects it
+    and translates the English note; English when DeepL is not reachable)."""
+    out = dict(args)
+    if out.get("html_file") and not out.get("html"):
+        try:
+            import dl_proton
+            out["html"] = dl_proton._html_of(out)       # the note goes into the HTML itself
+            out.pop("html_file")
+        except Exception:  # noqa: BLE001 - send_mail reports a missing file itself
+            pass
+    minutes = round((sent - planned) / 60)
+    note = (f"Planned for {dl_schedule.hm(planned)}, sent at {dl_schedule.hm(sent)} "
+            f"({minutes} min later than planned).")
+    sample = (str(out.get("body") or "") or re.sub(r"<[^>]+>", " ", str(out.get("html") or ""))
+              or str(out.get("subject") or ""))
+    try:
+        import dl_translate
+        lang = dl_translate.detect(sample)
+        if lang and not lang.upper().startswith("EN"):
+            note = dl_translate.translate(note, lang)[0] or note
+    except Exception:  # noqa: BLE001 - the note stays English
+        pass
+    if out.get("body"):
+        out["body"] = f"{note}\n\n{out['body']}"
+    if out.get("html"):
+        out["html"] = f"<p><i>{note}</i></p>\n{out['html']}"
+    if not out.get("body") and not out.get("html"):
+        out["body"] = note
+    return out
+
+
+# tools a job may use without "acting": a job that only read is run again after the server dropped it
+READ_ONLY_TOOLS = {"view_file", "exa_web_search", "resolve_library_id", "get_library_docs", "syntax_guard", "mcp",
+                   "switch_workspace"}
+
+
+class JobRunner:
+    """What dl_schedule.Scheduler needs from the daemon: run a job, check and warm the server, report."""
+
+    def __init__(self, registry: "Registry"):
+        self.registry = registry
+
+    def main(self) -> Session:
+        return self.registry.get(DEFAULT_SESSION)
+
+    def post(self, title: str, text: str, level: str = "info") -> None:
+        main = self.main()
+        main.output(f"⏰ {title}", text)
+        if level == "warn":
+            main.notice(f"⏰ {title}", "warn")
+        try:
+            main.save()
+        except OSError:
+            pass
+
+    def notify(self, subject: str, body: str) -> None:
+        to = str(dl_schedule.settings().get("notify_email") or "")
+        if not to:
+            return
+        try:
+            import dl_proton
+            proton = dl_mcp.load_catalog()[0].get("proton")
+            sender = (proton.fixed_args.get("from_address") if proton else "") or ""
+            out = dl_proton.call("send_mail", {"to": to, "subject": subject, "body": body, "from_address": sender})
+        except Exception as e:  # noqa: BLE001
+            out = f"Error: {e}"
+        if out.startswith("Error"):
+            self.main().notice(f"⏰ could not email the notice: {out}", "warn")
+
+    def health(self) -> bool:
+        try:
+            with cli.urllib.request.urlopen(f"{cli.DEFAULT_URL}/health", timeout=10) as r:
+                return json.loads(r.read() or b"{}").get("status") == "ok"
+        except Exception:  # noqa: BLE001
+            return False
+
+    def warm(self) -> None:
+        req = cli.urllib.request.Request(f"{cli.DEFAULT_URL}/v1/load", data=b"{}", method="POST",
+                                         headers={"Content-Type": "application/json",
+                                                  "Authorization": f"Bearer {cli.DEFAULT_API_KEY}"})
+        try:
+            cli.urllib.request.urlopen(req, timeout=600).read()
+        except Exception:  # noqa: BLE001 - busy means it is loaded; a failure shows when the job runs
+            pass
+
+    def run_action(self, job: dict) -> dict:
+        """The exact action the user approved when scheduling it: no model, no second card."""
+        tool, args = str(job["action"].get("tool")), dict(job["action"].get("args") or {})
+        main = self.main()
+        ws = Path(job.get("workspace") or main.workspace)
+        ws = ws if ws.is_dir() else main.workspace
+        reg = dl_mcp.McpRegistry(surface="code")
+        dl_mcp.CALL.ctx = {"workspace": ws, "yolo": True, "request_time": time.time(), "registry": reg}
+        if tool.endswith("send_mail") and float(job.get("late_s") or 0) > 120:
+            args = add_late_note(args, float(job["planned_at"]), time.time())
+        try:
+            if "__" in tool:
+                server = tool.split("__", 1)[0]
+                out = reg.enable(server, f"scheduled job #{job['id']}")
+                if out.startswith("error"):
+                    return {"ok": False, "text": out}
+            out = cli.dispatch_dl_tool(tool, args, ws, mode="act",
+                                       session_context={"yolo": True, "approve": lambda *a: True, "mcp": reg})
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "text": f"{type(e).__name__}: {e}"}
+        finally:
+            reg.close()
+        return {"ok": not str(out).lower().startswith(("error", "denied")), "text": str(out)}
+
+    def run_prompt(self, job: dict) -> dict:
+        """The agent in a session of its own; what it decides by itself asks on the Code tab's card."""
+        main = self.main()
+        ws = Path(job.get("workspace") or main.workspace)
+        s = Session("dl-ai-schedule", ws if ws.is_dir() else main.workspace)
+        calls: list[str] = []
+        asked = []
+        own_emit = s.emit
+
+        def emit(ev: dict) -> None:
+            if ev.get("type") == "tool_call":
+                calls.append(str(ev.get("name")))
+            own_emit(ev)
+
+        def approve(kind: str, summary: str, reason: str) -> bool:
+            if not asked:
+                asked.append(1)
+                self.notify(f"D.L. AI: job #{job['id']} waits for your approval",
+                            f"The scheduled job #{job['id']} wants to:\n\n{summary}\n\n({reason})\n\n"
+                            "Answer it on the Code tab; it counts as a no after 30 minutes.")
+            return main.approve(kind, f"[scheduled job #{job['id']}] {summary}", reason)
+
+        s.emit, s.approve = emit, approve
+        s.yolo = bool(job.get("yolo"))                 # scheduled while YOLO was on: runs without asking too
+        late = float(job.get("late_s") or 0)
+        late_note = (f" It was planned for {dl_schedule.fmt(job['planned_at'])} and runs {late / 60:.0f} min late: "
+                     "say so in any email you send." if late > 120 else "")
+        prompt = (f"[Scheduled job #{job['id']} ({dl_schedule.describe(job['spec'])}).{late_note} Nobody is "
+                  f"watching: do the task and end with the answer.]\n\n{job['prompt']}")
+
+        def acted() -> bool:
+            for name in calls:
+                if name in READ_ONLY_TOOLS:
+                    continue
+                route = s.mcp.routes.get(name)
+                if route and s.mcp._allowed_in("plan", *route):
+                    continue
+                return True
+            return False
+        try:
+            s._agent(prompt)
+            last = next((m for m in reversed(s.messages) if m.get("role") == "assistant" and m.get("content")), {})
+            return {"ok": True, "text": plain(last.get("content") or ""), "acted": acted(), "server_error": False}
+        except Exception as e:  # noqa: BLE001
+            msg = str(e)
+            return {"ok": False, "text": msg, "acted": acted(),
+                    "server_error": msg.startswith(("Strata API HTTP 5", "Connection failed to Strata"))}
+        finally:
+            s.mcp.close()
 
 
 class Registry:
@@ -519,11 +734,16 @@ def main() -> int:
     srv = Server(str(sock), Handler)
     os.umask(old)
     print(f"[dl-sessiond] listening on {sock} (workspace {Handler.registry.default_ws})", flush=True)
+    runner = JobRunner(Handler.registry)
+    sched = dl_schedule.Scheduler(runner.run_prompt, runner.run_action, runner.health, runner.warm, runner.post,
+                                  runner.notify)
+    sched.start()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        sched.stop.set()
         for s in Handler.registry.sessions.values():
             try:
                 s.save()

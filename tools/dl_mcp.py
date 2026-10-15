@@ -73,6 +73,8 @@ class Entry:
         # arguments set here, hidden from the model and added to every call (e.g. the Google account)
         self.fixed_args = {str(k): v for k, v in (raw.get("fixed_args") or {}).items()}
         self.triggers = [re.compile(t, re.I) for t in raw.get("triggers") or []]
+        # the router skips this entry when one of these matches (e.g. Proton's mail words, but the user named Gmail)
+        self.unless = [re.compile(t, re.I) for t in raw.get("unless") or []]
         self.missing = [k for k in raw.get("env_from_secrets") or [] if not os.environ.get(k)]
         # D.L. CLI's own tools this entry takes over: they leave the always-on list while the catalogue has it
         self.replaces = [str(x) for x in raw.get("replaces") or []]
@@ -109,6 +111,22 @@ _twin = sys.modules.get("tools.dl_mcp" if __name__ == "dl_mcp" else "dl_mcp")
 BUILTINS: dict[str, tuple[list[dict], object]] = getattr(_twin, "BUILTINS", None)
 if BUILTINS is None:
     BUILTINS = {}
+
+
+# what the running turn is for (workspace, yolo, when the user asked, the registry); the session daemon sets it per
+# turn, built-ins read it.  Per thread: each turn runs in its own thread, and built-ins run in the caller's thread
+CALL = getattr(_twin, "CALL", None) or threading.local()
+
+
+def _profile_email() -> str:
+    try:
+        return str(json.loads((Path.home() / ".config" / "dl-ai" / "profile.json").read_text()).get("email") or "").lower()
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
+def call_context() -> dict:
+    return getattr(CALL, "ctx", None) or {}
 
 
 def register_builtin(name: str, tools: list[dict], handler) -> None:
@@ -175,7 +193,7 @@ def _strings(value):
 
 
 # A local file a tool reads and sends on (a mail attachment's "path", a Drive upload's file_path / file:// URL)
-FILE_KEY = re.compile(r"^(path|file_?path|file_?url|fileUrl|url|source|local_?path)$", re.I)
+FILE_KEY = re.compile(r"^(path|file|file_?path|file_?url|fileUrl|url|source|local_?path|\w+_file)$", re.I)
 PRIVATE_DIRS = [Path.home() / ".config" / "dl-ai", Path.home() / ".ssh", Path.home() / ".gnupg",
                 Path.home() / ".aws", Path.home() / ".kube", Path.home() / ".docker"]
 MAX_SCAN_BYTES = 20 * 1024 * 1024
@@ -350,6 +368,8 @@ class McpRegistry:
         for name, entry in self.catalog.items():
             if name in self.enabled or entry.unavailable(self.surface):
                 continue
+            if any(rx.search(text or "") for rx in entry.unless):
+                continue
             for rx in entry.triggers:
                 m = rx.search(text or "")
                 if m:
@@ -399,7 +419,7 @@ class McpRegistry:
                            + "\n".join(lines),
             "parameters": {"type": "object", "properties": {
                 "action": {"type": "string", "enum": ["list", "enable", "disable"]},
-                "server": {"type": "string", "description": "Server name, for enable and disable."}},
+                "server": {"type": "string", "description": "Server name, or several comma-separated (\"drive,proton\")."}},
                 "required": ["action"]}}}
 
     def _allowed_in(self, mode: str, name: str, tool: str) -> bool:
@@ -431,11 +451,13 @@ class McpRegistry:
 
     def handle_meta(self, args: dict) -> str:
         action = str(args.get("action") or "list")
-        server = str(args.get("server") or "")
-        if action == "enable":
-            return self.enable(server, "asked by the model")
-        if action == "disable":
-            return self.disable(server, "asked by the model")
+        raw = args.get("server") or ""
+        names = [n.strip() for n in (raw if isinstance(raw, list) else str(raw).split(",")) if n and n.strip()]
+        if action in ("enable", "disable"):
+            if not names:
+                return f"error: say which server: mcp(action=\"{action}\", server=\"name\" or \"a,b\")"
+            fn = self.enable if action == "enable" else self.disable
+            return "\n".join(fn(n, "asked by the model") for n in names)
         return "\n".join(f"{s['name']}: {'ON' if s['on'] else 'off'} - {s['description']}"
                          + (f" [{s['unavailable']}]" if s["unavailable"] else "") for s in self.status())
 
@@ -494,6 +516,9 @@ class McpRegistry:
             return blocked
         if not self._allowed_in(mode, name, tool):
             return f"error: [PLAN MODE] {model_name} can change things and is disabled in Plan Mode"
+        bad = self.unknown_args(model_name, args)
+        if bad:
+            return bad
         with self.lock:
             self.enabled[name]["turn"] = self.turn
             self.enabled[name]["used"] = time.monotonic()
@@ -518,6 +543,28 @@ class McpRegistry:
                 self.enabled[name]["used"] = time.monotonic()
         return text
 
+    def schema(self, model_name: str) -> dict | None:
+        """The tool's input schema as the server listed it, or None while its server is off."""
+        name, tool = self.routes.get(model_name, (None, None))
+        srv = self.servers.get(name) if name else None
+        t = next((x for x in (srv.tools if srv else []) if x["name"] == tool), None)
+        return t.get("inputSchema") if t and isinstance(t.get("inputSchema"), dict) else None
+
+    def unknown_args(self, model_name: str, args) -> str | None:
+        """An error for parameters the tool does not have: a server would ignore them silently (an `html_body` that
+        never reached the email), so the model learns the right names instead."""
+        schema = self.schema(model_name) or {}
+        props = schema.get("properties") or {}
+        if not props or not isinstance(args, dict):
+            return None
+        name = self.routes[model_name][0]
+        extra = [k for k in args if k not in props and k not in self.catalog[name].fixed_args]
+        if not extra:
+            return None
+        allowed = ", ".join(k for k in props if k not in self.catalog[name].fixed_args)
+        return (f"error: {model_name} has no parameter {', '.join(map(repr, extra))}; nothing was done. "
+                f"Its parameters: {allowed}.")
+
     # ------------------------------------------------------------------ approvals
     def approval(self, model_name: str, args: dict, user_texts: list[str] | None = None) -> tuple[str, str, bool] | None:
         """(summary, reason, always) when a call needs the user's yes; `always`: even in YOLO.  `user_texts`: what
@@ -527,6 +574,12 @@ class McpRegistry:
         if name is None:
             return None
         entry = self.catalog[name]
+        args = {**(args or {}), **entry.fixed_args}         # the card shows what is really sent (e.g. the sender)
+        act = args.get("action")
+        if isinstance(act, dict) and isinstance(act.get("args"), dict):
+            # a scheduled action: approved now, run later exactly so - the card shows its every argument
+            args = {**{k: v for k, v in args.items() if k != "action"}, "action": str(act.get("tool")),
+                    **act["args"]}
         if tool in entry.ask_always or any((args or {}).get(a) for a in entry.ask_always_args.get(tool, [])):
             rcpt, body = [], ""
             for k, v in (args or {}).items():
@@ -534,7 +587,7 @@ class McpRegistry:
                     rcpt += [a for s in _strings(v) for a in EMAIL.findall(s)]
                 elif BODY_KEY.match(str(k)) and not body:
                     body = " ".join(_strings(v))
-            said = " ".join(user_texts).lower()
+            said = " ".join(user_texts).lower() + " " + _profile_email()      # "send me": the user's own address
             foreign = [a for a in rcpt if a.lower() not in said]
             lines = [f"{name}: {tool}"]
             for k, v in (args or {}).items():
@@ -542,7 +595,8 @@ class McpRegistry:
                     lines.append(f"  {k}: {' '.join(_strings(v)) if not isinstance(v, (int, float)) else v}"[:300])
             if body:
                 lines.append("  body:\n    " + body[:1500].replace("\n", "\n    ") + (" …" if len(body) > 1500 else ""))
-            reason = "sends on your behalf; always asks, even in YOLO"
+            reason = ("scheduled: approved now, runs later exactly as shown; always asks, even in YOLO"
+                      if isinstance(act, dict) else "sends on your behalf; always asks, even in YOLO")
             if foreign:
                 reason += " · ADDRESS NOT FROM YOU: " + ", ".join(foreign)
             return "\n".join(lines), reason, True
