@@ -490,8 +490,31 @@ class Scheduler:
         self.thread: threading.Thread | None = None
 
     def start(self) -> None:
+        self.recover()
         self.thread = threading.Thread(target=self._loop, name="dl-schedule", daemon=True)
         self.thread.start()
+
+    def recover(self) -> list[int]:
+        """Jobs still marked as running when the daemon starts: it stopped (restart, crash, power) in the middle of
+        them.  They may have done part of the work, so they are reported as interrupted, never run twice."""
+        found = []
+        with _lock:
+            data = load()
+            for j in data["jobs"]:
+                if isinstance(j, dict) and j.pop("running_since", None):
+                    j["runs"] = int(j.get("runs") or 0) + 1
+                    j["last"] = {"at": self.clock(), "status": "interrupted", "text": "the daemon stopped during it"}
+                    found.append(j)
+            if found:
+                save(data)
+        for j in found:
+            what = j.get("prompt") or (j.get("action") or {}).get("tool")
+            self.post(f"Scheduled job #{j.get('id')}: interrupted", f"{what}\n\nThe session daemon stopped while "
+                      "it ran (restart, crash or power cut); it was not run again.", "warn")
+            self.notify(f"D.L. AI: job #{j.get('id')} interrupted",
+                        f"The scheduled job #{j.get('id')} was running when the D.L. AI session daemon stopped. It may "
+                        f"have done part of its work, so it was not run again.\n\nJob: {what}")
+        return [j.get("id") for j in found]
 
     def _loop(self) -> None:
         while not self.stop.is_set():
@@ -529,9 +552,24 @@ class Scheduler:
             report()
         ran = []
         for job, late in due:
-            self._run(job, late)
+            self._mark_running(job["id"], True)
+            try:
+                self._run(job, late)
+            finally:
+                self._mark_running(job["id"], False)
             ran.append(job["id"])
         return ran
+
+    def _mark_running(self, job_id: int, on: bool) -> None:
+        with _lock:
+            data = load()
+            for j in data["jobs"]:
+                if j.get("id") == job_id:
+                    if on:
+                        j["running_since"] = self.clock()
+                    else:
+                        j.pop("running_since", None)
+            save(data)
 
     def _check(self, job: dict, now: float, cfg: dict, reports: list):
         """One entry at a tick: None (nothing now), "changed" (skipped as too late), or (job, late) to run."""

@@ -217,6 +217,26 @@ class Runner(Temp):
         self.assertIn("done", self.posts[-1][1])
         self.assertEqual(self.mails, [])
 
+    def test_a_job_cut_off_by_a_daemon_stop_is_reported_not_rerun(self):
+        sched = self.make()
+        S.add("in 1m tidy up", now=NOW)
+        data = S.load()
+        data["jobs"][0]["running_since"] = NOW               # the daemon died while it ran
+        S.save(data)
+        self.assertEqual(sched.recover(), [1])
+        job = S.load()["jobs"][0]
+        self.assertEqual(job["last"]["status"], "interrupted")
+        self.assertNotIn("running_since", job)
+        self.assertIn("interrupted", self.mails[0][0])
+        self.assertEqual(sched.recover(), [])                 # reported once
+
+    def test_running_mark_is_cleared_after_a_run(self):
+        sched = self.make()
+        S.add("in 1m x", now=NOW)
+        self.clock[0] = NOW + 61
+        sched.tick()
+        self.assertNotIn("running_since", S.load()["jobs"][0])
+
     def test_reports_go_out_after_the_lock(self):
         sched = self.make()
         held = []
