@@ -180,5 +180,23 @@ class ScheduleStop(unittest.TestCase):
             sessiond.RUNNING.clear()
 
 
+class DamagedSessionFile(unittest.TestCase):
+    def test_seq_continues_after_the_highest_shown(self):
+        sys.path.insert(0, str(HERE))
+        import dl_sessiond as sessiond
+        from unittest import mock
+        d = Path(tempfile.mkdtemp())
+        (d / "x.json").write_text(json.dumps({"seq": "bad", "events": [{"type": "text", "seq": 40}, {"seq": 41}],
+                                              "messages": []}))
+        with mock.patch.object(sessiond, "STATE_DIR", d):
+            s = sessiond.Session.load("x", d)
+        self.assertEqual(s.seq, 41)
+        s.mcp.close()
+        (d / "y.json").write_text("null")
+        with mock.patch.object(sessiond, "STATE_DIR", d):
+            sessiond.Session.load("y", d).mcp.close()
+        self.assertTrue(list(d.glob("y.json.unreadable-*")))      # the damaged file is kept
+
+
 if __name__ == "__main__":
     unittest.main()

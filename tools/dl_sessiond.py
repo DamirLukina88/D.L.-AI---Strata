@@ -168,7 +168,9 @@ class Session:
             s.messages.insert(0, system)
         s.events = [e for e in data.get("events") or [] if isinstance(e, dict)]
         seq = data.get("seq")
-        s.seq = seq if type(seq) is int and seq >= len(s.events) else len(s.events)
+        used = [e["seq"] for e in s.events if type(e.get("seq")) is int]
+        # never below a number already shown: the web app keys thinking blocks by it
+        s.seq = max([seq if type(seq) is int else 0, len(s.events), *used])
         return s
 
     # ---------------------------------------------------------------- approvals
