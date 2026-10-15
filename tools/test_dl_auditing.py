@@ -184,5 +184,23 @@ class TestApprovalPaths(unittest.TestCase):
             self.assertEqual(classify_command(cmd, ws), f"writes outside the workspace ({path})")
 
 
+class TestKnownValues(unittest.TestCase):
+    """A credential kept only in the wiki's vault is recognised by value too; names and addresses are not secrets."""
+
+    def test_wiki_vault_and_not_secret_names(self):
+        import tools.dl_auditing as A
+        d = Path(tempfile.mkdtemp())
+        (d / "secrets.env").write_text("DL_FAKE_SMTP_USER=someone.long@example.com\nDL_FAKE_HOST=mail.example.com\n")
+        (d / "vault.env").write_text("DL_FAKE_VAULT_TOKEN=Zx9Qw8Er7Ty6Ui5Op4As3\n")
+        saved = (A.SECRETS_ENV, A.WIKI_PRIVATE_ENV, A.GOOGLE_TOKEN_DIR)
+        A.SECRETS_ENV, A.WIKI_PRIVATE_ENV, A.GOOGLE_TOKEN_DIR = d / "secrets.env", d / "vault.env", d / "none"
+        try:
+            self.assertEqual(len(A.find_known_secrets("x Zx9Qw8Er7Ty6Ui5Op4As3 y")), 1)
+            self.assertIn("DL_FAKE_VAULT_TOKEN", A.find_known_secrets("x Zx9Qw8Er7Ty6Ui5Op4As3 y")[0])
+            self.assertEqual(A.find_known_secrets("to someone.long@example.com via mail.example.com"), [])
+        finally:
+            A.SECRETS_ENV, A.WIKI_PRIVATE_ENV, A.GOOGLE_TOKEN_DIR = saved
+
+
 if __name__ == "__main__":
     unittest.main()

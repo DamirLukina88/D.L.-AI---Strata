@@ -165,5 +165,20 @@ class JobApprovalAfterInterrupt(unittest.TestCase):
             sess.mcp.close()
 
 
+class ScheduleStop(unittest.TestCase):
+    def test_stop_the_running_job(self):
+        import threading
+        sys.path.insert(0, str(HERE))
+        import dl_sessiond as sessiond
+        self.assertIn("No scheduled job is running", sessiond.schedule_command("stop", Path(tempfile.mkdtemp())))
+        fake = type("S", (), {"cancel": threading.Event()})()
+        sessiond.RUNNING.update(job=9, session=fake)
+        try:
+            self.assertIn("Stopping job #9", sessiond.schedule_command("stop", Path(tempfile.mkdtemp())))
+            self.assertTrue(fake.cancel.is_set())
+        finally:
+            sessiond.RUNNING.clear()
+
+
 if __name__ == "__main__":
     unittest.main()

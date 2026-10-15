@@ -172,6 +172,8 @@ SECRET_PATTERNS = [
 # tokens.  A match is caught whatever its format, also URL-encoded (a fetch URL).
 SECRETS_ENV = Path.home() / ".config" / "dl-ai" / "secrets.env"
 GOOGLE_TOKEN_DIR = Path.home() / ".config" / "dl-ai" / "google"
+# the project wiki's credential vault (wiki.py env set): read only to recognise the values, never shown
+WIKI_PRIVATE_ENV = Path(__file__).resolve().parents[1] / "wiki" / "private" / ".env"
 SECRET_ENV_NAME = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|PASSWD")
 SECRET_JSON_KEYS = {"token", "access_token", "refresh_token", "id_token", "client_secret"}
 MIN_SECRET_LEN = 12
@@ -184,19 +186,20 @@ EMAIL_VALUE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 def known_secret_values() -> List[Tuple[str, str]]:
     """[(label, value)] of the credentials stored on this PC, read fresh each time (access tokens change hourly)."""
     found: Dict[str, str] = {}
-    try:
-        for line in SECRETS_ENV.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line.startswith("export "):
-                line = line[7:].strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, val = line.split("=", 1)
-            if NOT_SECRET_NAME.search(key.strip()):         # a user name or address is not a credential
-                continue
-            found.setdefault(val.strip().strip("'\""), f"value of {key.strip()} (secrets.env)")
-    except OSError:
-        pass
+    for env_file, where in ((SECRETS_ENV, "secrets.env"), (WIKI_PRIVATE_ENV, "wiki/private/.env")):
+        try:
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line.startswith("export "):
+                    line = line[7:].strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                if NOT_SECRET_NAME.search(key.strip()):     # a user name or address is not a credential
+                    continue
+                found.setdefault(val.strip().strip("'\""), f"value of {key.strip()} ({where})")
+        except OSError:
+            pass
     for key, val in os.environ.items():
         if SECRET_ENV_NAME.search(key):
             found.setdefault(val.strip(), f"value of ${key}")

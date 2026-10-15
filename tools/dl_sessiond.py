@@ -409,7 +409,7 @@ HELP = """Modes
 Tools and jobs
 /mcp [on|off N]   On-demand tools: web search (Exa), library docs (Context7), Fetch, DeepL, browser,
                   Proton Mail, Gmail, Drive, Docs, schedule (list, turn on/off; they also start when needed)
-/schedule ...     Scheduled jobs: /schedule [--email] <when> <task>; /schedule list; /schedule off|on|run|rm N
+/schedule ...     Scheduled jobs: /schedule [--email] <when> <task>; list; off|on|run|rm N; stop (the running job)
                   when: 2026-10-16 09:00, tomorrow 07:00, fri 09:00, in 2h, daily 08:00, mon-fri 07:30, every 2h
 
 Workspace
@@ -433,7 +433,14 @@ def schedule_command(arg: str, workspace: Path, yolo: bool = False) -> str:
     sub, _, rest = arg.strip().partition(" ")
     rest = rest.strip()
     if sub in ("", "list", "ls"):
-        return dl_schedule.list_text()
+        running = RUNNING.get("job")
+        return dl_schedule.list_text() + (f"\nRunning now: job #{running} (/schedule stop)" if running else "")
+    if sub == "stop":
+        sess = RUNNING.get("session")
+        if not sess:
+            return "No scheduled job is running."
+        sess.cancel.set()                    # stops its model stream and any approval card it waits on
+        return f"Stopping job #{RUNNING.get('job')}."
     if sub in ("off", "on", "run", "rm", "remove", "delete") and rest.lstrip("#").isdigit():
         n = int(rest.lstrip("#"))
         if sub in ("rm", "remove", "delete"):
@@ -491,6 +498,10 @@ def add_late_note(args: dict, planned: float, sent: float) -> dict:
     if not out.get("body") and not out.get("html"):
         out["body"] = note
     return out
+
+
+# the prompt job running now ({"job": id, "session": Session}), so /schedule stop can interrupt it
+RUNNING: dict = {}
 
 
 # tools a job may use without "acting": a job that only read is run again after the server dropped it
@@ -611,8 +622,11 @@ class JobRunner:
                     continue
                 return True
             return False
+        RUNNING.update(job=job["id"], session=s)
         try:
             s._agent(prompt)
+            if s.cancel.is_set():
+                return {"ok": False, "text": "stopped with /schedule stop", "acted": acted(), "server_error": False}
             last = next((m for m in reversed(s.messages) if m.get("role") == "assistant" and m.get("content")), {})
             return {"ok": True, "text": plain(last.get("content") or ""), "acted": acted(), "server_error": False}
         except Exception as e:  # noqa: BLE001
@@ -620,6 +634,7 @@ class JobRunner:
             return {"ok": False, "text": msg, "acted": acted(),
                     "server_error": msg.startswith(("Strata API HTTP 5", "Connection failed to Strata"))}
         finally:
+            RUNNING.clear()
             s.mcp.close()
 
 
