@@ -60,6 +60,10 @@ class Translate(unittest.TestCase):
         self.assertIn("not found", T.call("translate", {"file": "nope.txt", "target_lang": "HR"}))
         self.assertEqual(self.sent, [])
 
+    def test_html_false_string_is_plain_text(self):
+        T.call("translate", {"text": "a < b & c", "target_lang": "HR", "html": "false"})
+        self.assertNotIn("tag_handling", self.sent[-1][1])
+
     def test_errors_are_text(self):
         self.assertTrue(T.call("translate", {"text": " ", "target_lang": "HR"}).startswith("Error"))
         with mock.patch.object(T, "_post", side_effect=T.TranslateError("the DeepL quota for this month is used up")):

@@ -528,8 +528,22 @@ def draft_mail(m, a: dict, s: dict) -> str:
     return f"Draft saved in Drafts from {msg['From']}: {msg['Subject']}"
 
 
+def _uids(v) -> list[int]:
+    """Whole message UIDs: [12, 13], 12, "12" or "12, 13".  A string is never read character by character (that
+    would pick messages 1, 2, 3 for "123")."""
+    if isinstance(v, bool):
+        raise ProtonError("uids must be message numbers from search_mail")
+    items = v if isinstance(v, list) else re.split(r"[\s,]+", v.strip()) if isinstance(v, str) else [v] if v else []
+    out = []
+    for u in items:
+        if isinstance(u, bool) or not (isinstance(u, int) or (isinstance(u, str) and u.isdigit())):
+            raise ProtonError(f"uids must be message numbers from search_mail, not {u!r}")
+        out.append(int(u))
+    return [u for u in out if u > 0]
+
+
 def update_mail(m, a: dict) -> str:
-    uids = [int(u) for u in a.get("uids") or []]
+    uids = _uids(a.get("uids"))
     if not uids:
         return "Error: no uids given"
     target = str(a.get("move_to") or "").strip()

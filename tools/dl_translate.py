@@ -135,7 +135,9 @@ def call(tool: str, args: dict) -> str:
         src_file = _workspace_path(str(a["file"]), True) if a.get("file") else None
         dest = _workspace_path(str(a["out_file"]), False) if a.get("out_file") else None    # checked before DeepL
         text = src_file.read_text(encoding="utf-8", errors="replace") if src_file else str(a.get("text") or "")
-        html = bool(a.get("html")) or bool(src_file and src_file.suffix.lower() in (".html", ".htm"))
+        flag = a.get("html")                             # "false" is no: bool("false") would be True
+        flag = flag is True or (isinstance(flag, str) and flag.strip().lower() in ("true", "yes", "1"))
+        html = flag or bool(src_file and src_file.suffix.lower() in (".html", ".htm"))
         out, detected = translate(text, str(a.get("target_lang") or ""), str(a.get("source_lang") or ""), html,
                                   str(a.get("context") or ""), str(a.get("formality") or ""))
         note = f"DeepL {detected or '?'} -> {str(a.get('target_lang')).upper()}"

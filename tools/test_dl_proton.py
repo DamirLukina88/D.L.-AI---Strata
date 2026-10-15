@@ -261,6 +261,18 @@ class Writing(Base):
         self.assertEqual(dl_proton._date("2026-10-16"), "16-Oct-2026")
         self.assertEqual(dl_proton._date("2026-03-05"), "05-Mar-2026")
 
+    def test_uids_are_whole_numbers_never_characters(self):
+        self.assertEqual(dl_proton._uids("123"), [123])
+        self.assertEqual(dl_proton._uids("12, 13"), [12, 13])
+        self.assertEqual(dl_proton._uids(12), [12])
+        self.assertEqual(dl_proton._uids([12, "13"]), [12, 13])
+        for bad in (["x"], "abc", True, [1.5], {"a": 1}):
+            self.assertIn("message numbers", dl_proton.call("update_mail", {"uids": bad, "read": True}))
+        out = dl_proton.call("update_mail", {"uids": "123", "read": True})
+        self.assertIn("1 message(s)", out)
+        store = [c for c in self.imap.calls if c[0] == "STORE"][-1]
+        self.assertEqual(store[1][0], "123")                       # message 123, not 1,2,3
+
     def test_no_recipient(self):
         self.assertTrue(dl_proton.call("send_mail", {"to": "", "subject": "x", "body": "y"}).startswith("Error"))
 

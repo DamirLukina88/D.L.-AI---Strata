@@ -585,8 +585,10 @@ def call(tool: str, args: dict) -> str:
                 bad = check_action(action, ctx.get("registry"))
                 if bad:
                     return f"Error: {bad}"
+            email = a.get("email_result")                # "false" is no: bool("false") would be True
+            email = email is True or (isinstance(email, str) and email.strip().lower() in ("true", "yes", "1"))
             job = add(str(a.get("when") or ""), str(a.get("prompt") or ""), action,
-                      bool(a.get("email_result")), str(a.get("workspace") or ctx.get("workspace") or ""),
+                      email, str(a.get("workspace") or ctx.get("workspace") or ""),
                       anchor=ctx.get("request_time"), yolo=bool(ctx.get("yolo")))
             return f"Scheduled {summary(job)}"
         if tool == "list":

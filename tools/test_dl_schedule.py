@@ -125,6 +125,11 @@ class When(unittest.TestCase):
 
 
 class Store(Temp):
+    def test_email_result_false_string_is_no(self):
+        S.call("add", {"when": "in 2h", "prompt": "a", "email_result": "false"})
+        S.call("add", {"when": "in 2h", "prompt": "b", "email_result": "true"})
+        self.assertEqual([j["email_result"] for j in S.load()["jobs"]], [False, True])
+
     def test_tool_add_list_remove(self):
         with mock.patch.object(S.time, "time", return_value=NOW):
             out = S.call("add", {"when": "tomorrow 07:00", "prompt": "summarise my unread mail", "email_result": True})
