@@ -175,7 +175,7 @@ function codeApprovalCard(ev) {
   const mail = ev.kind === "mcp-always";
   const [reason, foreign] = String(ev.reason || "").split(" · ADDRESS NOT FROM YOU: ");
   const el = codeCard("cs-approval", (mail ? `
-    <div class="cs-approval-title">✉ Send this?</div>
+    <div class="cs-approval-title">${/^scheduled/.test(reason) ? "⏰ Schedule this?" : /permission|access|share/i.test(String(ev.summary).split("\n")[0]) ? "🔗 Share this?" : "✉ Send this?"}</div>
     <pre class="cs-approval-mail">${esc(ev.summary)}</pre>
     <div class="cs-approval-reason">${esc(reason)}${foreign ? ` · <span class="cs-approval-foreign">address not from you: ${esc(foreign)}</span>` : ""}</div>` : `
     <div class="cs-approval-title">${ev.kind === "plan" ? "📋" : "⚠"} ${esc(ev.summary)}</div>
