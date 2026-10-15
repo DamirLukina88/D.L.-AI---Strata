@@ -533,7 +533,8 @@ def _uids(v) -> list[int]:
     would pick messages 1, 2, 3 for "123")."""
     if isinstance(v, bool):
         raise ProtonError("uids must be message numbers from search_mail")
-    items = v if isinstance(v, list) else re.split(r"[\s,]+", v.strip()) if isinstance(v, str) else [v] if v else []
+    items = (v if isinstance(v, list) else [x for x in re.split(r"[\s,]+", v) if x] if isinstance(v, str)
+             else [v] if v else [])
     out = []
     for u in items:
         if isinstance(u, bool) or not (isinstance(u, int) or (isinstance(u, str) and u.isdigit())):

@@ -586,7 +586,8 @@ def call(tool: str, args: dict) -> str:
                 if bad:
                     return f"Error: {bad}"
             email = a.get("email_result")                # "false" is no: bool("false") would be True
-            email = email is True or (isinstance(email, str) and email.strip().lower() in ("true", "yes", "1"))
+            email = email is True or (type(email) is int and email == 1) or (
+                isinstance(email, str) and email.strip().lower() in ("true", "yes", "1"))
             job = add(str(a.get("when") or ""), str(a.get("prompt") or ""), action,
                       email, str(a.get("workspace") or ctx.get("workspace") or ""),
                       anchor=ctx.get("request_time"), yolo=bool(ctx.get("yolo")))

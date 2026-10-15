@@ -264,6 +264,7 @@ class Writing(Base):
     def test_uids_are_whole_numbers_never_characters(self):
         self.assertEqual(dl_proton._uids("123"), [123])
         self.assertEqual(dl_proton._uids("12, 13"), [12, 13])
+        self.assertEqual(dl_proton._uids("12,13,"), [12, 13])
         self.assertEqual(dl_proton._uids(12), [12])
         self.assertEqual(dl_proton._uids([12, "13"]), [12, 13])
         for bad in (["x"], "abc", True, [1.5], {"a": 1}):
