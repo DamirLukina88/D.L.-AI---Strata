@@ -215,6 +215,20 @@ class Writing(Base):
                                                                     "html_file": "nope.html"}))
         self.assertIn("empty", dl_proton.call("send_mail", {"to": "a@example.com", "subject": "s"}))
 
+    def test_html_file_only_from_the_workspace(self):
+        with mock.patch.object(dl_mcp, "call_context", lambda: {"workspace": Path(self.tmp.name)}):
+            out = dl_proton.call("send_mail", {"to": "a@example.com", "subject": "s", "html_file": "/etc/hostname"})
+        self.assertIn("outside the workspace", out)
+        self.assertEqual(FakeSmtp.sent, [])
+
+    def test_signature_and_grid_stay_inside_the_document(self):
+        dl_proton.call("send_mail", {"to": "a@example.com", "html": "<!doctype html><html><head><title>T</title>"
+                                     "</head><body><table><tr><td>1</td></tr></table></body></html>"})
+        html = FakeSmtp.sent[0][0].get_body(("html",)).get_content()
+        self.assertTrue(html.rstrip().endswith("</body></html>"), html[-120:])
+        self.assertLess(html.index("Sent by a personal AI assistant."), html.index("</body>"))
+        self.assertLess(html.index("border-collapse"), html.index("</head>"))
+
     def test_subject_from_the_html_title(self):
         out = dl_proton.call("send_mail", {"to": "a@example.com",
                                            "html": "<html><head><title>Vremenska prognoza</title></head><body>x</body></html>"})

@@ -77,6 +77,12 @@ class When(unittest.TestCase):
         self.assertEqual(S.parse_when("pon-pet 07:30 x", NOW)[0]["days"], [0, 1, 2, 3, 4])
         self.assertEqual(S.fmt(at(2026, 10, 16, 21, 30)), "pet 16.10.2026. 21:30")
 
+    def test_day_month_without_the_last_dot(self):
+        spec, rest = S.parse_when("16.10 09:00 x", NOW)          # a date when a time follows, not 16:10
+        self.assertEqual((spec["at"], rest), (at(2026, 10, 16, 9, 0), "x"))
+        spec, rest = S.parse_when("21.30 call mum", NOW)         # a time with a dot stays a time
+        self.assertEqual((spec["at"], rest), (at(2026, 10, 15, 21, 30), "call mum"))
+
     def test_time_that_passed_while_working_runs_at_once(self):
         asked = at(2026, 10, 15, 21, 17)                # the user asked at 21:17 for 21:30 ...
         now = at(2026, 10, 15, 21, 37)                  # ... and the work took until 21:37
@@ -285,7 +291,7 @@ class LateNote(Temp):
 
 
 class Approval(unittest.TestCase):
-    """Adding a job with an action asks even in YOLO and shows the action's every argument."""
+    """Adding a job with an action shows the action's every argument on the card (outside YOLO)."""
 
     def setUp(self):
         dl_mcp.register_builtin("schedule", S.TOOLS, S.call)

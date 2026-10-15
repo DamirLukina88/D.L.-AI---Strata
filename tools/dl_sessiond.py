@@ -148,8 +148,10 @@ class Session:
         return s
 
     # ---------------------------------------------------------------- approvals
-    def approve(self, kind: str, summary: str, reason: str) -> bool:
-        """The dl_cli approver: ask every attached client, wait for the first answer."""
+    def approve(self, kind: str, summary: str, reason: str, cancel: threading.Event | None = None) -> bool:
+        """The dl_cli approver: ask every attached client, wait for the first answer.  `cancel`: what stops the
+        wait (default this session's; a scheduled job passes its own, so an old interrupt here cannot deny it)."""
+        cancel = self.cancel if cancel is None else cancel
         aid = uuid.uuid4().hex[:10]
         ev = threading.Event()
         with self.lock:
@@ -157,7 +159,7 @@ class Session:
         self.emit({"type": "approval_request", "id": aid, "kind": kind, "summary": summary, "reason": reason})
         deadline = time.time() + APPROVAL_TIMEOUT
         while not ev.wait(0.5):
-            if self.cancel.is_set() or time.time() > deadline:
+            if cancel.is_set() or time.time() > deadline:
                 break
         with self.lock:
             ok = self.pending.pop(aid, {}).get("ok", False)
@@ -484,7 +486,8 @@ def add_late_note(args: dict, planned: float, sent: float) -> dict:
     if out.get("body"):
         out["body"] = f"{note}\n\n{out['body']}"
     if out.get("html"):
-        out["html"] = f"<p><i>{note}</i></p>\n{out['html']}"
+        import dl_proton
+        out["html"] = dl_proton.insert_html(str(out["html"]), f"<p><i>{note}</i></p>")
     if not out.get("body") and not out.get("html"):
         out["body"] = note
     return out
@@ -588,7 +591,7 @@ class JobRunner:
                 self.notify(f"D.L. AI: job #{job['id']} waits for your approval",
                             f"The scheduled job #{job['id']} wants to:\n\n{summary}\n\n({reason})\n\n"
                             "Answer it on the Code tab; it counts as a no after 30 minutes.")
-            return main.approve(kind, f"[scheduled job #{job['id']}] {summary}", reason)
+            return main.approve(kind, f"[scheduled job #{job['id']}] {summary}", reason, cancel=s.cancel)
 
         s.emit, s.approve = emit, approve
         s.yolo = bool(job.get("yolo"))                 # scheduled while YOLO was on: runs without asking too

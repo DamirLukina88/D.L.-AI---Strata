@@ -6,6 +6,7 @@ through a temporary dl_sessiond driven by a fake model server (cut off at the tu
 from __future__ import annotations
 
 import json
+import re
 import os
 import subprocess
 import sys
@@ -167,7 +168,8 @@ class FakeModel(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         FakeModel.efforts.append(body.get("reasoning_effort"))
         msgs = body["messages"]
-        user = next(m["content"] for m in reversed(msgs) if m["role"] == "user")
+        # D.L. CLI puts "[Now: …]" in front of each user message
+        user = re.sub(r"^\[Now: [^\]]*\]\n", "", next(m["content"] for m in reversed(msgs) if m["role"] == "user"))
         after_tool = msgs[-1]["role"] == "tool"
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -177,7 +179,8 @@ class FakeModel(BaseHTTPRequestHandler):
             self.wfile.write(sse({"tool_calls": [{"index": 0, "id": f"c{len(msgs)}", "function": {
                 "name": "run_command", "arguments": json.dumps({"CommandLine": cmd})}}]}, "tool_calls"))
 
-        real = [m["content"] for m in msgs if m["role"] == "user" and not m["content"].startswith("[D.L. CLI]")]
+        real = [re.sub(r"^\[Now: [^\]]*\]\n", "", m["content"]) for m in msgs if m["role"] == "user"
+                and not m["content"].startswith("[D.L. CLI]")]
         stubborn = "stubborn" in real[-1]
         if user.startswith("think"):                   # a reply that thinks first, second-guessing itself
             for part in ("Hmm, let me check the rotation table again. ", "Actually the kick is wrong. ",

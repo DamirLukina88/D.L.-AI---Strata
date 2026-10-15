@@ -426,7 +426,7 @@ def compose(s: dict, a: dict, original=None) -> EmailMessage:
     if html:
         if sig and sig not in html_to_text(html):
             sig_html = "<br>".join(_esc(l) for l in sig.splitlines())
-            html += f'\n<p style="color:#666;font-size:90%">{sig_html}</p>'
+            html = insert_html(html, f'<p style="color:#666;font-size:90%">{sig_html}</p>', end=True)
         if not re.search(r"<html", html, re.I):
             html = f'<!doctype html><html><head><meta charset="utf-8"></head><body>{html}</body></html>'
         if re.search(r"<table(?![^>]*(border|style))", html, re.I) and "<style" not in html.lower():
@@ -437,6 +437,15 @@ def compose(s: dict, a: dict, original=None) -> EmailMessage:
                 r"</head>", html, re.I) else css + html
         msg.add_alternative(html, subtype="html")
     return msg
+
+
+def insert_html(doc: str, fragment: str, end: bool = False) -> str:
+    """Put `fragment` just inside <body> (or before </body> with end=True), so a full HTML document stays valid."""
+    if end:
+        m = list(re.finditer(r"</body\s*>", doc, re.I))
+        return doc[:m[-1].start()] + fragment + "\n" + doc[m[-1].start():] if m else doc + "\n" + fragment
+    m = re.search(r"<body[^>]*>", doc, re.I)
+    return doc[:m.end()] + "\n" + fragment + doc[m.end():] if m else fragment + "\n" + doc
 
 
 def _esc(text: str) -> str:
@@ -451,14 +460,16 @@ def _html_of(a: dict) -> str:
     if not name:
         return ""
     f = Path(os.path.expanduser(name))
+    try:
+        import dl_mcp
+        ws = dl_mcp.call_context().get("workspace")
+    except ImportError:
+        ws = None
     if not f.is_absolute():
-        try:
-            import dl_mcp
-            ws = dl_mcp.call_context().get("workspace")
-        except ImportError:
-            ws = None
         f = Path(ws or os.getcwd()) / f
     f = f.resolve()
+    if ws and not f.is_relative_to(Path(ws).resolve()):
+        raise ProtonError(f"html_file {name!r} is outside the workspace {ws}")
     if not f.is_file():
         raise ProtonError(f"html_file {name!r} not found ({f})")
     try:

@@ -404,6 +404,9 @@ def now_line() -> str:
     return f"[Now: {HR_DAYS[n.weekday()]}, {n:%d.%m.%Y.} {n:%H:%M} ({tz})]"
 
 
+NOW_PREFIX = re.compile(r"^\[Now: [^\]\n]*\]\n")
+
+
 def with_now(text: str) -> str:
     return f"{now_line()}\n{text}"
 
@@ -1734,7 +1737,7 @@ def format_messages_to_markdown(messages: list[dict], model_name: str = "Qwen3.8
     for m in messages:
         role = m.get("role")
         if role == "user":
-            content = m.get("content", "").strip()
+            content = NOW_PREFIX.sub("", m.get("content", "")).strip()
             if content:
                 sections.append(f"## You\n\n{content}\n")
         elif role == "assistant":

@@ -171,7 +171,7 @@ function codeHealth(d) {
 }
 
 function codeApprovalCard(ev) {
-  // "mcp-always": sending email - the whole message is shown, and it asks even in YOLO
+  // "mcp-always": sending email or sharing - the whole message is shown (a YOLO session never asks)
   const mail = ev.kind === "mcp-always";
   const [reason, foreign] = String(ev.reason || "").split(" · ADDRESS NOT FROM YOU: ");
   const el = codeCard("cs-approval", (mail ? `

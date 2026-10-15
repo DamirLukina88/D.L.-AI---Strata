@@ -567,7 +567,8 @@ class McpRegistry:
 
     # ------------------------------------------------------------------ approvals
     def approval(self, model_name: str, args: dict, user_texts: list[str] | None = None) -> tuple[str, str, bool] | None:
-        """(summary, reason, always) when a call needs the user's yes; `always`: even in YOLO.  `user_texts`: what
+        """(summary, reason, always) when a call needs the user's yes outside YOLO; `always`: an email or a share, shown
+        in full (the card a /yolo session never sees).  `user_texts`: what
         the user typed (default: every message routed in this session) - a recipient not in it is flagged."""
         user_texts = self.said if user_texts is None else user_texts
         name, tool = self.routes.get(model_name, (None, None))
@@ -595,8 +596,8 @@ class McpRegistry:
                     lines.append(f"  {k}: {' '.join(_strings(v)) if not isinstance(v, (int, float)) else v}"[:300])
             if body:
                 lines.append("  body:\n    " + body[:1500].replace("\n", "\n    ") + (" …" if len(body) > 1500 else ""))
-            reason = ("scheduled: approved now, runs later exactly as shown; always asks, even in YOLO"
-                      if isinstance(act, dict) else "sends on your behalf; always asks, even in YOLO")
+            reason = ("scheduled: approved now, runs later exactly as shown"
+                      if isinstance(act, dict) else "sends or shares on your behalf")
             if foreign:
                 reason += " · ADDRESS NOT FROM YOU: " + ", ".join(foreign)
             return "\n".join(lines), reason, True

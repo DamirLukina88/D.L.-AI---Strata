@@ -107,6 +107,7 @@ def _is_days(word: str) -> bool:
 
 
 _HR_DATE = re.compile(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})?\.?$")
+_HR_DAY_MONTH = re.compile(r"^(\d{1,2})\.(\d{1,2})()$")         # "16.10" followed by a time: a date, not 16:10
 
 
 def parse_when(text: str, now: float | None = None, anchor: float | None = None) -> tuple[dict, str]:
@@ -172,8 +173,8 @@ def parse_when(text: str, now: float | None = None, anchor: float | None = None)
         except ValueError:
             raise WhenError(f"not a date: {d!r} (YYYY-MM-DD or DD.MM.YYYY.)") from None
         return once(day_at(day, hm), used)
-    m = _HR_DATE.match(w0)
-    if m and len(words) > 1:                         # 16.10.2026. 21:30 / 16.10. 21:30
+    m = _HR_DATE.match(w0) or (_HR_DAY_MONTH.match(w0) if len(words) > 1 and _HM.match(words[1]) else None)
+    if m and len(words) > 1:                         # 16.10.2026. 21:30 / 16.10. 21:30 / 16.10 21:30
         try:
             day = dt.datetime(int(m.group(3) or base.year), int(m.group(2)), int(m.group(1)))
         except ValueError:

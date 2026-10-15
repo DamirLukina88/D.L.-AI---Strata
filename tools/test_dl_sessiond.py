@@ -138,5 +138,32 @@ class SharedSession(unittest.TestCase):
         self.assertEqual(side.next()["type"], "error")
 
 
+
+class JobApprovalAfterInterrupt(unittest.TestCase):
+    """A scheduled job's card must not be denied by an interrupt left over from the user's last turn."""
+
+    def test_own_cancel_event(self):
+        import threading
+        sys.path.insert(0, str(HERE))
+        import dl_sessiond as sessiond
+        sess = sessiond.Session("audit-approve", Path(tempfile.mkdtemp()))
+        try:
+            sess.cancel.set()                                  # the user's last turn was interrupted
+            job_cancel = threading.Event()
+            got = []
+            t = threading.Thread(target=lambda: got.append(sess.approve("tool", "x", "y", cancel=job_cancel)))
+            t.start()
+            for _ in range(50):
+                if sess.pending:
+                    break
+                time.sleep(0.02)
+            self.assertTrue(sess.pending)                      # still waiting, not denied at once
+            sess.answer(next(iter(sess.pending)), True)
+            t.join(5)
+            self.assertEqual(got, [True])
+        finally:
+            sess.mcp.close()
+
+
 if __name__ == "__main__":
     unittest.main()
