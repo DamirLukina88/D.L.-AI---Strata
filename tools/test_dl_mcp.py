@@ -222,6 +222,17 @@ class Environment(unittest.TestCase):
             del os.environ["EXA_API_KEY"], os.environ["DL_TEST_KEY"]
 
 
+class MetaToolInputs(unittest.TestCase):
+    def test_odd_server_values_are_answered_not_raised(self):
+        r = registry()
+        try:
+            for server in ([5], [None, ""], {"a": 1}, 7, None, "", "fetch, ,deepl"):
+                for action in ("enable", "disable", "list", None, 3):
+                    self.assertIsInstance(r.handle_meta({"action": action, "server": server}), str)
+        finally:
+            r.close()
+
+
 class CatalogueTypos(unittest.TestCase):
     """A typo in mcp.json leaves one entry out (with a problem line); it never stops every session."""
 

@@ -419,30 +419,33 @@ class McpRegistry:
     def tick(self) -> None:
         """End of a user turn: turn off what went unused for idle_turns turns."""
         limit = int(self.settings["idle_turns"])
-        for name in list(self.enabled):
-            entry = self.catalog.get(name)
-            if entry and not entry.default_on and self.turn - self.enabled[name]["turn"] >= limit:
-                self.disable(name, f"unused for {limit} turns")
+        with self.lock:                                      # the idle timer may switch one off meanwhile
+            idle = [n for n, v in self.enabled.items()
+                    if (e := self.catalog.get(n)) and not e.default_on and self.turn - v["turn"] >= limit]
+        for name in idle:
+            self.disable(name, f"unused for {limit} turns")
 
     def _start_timer(self) -> None:
-        if self._timer is not None and self._timer.is_alive():
-            return
+        with self.lock:                                      # decided under the lock, as the loop's exit is
+            if self._timer is not None and self._timer.is_alive():
+                return
 
-        def loop():
-            while True:
-                time.sleep(15)
-                with self.lock:
-                    idle = [n for n, v in self.enabled.items()
-                            if self.catalog.get(n) and self.catalog[n].idle_s
-                            and time.monotonic() - v["used"] > self.catalog[n].idle_s]
-                    left = any(self.catalog[n].idle_s for n in self.enabled if n in self.catalog)
-                for n in idle:
-                    self.disable(n, f"idle for {int(self.catalog[n].idle_s)} s")
-                if not left and not idle:
-                    return
+            def loop():
+                while True:
+                    time.sleep(15)
+                    with self.lock:
+                        idle = [n for n, v in self.enabled.items()
+                                if self.catalog.get(n) and self.catalog[n].idle_s
+                                and time.monotonic() - v["used"] > self.catalog[n].idle_s]
+                        left = any(self.catalog[n].idle_s for n in self.enabled if n in self.catalog)
+                        if not left and not idle:
+                            self._timer = None               # a server enabled from now on starts a new timer
+                            return
+                    for n in idle:
+                        self.disable(n, f"idle for {int(self.catalog[n].idle_s)} s")
 
-        self._timer = threading.Thread(target=loop, daemon=True, name="dl-mcp-idle")
-        self._timer.start()
+            self._timer = threading.Thread(target=loop, daemon=True, name="dl-mcp-idle")
+            self._timer.start()
 
     # ------------------------------------------------------------------ what the model sees
     def meta_tool(self) -> dict:
@@ -489,7 +492,8 @@ class McpRegistry:
     def handle_meta(self, args: dict) -> str:
         action = str(args.get("action") or "list")
         raw = args.get("server") or ""
-        names = [n.strip() for n in (raw if isinstance(raw, list) else str(raw).split(",")) if n and n.strip()]
+        names = [str(n).strip() for n in (raw if isinstance(raw, list) else str(raw).split(","))
+                 if n is not None and str(n).strip()]
         if action in ("enable", "disable"):
             if not names:
                 return f"error: say which server: mcp(action=\"{action}\", server=\"name\" or \"a,b\")"
@@ -595,7 +599,9 @@ class McpRegistry:
         props = schema.get("properties") or {}
         if not props or not isinstance(args, dict):
             return None
-        name = self.routes[model_name][0]
+        name = self.routes.get(model_name, (None, None))[0]
+        if name is None:                                     # turned off since schema() looked: call() reports it
+            return None
         extra = [k for k in args if k not in props and k not in self.catalog[name].fixed_args]
         if not extra:
             return None
