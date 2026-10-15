@@ -77,6 +77,14 @@ class When(unittest.TestCase):
         self.assertEqual(S.parse_when("pon-pet 07:30 x", NOW)[0]["days"], [0, 1, 2, 3, 4])
         self.assertEqual(S.fmt(at(2026, 10, 16, 21, 30)), "pet 16.10.2026. 21:30")
 
+    def test_only_whole_weekday_words(self):
+        for bad in ("wedding 18:00 x", "monitor 09:00 x", "sunny 10:00 x"):
+            with self.assertRaises(S.WhenError, msg=bad):
+                S.parse_when(bad, NOW)
+        self.assertEqual(S.parse_when("friday 09:00 x", NOW)[0]["at"], at(2026, 10, 16, 9, 0))
+        self.assertEqual(S.parse_when("srijeda 09:00 x", NOW)[0]["at"], at(2026, 10, 21, 9, 0))
+        self.assertEqual(S.parse_when("tue,thu 07:00 x", NOW)[0]["days"], [1, 3])
+
     def test_day_month_without_the_last_dot(self):
         spec, rest = S.parse_when("16.10 09:00 x", NOW)          # a date when a time follows, not 16:10
         self.assertEqual((spec["at"], rest), (at(2026, 10, 16, 9, 0), "x"))
@@ -340,6 +348,11 @@ class Approval(unittest.TestCase):
         args = {"when": "in 1h", "action": {"tool": "proton__send_mail", "args": {"to": "a@example.com", "body": "x"}}}
         _, reason, _ = self.reg.approval("schedule__add", args, ["send it to ba@example.com"])
         self.assertIn("ADDRESS NOT FROM YOU: a@example.com", reason)
+        for said in ("send it to a@example.com.", "to a@example.com, thanks", "<a@example.com>"):
+            _, reason, _ = self.reg.approval("schedule__add", args, [said])
+            self.assertNotIn("ADDRESS NOT FROM YOU", reason, said)
+        _, reason, _ = self.reg.approval("schedule__add", args, ["to a@example.com.hr"])
+        self.assertIn("ADDRESS NOT FROM YOU", reason)
 
     def test_prompt_job_asks_unless_yolo(self):
         ask = self.reg.approval("schedule__add", {"when": "daily 08:00", "prompt": "summarise mail"})

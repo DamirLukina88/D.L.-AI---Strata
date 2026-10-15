@@ -89,12 +89,18 @@ def _days(text: str) -> list[int]:
 HR_DAYS = ["pon", "uto", "sri", "čet", "pet", "sub", "ned"]
 
 
+# whole weekday words only: "wedding" or "monitor" is not a day
+_DAY_WORDS = {w: i for i, names in enumerate((
+    ("mon", "monday", "pon", "ponedjeljak"), ("tue", "tues", "tuesday", "uto", "utorak"),
+    ("wed", "wednesday", "sri", "srijeda"), ("thu", "thur", "thurs", "thursday", "čet", "cet", "četvrtak", "cetvrtak"),
+    ("fri", "friday", "pet", "petak"), ("sat", "saturday", "sub", "subota"),
+    ("sun", "sunday", "ned", "nedjelja"))) for w in names}
+
+
 def _day(word: str) -> int:
-    w = word.strip().lower()[:3].replace("cet", "čet")
-    if w in DAYS:
-        return DAYS.index(w)
-    if w in HR_DAYS:
-        return HR_DAYS.index(w)
+    w = word.strip().lower().rstrip(".")
+    if w in _DAY_WORDS:
+        return _DAY_WORDS[w]
     raise WhenError(f"not a weekday: {word!r} (mon, tue, wed, thu, fri, sat, sun)")
 
 

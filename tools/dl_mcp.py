@@ -617,7 +617,9 @@ class McpRegistry:
                     body = " ".join(_strings(v))
             body = body or _email_text(args)                 # an HTML email (html / html_file): its text, in full
             said = " ".join(user_texts).lower() + " " + _profile_email()      # "send me": the user's own address
-            foreign = [a for a in rcpt if not re.search(rf"(?<![\w.%+-]){re.escape(a.lower())}(?![\w.-])", said)]
+            # a whole address: not inside a longer one, but a full stop after it ends the sentence ("to a@x.com.")
+            foreign = [a for a in rcpt
+                       if not re.search(rf"(?<![\w.%+-]){re.escape(a.lower())}(?![\w-]|\.\w)", said)]
             lines = [f"{name}: {tool}"]
             for k, v in (args or {}).items():
                 if not BODY_KEY.match(str(k)) and k != "html":
