@@ -1661,6 +1661,8 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                 if session_context["workspace"] != current_ws:
                     current_ws = session_context["workspace"]
                     active_tools = get_active_tools(current_ws, mode=mode, registry=registry)
+                    if dl_mcp is not None and dl_mcp.call_context():    # built-ins resolve files in the new one
+                        dl_mcp.CALL.ctx = {**dl_mcp.call_context(), "workspace": current_ws}
             if registry is not None and registry.active:      # an MCP server may have been turned on or off
                 active_tools = get_active_tools(current_ws, mode=mode, registry=registry)
 

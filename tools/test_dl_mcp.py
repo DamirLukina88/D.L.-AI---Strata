@@ -12,6 +12,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -220,6 +221,29 @@ class Environment(unittest.TestCase):
         finally:
             r.close()
             del os.environ["EXA_API_KEY"], os.environ["DL_TEST_KEY"]
+
+
+class WorkspaceSwitch(unittest.TestCase):
+    def test_built_ins_follow_a_switch_mid_turn(self):
+        import dl_cli
+        old, new = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
+        dl_mcp.CALL.ctx = {"workspace": old, "yolo": False}
+        ctx = {"workspace": old}
+        calls = iter([{"content": None, "reasoning": "", "tool_calls": [{"id": "1", "function": {
+                          "name": "switch_workspace", "arguments": json.dumps({"path": str(new)})}}],
+                       "finish_reason": "tool_calls", "tokens": 1},
+                      {"content": "done", "reasoning": "", "tool_calls": [], "finish_reason": "stop", "tokens": 1}])
+        def fake_turn(*a, **k):
+            return next(calls)
+        def fake_dispatch(name, args, ws, mode="act", session_context=None):
+            session_context["workspace"] = Path(args["path"])
+            return "switched"
+        with mock.patch.object(dl_cli, "chat_turn_in_context", fake_turn), \
+                mock.patch.object(dl_cli, "dispatch_dl_tool", fake_dispatch):
+            dl_cli.execute_agent_loop([{"role": "system", "content": "s"}, {"role": "user", "content": "go"}],
+                                      "http://x", "", old, session_context=ctx)
+        self.assertEqual(dl_mcp.call_context()["workspace"], new)
+        dl_mcp.CALL.ctx = {}
 
 
 class MetaToolInputs(unittest.TestCase):

@@ -192,6 +192,14 @@ class DamagedSessionFile(unittest.TestCase):
             s = sessiond.Session.load("x", d)
         self.assertEqual(s.seq, 41)
         s.mcp.close()
+        (d / "z.json").write_text(json.dumps({"messages": [
+            {"role": "system", "content": "old"}, {"role": "user"}, {"role": "user", "content": "hi"},
+            {"role": "assistant", "tool_calls": [{"id": "1"}]}, {"role": "weird", "content": "x"}]}))
+        with mock.patch.object(sessiond, "STATE_DIR", d):
+            z = sessiond.Session.load("z", d)
+        self.assertEqual([m["role"] for m in z.messages], ["system", "user", "assistant"])
+        self.assertEqual(z.messages[1]["content"], "hi")
+        z.mcp.close()
         (d / "y.json").write_text("null")
         with mock.patch.object(sessiond, "STATE_DIR", d):
             sessiond.Session.load("y", d).mcp.close()

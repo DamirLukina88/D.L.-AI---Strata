@@ -159,7 +159,11 @@ class Session:
         s.mode = data.get("mode") if data.get("mode") in ("act", "plan") else "act"
         s.effort = data.get("effort") if data.get("effort") in EFFORTS else None
         s.yolo = data.get("yolo") is True             # YOLO stays on until it is turned off, also after restarts
-        msgs = [m for m in data.get("messages") or [] if isinstance(m, dict) and isinstance(m.get("role"), str)]
+        # what the model can be sent again: an assistant turn as saved (it may hold only tool calls), anything else
+        # only with its text
+        msgs = [m for m in data.get("messages") or [] if isinstance(m, dict) and (
+            m.get("role") == "assistant" or (m.get("role") in ("system", "user", "tool")
+                                             and isinstance(m.get("content"), str)))]
         s.messages = msgs or s.messages
         system = {"role": "system", "content": cli.build_dl_system_prompt(s.workspace, s.mode)}
         if s.messages[0].get("role") == "system":
