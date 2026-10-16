@@ -163,7 +163,7 @@ class Session:
         # only with its text
         msgs = [m for m in data.get("messages") or [] if isinstance(m, dict) and (
             m.get("role") == "assistant" or (m.get("role") in ("system", "user", "tool")
-                                             and isinstance(m.get("content"), str)))]
+                                             and isinstance(m.get("content"), (str, list))))]   # list: parts, e.g. images
         s.messages = msgs or s.messages
         system = {"role": "system", "content": cli.build_dl_system_prompt(s.workspace, s.mode)}
         if s.messages[0].get("role") == "system":
