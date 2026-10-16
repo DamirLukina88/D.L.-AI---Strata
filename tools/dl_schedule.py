@@ -597,8 +597,11 @@ def call(tool: str, args: dict) -> str:
         if tool == "remove":
             if _context().get("job"):
                 return "Error: a scheduled job cannot remove jobs"
-            job = remove(int(a.get("id") or 0))
-            return f"Removed #{job['id']}." if job else f"Error: no job #{a.get('id')}"
+            n = a.get("id")
+            if isinstance(n, bool) or not (isinstance(n, int) or (isinstance(n, str) and n.strip().lstrip("#").isdigit())):
+                return f"Error: id must be a job number from schedule__list, not {n!r}"   # true would remove #1
+            job = remove(int(str(n).strip().lstrip("#")))
+            return f"Removed #{job['id']}." if job else f"Error: no job #{n}"
     except WhenError as e:
         return f"Error: {e}"
     except (TypeError, ValueError) as e:

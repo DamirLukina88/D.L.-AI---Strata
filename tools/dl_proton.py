@@ -260,7 +260,9 @@ def html_to_text(html: str) -> str:
     return re.sub(r"\n\s*\n+", "\n\n", re.sub(r"[ \t]+", " ", "".join(p.parts))).strip()
 
 
-def _fetch(m, uid: int):
+def _fetch(m, uid):
+    if isinstance(uid, bool) or not (isinstance(uid, int) or (isinstance(uid, str) and uid.strip().isdigit())):
+        raise ProtonError(f"uid must be a message number from search_mail, not {uid!r}")   # true would be message 1
     typ, data = m.uid("FETCH", str(int(uid)), "(BODY.PEEK[])")
     raw = next((d[1] for d in data or [] if isinstance(d, tuple)), None)
     if typ != "OK" or raw is None:

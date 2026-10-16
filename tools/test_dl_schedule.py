@@ -125,6 +125,13 @@ class When(unittest.TestCase):
 
 
 class Store(Temp):
+    def test_remove_needs_a_real_job_number(self):
+        S.add("in 2h a", now=NOW)
+        for bad in (True, 1.0, "one", None, [1]):
+            self.assertIn("job number", S.call("remove", {"id": bad}))
+        self.assertEqual(len(S.load()["jobs"]), 1)
+        self.assertEqual(S.call("remove", {"id": "#1"}), "Removed #1.")
+
     def test_email_result_false_string_is_no(self):
         S.call("add", {"when": "in 2h", "prompt": "a", "email_result": "false"})
         S.call("add", {"when": "in 2h", "prompt": "b", "email_result": "true"})

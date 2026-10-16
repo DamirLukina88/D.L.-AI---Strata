@@ -169,6 +169,14 @@ class Reading(Base):
         self.assertFalse(out.startswith("Error"), out)
         self.assertIn("line", dl_proton.call("get_attachment", {"uid": 13, "name": "n.txt"}))
 
+    def test_uid_must_be_a_message_number(self):
+        for bad in (True, 1.5, "x", [11]):
+            self.assertIn("message number", dl_proton.call("read_mail", {"uid": bad}))
+            self.assertIn("message number", dl_proton.call("send_mail", {"to": "a@example.com", "body": "x",
+                                                                         "reply_to_uid": bad}))
+        self.assertEqual(FakeSmtp.sent, [])
+        self.assertIn("Subject: Meeting", dl_proton.call("read_mail", {"uid": "12"}))
+
     def test_unknown_folder(self):
         self.assertIn("no folder", dl_proton.call("search_mail", {"folder": "Nope"}))
 
