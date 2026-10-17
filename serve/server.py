@@ -201,6 +201,7 @@ VISION_START = "<|vision_start|>"
 # broken state that answers one token forever (an issue saw 36,689 tokens of "!"). The config's "repeat_stop_tokens"
 # sets it; 0 turns it off.
 REPEAT_STOP_TOKENS = 256
+ANSWER_ROOM_MIN_CAP = 1024    # 0.1.45: from this max_tokens on, thinking without a budget is closed early enough to leave room to answer
 ANSWER_RESERVE_MIN = 512      # #984: the tokens kept for the answer when a thinking budget is cut down to fit max_tokens
 # #123: what closes the thinking when it reaches reasoning_budget_tokens (the model's own end-of-thinking tag after it)
 # #1053 (opt-in "reasoning_close_retry": true): a reply that ends on its stop token still inside <think>, with no answer
@@ -757,6 +758,19 @@ class ConvCacheLog:
             if m:
                 self.state["parked"] = int(m.group(1))
         return dict(self.state)
+
+
+def conversation_slots(engine) -> int | None:
+    """The number of conversation slots the engine can keep at once (--conversation-cache-slots, or the INFO line's
+    conversation_cache_slots). None when not set."""
+    args = engine.spawn[1] if hasattr(engine, "spawn") else []
+    if "--conversation-cache-slots" in args[:-1]:
+        try:
+            return int(args[args.index("--conversation-cache-slots") + 1])
+        except ValueError:
+            pass
+    slots = (getattr(engine, "info", None) or {}).get("conversation_cache_slots")
+    return slots if isinstance(slots, int) else None
 
 
 def conversation_cache_view(info: dict, hist: list, totals: dict, parked: dict) -> dict:
@@ -2927,22 +2941,31 @@ class ByteTokenizer:
     ALWAYS = ()                                     # specials matched without parse_special (type 4, as <think>)
 
     @property
+    def max_special_len(self):
+        return max(len(s) for s in self.SPECIALS)
+
+    @property
     def control_tokens(self):
         return [s for s in self.SPECIALS if s not in self.ALWAYS]
 
     def encode(self, text, parse_special=False, plain=()):
-        out, i = [], 0
+        return self.encode_marked(text, parse_special, plain)[0]
+
+    def encode_marked(self, text, parse_special=False, plain=()):
+        """encode() and its resume points (after each special), as strata_tokenizer's for PromptEncoder."""
+        out, marks, i = [], [], 0
         while i < len(text):
             for k, s in enumerate(self.SPECIALS):
                 if (parse_special or s in self.ALWAYS) and text.startswith(s, i) and not any(
                         a <= i < b for a, b in plain):
                     out.append(256 + k)
                     i += len(s)
+                    marks.append((i, len(out)))
                     break
             else:
                 out.extend(text[i].encode("utf-8"))
                 i += 1
-        return out
+        return out, marks
 
     def decode(self, ids, errors="replace"):
         raw = bytearray()
@@ -3101,6 +3124,7 @@ class Service:
         self.literals = literal_tags(getattr(tokenizer, "control_tokens", ()))   # texts that stay text inside a message
         self.fit_max_tokens = fit_max_tokens          # --fit-max-tokens: clamp the output cap instead of 400
         self.aliases: list[str] = []                  # #297: other names of the model (the config's `aliases`)
+        self.answer_room = True                       # 0.1.45: see ANSWER_ROOM_MIN_CAP (the config's "answer_room": false turns it off)
         self.reasoning_close_retry = False            # #1053 (opt-in): close the thinking once when a reply ends inside it
         self.codex_compaction_cache = False           # #924 (opt-in): a Codex compaction is rendered with its conversation's tools
         self.codex_thread_titles = False              # #923 (opt-in): answer Codex's thread-title turns without the engine
@@ -3146,6 +3170,9 @@ class Service:
                        "prompt_ms": 0.0, "decode_ms": 0.0,
                        "drafts_offered": 0, "drafts_accepted": 0}   # #457: the MTP drafts, summed where reported
         self.last_timings = None                         # the last finished request's, llama.cpp's names (/v1/status)
+        # /metrics/prometheus' two throughput gauges need the totals as they stood at the last scrape, because
+        # llama.cpp averages them over the window between two scrapes (#2341).
+        self.scrape_bucket = (0, 0.0, 0, 0.0)
         from serve.prometheus import Latencies
         self.latencies = Latencies()                     # GET /metrics in Prometheus text: the latency histograms
         self.last_request_at = None                      # when a request last started or finished
@@ -3176,6 +3203,17 @@ class Service:
         self.restore_after_load = None                    # a session file an image job saved before it unloaded
         self.stop_ids = set(tokenizer.encode(IM_END, parse_special=True) +
                             tokenizer.encode("<|endoftext|>", parse_special=True))
+        # #567: a prompt re-encodes only what follows the last special token it shares with a recent prompt (the
+        # same ids as a full encode: tools/strata_tokenizer.py PromptEncoder).  Tokenizers without resume points
+        # encode in full.
+        self.prompts = None
+        if hasattr(tokenizer, "encode_marked") and hasattr(tokenizer, "max_special_len"):
+            from strata_tokenizer import PromptEncoder
+            # one kept prompt per conversation the engine's cache can hold (--conversation-cache-slots); the
+            # encoder's own default without that setting
+            slots = conversation_slots(engine)
+            self.prompts = PromptEncoder(tokenizer, keep=slots) if slots is not None and slots > 0 \
+                else PromptEncoder(tokenizer)
 
     def loaded(self) -> bool:
         return not hasattr(self.engine, "alive") or self.engine.alive()
@@ -3780,7 +3818,7 @@ class Service:
         if effort:
             if api == "openai":
                 ctk = req.get("chat_template_kwargs") if isinstance(req.get("chat_template_kwargs"), dict) else {}
-                if not req.get("reasoning_effort") and not req.get("reasoning") and \
+                if req.get("reasoning_effort") in (None, "") and not req.get("reasoning") and \
                         "enable_thinking" not in ctk and "reasoning_effort" not in ctk:
                     req["reasoning_effort"] = effort
             elif not req.get("thinking") and not req.get("output_config"):
@@ -3935,8 +3973,15 @@ class Service:
         with self.status_lock:
             s, t = dict(self.status), dict(self.totals)
             running = len(self.live_reqs) or int(bool(s.get("busy")))
-        prompt_n = t["prompt_tokens"] - t["reused"]               # what was read, as llama.cpp counts it
-        prompt_s, decode_s = t["prompt_ms"] / 1000, t["decode_ms"] / 1000
+            prompt_n = t["prompt_tokens"] - t["reused"]               # what was read, as llama.cpp counts it
+            prompt_s, decode_s = t["prompt_ms"] / 1000, t["decode_ms"] / 1000
+            # llama.cpp reads these two gauges from a bucket it resets on every scrape (server_metrics::bucket,
+            # "the gauges are averaged over the window between two scrapes"), so an idle server reports 0 rather
+            # than its lifetime average. Keep the same window here, or the names lie to llama.cpp dashboards.
+            was_prompt_n, was_prompt_s, was_predicted_n, was_decode_s = self.scrape_bucket
+            self.scrape_bucket = (prompt_n, prompt_s, t["output_tokens"], decode_s)
+        d_prompt_n, d_prompt_s = prompt_n - was_prompt_n, prompt_s - was_prompt_s
+        d_predicted_n, d_decode_s = t["output_tokens"] - was_predicted_n, decode_s - was_decode_s
         rows = [
             ("llamacpp:prompt_tokens_total", "counter", "Prompt tokens read", prompt_n),
             ("llamacpp:prompt_tokens_cached_total", "counter", "Prompt tokens the conversation cache already held",
@@ -3944,10 +3989,10 @@ class Service:
             ("llamacpp:prompt_seconds_total", "counter", "Prompt read time", prompt_s),
             ("llamacpp:tokens_predicted_total", "counter", "Tokens generated", t["output_tokens"]),
             ("llamacpp:tokens_predicted_seconds_total", "counter", "Generation time", decode_s),
-            ("llamacpp:prompt_tokens_seconds", "gauge", "Average prompt read throughput in tokens/s",
-             prompt_n / prompt_s if prompt_s else 0),
-            ("llamacpp:predicted_tokens_seconds", "gauge", "Average generation throughput in tokens/s",
-             t["output_tokens"] / decode_s if decode_s else 0),
+            ("llamacpp:prompt_tokens_seconds", "gauge", "Average prompt read throughput in tokens/s, since the last scrape",
+             d_prompt_n / d_prompt_s if d_prompt_s > 0 else 0),
+            ("llamacpp:predicted_tokens_seconds", "gauge", "Average generation throughput in tokens/s, since the last scrape",
+             d_predicted_n / d_decode_s if d_decode_s > 0 else 0),
             ("llamacpp:requests_processing", "gauge", "Requests running", running),
             ("llamacpp:requests_deferred", "gauge", "Requests waiting their turn", s.get("queued") or 0),
             ("strata:requests_total", "counter", "Requests finished", t["requests"]),
@@ -4019,17 +4064,21 @@ class Service:
         tail = "" if off else EFFORT_TURN.format(EFFORT_TEXT.get(effort, EFFORT_TEXT["medium"]))
         return history + tail + full[len(mine):]
 
-    def encode_prompt(self, messages, tools, kwargs) -> list[int]:
+    def encode_prompt(self, messages, tools, kwargs, store: bool = True) -> list[int]:
         """The request's prompt: the template rendered and tokenized.  #537: a <think> / </think> written inside a
         message's text is encoded as the text it is, not as the model's reasoning markers (the template's own are).
         A control token's text (<|im_start|>, <|im_end|>, <|endoftext|>, ...) inside a message is text as well: only
-        the control tokens the template writes are control tokens."""
+        the control tokens the template writes are control tokens.  `store=False` (a token count) reuses the kept
+        prompts without adding or replacing one."""
         marked, marked_tools, changed = mark_think_literals(messages, tools, self.literals)
         prompt = self.render_prompt(marked, marked_tools, kwargs)
-        if not changed:
-            return self.tok.encode(prompt, parse_special=True)
-        prompt, plain = unmark_think_literals(prompt, self.literals)
-        return self.tok.encode(prompt, parse_special=True, plain=plain)
+        plain = ()
+        if changed:
+            prompt, plain = unmark_think_literals(prompt, self.literals)
+        if self.prompts is not None:            # #567: only what follows the last special shared with a recent prompt
+            return self.prompts.encode(prompt, plain, store)
+        return self.tok.encode(prompt, parse_special=True, plain=plain) if plain else \
+            self.tok.encode(prompt, parse_special=True)
 
     @contextlib.contextmanager
     def _turn(self, cancel=None):
@@ -4077,6 +4126,10 @@ class Service:
                     content[n] = {"type": "text", "text": f"[image omitted: {why}]"}
         return fetched
 
+    def forget_prompt(self, ids):
+        if self.prompts is not None:
+            self.prompts.forget(ids)
+
     def prepare(self, messages, tools, kwargs, max_new=None, force=None, req=None, cancel=None):
         """-> (ids, thinking, max_new). An unset or non-positive max_new (some clients send -1) means "unlimited":
         the rest of the context.  `force` (forced_call): without thinking the reply starts with it, so it ends the
@@ -4084,7 +4137,7 @@ class Service:
         # `cancel` (#1999): set when the client hangs up; the downloads, the wait for the turn and the encodes stop
         # between pictures and raise ClientGone
         fetched = self._note_unreadable_tool_images(messages, cancel)
-        ids = self.encode_prompt(messages, tools, kwargs)
+        ids = encoded_ids = self.encode_prompt(messages, tools, kwargs)
         if force and kwargs.get("enable_thinking", True) is False:
             ids = ids + self.tok.encode(force, parse_special=True)
         self.embeddings.path = None
@@ -4146,12 +4199,16 @@ class Service:
         room = ctx - CTX_SLACK - len(ids)
         if max_new is None or max_new <= 0 or (self.fit_max_tokens and room < 1):
             if room < 1:
+                # A prompt refused for the context is not kept (#567): the client cannot resend it unchanged.  The
+                # other refusals (engine starting, images) keep it: the same prompt comes back and its encode is reused.
+                self.forget_prompt(encoded_ids)
                 raise ValueError("request exceeds the context window: "
                                  f"prompt ({len(ids)} tokens) leaves no room to answer in the context "
                                  f"({ctx}); requests are never truncated")
             max_new = room
         elif max_new > room:
             if not self.fit_max_tokens:
+                self.forget_prompt(encoded_ids)
                 raise ValueError("request exceeds the context window: "
                                  f"prompt ({len(ids)} tokens) + max tokens ({max_new}) exceeds the context "
                                  f"({ctx}); requests are never truncated. Send a smaller "
@@ -4314,6 +4371,15 @@ class Service:
             sampling = {**defaults, **req_values}
         # #123: read after the merge, so a budget shared through POST /settings is seen like the other keys
         budget = self.reasoning_budget(sampling) if thinking else None
+        if thinking and not budget and self.answer_room and max_new and max_new >= ANSWER_ROOM_MIN_CAP:
+            # 0.1.45: max_tokens counts the thinking too.  A client that caps the reply at 8192 (the desktop agent's
+            # harness sends max_completion_tokens: 8192 on every request) and a task the model thinks long about got
+            # the cut-off in the middle of the thinking and NO answer.  So thinking is closed early enough to leave
+            # the answer its quarter of the cap (the budget's wrap-up: a short closing sentence, </think>, the answer).
+            # A request with a budget of its own, or max_tokens below ANSWER_ROOM_MIN_CAP, is left as it was.
+            budget = max_new - min(max(ANSWER_RESERVE_MIN, max_new // 4), max_new // 2)
+            if max_new <= 32768: print(f"[strata] thinking limited to {budget} of max_tokens {max_new} so the answer has room "
+                  "(\"answer_room\": false in the config turns this off)", flush=True)
         if budget and max_new and max_new > 0:
             # #984: a budget at or near max_tokens never fires before the reply is cut off while still thinking, so
             # it has no answer.  Close the thinking early enough to leave room for one.
@@ -6826,7 +6892,7 @@ def make_handler(svc: Service):
             messages, tools, kw = anthropic_to_messages(req, svc.anthropic_think_unasked)
             stop_strings(req)                                 # the same 400 as the request itself would get
             check_request_sampling(req)                       # ... likewise a sampling field of the wrong type
-            self._json(200, {"input_tokens": len(svc.encode_prompt(messages, tools, kw))})
+            self._json(200, {"input_tokens": len(svc.encode_prompt(messages, tools, kw, store=False))})
 
         def _anthropic(self, req):
             _dump_claude_prompt(req)
@@ -7549,6 +7615,7 @@ def main() -> int:
                   sampling_defaults=sampling_defaults,
                   fit_max_tokens=a.fit_max_tokens or cfg.get("fit_max_tokens") is True)
     svc.lazy = lazy
+    svc.answer_room = cfg.get("answer_room") is not False
     svc.reasoning_close_retry = cfg.get("reasoning_close_retry") is True    # #1053: opt-in, off by default
     if cfg.get("images"):                               # image generation (serve/images.py), set up by setup --images
         icfg = {k: (os.path.abspath(os.path.join(cfg.get("cwd") or ".", v))
