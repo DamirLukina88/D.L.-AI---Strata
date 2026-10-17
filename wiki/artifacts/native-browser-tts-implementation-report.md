@@ -90,6 +90,11 @@ All 6 automated unit tests passed with 100% assertions:
 - Live HTTP curl to `http://127.0.0.1:8080/`: Verified delivery of `index.html`, `app.js?v=20261017-tts`, and `sprite.svg?v=20261017-tts`.
 - Secret scan audit via `tools/dl_auditing.py`: 100% clean, 0 secret violations across all 5 modified files.
 
+### 4.3 Linux Speech Dispatcher & Piper Neural TTS Integration
+- **Default Voice Alphabetical Sorting Gotcha**: In Chromium on Linux (`content/browser/speech/tts_linux.cc`), voices from all active Speech Dispatcher modules are stored in a `std::map<string, SPDChromeVoice>` sorted alphabetically. When `espeak-ng` was loaded alongside `piper`, eSpeak-NG's 14,805 voices (starting with letters like 'A' — `Afrikaans espeak-ng`) preempted Piper, causing Chromium's `voices[0]` to default to robotic eSpeak-NG.
+- **Resolution**: Configured `~/.config/speech-dispatcher/speechd.conf` with `AddModule "piper" "sd_generic" "piper.conf"` and `DefaultModule piper`, leaving eSpeak disabled so Speech Dispatcher serves exclusively the Piper neural voices (`en_US-lessac-medium` and `en_US-ryan-medium`).
+- **UI Prioritization**: Updated `getVoice()` in `app.js` to actively prioritize Piper neural voices and ignore stale eSpeak URIs in `localStorage`.
+
 ---
 
 ## 5. Artifacts & Commits

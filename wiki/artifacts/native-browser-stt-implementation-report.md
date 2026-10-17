@@ -90,7 +90,12 @@ All 11 automated unit tests passed (100%):
 - `node --check serve/web/app.js`: Syntax check passed (Exit code 0).
 - `node tools/test_tts_sanitizer.js`: Existing TTS tests intact (6/6 passed).
 - `python3 tools/pre-commit-scan-secrets.py`: Clean scan across all modified files (zero leaks).
-- `curl -s http://127.0.0.1:8080/`: Live HTTP verification confirmed all assets served with fresh cache-busting headers (`?v=20261017-stt4`).
+### 3.3 Android Continuous Mode Gotcha & Idempotent Merger
+- **Continuous Mode Glitch on Android**: Setting `continuous = true` in Web Speech API on Android Chrome triggers an underlying speech recognition engine bug where speech sessions continuously restart or append prior final transcripts into subsequent `event.results`, resulting in compounded word repetitions.
+- **Resolution**:
+  1. Detect Android (`/Android/i.test(navigator.userAgent)`) and set `this.recognition.continuous = !isAndroid;`. This matches native Gboard / Google Assistant single-turn dictation behavior.
+  2. Implemented `mergeSpeechTranscripts(existing, incoming)` in `serve/web/app.js` handling disjoint phrases, cumulative expansions, duplicate triggers, and head/tail overlaps without repeating text.
+  3. Expanded test suite in `tools/test_stt_controller.js` to 14/14 passing tests (covering multi-chunk cumulative events and existing base text merging).
 
 ---
 
