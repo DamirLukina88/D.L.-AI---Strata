@@ -19,7 +19,7 @@ The solution operates with zero external network requests, zero server CPU/GPU o
 
 ### Supported Platforms & Browsers
 - **Desktop Google Chrome / Chromium**: Full Web Speech API with V8 GC retention and 10s watchdog heartbeat.
-- **Desktop Brave Browser**: Local system voice prioritization, gesture-compliant audio unlocking, and privacy-shield auto-play fallback.
+- **Desktop Brave Browser & Linux**: Powered by local Piper Neural Text-to-Speech via Speech-Dispatcher with human ONNX voices (Lessac, Ryan) running 20x faster than real-time on CPU, with fallback to eSpeak-NG.
 - **Android Google Chrome**: Web Speech API bridge to Android system TextToSpeech service, Screen Wake Lock API, and sentence-boundary chunking (&le;180 chars).
 - **Android Brave Browser**: Brave mobile shields compatibility, background tab sleep mitigation, and touch-unlocked playback pipeline.
 - **Native Android System Audio Integration**: `navigator.mediaSession` integration with Android notification shade and lock-screen playback controls (Play, Pause, Stop), paired with a microscopic silent WebAudio keep-alive buffer.
