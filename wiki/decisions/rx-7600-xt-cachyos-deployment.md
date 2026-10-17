@@ -40,6 +40,14 @@ Strata was successfully deployed on CachyOS Linux equipped with an AMD Ryzen 5 3
   - Backup: `~/.config/dl-ai/backup-20261013/strata-coder-iq1_m.json.before-agent-settings`.
   - The experimental speed projection's effect on coding quality is unmeasured.
 
+- 2026-10-17: Upstream v0.1.45 evaluation on RX 7600 XT (`gfx1102`):
+  - **rocBLAS Tuning vs RDNA3 WMMA:** Upstream commit `57c95d5f` (`tune_rocblas`) applies exclusively to older RDNA2 cards (`gfx103x`) lacking `hipBLASLt`. On our RDNA3 `gfx1102`, prompt GEMMs natively run on hardware **WMMA matrix cores** (`wmma_gemm.cu` and `STRATA_HIP_WMMA=1`) and `hipBLASLt`, delivering +12.8% to +16.6% faster prefill over non-tensor fallback. See [Component 1 WMMA Hardware Validation Report](../artifacts/v0-1-45-component-1-wmma-hardware-validation-report.md) and [Upstream v0.1.45 Evaluation Plan](../artifacts/upstream-v0-1-45-evaluation-and-benchmark-plan.md).
+  - **Evaluation Targets:** Evaluating HIP Tiled QSA Scorer (`STRATA_SELECT_SIMT=1`), automatic thinking budget protection (`#984`), and Prompt Tokenizer prefix caching (`#567`).
+  - **Component 2 Ported & Verified:** Upstream commit `4f21be87` ported the FP32 tiled QSA scorer to HIP. On `gfx1102`, `STRATA_SELECT_SIMT=1` activates tile geometry `32/64/32/4`, delivering 3.38x to 5.87x microsecond speedups in block scoring across 4K–131K contexts with 100% selection parity and passing the FP64 accuracy gate. See [Component 2 FP32 Tiled QSA Scorer Report](../artifacts/v0-1-45-component-2-simt-qsa-scorer-report.md).
+  - **Component 3 Ported & Verified:** Upstream commits `d0e990ba` and `194c2688` implemented automatic thinking budget protection (`#984`), reserving &ge;25% of `max_tokens` (floor 512) for the answer when no budget is specified, and mapping Anthropic `thinking.budget_tokens`. Verified via 38 unit tests (100% pass) and live dual-API calls. See [Component 3 Thinking Budget Protection Report](../artifacts/v0-1-45-component-3-thinking-budget-protection-report.md).
+  - **Local-Only Policy:** All pre-evaluation snapshots saved to `/mnt/data/Strata-data/local_backups/v145_eval/`; zero git commits, branches, or tags created.
+
+
 ## Key Facts
 
 - `gfx1102` (Navi 33) was enabled in `setup.py` under `AMD_ARCHS` and compiled natively via ROCm 7.2.4 (`/opt/rocm/lib`).
@@ -96,6 +104,9 @@ The host machine features a high-capacity second NVMe SSD on `/mnt/data` (460 GB
 - Models: [Strata Model Variants](../entities/strata-models.md)
 - Sizing Decisions: [Model Selection and Hardware Budgeting](model-selection-and-hardware-budget.md)
 - Git: [Local-Only Repository](../preferences/local-only-repository.md)
+- Evaluation: [Component 4: Prompt Tokenizer Prefix Caching Validation & Benchmark Report](../artifacts/v0-1-45-component-4-tokenizer-prefix-caching-report.md)
+- Observability: [Component 5: Web Monitor & Observability Updates Validation Report](../artifacts/v0-1-45-component-5-web-monitor-observability-report.md)
+- Complete v0.1.45 Report: [Strata v0.1.45 Complete Upstream Evaluation & Benchmark Report](../artifacts/v0-1-45-optimizations-and-tuning-report.md)
 
 ## Sources
 

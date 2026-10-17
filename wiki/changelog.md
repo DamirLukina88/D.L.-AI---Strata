@@ -15,6 +15,12 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-17:** Ingestion. artifacts/v0-1-45-component-2-simt-qsa-scorer-report.md, artifacts/v0-1-45-component-3-thinking-budget-protection-report.md, artifacts/v0-1-45-component-4-tokenizer-prefix-caching-report.md, artifacts/v0-1-45-component-5-web-monitor-observability-report.md, artifacts/v0-1-45-optimizations-and-tuning-report.md. (Agent: Antigravity)
+- **2026-10-17:** Artifact Backup. Component 1 RDNA3 WMMA hardware validation and dual-tier benchmark report. (Agent: Antigravity)
+- **2026-10-17:** Ingestion. artifacts/v0-1-45-component-1-wmma-hardware-validation-report.md. (Agent: Antigravity)
+- **2026-10-17:** Add upstream v0.1.45 evaluation and dual-tier benchmark plan for RX 7600 XT. (Agent: Antigravity)
+- **2026-10-17:** Ingestion. artifacts/upstream-v0-1-45-evaluation-and-benchmark-plan.md. (Agent: Antigravity)
+- **2026-10-17:** Update. decisions/rx-7600-xt-cachyos-deployment.md. (Agent: Antigravity)
 - **2026-10-17:** Artifact Backup. Saved Strata Full Project Audit Report (2026-10-16) to wiki/artifacts/. (Agent: Antigravity)
 - **2026-10-17:** Update. entities/strata.md. (Agent: Antigravity)
 - **2026-10-17:** Ingestion. artifacts/strata-full-project-audit-2026-10-16.md. (Agent: Antigravity)
