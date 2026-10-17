@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-17:** Ingestion. decisions/desktop-piper-voice-switching-and-stt-auto-speak.md. (Agent: Antigravity)
 - **2026-10-17:** fix(voice): fixed desktop Piper voice switching in speechd wrapper and gated auto-speak to STT voice prompts only. (Agent: Antigravity)
 - **2026-10-17:** Update. private/.env (HASS_TOKEN). (Agent: Antigravity)
 - **2026-10-17:** Ingestion. decisions/home-assistant-strata-mcp.md. (Agent: Antigravity)

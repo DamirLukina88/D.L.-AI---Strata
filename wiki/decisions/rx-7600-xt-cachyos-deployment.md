@@ -46,6 +46,7 @@ Strata was successfully deployed on CachyOS Linux equipped with an AMD Ryzen 5 3
   - **Component 2 Ported & Verified:** Upstream commit `4f21be87` ported the FP32 tiled QSA scorer to HIP. On `gfx1102`, `STRATA_SELECT_SIMT=1` activates tile geometry `32/64/32/4`, delivering 3.38x to 5.87x microsecond speedups in block scoring across 4K–131K contexts with 100% selection parity and passing the FP64 accuracy gate. See [Component 2 FP32 Tiled QSA Scorer Report](../artifacts/v0-1-45-component-2-simt-qsa-scorer-report.md).
   - **Component 3 Ported & Verified:** Upstream commits `d0e990ba` and `194c2688` implemented automatic thinking budget protection (`#984`), reserving &ge;25% of `max_tokens` (floor 512) for the answer when no budget is specified, and mapping Anthropic `thinking.budget_tokens`. Verified via 38 unit tests (100% pass) and live dual-API calls. See [Component 3 Thinking Budget Protection Report](../artifacts/v0-1-45-component-3-thinking-budget-protection-report.md).
   - **Local-Only Policy:** All pre-evaluation snapshots saved to `/mnt/data/Strata-data/local_backups/v145_eval/`; zero git commits, branches, or tags created.
+  - **Piper TTS & STT Voice Features:** 20 US Piper neural voices integrated via Speech Dispatcher and gated for STT-only auto-speak. Details: [Desktop Piper Voice Switching and STT-Only Auto-Speak Gating](desktop-piper-voice-switching-and-stt-auto-speak.md).
 
 
 ## Key Facts
