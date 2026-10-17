@@ -15,7 +15,7 @@ last_verified: 2026-10-15
 
 **Built and live** for Fetch, DeepL, Playwright and Google (Google since 2026-10-15, see [Google: live setup](#google-live-setup-2026-10-15)).
 - Code: `tools/dl_mcp.py` (registry, router, allowlist, approvals), hooks in `tools/dl_cli.py` and `tools/dl_sessiond.py`, chips and the mail approval card in the web Code tab, opt-in `env_inherit` in `serve/mcp.py`. Tests: `python tools/test_dl_mcp.py` (21), plus `serve.test_mcp`, `test_dl_sessiond`, `test_dl_auditing` all green.
-- Config: `~/.config/dl-ai/mcp.json` (mode 600). Python servers live in `~/.local/share/dl-ai/mcp-venv`, npm servers in `~/.local/share/dl-ai/mcp-npm`. Pinned versions: mcp-server-fetch 2026.8.18, deepl-mcp-server 1.3.10, @playwright/mcp 0.0.82.
+- Config: `~/.config/dl-ai/mcp.json` (mode 600). Python servers live in `~/.local/share/dl-ai/mcp-venv`, npm servers in `~/.local/share/dl-ai/mcp-npm`. Pinned versions: mcp-server-fetch 2026.8.18, deepl-mcp-server 1.3.10, @playwright/mcp 0.0.82. Also integrated with local [Home Assistant MCP Server](../decisions/home-assistant-strata-mcp.md).
 - Detailed plan: `~/.claude/plans/create-a-detailed-implementation-quirky-meadow.md`.
 
 **Measured prompt size** (qwen3.8-flash-next-coder-iq1_m on the RX 7600 XT, request "hello", max_tokens 1, no prefix cache):

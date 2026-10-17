@@ -5790,6 +5790,11 @@ def make_handler(svc: Service):
                 if self._authorized():
                     self._json(200, svc.mcp.status() if svc.mcp else {"servers": [], "tools": 0})
                 return
+            if path in ("/v1/audio/transcriptions", "/v1/audio/status", "/audio/status"):
+                if self._authorized():
+                    from serve.transcribe import get_stt_status
+                    self._json(200, get_stt_status())
+                return
             if path in ("/available_models", "/api/models"):
                 if self._authorized():
                     self._json(200, {"models": svc.available_models(), "current": svc.model})
@@ -6145,6 +6150,9 @@ def make_handler(svc: Service):
                 except OSError as e:
                     self._json(503, {"error": {"message": f"the CLI session daemon is not running ({e})"}})
                 return
+            if path in ("/v1/audio/transcriptions", "/audio/transcriptions"):
+                self._audio_transcriptions()
+                return
             try:
                 req = json.loads(self._body() or b"{}")
                 if not isinstance(req, dict):
@@ -6307,6 +6315,80 @@ def make_handler(svc: Service):
             host = self.headers.get("Host") or f"{self.server.server_address[0]}:{self.server.server_address[1]}"
             scheme = "https" if (self.headers.get("X-Forwarded-Proto") or "").lower() == "https" else "http"
             self._json(200, gen.response(images, job, figures, f"{scheme}://{host}"))
+
+        def _audio_transcriptions(self):
+            """POST /v1/audio/transcriptions (serve/transcribe.py): local Whisper audio transcription."""
+            if not self._authorized():
+                return
+            content_type = self.headers.get("Content-Type", "")
+            try:
+                body = self._body()
+            except Exception as e:
+                self._json(400, {"error": {"message": f"could not read audio body: {e}"}})
+                return
+
+            if not body:
+                self._json(400, {"error": {"message": "missing audio payload"}})
+                return
+
+            audio_bytes = b""
+            language = None
+            prompt = None
+
+            # 1. Multipart Form Data (OpenAI standard)
+            if "multipart/form-data" in content_type:
+                from email.parser import BytesParser
+                from email.policy import default
+                try:
+                    msg = BytesParser(policy=default).parsebytes(b"Content-Type: " + content_type.encode() + b"\r\n\r\n" + body)
+                    for part in msg.iter_parts():
+                        name = part.get_param("name", header="content-disposition")
+                        if name == "file":
+                            audio_bytes = part.get_payload(decode=True) or b""
+                        elif name == "language":
+                            language = (part.get_payload(decode=True) or b"").decode("utf-8", errors="ignore").strip()
+                        elif name == "prompt":
+                            prompt = (part.get_payload(decode=True) or b"").decode("utf-8", errors="ignore").strip()
+                except Exception as e:
+                    self._json(400, {"error": {"message": f"malformed multipart payload: {e}"}})
+                    return
+
+            # 2. JSON with base64 audio
+            elif "application/json" in content_type:
+                import base64
+                try:
+                    data = json.loads(body.decode("utf-8", errors="ignore"))
+                    raw_b64 = data.get("file") or data.get("audio") or ""
+                    if "," in raw_b64:
+                        raw_b64 = raw_b64.split(",", 1)[1]
+                    audio_bytes = base64.b64decode(raw_b64)
+                    language = data.get("language")
+                    prompt = data.get("prompt")
+                except Exception as e:
+                    self._json(400, {"error": {"message": f"malformed json payload: {e}"}})
+                    return
+
+            # 3. Direct binary audio payload
+            else:
+                audio_bytes = body
+                query = parse_qs(urlsplit(self.path).query)
+                language = query.get("language", [None])[0]
+
+            if not audio_bytes:
+                self._json(400, {"error": {"message": "no audio data found in request"}})
+                return
+
+            from serve.transcribe import transcribe_audio, TranscriptionError
+            try:
+                t0 = time.time()
+                text = transcribe_audio(audio_bytes, language=language, prompt=prompt)
+                dur = time.time() - t0
+                print(f"[strata] stt: transcribed {len(audio_bytes)} bytes in {dur:.2f}s -> {repr(text[:60])}", flush=True)
+                self._json(200, {"text": text})
+            except TranscriptionError as e:
+                self._json(500, {"error": {"type": "server_error", "message": str(e)}})
+            except Exception as e:
+                self._json(500, {"error": {"type": "server_error", "message": f"transcription failed: {e}"}})
 
         def _props(self):
             model = parse_qs(urlsplit(self.path).query).get("model", [svc.model])[0]

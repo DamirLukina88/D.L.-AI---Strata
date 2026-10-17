@@ -22,6 +22,7 @@ import re
 import readline
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -329,6 +330,55 @@ DL_TOOLS = [
                 "required": ["action"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_chat",
+            "description": "Save the current conversation as a Markdown file in the active workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "Optional custom filename to save the markdown chat to (e.g. 'notes.md' or 'plan.md'). Defaults to timestamped name."
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_system_health",
+            "description": "Get real-time system hardware health metrics: CPU, RAM, VRAM, Swap, GPU usage, and server stats.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_engine_status",
+            "description": "Get the Strata AI engine status: loaded model, context size, props, slots, and engine health.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "clear_conversation",
+            "description": "Reset the current conversation history and clear short-term context memory immediately.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
     }
 ]
 
@@ -473,6 +523,10 @@ DL_PLAN_TOOLS = [
     next(t for t in DL_TOOLS if t["function"]["name"] == "exa_web_search"),
     next(t for t in DL_TOOLS if t["function"]["name"] == "resolve_library_id"),
     next(t for t in DL_TOOLS if t["function"]["name"] == "get_library_docs"),
+    next(t for t in DL_TOOLS if t["function"]["name"] == "save_chat"),
+    next(t for t in DL_TOOLS if t["function"]["name"] == "get_system_health"),
+    next(t for t in DL_TOOLS if t["function"]["name"] == "get_engine_status"),
+    next(t for t in DL_TOOLS if t["function"]["name"] == "clear_conversation"),
 ]
 
 
@@ -1082,6 +1136,72 @@ def tool_local_wiki(args: dict, workspace: Path, mode: str = "act", session_cont
         return f"Error executing wiki command: {e}"
 
 
+def tool_save_chat(args: dict, workspace: Path, session_context: dict | None = None) -> str:
+    custom_name = (args.get("filename") or "").strip()
+    messages = (session_context or {}).get("messages", [])
+    user_or_asst = [m for m in messages if m.get("role") in ("user", "assistant")]
+    if not user_or_asst:
+        return "No chat messages to save yet."
+
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M")
+    if custom_name:
+        out_p = Path(custom_name).expanduser()
+        if not out_p.is_absolute():
+            out_p = (workspace / out_p).resolve()
+        if not out_p.suffix:
+            out_p = out_p.with_suffix(".md")
+    else:
+        out_p = workspace / f"dl-ai-code-chat-{now_str}.md"
+
+    md_content = format_messages_to_markdown(messages, model_name="Qwen3.8-Flash-Next Coder", workspace=workspace)
+    try:
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        out_p.write_text(md_content, encoding="utf-8")
+        return f"Chat successfully saved as Markdown to {out_p} ({len(md_content):,} bytes, {len(user_or_asst)} messages)."
+    except Exception as e:
+        return f"Error saving chat to {out_p}: {e}"
+
+
+def tool_get_system_health(args: dict, workspace: Path) -> str:
+    stats = get_system_health(DEFAULT_URL, DEFAULT_API_KEY)
+    card = format_health_card(stats)
+    clean_card = re.sub(r'\033\[[0-9;]*m', '', card)
+    return clean_card.strip()
+
+
+def tool_get_engine_status(args: dict, workspace: Path) -> str:
+    status_str = check_status(DEFAULT_URL, DEFAULT_API_KEY)
+    clean_status = re.sub(r'\033\[[0-9;]*m', '', status_str)
+    return clean_status.strip()
+
+
+def tool_clear_conversation(args: dict, workspace: Path, session_context: dict | None = None) -> str:
+    session = (session_context or {}).get("session")
+    if session is not None and hasattr(session, "messages"):
+        session.messages = [{"role": "system", "content": build_dl_system_prompt(session.workspace, session.mode)}]
+        with getattr(session, "lock", threading.Lock()):
+            session.events = []
+        if hasattr(session, "emit"):
+            session.emit({"type": "cleared"})
+        if hasattr(session, "mcp") and hasattr(session.mcp, "close"):
+            session.mcp.close()
+        if hasattr(session, "notice"):
+            session.notice(f"Memory reset ({session.mode} mode).")
+        if hasattr(session, "emit_state"):
+            session.emit_state()
+        return "Conversation history and context memory have been reset."
+
+    messages = (session_context or {}).get("messages")
+    if messages is not None:
+        messages.clear()
+        mode = (session_context or {}).get("mode", "act")
+        messages.append({"role": "system", "content": build_dl_system_prompt(workspace, mode=mode)})
+        sync_current_chat_state(messages, workspace)
+        return "Conversation history and context memory have been reset."
+
+    return "Conversation reset requested."
+
+
 def terminal_approve(kind: str, summary: str, reason: str) -> bool:
     """Ask on this terminal before a gated action runs (the session daemon swaps in its own approver)."""
     print(f"\n{C_YELLOW}⚠ Approval needed{C_RESET} {C_MUTED}({reason}){C_RESET}\n  {C_BOLD}{summary}{C_RESET}")
@@ -1155,8 +1275,14 @@ def dispatch_dl_tool(name: str, args: dict, workspace: Path, mode: str = "act", 
         return tool_syntax_guard(args, workspace)
     elif name == "scan_secrets":
         return tool_scan_secrets(args, workspace)
-    elif name == "system_health":
-        return tool_system_health(args, workspace)
+    elif name in ("get_system_health", "system_health"):
+        return tool_get_system_health(args, workspace)
+    elif name in ("get_engine_status", "engine_status"):
+        return tool_get_engine_status(args, workspace)
+    elif name in ("save_chat", "export_chat"):
+        return tool_save_chat(args, workspace, session_context=session_context)
+    elif name in ("clear_conversation", "reset_conversation"):
+        return tool_clear_conversation(args, workspace, session_context=session_context)
     elif name == "git_diff_audit":
         return tool_git_diff_audit(args, workspace)
     elif name == "smart_test_runner":
@@ -1681,6 +1807,17 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                 "name": fn_name,
                 "content": result_str
             })
+
+        if turn >= max_turns and (session_context or {}).get("yolo"):
+            if cancel is not None and cancel.is_set():
+                break
+            turn = 0
+            note = f"⚡ [YOLO] Reached {max_turns} tool rounds (DL_MAX_TURNS). Auto-continuing..."
+            if emit:
+                emit({"type": "notice", "level": "info", "text": note})
+            else:
+                print(f"\n{C_ACCENT}{note}{C_RESET}\n")
+            continue
     else:                                   # the cap ended the loop, not the model: ask it for a status
         if not (cancel is not None and cancel.is_set()):
             turn_cap_wrap_up(messages, url, api_key, active_tools, max_turns, emit=emit, cancel=cancel, effort=effort)
@@ -1867,7 +2004,7 @@ def interactive_loop(workspace: Path, url: str, api_key: str, initial_mode: str 
                 print(f"  /context7, /docs <lib> Direct Context7 library documentation lookup")
                 print(f"  /status, /model       Check Strata server health")
                 print(f"  /yolo                 Toggle approvals for destructive commands (on by default)")
-                print(f"  /mcp [on|off NAME]    Tools and MCP servers: list, or turn one on/off (they also start when needed)")
+                print(f"  /mcp [on|off NAME]    Tools and MCP servers (Home Assistant, Google, Exa): list or toggle")
                 print(f"  /schedule             Scheduled jobs (they run in the session daemon: set them up in the Code tab or --attach)")
                 print(f"  !<shell command>      Execute bash command directly in workspace")
                 print(f"  @filename             Inject file content into your prompt")
@@ -2014,8 +2151,10 @@ def interactive_loop(workspace: Path, url: str, api_key: str, initial_mode: str 
                 else:
                     print(f"{C_GREEN}⚡ Executing in ACT MODE: {sub}{C_RESET}\n")
                     prompt = sub
-            elif prompt.split(" ", 1)[0] == "/continue":
-                prompt = prompt[9:].strip() or CONTINUE_PROMPT
+            elif prompt.split(" ", 1)[0] == "/continue" or prompt.strip().lower() in ("continue", "keep going", "go on", "proceed"):
+                parts = prompt.split(" ", 1)
+                sub_arg = parts[1].strip() if len(parts) > 1 and parts[0] == "/continue" else ""
+                prompt = sub_arg or CONTINUE_PROMPT
             elif prompt.startswith("/wiki"):
                 sub = prompt[5:].strip()
                 wroot = resolve_wiki_root(workspace)

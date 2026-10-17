@@ -15,6 +15,21 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-17:** Artifact Backup. Saved Home Assistant plan, session tools plan, and walkthrough artifacts. (Agent: Antigravity)
+- **2026-10-17:** Ingestion. artifacts/homeassistant-strata-core-plan.md, artifacts/session-commands-and-tools-plan.md, artifacts/homeassistant-and-session-tools-walkthrough.md. (Agent: Antigravity)
+- **2026-10-17:** fix(stt): removed 400ms delay on auto-send to make recognized speech submission completely instant (0ms delay). (Agent: Antigravity)
+
+- **2026-10-17:** fix(a11y): resolved Chrome "Blocked aria-hidden on an element because its descendant retained focus" warning on #drawer by blurring #s-apply, restoring focus to opening trigger button, and applying HTML5 inert attribute. (Agent: Antigravity)
+
+- **2026-10-17:** fix(stt & ui): replaced countdown banners with 400ms visual beat auto-send, and made notification toasts non-blocking with instant dismissal on screen tap or toast click. (Agent: Antigravity)
+
+- **2026-10-17:** Update. Isolate General Chat from tools and configure pure infinite auto-continue for YOLO mode. (Agent: Antigravity)
+- **2026-10-17:** fix(stt): implemented live progressive speech population in text box and added 2.5s visual review confirmation countdown with cancel/send-now controls for hands-free dictation. (Agent: Antigravity)
+- **2026-10-17:** Update. Add session management tools and conversational continue notes to shared-cli-session-daemon.md. (Agent: Antigravity)
+- **2026-10-17:** Update. Add session tools (save_chat, get_system_health, get_engine_status, clear_conversation) and conversational continue handling to D.L. CLI and session daemon, decisions/shared-cli-session-daemon.md. (Agent: Antigravity)
+- **2026-10-17:** Ingestion. decisions/local-whisper-speech-to-text.md. (Agent: Antigravity)
+- **2026-10-17:** Update. Document Home Assistant Core deployment, Strata MCP server, GUI /mcp integration, and Xiaomi camera streaming gotchas. (Agent: Antigravity)
+- **2026-10-17:** Update. artifacts/dl-cli-on-demand-mcp-plan.md. (Agent: Antigravity)
 - **2026-10-17:** Ingestion. decisions/desktop-piper-voice-switching-and-stt-auto-speak.md. (Agent: Antigravity)
 - **2026-10-17:** fix(voice): fixed desktop Piper voice switching in speechd wrapper and gated auto-speak to STT voice prompts only. (Agent: Antigravity)
 - **2026-10-17:** Update. private/.env (HASS_TOKEN). (Agent: Antigravity)

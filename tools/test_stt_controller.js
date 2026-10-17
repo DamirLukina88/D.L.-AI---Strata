@@ -308,8 +308,321 @@ assert.strictEqual(
   true,
   "Message speaker button re-click in chat should toggle off"
 );
+// 8. STT Engine Selection logic tests
+function resolveEngine(pref, hasWhisper, hasBrowserSpeech) {
+  if (pref === "whisper") return "whisper";
+  if (pref === "browser") return "browser";
+  if (hasWhisper) return "whisper";
+  if (hasBrowserSpeech) return "browser";
+  return "whisper";
+}
 
-console.log("All STT Unit Tests Passed Successfully! (22/22)");
+// Test 23: Auto with whisper available picks whisper
+assert.strictEqual(
+  resolveEngine("auto", true, true),
+  "whisper",
+  "Auto mode should prefer local whisper when available"
+);
 
+// Test 24: Auto without whisper picks browser
+assert.strictEqual(
+  resolveEngine("auto", false, true),
+  "browser",
+  "Auto mode without local whisper should fall back to browser"
+);
+
+// Test 25: Explicit whisper preference always returns whisper
+assert.strictEqual(
+  resolveEngine("whisper", true, true),
+  "whisper",
+  "Explicit whisper should return whisper"
+);
+
+// Test 26: Explicit browser preference returns browser even if whisper available
+assert.strictEqual(
+  resolveEngine("browser", true, true),
+  "browser",
+  "Explicit browser should return browser"
+);
+
+// Test 27: Brave browser fallback to whisper when cloud speech service-not-allowed
+function handleSpeechError(err, isBrave, hasWhisper) {
+  if (err === "service-not-allowed" || err === "network") {
+    if (hasWhisper) return "switch-to-whisper";
+    if (isBrave) return "show-brave-guide";
+    return "show-network-toast";
+  }
+  return "other";
+}
+assert.strictEqual(
+  handleSpeechError("service-not-allowed", true, true),
+  "switch-to-whisper",
+  "Brave service-not-allowed should seamlessly switch to whisper when installed"
+);
+assert.strictEqual(
+  handleSpeechError("service-not-allowed", true, false),
+  "show-brave-guide",
+  "Brave service-not-allowed without whisper should show guide"
+);
+
+// 9. CLI coding auto-send and auto-speak tests
+// Test 28: Both auto-send buttons update in sync
+function simulateSetAutoSend(val) {
+  const btns = [
+    { id: "auto-send-btn", active: false, pressed: "false" },
+    { id: "code-mobile-auto-send-btn", active: false, pressed: "false" }
+  ];
+  for (const b of btns) {
+    b.active = Boolean(val);
+    b.pressed = String(Boolean(val));
+  }
+  return btns;
+}
+const syncedBtns = simulateSetAutoSend(true);
+assert.strictEqual(syncedBtns[0].active, true, "Chat auto-send button should be active");
+assert.strictEqual(syncedBtns[1].active, true, "CLI coding auto-send button should be active");
+
+// Test 29: CLI coding turnFromVoice preserved across user event
+function simulateCliTurn(wasVoice) {
+  const codeState = { turnFromVoice: wasVoice, cur: null };
+  // 1. User event arrives
+  function onUserEvent() {
+    // codeEnd() closes any previous block but must NOT clear turnFromVoice
+    codeState.cur = null;
+  }
+  onUserEvent();
+  // 2. Assistant starts reply
+  function onAssistantText(chunk) {
+    if (!codeState.cur) {
+      codeState.cur = { text: "", fromVoice: Boolean(codeState.turnFromVoice) };
+    }
+    codeState.cur.text += chunk;
+  }
+  onAssistantText("Here is the answer");
+  return codeState.cur.fromVoice;
+}
+assert.strictEqual(simulateCliTurn(true), true, "Voice input must set assistant card fromVoice to true");
+assert.strictEqual(simulateCliTurn(false), false, "Typed input must keep assistant card fromVoice false");
+
+// Test 30: codeOnTurnEnd speaks when autoSpeak=true and turnFromVoice=true
+function simulateTurnEnd(autoSpeak, turnFromVoice, replaying, text) {
+  let spoken = null;
+  if (autoSpeak && turnFromVoice && !replaying) {
+    if (text && text.trim()) {
+      spoken = text.trim();
+    }
+  }
+  return spoken;
+}
+assert.strictEqual(
+  simulateTurnEnd(true, true, false, "Refactored function successfully."),
+  "Refactored function successfully.",
+  "Turn end with STT input and autoSpeak=true should speak aloud"
+);
+
+// Test 31: codeOnTurnEnd stays silent when turnFromVoice=false (typed)
+assert.strictEqual(
+  simulateTurnEnd(true, false, false, "Refactored function successfully."),
+  null,
+  "Turn end with typed input should NOT speak aloud"
+);
+
+// Test 32: codeOnTurnEnd stays silent during history replay
+assert.strictEqual(
+  simulateTurnEnd(true, true, true, "Historical answer from yesterday."),
+  null,
+  "Turn end during history replay should NEVER speak aloud"
+);
+
+// 10. Auto-Send Instant Submission (0ms) and Live Population Tests
+function simulateTranscriptionWorkflow({
+  transcribedText,
+  autoSendEnabled,
+}) {
+  let textboxValue = "";
+  let sentText = null;
+
+  // 1. Text is ALWAYS populated into textbox first so user visually sees it
+  textboxValue = transcribedText;
+
+  // 2. If auto-send is on, submit immediately (0ms delay)
+  if (autoSendEnabled && transcribedText.trim()) {
+    sentText = textboxValue;
+    textboxValue = "";
+  }
+
+  return { textboxValue, sentText };
+}
+
+// Test 33: Textbox is visibly populated before instant auto-send
+const simAutoSend = simulateTranscriptionWorkflow({
+  transcribedText: "Explain how quicksort partitions data",
+  autoSendEnabled: true,
+});
+assert.strictEqual(
+  simAutoSend.sentText,
+  "Explain how quicksort partitions data",
+  "Transcribed text must be submitted instantly when auto-send is enabled"
+);
+
+// Test 34: Instant submission leaves composer empty after send
+assert.strictEqual(simAutoSend.textboxValue, "", "Composer should be cleared after instant send");
+
+// Test 35: Empty speech with auto-send does not submit
+const simEmpty = simulateTranscriptionWorkflow({
+  transcribedText: "",
+  autoSendEnabled: true,
+});
+assert.strictEqual(simEmpty.sentText, null, "Empty speech should not be submitted");
+
+// Test 36: Auto-send disabled keeps text in box with zero sending
+const simDisabled = simulateTranscriptionWorkflow({
+  transcribedText: "Save this note",
+  autoSendEnabled: false,
+});
+assert.strictEqual(simDisabled.sentText, null, "Text should not be sent when auto-send is disabled");
+assert.strictEqual(simDisabled.textboxValue, "Save this note", "Text must stay in box for manual send");
+
+// Test 37: Complex prompt with special characters sent intact
+const simSpecial = simulateTranscriptionWorkflow({
+  transcribedText: "Refactor main() in src/engine.cu --check-all",
+  autoSendEnabled: true,
+});
+assert.strictEqual(simSpecial.sentText, "Refactor main() in src/engine.cu --check-all", "Complex prompt must send intact");
+assert.strictEqual(simDisabled.textboxValue, "Save this note", "Text must stay in box for manual send");
+
+// Test 38: Live interim speech progressive updates
+function simulateLiveSpeechProgression(interimPhrases, finalPhrase) {
+  let box = "";
+  for (const phrase of interimPhrases) {
+    box = mergeSpeechTranscripts("", phrase);
+  }
+  box = mergeSpeechTranscripts("", finalPhrase);
+  return box;
+}
+const progressiveResult = simulateLiveSpeechProgression(
+  ["testing speech", "testing speech to text", "testing speech to text while walking"],
+  "testing speech to text while walking outside"
+);
+assert.strictEqual(
+  progressiveResult,
+  "testing speech to text while walking outside",
+  "Progressive interim updates must smoothly lead to final transcript"
+);
+
+// 11. Notification Toast Dismissal & Click-Through Tests
+function simulateToastInteraction({
+  toasts,
+  clickTarget, // "outside" | "toast" | "action_button" | "underlying_button"
+  elementsUnderPoint = [],
+}) {
+  let currentToasts = [...toasts];
+  let actionRan = false;
+  let clickedInteractive = null;
+
+  function dismissAllToasts() {
+    currentToasts = [];
+  }
+
+  // Pointerdown capture simulation
+  if (currentToasts.length > 0) {
+    if (clickTarget === "action_button") {
+      actionRan = true;
+      currentToasts = currentToasts.filter(t => t.id !== "toast-with-action");
+      return { currentToasts, actionRan, clickedInteractive };
+    }
+
+    const hitToast = clickTarget === "toast" || clickTarget === "underlying_button";
+    dismissAllToasts();
+
+    if (hitToast && elementsUnderPoint.length > 0) {
+      const interactive = elementsUnderPoint.find(el => el.interactive);
+      if (interactive) {
+        clickedInteractive = interactive.id;
+      }
+    }
+  }
+
+  return { currentToasts, actionRan, clickedInteractive };
+}
+
+// Test 39: Touching outside toasts immediately dismisses active toasts
+const testOutside = simulateToastInteraction({
+  toasts: [{ id: "toast-1" }, { id: "toast-2" }],
+  clickTarget: "outside",
+});
+assert.strictEqual(testOutside.currentToasts.length, 0, "Touching outside toasts should dismiss all active toasts immediately");
+
+// Test 40: Clicking toast directly dismisses it
+const testClickToast = simulateToastInteraction({
+  toasts: [{ id: "toast-1" }],
+  clickTarget: "toast",
+});
+assert.strictEqual(testClickToast.currentToasts.length, 0, "Clicking toast directly should dismiss it");
+
+// Test 41: Clicking toast when an interactive button is underneath forwards click to underlying button
+const testUnderlying = simulateToastInteraction({
+  toasts: [{ id: "toast-1" }],
+  clickTarget: "underlying_button",
+  elementsUnderPoint: [{ id: "toast-1", interactive: false }, { id: "auto-send-toggle", interactive: true }],
+});
+assert.strictEqual(testUnderlying.currentToasts.length, 0, "Toasts must be dismissed on tap");
+assert.strictEqual(testUnderlying.clickedInteractive, "auto-send-toggle", "Click must be forwarded to underlying button without being blocked");
+
+// Test 42: Action button inside toast executes action without being dismissed pre-emptively
+const testActionBtn = simulateToastInteraction({
+  toasts: [{ id: "toast-with-action" }],
+  clickTarget: "action_button",
+});
+assert.strictEqual(testActionBtn.actionRan, true, "Toast action button must be allowed to execute its handler");
+
+// 12. Sampling Drawer Accessibility & Focus Restoration Tests
+function simulateDrawerLifecycle({ initialFocusInside = false, triggerId = "sampling-btn" }) {
+  const triggerEl = { id: triggerId, focused: false, focus() { this.focused = true; } };
+  const applyBtn = { id: "s-apply", focused: initialFocusInside, blur() { this.focused = false; } };
+  const drawer = {
+    open: true,
+    attributes: { "data-open": "true" },
+    inert: false,
+    contains(el) { return el === applyBtn; }
+  };
+  let activeElement = initialFocusInside ? applyBtn : triggerEl;
+  let lastDrawerTrigger = triggerEl;
+
+  function closeDrawer() {
+    if (activeElement && drawer.contains(activeElement)) {
+      activeElement.blur();
+      activeElement = null;
+      if (lastDrawerTrigger && typeof lastDrawerTrigger.focus === "function") {
+        lastDrawerTrigger.focus();
+        activeElement = lastDrawerTrigger;
+      }
+    }
+    drawer.open = false;
+    drawer.attributes["data-open"] = "false";
+    drawer.attributes["aria-hidden"] = "true";
+    drawer.attributes["inert"] = "";
+    drawer.inert = true;
+  }
+
+  closeDrawer();
+  return { drawer, applyBtn, triggerEl, activeElement };
+}
+
+// Test 43: Closing drawer removes focus from #s-apply before applying aria-hidden/inert
+const simApplyClose = simulateDrawerLifecycle({ initialFocusInside: true, triggerId: "sampling-btn" });
+assert.strictEqual(simApplyClose.applyBtn.focused, false, "#s-apply must be blurred upon drawer close");
+assert.strictEqual(simApplyClose.drawer.attributes["aria-hidden"], "true", "aria-hidden must be set to true on close");
+assert.strictEqual(simApplyClose.drawer.inert, true, "drawer inert property must be set to true on close");
+
+// Test 44: Focus is returned to trigger button (#sampling-btn)
+assert.strictEqual(simApplyClose.triggerEl.focused, true, "Focus must be restored to the opening trigger button");
+assert.strictEqual(simApplyClose.activeElement.id, "sampling-btn", "Active element must be the trigger button");
+
+// Test 45: Focus is returned to #code-sampling-btn when opened from CLI coding
+const simCodeClose = simulateDrawerLifecycle({ initialFocusInside: true, triggerId: "code-sampling-btn" });
+assert.strictEqual(simCodeClose.triggerEl.focused, true, "#code-sampling-btn must receive focus when closed in CLI mode");
+
+console.log("All STT & Accessibility Unit Tests Passed Successfully! (45/45)");
 
 

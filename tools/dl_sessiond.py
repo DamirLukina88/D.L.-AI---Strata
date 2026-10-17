@@ -270,7 +270,8 @@ class Session:
                               "content": cli.with_now(cli.resolve_file_references(prompt, self.workspace))})
         ctx = {"workspace": self.workspace, "messages": self.messages, "mode": self.mode, "yolo": self.yolo,
                "effort": self.effort,
-               "emit": self.emit, "cancel": self.cancel, "approve": self.approve, "mcp": self.mcp, "user_text": prompt}
+               "emit": self.emit, "cancel": self.cancel, "approve": self.approve, "mcp": self.mcp, "user_text": prompt,
+               "session": self}
         new_ws = cli.execute_agent_loop(messages=self.messages, url=cli.DEFAULT_URL, api_key=cli.DEFAULT_API_KEY,
                                         workspace=self.workspace, mode=self.mode,
                                         session_context=ctx)
@@ -291,6 +292,9 @@ class Session:
                                        session_context={"yolo": self.yolo, "approve": self.approve})
             self.output(f"$ {cmd}", out)
             return None
+        low = text.strip().lower()
+        if low in ("/continue", "continue", "keep going", "go on", "proceed"):
+            return cli.CONTINUE_PROMPT
         if not text.startswith("/"):
             return text
         cmd, _, arg = text.partition(" ")
@@ -437,8 +441,9 @@ HELP = """Modes
 /effort [level]   This session's thinking level: none, low, medium, high, or default (the Chat settings)
 
 Tools and jobs
-/mcp [on|off N]   On-demand tools: web search (Exa), library docs (Context7), Fetch, DeepL, browser,
-                  Proton Mail, Gmail, Drive, Docs, schedule (list, turn on/off; they also start when needed)
+/mcp [on|off N]   On-demand tools: Home Assistant (3D printers, cameras, plugs, sensors), web search (Exa),
+                  library docs (Context7), Fetch, DeepL, browser, Proton Mail, Gmail, Drive, Docs, schedule
+                  (list, turn on/off; they also start when needed)
 /schedule ...     Scheduled jobs: /schedule [--email] <when> <task>; list; off|on|run|rm N; stop (the running job)
                   when: 2026-10-16 09:00, tomorrow 07:00, fri 09:00, in 2h, daily 08:00, mon-fri 07:30, every 2h
 

@@ -8,7 +8,7 @@
 <link rel="icon" type="image/svg+xml" href="web/favicon.svg">
 <link rel="stylesheet" href="web/tokens.css">
 <link rel="stylesheet" href="web/components.css">
-<link rel="stylesheet" href="web/app.css?v=20261017-stt">
+<link rel="stylesheet" href="web/app.css?v=20261017-stt15">
 <script>
   // the theme before the first paint: default dark for D.L. AI
   try {
@@ -155,6 +155,9 @@
           </div>
           <div class="code-mobile-input-bar">
             <textarea id="code-mobile-input" class="code-mobile-textarea" placeholder="Prompt, /command or !shell&hellip;" rows="1"></textarea>
+            <button type="button" id="code-mobile-auto-send-btn" class="st-btn st-btn--icon composer-action-btn code-mobile-auto-send" title="Auto-send after speaking (Hands-free voice mode)" aria-label="Auto-send after speaking" aria-pressed="false">
+              <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-auto-send"/></svg>
+            </button>
             <button type="button" id="code-mobile-mic-btn" class="st-btn st-btn--icon code-mobile-mic" title="Voice typing (Click to speak, hold to talk)" aria-label="Voice typing">
               <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-mic"/></svg>
             </button>
@@ -316,6 +319,16 @@
         </div>
 
         <div class="st-field" style="border-top:1px solid var(--st-line-soft);margin-top:16px;padding-top:14px;">
+          <label class="st-label" for="stt-engine-select">Speech recognition engine (STT)</label>
+          <select class="st-select" id="stt-engine-select" aria-label="Select speech recognition engine">
+            <option value="auto">Automatic (Local Whisper or Browser Native)</option>
+            <option value="whisper">Local Whisper (100% offline, works in Brave Desktop & all browsers)</option>
+            <option value="browser">Browser Native Speech (Web Speech API)</option>
+          </select>
+          <div class="muted small" id="stt-engine-status" style="margin-top:4px;">Checking local Whisper engine...</div>
+        </div>
+
+        <div class="st-field" style="margin-top:10px;">
           <label class="st-label" for="stt-lang-select">Speech recognition language (STT)</label>
           <select class="st-select" id="stt-lang-select" aria-label="Select speech recognition language">
             <option value="en-US">English (United States)</option>
@@ -334,7 +347,7 @@
         </div>
 
         <div class="toggle-row">
-          <span>Auto-send on speech pause<br><span class="muted small">Hands-free mode: sends immediately when you finish speaking</span></span>
+          <span>Auto-send on speech pause<br><span class="muted small">Hands-free mode: sends automatically after dictation shows in text box</span></span>
           <button class="st-toggle" id="stt-auto-toggle" role="switch" aria-checked="false" aria-label="Auto send on speech pause"></button>
         </div>
 
@@ -356,7 +369,7 @@
 </main>
 
 <!-- ============================ Sampling drawer ============================ -->
-<aside class="st-drawer" id="drawer" data-open="false" aria-label="Sampling and thinking" aria-hidden="true">
+<aside class="st-drawer" id="drawer" data-open="false" aria-label="Sampling and thinking" aria-hidden="true" inert>
   <div class="st-drawer__head"><span class="card-title">Sampling</span>
     <button class="st-btn st-btn--icon" id="drawer-close" aria-label="Close">
       <svg class="st-icon"><use href="web/sprite.svg#i-chevron"/></svg></button></div>
@@ -474,24 +487,29 @@
     </div>
   </div>
   <div class="st-dialog__body" style="padding:16px 20px;line-height:1.6;">
-    <p style="margin-top:0;"><strong>Why Speech-to-Text is restricted in Brave:</strong></p>
+    <div id="brave-stt-whisper-banner" style="background:var(--st-surface-variant);border-left:4px solid var(--st-accent);border-radius:var(--st-r-md,8px);padding:12px 14px;margin-bottom:14px;font-size:13.5px;">
+      <strong>Local Whisper STT is available!</strong>
+      <p style="margin:4px 0 10px;color:var(--st-ink-muted);">Strata has 100% local, offline Whisper speech recognition installed (<span id="brave-dialog-model-name">ggml-base.bin</span>). You can record voice directly in Brave without sending audio to Google or any cloud server.</p>
+      <button type="button" class="st-btn st-btn--primary st-btn--sm" id="brave-use-whisper-btn">Use Local Whisper STT</button>
+    </div>
+    <p style="margin-top:0;"><strong>Why Cloud Speech-to-Text is restricted in Brave:</strong></p>
     <p style="margin-top:0;color:var(--st-muted);">Brave disables Google's proprietary cloud speech recognition servers by default to prevent transmitting your voice recordings to third parties. Unlike Google Chrome, current versions of Brave do not include cloud STT endpoints.</p>
     <div style="background:var(--st-surface-variant);border-radius:var(--st-r-md,8px);padding:12px 14px;margin-bottom:14px;font-size:13.5px;">
-      <strong>Recommended Options:</strong>
+      <strong>Alternative Options:</strong>
       <ul style="margin:6px 0 0;padding-left:18px;">
         <li style="margin-bottom:6px;"><strong>Mobile / Android Brave:</strong> Use the microphone icon directly on your virtual keyboard (Gboard / Samsung Keyboard) to dictate into the input field.</li>
-        <li style="margin-bottom:6px;"><strong>Desktop Voice Typing:</strong> Use Google Chrome, Chromium, or your operating system's native voice typing (e.g. OS Dictation).</li>
+        <li style="margin-bottom:6px;"><strong>Desktop Voice Typing:</strong> Local Whisper (recommended above) or your operating system's native voice typing (e.g. OS Dictation).</li>
         <li><strong>Brave Flags Configured:</strong> System Speech-Dispatcher (for TTS audio playback) and on-device speech flags have been configured in <code>~/.config/brave-flags.conf</code>. Restart Brave for flags to take effect.</li>
       </ul>
     </div>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
       <button type="button" class="st-btn st-btn--secondary" id="brave-copy-flags-btn">Copy Flags Config</button>
-      <button type="button" class="st-btn st-btn--primary" id="brave-dialog-ok-btn">Got it</button>
+      <button type="button" class="st-btn st-btn--secondary" id="brave-dialog-ok-btn">Close</button>
     </div>
   </div>
 </dialog>
 <div class="scrim" id="scrim" hidden></div>
 <div class="st-toasts" id="toasts" aria-live="polite"></div>
-<script src="web/app.js?v=20261017-stt9"></script>
+<script src="web/app.js?v=20261017-stt15"></script>
 </body>
 </html>

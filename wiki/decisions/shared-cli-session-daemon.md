@@ -25,10 +25,13 @@ last_verified: 2026-10-13
   - Still per browser: "show thinking" (display only) and the web app's own MCP tools toggle.
   - Checked: with effort none a CLI-style request answered with 0 thinking words, with high 35, both within max_tokens 300.
   - Not changed: `tools/antigravity_local.py`, a separate copy of the CLI.
+- 2026-10-17: Autonomous session management tools (`save_chat`, `get_system_health`, `get_engine_status`, `clear_conversation`) added to `DL_TOOLS` and `DL_PLAN_TOOLS`, allowing Qwen Coder to export sessions, inspect hardware/engine stats, and reset conversation memory autonomously. Conversational continuation phrases (`"continue"`, `"keep going"`, `"go on"`, `"proceed"`) in `dl_sessiond` and `dl_cli` automatically map to `/continue` after the tool-turn limit (`DL_MAX_TURNS`) is reached. In YOLO mode, reaching `DL_MAX_TURNS` automatically continues execution indefinitely without prompting the user. Tests in `tools/test_dl_session_tools.py` and `tools/test_dl_yolo_continue.py`.
 
 ## Related
 
 - [Scheduled Jobs in D.L. AI](dl-ai-scheduled-jobs.md)
+- [Session Commands and Tools Implementation Plan](../artifacts/session-commands-and-tools-plan.md)
+- [Home Assistant Server and Session Tools Walkthrough](../artifacts/homeassistant-and-session-tools-walkthrough.md)
 
 ## Sources
 

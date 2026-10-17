@@ -71,3 +71,4 @@ This decision documents two critical speech subsystem fixes: (1) resolving Speec
 2. Chromium Linux Speech Dispatcher backend: `content/browser/speech/tts_linux.cc`.
 3. Speech Dispatcher module specification: `piper.conf` & `sd_generic`.
 4. Piper TTS issue tracker & C++ source: `piper/src/cpp/phonemize.cpp`.
+5. Local Whisper STT Integration: [local-whisper-speech-to-text.md](local-whisper-speech-to-text.md).

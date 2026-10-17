@@ -23,6 +23,38 @@ const store = {
 };
 
 // ------------------------------------------------------------------ toasts
+function dismissAllToasts() {
+  const container = $("toasts");
+  if (container && container.children.length > 0) {
+    container.innerHTML = "";
+  }
+}
+window.addEventListener("pointerdown", (e) => {
+  const toastsEl = $("toasts");
+  if (toastsEl && toastsEl.children.length > 0) {
+    if (e.target && e.target.closest && e.target.closest(".st-toast button")) return;
+    const hitToast = Boolean(e.target && e.target.closest && e.target.closest("#toasts"));
+    dismissAllToasts();
+    if (hitToast && typeof document.elementsFromPoint === "function" && e.clientX != null && e.clientY != null) {
+      const underElements = document.elementsFromPoint(e.clientX, e.clientY);
+      const interactive = underElements.find(el =>
+        el !== toastsEl && !toastsEl.contains(el) && (
+          el.tagName === "BUTTON" || el.tagName === "A" || el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" || el.classList.contains("st-toggle") ||
+          el.classList.contains("st-btn") || el.hasAttribute("role") ||
+          el.onclick != null
+        )
+      );
+      if (interactive) {
+        setTimeout(() => {
+          try { interactive.focus(); } catch (_) {}
+          try { interactive.click(); } catch (_) {}
+        }, 0);
+      }
+    }
+  }
+}, { capture: true });
+
 function toast(kind, title, text = "", ms = 3500, action = null) {
   const names = {info: "info", success: "check", warn: "warning", error: "error"};
   const el = document.createElement("div");
@@ -36,11 +68,15 @@ function toast(kind, title, text = "", ms = 3500, action = null) {
     b.style.height = "32px";
     b.style.marginLeft = "auto";
     b.textContent = action.label;
-    b.onclick = () => { action.run(); el.remove(); };
+    b.onclick = (e) => { e.stopPropagation(); action.run(); el.remove(); };
     el.appendChild(b);
   }
+  el.onclick = (e) => {
+    if (e.target && e.target.tagName === "BUTTON") return;
+    el.remove();
+  };
   $("toasts").appendChild(el);
-  setTimeout(() => el.remove(), ms);
+  setTimeout(() => { if (el.parentNode) el.remove(); }, ms);
 }
 
 async function copyText(text, btn) {
@@ -638,23 +674,48 @@ function mergeSpeechTranscripts(existing, incoming) {
 // ------------------------------------------------------------------ Speech-to-Text (STT) Native Engine
 const STTController = {
   recognition: null,
+  mediaRecorder: null,
+  mediaStream: null,
+  audioChunks: [],
+  vadCleanup: null,
+  maxTimer: null,
   isRecording: false,
   isPushToTalk: false,
+  isTranscribing: false,
   currentTarget: null, // "chat" | "code"
   baseText: "",
   finalText: "",
   interimText: "",
   silenceTimer: null,
   autoSend: false,
+  autoSendTimer: null,
+  isInterimTranscribing: false,
   lastInputWasVoice: false,
   lastTranscribedText: "",
+  hasWhisper: false,
+  whisperModel: null,
 
   isSupported() {
-    return Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+    return Boolean(
+      (navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder) ||
+      window.SpeechRecognition ||
+      window.webkitSpeechRecognition
+    );
   },
 
   getLang() {
     return store.get("stt_lang", "") || navigator.language || "en-US";
+  },
+
+  getEngine() {
+    const pref = store.get("stt_engine", "auto");
+    if (pref === "whisper") return "whisper";
+    if (pref === "browser") return "browser";
+    // "auto" mode:
+    // If local Whisper is available, prefer it (works offline, zero cloud leaks, works in Brave Desktop & mobile)
+    if (this.hasWhisper) return "whisper";
+    if (window.SpeechRecognition || window.webkitSpeechRecognition) return "browser";
+    return "whisper";
   },
 
   isAutoSend() {
@@ -664,11 +725,13 @@ const STTController = {
   setAutoSend(val) {
     this.autoSend = !!val;
     store.set("stt_auto_send", this.autoSend);
-    const btn = $("auto-send-btn");
-    if (btn) {
-      btn.classList.toggle("is-active", this.autoSend);
-      btn.setAttribute("aria-pressed", String(this.autoSend));
-      btn.title = `Auto-Send: ${this.autoSend ? "ON (hands-free dictation)" : "OFF"}`;
+    const btns = [$("auto-send-btn"), $("code-mobile-auto-send-btn")];
+    for (const btn of btns) {
+      if (btn) {
+        btn.classList.toggle("is-active", this.autoSend);
+        btn.setAttribute("aria-pressed", String(this.autoSend));
+        btn.title = `Auto-Send: ${this.autoSend ? "ON (hands-free dictation)" : "OFF"}`;
+      }
     }
     const toggle = $("stt-auto-toggle");
     if (toggle) {
@@ -688,7 +751,7 @@ const STTController = {
 
   resetSilenceTimer() {
     if (this.silenceTimer) clearTimeout(this.silenceTimer);
-    // 4-second silence auto-stop
+    // 4-second silence auto-stop for browser SpeechRecognition
     this.silenceTimer = setTimeout(() => {
       if (this.isRecording) {
         this.stop();
@@ -720,19 +783,311 @@ const STTController = {
     }
   },
 
-  async start(target = (tab === "code" ? "code" : "chat")) {
-    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRec) {
-      toast("warn", "Speech recognition unavailable", "Your browser does not support native speech recognition. Please use Chrome, Brave, Edge, or Chromium.");
+  cancelAutoSendTimer() {
+    if (this.autoSendTimer) {
+      clearTimeout(this.autoSendTimer);
+      this.autoSendTimer = null;
+    }
+  },
+
+  cancelAutoSendCountdown() {
+    this.cancelAutoSendTimer();
+  },
+
+  scheduleAutoSend(target) {
+    this.cancelAutoSendTimer();
+    const tgt = target || this.currentTarget || (tab === "code" ? "code" : "chat");
+    // Send immediately as requested
+    if (tgt === "chat" && typeof send === "function") {
+      send();
+    } else if (tgt === "code" && typeof codeSend === "function") {
+      codeSend();
+    }
+  },
+
+  async transcribeInterimBlob(blob, target) {
+    if (!this.isRecording || this.isInterimTranscribing) return;
+    this.isInterimTranscribing = true;
+
+    const fd = new FormData();
+    fd.append("file", blob, "interim.webm");
+    const lang = this.getLang();
+    if (lang) fd.append("language", lang);
+
+    try {
+      const res = await fetch("v1/audio/transcriptions", {
+        method: "POST",
+        headers: headers(),
+        body: fd,
+      });
+      if (res.ok && this.isRecording && this.currentTarget === target) {
+        const data = await res.json();
+        const text = (data.text || "").trim();
+        if (text && this.isRecording && this.currentTarget === target) {
+          this.interimText = text;
+          this.updateInput();
+        }
+      }
+    } catch (e) {
+      // Non-fatal interim transcription
+    } finally {
+      this.isInterimTranscribing = false;
+    }
+  },
+
+  setupVAD(stream, callbacks = {}) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    try {
+      const ctx = new AudioCtx();
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.3;
+      src.connect(analyser);
+
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      let hadSpeech = false;
+      let silenceSince = null;
+      let active = true;
+
+      const interval = setInterval(() => {
+        if (!active) return;
+        analyser.getByteFrequencyData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += data[i];
+        const avg = sum / data.length;
+
+        if (avg > 6) {
+          hadSpeech = true;
+          silenceSince = null;
+          if (callbacks.onSpeech) callbacks.onSpeech();
+        } else if (hadSpeech) {
+          if (!silenceSince) {
+            silenceSince = Date.now();
+            if (callbacks.onPause) callbacks.onPause();
+          } else {
+            const silentMs = Date.now() - silenceSince;
+            if (silentMs > 1000 && silentMs < 1200) {
+              if (callbacks.onPause) callbacks.onPause();
+            } else if (silentMs > 3200) {
+              active = false;
+              if (callbacks.onSilence) callbacks.onSilence();
+            }
+          }
+        }
+      }, 150);
+
+      return () => {
+        active = false;
+        clearInterval(interval);
+        try { ctx.close(); } catch (e) {}
+      };
+    } catch (e) {
+      return null;
+    }
+  },
+
+  async startMediaRecorder(target) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+      toast("warn", "Microphone recording unsupported", "Your browser does not support local audio recording via MediaRecorder.");
       return;
     }
+
+    this.cancelAutoSendTimer();
 
     if (this.isRecording) {
       if (this.currentTarget === target) return;
       this.stop();
     }
 
-    // Stop TTS if speaking so speech input isn't confused by model's own voice
+    if (typeof TTSController !== "undefined" && TTSController.speaking) {
+      TTSController.stop();
+    }
+
+    this.currentTarget = target;
+    const ta = this.getTargetInput(target);
+    this.baseText = ta ? ta.value : "";
+    this.finalText = "";
+    this.interimText = "";
+
+    try {
+      this.mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: 16000,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+    } catch (err) {
+      toast("warn", "Microphone access blocked", "Please allow microphone access in your browser settings to use voice typing.");
+      this.cleanup();
+      return;
+    }
+
+    let mimeType = "";
+    const types = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
+    for (const t of types) {
+      if (MediaRecorder.isTypeSupported(t)) {
+        mimeType = t;
+        break;
+      }
+    }
+
+    try {
+      this.audioChunks = [];
+      this.mediaRecorder = mimeType ? new MediaRecorder(this.mediaStream, { mimeType }) : new MediaRecorder(this.mediaStream);
+    } catch (e) {
+      try {
+        this.mediaRecorder = new MediaRecorder(this.mediaStream);
+      } catch (err) {
+        toast("error", "Recording error", "Failed to initialize MediaRecorder: " + (err.message || err));
+        this.cleanup();
+        return;
+      }
+    }
+
+    this.mediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        this.audioChunks.push(e.data);
+      }
+    };
+
+    this.mediaRecorder.onstop = async () => {
+      const chunks = this.audioChunks.slice();
+      this.audioChunks = [];
+      if (this.mediaStream) {
+        this.mediaStream.getTracks().forEach((t) => t.stop());
+        this.mediaStream = null;
+      }
+      if (typeof this.vadCleanup === "function") {
+        this.vadCleanup();
+        this.vadCleanup = null;
+      }
+      if (this.maxTimer) {
+        clearTimeout(this.maxTimer);
+        this.maxTimer = null;
+      }
+
+      const blob = new Blob(chunks, { type: this.mediaRecorder?.mimeType || mimeType || "audio/webm" });
+      if (blob.size < 500) {
+        this.cleanup();
+        return;
+      }
+      await this.transcribeBlob(blob, target);
+    };
+
+    this.isRecording = true;
+    this.updateMicUI(true);
+
+    let lastInterimTime = Date.now();
+    this.vadCleanup = this.setupVAD(this.mediaStream, {
+      onSpeech: () => {
+        if (Date.now() - lastInterimTime > 2500 && this.audioChunks.length >= 4 && !this.isInterimTranscribing) {
+          lastInterimTime = Date.now();
+          const interimBlob = new Blob(this.audioChunks.slice(), {
+            type: this.mediaRecorder?.mimeType || mimeType || "audio/webm",
+          });
+          this.transcribeInterimBlob(interimBlob, target);
+        }
+      },
+      onPause: () => {
+        if (Date.now() - lastInterimTime > 1500 && this.audioChunks.length >= 3 && !this.isInterimTranscribing) {
+          lastInterimTime = Date.now();
+          const interimBlob = new Blob(this.audioChunks.slice(), {
+            type: this.mediaRecorder?.mimeType || mimeType || "audio/webm",
+          });
+          this.transcribeInterimBlob(interimBlob, target);
+        }
+      },
+      onSilence: () => {
+        if (this.isRecording) {
+          this.stop();
+        }
+      },
+    });
+
+    this.maxTimer = setTimeout(() => {
+      if (this.isRecording) this.stop();
+    }, 60000);
+
+    try {
+      this.mediaRecorder.start(250);
+    } catch (e) {
+      this.mediaRecorder.start();
+    }
+  },
+
+  async transcribeBlob(blob, target) {
+    this.isTranscribing = true;
+    this.updateTranscribingUI(true);
+
+    const fd = new FormData();
+    fd.append("file", blob, "recording.webm");
+    const lang = this.getLang();
+    if (lang) fd.append("language", lang);
+
+    try {
+      const res = await fetch("v1/audio/transcriptions", {
+        method: "POST",
+        headers: headers(),
+        body: fd,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error?.message || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      const text = (data.text || "").trim();
+      if (text) {
+        this.finalText = text;
+        this.interimText = "";
+        this.lastInputWasVoice = true;
+        this.lastTranscribedText = text;
+
+        const targetToSend = target || this.currentTarget || (tab === "code" ? "code" : "chat");
+        // Always populate the text box visibly first so the user sees the recognized text!
+        this.updateInput();
+        const ta = this.getTargetInput(targetToSend);
+        if (ta) {
+          this.baseText = ta.value;
+          ta.focus();
+          ta.selectionStart = ta.selectionEnd = ta.value.length;
+        }
+
+        if (this.autoSend) {
+          this.scheduleAutoSend(targetToSend);
+        } else {
+          this.finalText = "";
+        }
+      }
+    } catch (e) {
+      toast("error", "Transcription error", e.message || String(e));
+    } finally {
+      this.isTranscribing = false;
+      this.updateTranscribingUI(false);
+      this.cleanup();
+    }
+  },
+
+  async startBrowserSpeech(target) {
+    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRec) {
+      if (this.hasWhisper) {
+        return this.startMediaRecorder(target);
+      }
+      toast("warn", "Speech recognition unavailable", "Your browser does not support native speech recognition.");
+      return;
+    }
+
+    this.cancelAutoSendTimer();
+
+    if (this.isRecording) {
+      if (this.currentTarget === target) return;
+      this.stop();
+    }
+
     if (typeof TTSController !== "undefined" && TTSController.speaking) {
       TTSController.stop();
     }
@@ -746,8 +1101,6 @@ const STTController = {
     try {
       this.recognition = new SpeechRec();
       const isAndroid = /Android/i.test(navigator.userAgent);
-      // On Android Chrome, continuous = true triggers a known engine bug where
-      // the recognizer loops, continuously restarts, or duplicates prior final transcripts.
       this.recognition.continuous = !isAndroid;
       this.recognition.interimResults = true;
       this.recognition.lang = this.getLang();
@@ -763,8 +1116,6 @@ const STTController = {
         let finalStr = "";
         let interimStr = "";
 
-        // Reconstruct from event.results using mergeSpeechTranscripts on every event.
-        // This eliminates duplicate words across disjoint, cumulative, or overlapping chunks.
         for (let i = 0; i < event.results.length; ++i) {
           const res = event.results[i];
           if (!res || !res[0]) continue;
@@ -785,11 +1136,8 @@ const STTController = {
 
       this.recognition.onerror = async (event) => {
         const err = event.error;
-        if (err === "no-speech") {
-          return;
-        }
+        if (err === "no-speech") return;
 
-        // Brave browser blocks third-party Google speech endpoints by default
         let isBrave = false;
         try {
           if (navigator.brave && typeof navigator.brave.isBrave === "function") {
@@ -802,6 +1150,14 @@ const STTController = {
         }
 
         if (err === "service-not-allowed" || err === "network") {
+          if (this.hasWhisper) {
+            toast("info", "Using Local Whisper STT", "Browser speech service unavailable; switched to local Whisper.");
+            this.cleanup();
+            store.set("stt_engine", "whisper");
+            const engSel = $("stt-engine-select");
+            if (engSel) engSel.value = "whisper";
+            return this.startMediaRecorder(target);
+          }
           if (isBrave) {
             this.openBraveGuide();
             this.cleanup();
@@ -809,7 +1165,7 @@ const STTController = {
           }
           toast("error", "Speech recognition failed", `Network or service issue (${err}). Make sure internet is connected.`);
         } else if (err === "not-allowed") {
-          if (isBrave) {
+          if (isBrave && !this.hasWhisper) {
             this.openBraveGuide();
             this.cleanup();
             return;
@@ -823,19 +1179,36 @@ const STTController = {
 
       this.recognition.onend = () => {
         const hadRecording = this.isRecording;
-        const targetWas = this.currentTarget;
+        const targetWas = this.currentTarget || (tab === "code" ? "code" : "chat");
         const hadFinalSpoken = Boolean((this.finalText + " " + this.interimText).trim());
+        const spokenText = mergeSpeechTranscripts(this.finalText, this.interimText).trim();
+
+        if (hadRecording && hadFinalSpoken && spokenText) {
+          this.finalText = spokenText;
+          this.interimText = "";
+          this.lastInputWasVoice = true;
+          this.lastTranscribedText = spokenText;
+
+          // Always populate the text box visibly first so user sees it!
+          this.updateInput();
+          const ta = this.getTargetInput(targetWas);
+          if (ta) {
+            this.baseText = ta.value;
+            ta.focus();
+            ta.selectionStart = ta.selectionEnd = ta.value.length;
+          }
+
+          this.cleanup();
+
+          if (this.autoSend) {
+            this.scheduleAutoSend(targetWas);
+          } else {
+            this.finalText = "";
+          }
+          return;
+        }
 
         this.cleanup();
-
-        // If auto-send is enabled and speech was transcribed, trigger submission!
-        if (hadRecording && this.autoSend && hadFinalSpoken) {
-          if (targetWas === "chat") {
-            if (typeof send === "function") send();
-          } else if (targetWas === "code") {
-            if (typeof codeSend === "function") codeSend();
-          }
-        }
       };
 
       this.recognition.start();
@@ -845,28 +1218,64 @@ const STTController = {
     }
   },
 
+  async start(target = (tab === "code" ? "code" : "chat")) {
+    const engine = this.getEngine();
+    if (engine === "whisper") {
+      return this.startMediaRecorder(target);
+    }
+    return this.startBrowserSpeech(target);
+  },
+
   stop() {
     this.clearSilenceTimer();
+    if (this.maxTimer) {
+      clearTimeout(this.maxTimer);
+      this.maxTimer = null;
+    }
+    if (typeof this.vadCleanup === "function") {
+      this.vadCleanup();
+      this.vadCleanup = null;
+    }
+    if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
+      try {
+        this.mediaRecorder.stop();
+      } catch (e) {}
+      return;
+    }
     if (this.recognition) {
       try {
         this.recognition.stop();
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) {}
     }
   },
 
   cleanup() {
     this.clearSilenceTimer();
+    if (this.maxTimer) {
+      clearTimeout(this.maxTimer);
+      this.maxTimer = null;
+    }
+    if (typeof this.vadCleanup === "function") {
+      this.vadCleanup();
+      this.vadCleanup = null;
+    }
+    if (this.mediaStream) {
+      this.mediaStream.getTracks().forEach((t) => t.stop());
+      this.mediaStream = null;
+    }
+    this.mediaRecorder = null;
+    this.audioChunks = [];
     this.isRecording = false;
     this.isPushToTalk = false;
     this.updateMicUI(false);
+    this.updateTranscribingUI(false);
     this.interimText = "";
-    this.updateInput();
     this.recognition = null;
   },
 
   toggle(target) {
+    if (this.isTranscribing) return;
+    this.cancelAutoSendTimer();
     if (this.isRecording && this.currentTarget === target) {
       this.stop();
     } else {
@@ -887,9 +1296,27 @@ const STTController = {
     }
   },
 
+  updateTranscribingUI(transcribing) {
+    const btn = this.getTargetMicBtn();
+    if (btn) {
+      btn.classList.toggle("is-transcribing", transcribing);
+      if (transcribing) {
+        btn.title = "Transcribing speech with Whisper...";
+      }
+    }
+  },
+
   openBraveGuide() {
     const d = $("brave-stt-dialog");
     if (d) {
+      const banner = $("brave-stt-whisper-banner");
+      if (banner) {
+        banner.style.display = this.hasWhisper ? "block" : "none";
+      }
+      const modelSpan = $("brave-dialog-model-name");
+      if (modelSpan && this.whisperModel) {
+        modelSpan.textContent = this.whisperModel;
+      }
       if (typeof d.showModal === "function") d.showModal();
       else d.setAttribute("open", "");
     }
@@ -900,6 +1327,27 @@ const STTController = {
     if (d) {
       if (typeof d.close === "function") d.close();
       else d.removeAttribute("open");
+    }
+  },
+
+  updateEngineUI() {
+    const engSel = $("stt-engine-select");
+    const status = $("stt-engine-status");
+    if (engSel) {
+      engSel.value = store.get("stt_engine", "auto");
+    }
+    if (status) {
+      if (this.hasWhisper) {
+        status.textContent = `Local Whisper ready (${this.whisperModel || "ggml-base.bin"}). 100% offline & private.`;
+        status.style.color = "var(--st-accent, #0ea5e9)";
+      } else {
+        status.textContent = "Local Whisper model not detected. Using Browser Web Speech API.";
+        status.style.color = "var(--st-muted)";
+      }
+    }
+    const banner = $("brave-stt-whisper-banner");
+    if (banner) {
+      banner.style.display = this.hasWhisper ? "block" : "none";
     }
   },
 
@@ -954,25 +1402,32 @@ const STTController = {
     btn.addEventListener("click", onClick);
   },
 
-  init() {
+  async init() {
     this.autoSend = this.isAutoSend();
     this.setAutoSend(this.autoSend);
 
+    const toggleAutoSend = () => {
+      const next = !this.autoSend;
+      this.setAutoSend(next);
+      toast("info", `Auto-send ${next ? "enabled" : "disabled"}`, next ? "Hands-free: messages send automatically when dictation stops." : "Manual send mode: transcribed text stays in composer.", 2500);
+    };
+
     const autoSendBtn = $("auto-send-btn");
-    if (autoSendBtn) {
-      autoSendBtn.onclick = () => {
-        const next = !this.autoSend;
-        this.setAutoSend(next);
-        toast("info", `Auto-send ${next ? "enabled" : "disabled"}`, next ? "Hands-free: messages send automatically when dictation stops." : "Manual send mode: transcribed text stays in composer.", 2500);
-      };
-    }
+    if (autoSendBtn) autoSendBtn.onclick = toggleAutoSend;
+
+    const codeAutoSendBtn = $("code-mobile-auto-send-btn");
+    if (codeAutoSendBtn) codeAutoSendBtn.onclick = toggleAutoSend;
 
     const sttAutoToggle = $("stt-auto-toggle");
-    if (sttAutoToggle) {
-      sttAutoToggle.onclick = () => {
-        const next = !this.autoSend;
-        this.setAutoSend(next);
-        toast("info", `Auto-send ${next ? "enabled" : "disabled"}`, next ? "Hands-free: messages send automatically when dictation stops." : "Manual send mode: transcribed text stays in composer.", 2500);
+    if (sttAutoToggle) sttAutoToggle.onclick = toggleAutoSend;
+
+    // Engine selection
+    const engSel = $("stt-engine-select");
+    if (engSel) {
+      engSel.value = store.get("stt_engine", "auto");
+      engSel.onchange = () => {
+        store.set("stt_engine", engSel.value);
+        toast("info", "Speech Recognition Engine", `Set to ${engSel.options[engSel.selectedIndex]?.text || engSel.value}`);
       };
     }
 
@@ -1006,6 +1461,15 @@ const STTController = {
     if (braveOkBtn) {
       braveOkBtn.onclick = () => this.closeBraveGuide();
     }
+    const braveUseWhisperBtn = $("brave-use-whisper-btn");
+    if (braveUseWhisperBtn) {
+      braveUseWhisperBtn.onclick = () => {
+        store.set("stt_engine", "whisper");
+        if (engSel) engSel.value = "whisper";
+        this.closeBraveGuide();
+        toast("success", "Local Whisper STT Activated", "Speech recognition will now run 100% locally on your PC.");
+      };
+    }
     const braveCopyBtn = $("brave-copy-flags-btn");
     if (braveCopyBtn) {
       braveCopyBtn.onclick = () => {
@@ -1016,6 +1480,33 @@ const STTController = {
     // Bind Dual-mode interaction to mic buttons
     this.bindDualMode($("mic-btn"), "chat");
     this.bindDualMode($("code-mobile-mic-btn"), "code");
+
+    // Cancel auto-send timer when user interacts with text boxes (typing, clicking, tapping to edit)
+    const cancelOnInteract = () => {
+      if (this.autoSendTimer) {
+        this.cancelAutoSendTimer();
+      }
+    };
+    $("input")?.addEventListener("input", cancelOnInteract);
+    $("input")?.addEventListener("click", cancelOnInteract);
+    $("input")?.addEventListener("pointerdown", cancelOnInteract);
+
+    $("code-mobile-input")?.addEventListener("input", cancelOnInteract);
+    $("code-mobile-input")?.addEventListener("click", cancelOnInteract);
+    $("code-mobile-input")?.addEventListener("pointerdown", cancelOnInteract);
+
+    // Fetch status of local Whisper engine asynchronously
+    try {
+      const r = await fetch("v1/audio/status", { headers: headers() });
+      if (r.ok) {
+        const st = await r.json();
+        this.hasWhisper = !!st.available;
+        this.whisperModel = st.model || null;
+      }
+    } catch (e) {
+      this.hasWhisper = false;
+    }
+    this.updateEngineUI();
   },
 };
 
@@ -1039,6 +1530,7 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
 
 let tab = "chat";
 function showTab(name) {
+  if (typeof STTController !== "undefined") STTController.cancelAutoSendTimer();
   tab = ["chat", "code", "monitor", "about"].includes(name) ? name : "chat";
   for (const b of document.querySelectorAll(".st-tab")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
   for (const v of ["chat", "code", "monitor", "about"]) {
@@ -1059,7 +1551,7 @@ window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
 // ?session=NAME shows another daemon session (the agent bench's bench-* sessions); the default is the shared one
 const CODE_SESSION = /^[A-Za-z0-9_.-]{1,64}$/.test(new URLSearchParams(location.search).get("session") || "")
   ? new URLSearchParams(location.search).get("session") : "dl-ai-code";
-const code = { conn: null, state: {}, client: "", cur: null, retry: 0, renderQueued: false, approvals: {} };
+const code = { conn: null, state: {}, client: "", cur: null, retry: 0, renderQueued: false, approvals: {}, turnFromVoice: false, replaying: false, lastSpokenText: "" };
 // thinking blocks start open; the ones you close stay closed (per session, kept in this browser)
 const thinkClosedKey = `code.thinkClosed.${CODE_SESSION}`;
 const codeThinkClosed = new Set(store.get(thinkClosedKey, []));
@@ -1093,7 +1585,7 @@ function codeAssistant() {
     `<button type="button" class="st-btn st-btn--icon st-btn--sm code-card-action" data-code-copy title="Copy answer" aria-label="Copy answer">${icon("copy")}</button>` +
     `<button type="button" class="st-btn st-btn--icon st-btn--sm code-card-action" data-code-speak title="Read aloud" aria-label="Read aloud">${icon("volume")}</button>` +
     `</div>`);
-  code.cur = { el, thinking: "", text: "", fromVoice: Boolean(code.lastInputWasVoice) };
+  code.cur = { el, thinking: "", text: "", fromVoice: Boolean(code.turnFromVoice) };
   return code.cur;
 }
 
@@ -1101,13 +1593,27 @@ function codeEnd() {                                      // close the open repl
   if (code.cur) {
     const cur = code.cur;
     codeRenderCur(cur);
-    if (TTSController.isAutoSpeak() && cur.fromVoice && cur.text) {
-      const sp = cur.el.querySelector("[data-code-speak]");
-      TTSController.speakText(cur.text, sp);
-    }
   }
   code.cur = null;
-  code.lastInputWasVoice = false;
+}
+
+function codeOnTurnEnd() {
+  if (TTSController.isAutoSpeak() && code.turnFromVoice && !code.replaying) {
+    const cards = codeFeed() ? codeFeed().querySelectorAll(".code-mobile-card--assistant") : [];
+    if (cards.length) {
+      const lastCard = cards[cards.length - 1];
+      const textEl = lastCard.querySelector(".cs-text") || lastCard.querySelector(".code-mobile-card-body");
+      const sp = lastCard.querySelector("[data-code-speak]") || $("code-speak-btn");
+      if (textEl) {
+        const textToSpeak = (textEl.innerText || textEl.textContent || "").trim();
+        if (textToSpeak && textToSpeak !== code.lastSpokenText) {
+          code.lastSpokenText = textToSpeak;
+          TTSController.speakText(textToSpeak, sp);
+        }
+      }
+    }
+  }
+  code.turnFromVoice = false;
 }
 
 function codeRenderCur(block) {
@@ -1232,21 +1738,31 @@ function codeEvent(ev, replay) {
       break;
     case "health": codeEnd(); codeCard("code-mobile-card--assistant cs-health", codeHealth(ev.data || {})); break;
     case "notice": codeEnd(); codeCard(`cs-notice cs-notice--${esc(ev.level || "info")}`, esc(ev.text)); break;
-    case "error": codeEnd(); codeCard("cs-notice cs-notice--error", esc(ev.text)); break;
+    case "error":
+      codeEnd();
+      codeCard("cs-notice cs-notice--error", esc(ev.text));
+      code.turnFromVoice = false;
+      break;
     case "stats": codeEnd(); codeCard("cs-stats", `${ev.tokens} tokens · ${ev.seconds}s · ${ev.rate} t/s`); break;
     case "approval_request": codeEnd(); codeApprovalCard(ev); break;
     case "approval_resolved": codeResolve(ev.id, ev.ok); break;
     case "cleared":
       codeFeed().innerHTML = "";
       codeEnd();
+      code.turnFromVoice = false;
       if (!replay) { codeThinkClosed.clear(); codeSaveThinkState(); }   // a live /clear, not one in the history
       break;
-    case "turn_end": codeEnd(); break;
+    case "turn_end":
+      codeEnd();
+      codeOnTurnEnd();
+      break;
     case "state": codeSetState(ev); break;
   }
 }
 
 function codeHello(h) {
+  code.replaying = true;
+  code.turnFromVoice = false;
   code.client = h.client || "";
   codeFeed().innerHTML = "";
   codeEnd();
@@ -1262,6 +1778,7 @@ function codeHello(h) {
   codeRenderCur();
   codeSetState(h.state);
   codeScroll(true);
+  code.replaying = false;
 }
 
 async function codeConnect() {
@@ -1331,19 +1848,26 @@ async function codeOp(op, extra = {}) {
 }
 
 async function codeSend(text) {
+  if (typeof STTController !== "undefined") {
+    STTController.cancelAutoSendTimer();
+  }
   const ta = $("code-mobile-input");
   text = (text ?? (ta ? ta.value : "")).trim();
   if (!text) return;
 
+  if (typeof TTSController !== "undefined" && TTSController.speaking) {
+    TTSController.stop();
+  }
+
   let fromVoice = false;
-  if (STTController.lastInputWasVoice && STTController.lastTranscribedText && STTController.currentTarget === "code") {
+  if (STTController.lastInputWasVoice && STTController.lastTranscribedText) {
     const spokenLower = STTController.lastTranscribedText.toLowerCase();
     const textLower = text.toLowerCase();
     if (textLower.includes(spokenLower) || spokenLower.includes(textLower)) {
       fromVoice = true;
     }
   }
-  code.lastInputWasVoice = fromVoice;
+  code.turnFromVoice = fromVoice;
   STTController.lastInputWasVoice = false;
   STTController.lastTranscribedText = "";
 
@@ -1374,7 +1898,13 @@ function setScaffoldUI() {
 if ($("code-restart-btn")) {
   $("code-restart-btn").onclick = () => { if (confirm("Clear this CLI conversation (in every client)?")) codeSend("/clear"); };
 }
-if ($("code-stop-btn")) $("code-stop-btn").onclick = () => codeOp("interrupt");
+if ($("code-stop-btn")) {
+  $("code-stop-btn").onclick = () => {
+    if (typeof TTSController !== "undefined") TTSController.stop();
+    code.turnFromVoice = false;
+    codeOp("interrupt");
+  };
+}
 if ($("code-speak-btn")) {
   $("code-speak-btn").onclick = () => {
     const cards = codeFeed() ? codeFeed().querySelectorAll(".code-mobile-card--assistant") : [];
@@ -2059,7 +2589,7 @@ function markdown(text) {
 }
 
 // ------------------------------------------------------------------ Chat
-const DEFAULTS = {thinking: "high", temperature: 0.6, top_p: 0.95, top_k: 20, max: "", seed: "", show: true, esp: true, mcp: true};
+const DEFAULTS = {thinking: "high", temperature: 0.6, top_p: 0.95, top_k: 20, max: "", seed: "", show: true, esp: true, mcp: false};
 let settings = {...DEFAULTS, ...store.get("sampling", {})};
 let messages = store.get("chat", []);
 let attachments = [];                 // {name, url}
@@ -2277,8 +2807,11 @@ function setBusy(on) {
   $("composer-hint").textContent = on ? "" : "Shift+Enter: new line";
 }
 
-async function send() {
-  const text = $("input").value.trim();
+async function send(overrideText) {
+  if (typeof STTController !== "undefined") {
+    STTController.cancelAutoSendTimer();
+  }
+  const text = (overrideText ?? $("input").value).trim();
   if ((!text && !attachments.length) || busy) return;
 
   // Auto-speak condition: only when request was dictated via STT
@@ -2316,8 +2849,8 @@ async function send() {
   }
   if (settings.seed) body.seed = +settings.seed;
   if (settings.max) body.max_tokens = +settings.max;
-  if (projectionLoaded()) body.experimental_speed_projection = !!settings.esp;
-  if (settings.mcp !== false && mcpInfo.tools > 0) body.strata_mcp = true;   // this server may run MCP tools for it
+  // General chat is completely isolated from tools (all tools belong to Code tab & CLI)
+  body.strata_mcp = false;
 
   let firstAt = null, thinkStart = null, usage = null, frame = 0;
   const paint = () => { frame = 0; updateAssistant(el, m, true); scrollDown(); };
@@ -2518,11 +3051,40 @@ $("input").addEventListener("paste", (e) => {
 });
 
 // ------------------------------------------------------------------ the sampling drawer
+let lastDrawerTrigger = null;
 function openDrawer(open) {
-  $("drawer").dataset.open = String(open);
-  $("drawer").setAttribute("aria-hidden", String(!open));
-  $("scrim").hidden = !open;
-  if (open) { loadDrawer(); syncShared().then(loadDrawer); loadMcp(); }
+  const drawer = $("drawer");
+  if (!drawer) return;
+  if (open) {
+    if (document.activeElement && (document.activeElement.id === "sampling-btn" || document.activeElement.id === "code-sampling-btn")) {
+      lastDrawerTrigger = document.activeElement;
+    }
+    drawer.dataset.open = "true";
+    drawer.removeAttribute("aria-hidden");
+    drawer.removeAttribute("inert");
+    drawer.inert = false;
+    $("scrim").hidden = false;
+    loadDrawer();
+    syncShared().then(loadDrawer);
+    loadMcp();
+  } else {
+    // Release focus from any focused element inside drawer before setting aria-hidden/inert
+    if (document.activeElement && drawer.contains(document.activeElement)) {
+      document.activeElement.blur();
+      if (lastDrawerTrigger && typeof lastDrawerTrigger.focus === "function") {
+        try { lastDrawerTrigger.focus(); } catch (_) {}
+      } else if (tab === "chat" && $("input")) {
+        try { $("input").focus(); } catch (_) {}
+      } else if (tab === "code" && $("code-mobile-input")) {
+        try { $("code-mobile-input").focus(); } catch (_) {}
+      }
+    }
+    drawer.dataset.open = "false";
+    drawer.setAttribute("aria-hidden", "true");
+    drawer.setAttribute("inert", "");
+    drawer.inert = true;
+    $("scrim").hidden = true;
+  }
 }
 function loadDrawer(s = settings) {
   for (const b of $("s-thinking").children) b.setAttribute("aria-checked", String(b.dataset.v === s.thinking));
@@ -3095,14 +3657,15 @@ if (wsDialog) {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
+    if (typeof STTController !== "undefined") STTController.cancelAutoSendTimer();
     if ($("drawer") && $("drawer").dataset.open === "true") openDrawer(false);
     if ($("workspace-dialog") && ($("workspace-dialog").hasAttribute("open") || $("workspace-dialog").open)) openWorkspace(false);
     if ($("brave-stt-dialog") && ($("brave-stt-dialog").hasAttribute("open") || $("brave-stt-dialog").open)) STTController.closeBraveGuide();
   }
 });
 
-$("sampling-btn").onclick = () => openDrawer(true);
-if ($("code-sampling-btn")) $("code-sampling-btn").onclick = () => openDrawer(true);   // the same settings drive the CLI
+$("sampling-btn").onclick = () => { lastDrawerTrigger = $("sampling-btn"); openDrawer(true); };
+if ($("code-sampling-btn")) $("code-sampling-btn").onclick = () => { lastDrawerTrigger = $("code-sampling-btn"); openDrawer(true); };   // the same settings drive the CLI
 syncShared();                                            // the server's Chat settings, or publish this browser's
 $("drawer-close").onclick = () => openDrawer(false);
 $("scrim").onclick = () => openDrawer(false);
