@@ -8,7 +8,7 @@
 <link rel="icon" type="image/svg+xml" href="web/favicon.svg">
 <link rel="stylesheet" href="web/tokens.css">
 <link rel="stylesheet" href="web/components.css">
-<link rel="stylesheet" href="web/app.css">
+<link rel="stylesheet" href="web/app.css?v=20261017-tts">
 <script>
   // the theme before the first paint: default dark for D.L. AI
   try {
@@ -111,6 +111,9 @@
           <button type="button" class="st-btn st-btn--icon code-action-btn" id="code-sampling-btn" title="Sampling and thinking (shared with Chat)" aria-label="Sampling and thinking">
             <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-settings"/></svg>
           </button>
+          <button type="button" class="st-btn st-btn--icon code-action-btn" id="code-speak-btn" title="Read latest reply aloud" aria-label="Read latest reply aloud">
+            <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-volume"/></svg>
+          </button>
           <button type="button" class="st-btn st-btn--secondary st-btn--sm code-action-btn" id="code-stop-btn" title="Interrupt the running turn" hidden>
             <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-stop"/></svg><span>Stop</span>
           </button>
@@ -142,6 +145,7 @@
             <button type="button" class="code-mobile-chip" data-cmd="/schedule list" data-run>/schedule</button>
             <button type="button" class="code-mobile-chip" data-cmd="/cd">/cd</button>
             <button type="button" class="code-mobile-chip" data-cmd="/continue" data-run>/continue</button>
+            <button type="button" class="code-mobile-chip" data-cmd="/speak" data-run>/speak</button>
             <button type="button" class="code-mobile-chip" data-cmd="/yolo" data-run>/yolo</button>
             <button type="button" class="code-mobile-chip" data-cmd="/help" data-run>/help</button>
           </div>
@@ -258,6 +262,51 @@
         <div class="toggle-row"><span>Dark theme</span>
           <button class="st-toggle" id="dark-toggle" role="switch" aria-checked="false" aria-label="Dark theme"></button></div>
         <p class="muted small">Chats, settings and the key are kept in this browser only.</p>
+      </div>
+      <div class="st-card" id="tts-settings-card">
+        <div class="req-head">
+          <span class="card-title">Voice &amp; Speech (TTS)</span>
+          <span class="muted small" id="tts-status-badge">Native Engine</span>
+        </div>
+        <p class="muted small">Uses your browser and operating system's native voice engine. 100% client-side, zero latency, completely private.</p>
+
+        <div class="st-field">
+          <label class="st-label" for="tts-voice-select">Voice <output id="tts-voice-count"></output></label>
+          <select class="st-select" id="tts-voice-select" aria-label="Select speech voice">
+            <option value="">System default</option>
+          </select>
+        </div>
+
+        <div class="st-field">
+          <label class="st-label" for="tts-rate">Speed <output id="tts-rate-val">1.00x</output></label>
+          <input class="st-slider" type="range" id="tts-rate" min="0.7" max="1.8" step="0.05" value="1.0">
+        </div>
+
+        <div class="st-field">
+          <label class="st-label" for="tts-pitch">Pitch <output id="tts-pitch-val">1.00</output></label>
+          <input class="st-slider" type="range" id="tts-pitch" min="0.8" max="1.3" step="0.05" value="1.0">
+        </div>
+
+        <div class="st-field">
+          <label class="st-label" for="tts-code-mode">Code blocks in speech</label>
+          <select class="st-select" id="tts-code-mode">
+            <option value="skip" selected>Skip code blocks (recommended)</option>
+            <option value="summary">Read language summary only</option>
+            <option value="verbatim">Read all code aloud</option>
+          </select>
+        </div>
+
+        <div class="toggle-row">
+          <span>Automatically read new answers aloud<br><span class="muted small">Starts speaking once the assistant finishes writing</span></span>
+          <button class="st-toggle" id="tts-auto-toggle" role="switch" aria-checked="false" aria-label="Auto read answers"></button>
+        </div>
+
+        <div class="drawer-actions" style="margin-top:14px;">
+          <button class="st-btn st-btn--secondary" id="tts-test-btn" type="button">
+            <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-volume"/></svg>
+            <span>Test voice</span>
+          </button>
+        </div>
       </div>
       <div class="st-card cfg-card" id="cfg-card" hidden>
         <div class="req-head"><span class="card-title">Model settings</span><span class="muted small" id="cfg-file"></span></div>
@@ -379,6 +428,6 @@
 </dialog>
 <div class="scrim" id="scrim" hidden></div>
 <div class="st-toasts" id="toasts" aria-live="polite"></div>
-<script src="web/app.js?v=20261017-2"></script>
+<script src="web/app.js?v=20261017-tts"></script>
 </body>
 </html>

@@ -3,7 +3,7 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const SPRITE = "web/sprite.svg?v=20261010-5";
+const SPRITE = "web/sprite.svg?v=20261017-tts";
 const icon = (name, cls = "st-icon") => {
   if (name === "folder") {
     return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path opacity="0.25" d="M3 6C3 4.895 3.895 4 5 4H9.172C9.702 4 10.211 4.21 10.586 4.586L12.414 6.414C12.789 6.789 13.298 7 13.828 7H19C20.105 7 21 7.895 21 9V18C21 19.105 20.105 20 19 20H5C3.895 20 3 19.105 3 18V6Z" fill="currentColor"/><path d="M3 6C3 4.895 3.895 4 5 4H9.172C9.702 4 10.211 4.21 10.586 4.586L12.414 6.414C12.789 6.789 13.298 7 13.828 7H19C20.105 7 21 7.895 21 9V18C21 19.105 20.105 20 19 20H5C3.895 20 3 19.105 3 18V6Z"/></svg>`;
@@ -57,6 +57,438 @@ async function copyText(text, btn) {
   }
   toast("success", "Copied to clipboard", "", 1800);
 }
+
+// ------------------------------------------------------------------ Text-to-Speech (TTS) Engine
+function cleanForSpeech(rawText, codeMode = "skip") {
+  if (!rawText) return "";
+  let text = String(rawText);
+
+  // 1. Remove thinking / reasoning blocks (<think>...</think>)
+  text = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  text = text.replace(/<think>[\s\S]*$/gi, "");
+
+  // 2. Handle fenced code blocks (```lang ... ```)
+  text = text.replace(/(?:^|\n)```([^\n`]*)\n([\s\S]*?)(?:^|\n)```[ \t]*(?:\n|$)/g, (match, lang, code) => {
+    if (codeMode === "skip") {
+      return " [Code block omitted.] ";
+    } else if (codeMode === "summary") {
+      const lineCount = code.trim().split("\n").filter(l => l.trim().length > 0).length;
+      const lName = (lang || "").trim() || "Code";
+      return ` [${lName} code block, ${lineCount} lines.] `;
+    } else {
+      return ` [Code: ${code.trim()}] `;
+    }
+  });
+  text = text.replace(/(?:^|\n)```[^\n`]*\n[\s\S]*$/g, " [Code block omitted.] ");
+
+  // 3. Strip Markdown Headings (# Header)
+  text = text.replace(/^#{1,6}\s+/gm, "");
+
+  // 4. Strip Bold and Italics (**bold**, *italic*, __bold__, _italic_)
+  text = text.replace(/[*_]{1,3}([^*_]+)[*_]{1,3}/g, "$1");
+
+  // 5. Strip Blockquotes (> quote)
+  text = text.replace(/^>\s*/gm, "");
+
+  // 6. Strip List bullets and numbers (- item, * item, 1. item)
+  text = text.replace(/^[\s]*[-*+]\s+/gm, "");
+  text = text.replace(/^[\s]*\d+\.\s+/gm, "");
+
+  // 7. Strip inline code (`code`)
+  text = text.replace(/`([^`]+)`/g, "$1");
+
+  // 8. Convert markdown links [Label](url) to just Label
+  text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+
+  // 9. Strip bare URLs
+  text = text.replace(/https?:\/\/[^\s]+/g, "link");
+
+  // 10. Strip horizontal rules (---, ***, ___)
+  text = text.replace(/^[-*_]{3,}\s*$/gm, "");
+
+  // 11. Strip HTML tags
+  text = text.replace(/<[^>]+>/g, " ");
+
+  // 12. Normalize LaTeX / Math formulas ($x^2$, $$formula$$)
+  text = text.replace(/\$\$([^$]+)\$\$/g, "$1");
+  text = text.replace(/\$([^$]+)\$/g, "$1");
+
+  // 13. Collapse multiple whitespace, preserve natural sentence spacing
+  text = text.replace(/[ \t]+/g, " ");
+  text = text.replace(/\n\s*\n/g, "\n");
+  text = text.trim();
+
+  return text;
+}
+
+function chunkText(text, maxLen = 180) {
+  if (!text) return [];
+  const clean = text.trim();
+  if (clean.length <= maxLen) return [clean];
+
+  const chunks = [];
+  const rawSentences = clean.split(/(?<=[.!?;\n])\s+/);
+
+  for (const raw of rawSentences) {
+    const s = raw.trim();
+    if (!s) continue;
+
+    if (s.length <= maxLen) {
+      if (chunks.length > 0 && chunks[chunks.length - 1].length + 1 + s.length <= maxLen) {
+        chunks[chunks.length - 1] += " " + s;
+      } else {
+        chunks.push(s);
+      }
+    } else {
+      const clauses = s.split(/(?<=[,:\-\–—])\s+/);
+      let cur = "";
+
+      for (const clause of clauses) {
+        if (!clause) continue;
+        if ((cur + " " + clause).trim().length <= maxLen) {
+          cur = (cur ? cur + " " + clause : clause).trim();
+        } else {
+          if (cur) chunks.push(cur);
+          if (clause.length > maxLen) {
+            const words = clause.split(/\s+/);
+            let wCur = "";
+            for (const w of words) {
+              if ((wCur + " " + w).trim().length <= maxLen) {
+                wCur = (wCur ? wCur + " " + w : w).trim();
+              } else {
+                if (wCur) chunks.push(wCur);
+                wCur = w;
+              }
+            }
+            cur = wCur;
+          } else {
+            cur = clause;
+          }
+        }
+      }
+      if (cur) chunks.push(cur);
+    }
+  }
+
+  return chunks.filter(c => c.length > 0);
+}
+
+const TTSController = {
+  queue: [],
+  currentIndex: 0,
+  speaking: false,
+  paused: false,
+  activeBtn: null,
+  activeMsg: null,
+  watchdogTimer: null,
+  wakeLock: null,
+  audioCtx: null,
+  _silentSource: null,
+  currentUtterance: null, // V8 Garbage Collection Anchor
+
+  getVoice() {
+    if (!window.speechSynthesis) return null;
+    const voices = window.speechSynthesis.getVoices();
+    const uri = store.get("tts_voice", "");
+    if (uri) {
+      const match = voices.find((v) => v.voiceURI === uri);
+      if (match) return match;
+    }
+    return voices.find((v) => v.default) || voices.find((v) => v.localService) || voices[0] || null;
+  },
+
+  getRate() { return +store.get("tts_rate", 1.0); },
+  getPitch() { return +store.get("tts_pitch", 1.0); },
+  getCodeMode() { return store.get("tts_code_mode", "skip"); },
+  isAutoSpeak() { return !!store.get("tts_auto_speak", false); },
+
+  clean(rawText) {
+    return cleanForSpeech(rawText, this.getCodeMode());
+  },
+
+  chunk(text) {
+    return chunkText(text, 180);
+  },
+
+  startWatchdog() {
+    this.stopWatchdog();
+    this.watchdogTimer = setInterval(() => {
+      if (window.speechSynthesis && window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+        window.speechSynthesis.pause();
+        window.speechSynthesis.resume();
+      }
+    }, 10000);
+  },
+
+  stopWatchdog() {
+    if (this.watchdogTimer) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+  },
+
+  async acquireWakeLock() {
+    if ("wakeLock" in navigator && !this.wakeLock) {
+      try {
+        this.wakeLock = await navigator.wakeLock.request("screen");
+        this.wakeLock.addEventListener("release", () => { this.wakeLock = null; });
+      } catch (e) { /* ignore policy errors */ }
+    }
+  },
+
+  releaseWakeLock() {
+    if (this.wakeLock) {
+      try { this.wakeLock.release(); } catch (e) {}
+      this.wakeLock = null;
+    }
+  },
+
+  updateMediaSession(title = "D.L. AI Response") {
+    if (!("mediaSession" in navigator)) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: title,
+        artist: "D.L. AI · Strata",
+        album: "Local AI Voice",
+      });
+      navigator.mediaSession.playbackState = "playing";
+      navigator.mediaSession.setActionHandler("play", () => this.resume());
+      navigator.mediaSession.setActionHandler("pause", () => this.pause());
+      navigator.mediaSession.setActionHandler("stop", () => this.stop());
+    } catch (e) {}
+  },
+
+  clearMediaSession() {
+    if (!("mediaSession" in navigator)) return;
+    try {
+      navigator.mediaSession.playbackState = "none";
+    } catch (e) {}
+  },
+
+  startAudioKeepAlive() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!this.audioCtx) this.audioCtx = new AudioCtx();
+      if (this.audioCtx.state === "suspended") this.audioCtx.resume();
+      const buffer = this.audioCtx.createBuffer(1, Math.floor(this.audioCtx.sampleRate * 0.05), this.audioCtx.sampleRate);
+      const source = this.audioCtx.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      source.connect(this.audioCtx.destination);
+      source.start();
+      this._silentSource = source;
+    } catch (e) {}
+  },
+
+  stopAudioKeepAlive() {
+    if (this._silentSource) {
+      try { this._silentSource.stop(); this._silentSource.disconnect(); } catch (e) {}
+      this._silentSource = null;
+    }
+  },
+
+  updateButtonState(speaking) {
+    if (!this.activeBtn) return;
+    this.activeBtn.classList.toggle("is-speaking", speaking);
+    const use = this.activeBtn.querySelector("use");
+    if (use) {
+      use.setAttribute("href", `${SPRITE}#i-${speaking ? "volume-x" : "volume"}`);
+    }
+    this.activeBtn.title = speaking ? "Stop reading aloud" : "Read aloud";
+    this.activeBtn.setAttribute("aria-label", speaking ? "Stop reading aloud" : "Read aloud");
+  },
+
+  stop() {
+    if (!window.speechSynthesis) return;
+    this.stopWatchdog();
+    this.releaseWakeLock();
+    this.stopAudioKeepAlive();
+    this.clearMediaSession();
+    try { window.speechSynthesis.cancel(); } catch (e) {}
+    this.updateButtonState(false);
+    this.speaking = false;
+    this.paused = false;
+    this.queue = [];
+    this.currentIndex = 0;
+    this.currentUtterance = null;
+    this.activeBtn = null;
+    this.activeMsg = null;
+  },
+
+  pause() {
+    if (!window.speechSynthesis || !this.speaking) return;
+    try { window.speechSynthesis.pause(); } catch (e) {}
+    this.paused = true;
+    if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
+  },
+
+  resume() {
+    if (!window.speechSynthesis || !this.speaking) return;
+    try { window.speechSynthesis.resume(); } catch (e) {}
+    this.paused = false;
+    if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
+  },
+
+  speakText(rawText, btn = null, msgObj = null) {
+    if (!window.speechSynthesis) {
+      toast("error", "TTS not supported", "Your browser does not support the Web Speech API.");
+      return;
+    }
+
+    if (this.speaking) {
+      const wasSame = (this.activeBtn === btn && btn !== null) || (this.activeMsg === msgObj && msgObj !== null);
+      this.stop();
+      if (wasSame) return; // Toggle off if clicked on same playing button
+    }
+
+    const clean = this.clean(rawText);
+    if (!clean) {
+      toast("info", "Nothing to read", "The message contains no readable text.");
+      return;
+    }
+
+    this.queue = this.chunk(clean);
+    if (!this.queue.length) return;
+
+    this.currentIndex = 0;
+    this.speaking = true;
+    this.paused = false;
+    this.activeBtn = btn;
+    this.activeMsg = msgObj;
+    this.updateButtonState(true);
+
+    this.acquireWakeLock();
+    this.startAudioKeepAlive();
+    this.updateMediaSession("Reading response...");
+    this.startWatchdog();
+
+    this.speakNext();
+  },
+
+  speakNext() {
+    if (!this.speaking || this.currentIndex >= this.queue.length) {
+      this.stop();
+      return;
+    }
+
+    const chunk = this.queue[this.currentIndex];
+    const u = new SpeechSynthesisUtterance(chunk);
+    this.currentUtterance = u; // Anchor to avoid V8 GC mid-speech
+
+    const v = this.getVoice();
+    if (v) u.voice = v;
+    u.rate = this.getRate();
+    u.pitch = this.getPitch();
+
+    u.onend = () => {
+      this.currentIndex++;
+      this.speakNext();
+    };
+
+    u.onerror = (e) => {
+      if (e.error !== "canceled" && e.error !== "interrupted") {
+        console.warn("SpeechSynthesis error:", e);
+      }
+      this.currentIndex++;
+      if (this.currentIndex < this.queue.length && e.error !== "canceled") {
+        this.speakNext();
+      } else {
+        this.stop();
+      }
+    };
+
+    try {
+      window.speechSynthesis.speak(u);
+    } catch (err) {
+      console.error("SpeechSynthesis speak() failed:", err);
+      this.stop();
+      toast("warn", "Speech blocked", "Click the speaker button to start audio playback.");
+    }
+  },
+
+  toggleMessage(msg, btn) {
+    if (!msg || !msg.text) return;
+    this.speakText(msg.text, btn, msg);
+  },
+
+  init() {
+    if (!window.speechSynthesis) {
+      const card = $("tts-settings-card");
+      if (card) {
+        card.querySelector(".muted.small").textContent = "Web Speech API is not supported in this browser.";
+      }
+      return;
+    }
+    const updateVoices = () => this.populateVoiceSelector();
+    window.speechSynthesis.onvoiceschanged = updateVoices;
+    updateVoices();
+
+    const vSel = $("tts-voice-select");
+    if (vSel) {
+      vSel.onchange = () => store.set("tts_voice", vSel.value);
+    }
+    const rSlider = $("tts-rate");
+    if (rSlider) {
+      rSlider.value = this.getRate();
+      const rOut = $("tts-rate-val");
+      if (rOut) rOut.textContent = `${Number(rSlider.value).toFixed(2)}x`;
+      rSlider.oninput = () => {
+        store.set("tts_rate", +rSlider.value);
+        if (rOut) rOut.textContent = `${Number(rSlider.value).toFixed(2)}x`;
+      };
+    }
+    const pSlider = $("tts-pitch");
+    if (pSlider) {
+      pSlider.value = this.getPitch();
+      const pOut = $("tts-pitch-val");
+      if (pOut) pOut.textContent = Number(pSlider.value).toFixed(2);
+      pSlider.oninput = () => {
+        store.set("tts_pitch", +pSlider.value);
+        if (pOut) pOut.textContent = Number(pSlider.value).toFixed(2);
+      };
+    }
+    const cMode = $("tts-code-mode");
+    if (cMode) {
+      cMode.value = this.getCodeMode();
+      cMode.onchange = () => store.set("tts_code_mode", cMode.value);
+    }
+    const autoToggle = $("tts-auto-toggle");
+    if (autoToggle) {
+      autoToggle.setAttribute("aria-checked", String(this.isAutoSpeak()));
+      autoToggle.onclick = () => {
+        const next = autoToggle.getAttribute("aria-checked") !== "true";
+        autoToggle.setAttribute("aria-checked", String(next));
+        store.set("tts_auto_speak", next);
+        toast("info", `Auto-speak ${next ? "enabled" : "disabled"}`, next ? "New responses will be read aloud automatically." : "Tap the speaker icon on any message to listen.", 2500);
+      };
+    }
+    const testBtn = $("tts-test-btn");
+    if (testBtn) {
+      testBtn.onclick = () => {
+        this.speakText("Hello! This is D.L. AI voice running natively in your browser.", testBtn);
+      };
+    }
+  },
+
+  populateVoiceSelector() {
+    const sel = $("tts-voice-select");
+    if (!sel || !window.speechSynthesis) return;
+    const voices = window.speechSynthesis.getVoices();
+    const countEl = $("tts-voice-count");
+    if (countEl) countEl.textContent = `${voices.length} available`;
+    const saved = store.get("tts_voice", "");
+
+    sel.innerHTML = '<option value="">System default</option>';
+    voices.forEach((v) => {
+      const opt = document.createElement("option");
+      opt.value = v.voiceURI;
+      opt.textContent = `${v.name} (${v.lang})${v.localService ? " [local]" : ""}`;
+      if (v.voiceURI === saved) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  },
+};
 
 // ------------------------------------------------------------------ theme and tabs
 // the system's theme until the user picks one (only a click is saved)
@@ -127,13 +559,24 @@ function codeCard(cls, html) {
 function codeAssistant() {
   if (code.cur) return code.cur;
   const el = codeCard("code-mobile-card--assistant cs-reply",
-    `<details class="cs-think" hidden open><summary>Thinking</summary><div class="cs-think-body"></div></details><div class="cs-text md"></div>`);
+    `<details class="cs-think" hidden open><summary>Thinking</summary><div class="cs-think-body"></div></details><div class="cs-text md"></div>` +
+    `<div class="code-card-actions">` +
+    `<button type="button" class="st-btn st-btn--icon st-btn--sm code-card-action" data-code-copy title="Copy answer" aria-label="Copy answer">${icon("copy")}</button>` +
+    `<button type="button" class="st-btn st-btn--icon st-btn--sm code-card-action" data-code-speak title="Read aloud" aria-label="Read aloud">${icon("volume")}</button>` +
+    `</div>`);
   code.cur = { el, thinking: "", text: "" };
   return code.cur;
 }
 
 function codeEnd() {                                      // close the open reply block, drawn in full
-  if (code.cur) codeRenderCur(code.cur);
+  if (code.cur) {
+    const cur = code.cur;
+    codeRenderCur(cur);
+    if (TTSController.isAutoSpeak() && cur.text) {
+      const sp = cur.el.querySelector("[data-code-speak]");
+      TTSController.speakText(cur.text, sp);
+    }
+  }
   code.cur = null;
 }
 
@@ -251,7 +694,11 @@ function codeEvent(ev, replay) {
     case "output":
       codeEnd();
       codeCard("code-mobile-card--assistant", `<div class="code-mobile-card-header"><span class="role-tag">${esc(ev.title || "")}</span></div>
-        <div class="code-mobile-card-body">${esc(ev.text || "")}</div>`);
+        <div class="code-mobile-card-body">${esc(ev.text || "")}</div>
+        <div class="code-card-actions">
+          <button type="button" class="st-btn st-btn--icon st-btn--sm code-card-action" data-code-copy title="Copy output" aria-label="Copy output">${icon("copy")}</button>
+          <button type="button" class="st-btn st-btn--icon st-btn--sm code-card-action" data-code-speak title="Read aloud" aria-label="Read aloud">${icon("volume")}</button>
+        </div>`);
       break;
     case "health": codeEnd(); codeCard("code-mobile-card--assistant cs-health", codeHealth(ev.data || {})); break;
     case "notice": codeEnd(); codeCard(`cs-notice cs-notice--${esc(ev.level || "info")}`, esc(ev.text)); break;
@@ -355,10 +802,23 @@ async function codeOp(op, extra = {}) {
 
 async function codeSend(text) {
   const ta = $("code-mobile-input");
-  text = (text ?? ta.value).trim();
+  text = (text ?? (ta ? ta.value : "")).trim();
   if (!text) return;
+  if (text === "/speak") {
+    if (ta && ta.value.trim() === text) { ta.value = ""; ta.style.height = "auto"; }
+    const cards = codeFeed() ? codeFeed().querySelectorAll(".code-mobile-card--assistant") : [];
+    if (cards.length) {
+      const lastCard = cards[cards.length - 1];
+      const textEl = lastCard.querySelector(".cs-text") || lastCard.querySelector(".code-mobile-card-body");
+      const sp = lastCard.querySelector("[data-code-speak]") || $("code-speak-btn");
+      if (textEl) TTSController.speakText(textEl.innerText || textEl.textContent, sp);
+    } else {
+      toast("info", "No messages yet", "There is no assistant reply to speak.");
+    }
+    return;
+  }
   if (await codeOp("input", { text })) {
-    if (ta.value.trim() === text) { ta.value = ""; ta.style.height = "auto"; }
+    if (ta && ta.value.trim() === text) { ta.value = ""; ta.style.height = "auto"; }
   }
 }
 
@@ -372,6 +832,19 @@ if ($("code-restart-btn")) {
   $("code-restart-btn").onclick = () => { if (confirm("Clear this CLI conversation (in every client)?")) codeSend("/clear"); };
 }
 if ($("code-stop-btn")) $("code-stop-btn").onclick = () => codeOp("interrupt");
+if ($("code-speak-btn")) {
+  $("code-speak-btn").onclick = () => {
+    const cards = codeFeed() ? codeFeed().querySelectorAll(".code-mobile-card--assistant") : [];
+    if (cards.length) {
+      const lastCard = cards[cards.length - 1];
+      const textEl = lastCard.querySelector(".cs-text") || lastCard.querySelector(".code-mobile-card-body");
+      const sp = lastCard.querySelector("[data-code-speak]") || $("code-speak-btn");
+      if (textEl) TTSController.speakText(textEl.innerText || textEl.textContent, sp);
+    } else {
+      toast("info", "No messages yet", "There is no assistant reply to speak.");
+    }
+  };
+}
 if ($("code-export-btn")) {
   $("code-export-btn").onclick = async () => {
     const res = await codeOp("export");
@@ -386,6 +859,24 @@ if ($("code-export-btn")) {
 }
 if ($("code-fullscreen-btn")) {
   $("code-fullscreen-btn").onclick = () => document.querySelector(".code-terminal-wrap")?.classList.toggle("code-terminal--fullscreen");
+}
+if (codeFeed()) {
+  codeFeed().addEventListener("click", (e) => {
+    const sp = e.target.closest("[data-code-speak]");
+    if (sp) {
+      const card = sp.closest(".code-mobile-card");
+      const textEl = card.querySelector(".cs-text") || card.querySelector(".code-mobile-card-body");
+      if (textEl) TTSController.speakText(textEl.innerText || textEl.textContent, sp);
+      return;
+    }
+    const cp = e.target.closest("[data-code-copy]");
+    if (cp) {
+      const card = cp.closest(".code-mobile-card");
+      const textEl = card.querySelector(".cs-text") || card.querySelector(".code-mobile-card-body");
+      if (textEl) copyText(textEl.innerText || textEl.textContent, cp);
+      return;
+    }
+  });
 }
 if ($("code-mobile-send-btn")) $("code-mobile-send-btn").onclick = () => codeSend();
 if ($("code-mobile-input")) {
@@ -1069,6 +1560,7 @@ function msgEl(m, i) {
     el.innerHTML = `<details class="st-collapse think" hidden${(m.thinkOpen ?? settings.show !== false) ? " open" : ""}><summary>${icon("thinking", "st-icon st-icon--sm")}<span class="think-title"></span>` +
       `${icon("chevron", "st-icon st-icon--sm st-chev")}</summary><div class="st-collapse__body thinking"></div></details>` +
       `<div class="st-bubble"></div><div class="st-msg__meta"><span class="meta-text"></span>` +
+      `<button class="st-btn st-btn--icon st-msg-btn-speak" data-msg-speak aria-label="Read answer aloud" title="Read aloud">${icon("volume")}</button>` +
       `<button class="st-btn st-btn--icon" data-msg-copy aria-label="Copy the answer" title="Copy">${icon("copy")}</button></div>`;
     updateAssistant(el, m, false);
   }
@@ -1149,6 +1641,8 @@ function updateAssistant(el, m, streaming) {
   }
   el.querySelector(".meta-text").textContent = m.meta || (streaming ? "" : m.stopped ? "Stopped" : "");
   el.querySelector("[data-msg-copy]").hidden = streaming || !m.text;
+  const spk = el.querySelector("[data-msg-speak]");
+  if (spk) spk.hidden = streaming || !m.text;
 }
 function renderChat() {
   const chat = $("chat");
@@ -1163,6 +1657,8 @@ function scrollDown(force) { const s = $("chat-scroll"); if (force || nearBottom
 $("chat").addEventListener("click", (e) => {
   const cc = e.target.closest("[data-code-copy]");
   if (cc) { copyText(cc.closest(".st-code").querySelector("pre").textContent, cc); return; }
+  const ms = e.target.closest("[data-msg-speak]");
+  if (ms) { const i = +ms.closest(".st-msg").dataset.i; TTSController.toggleMessage(messages[i], ms); return; }
   const mc = e.target.closest("[data-msg-copy]");
   if (mc) { const i = +mc.closest(".st-msg").dataset.i; copyText(messages[i].text, mc); return; }
   // a tool block: its open state lives in the message (the answer is rebuilt while it streams), so the click sets it
@@ -1330,6 +1826,10 @@ async function send() {
   updateAssistant(el, m, false);
   saveChat();
   scrollDown();
+  if (TTSController.isAutoSpeak() && m.text && !m.error && !m.stopped) {
+    const spk = el.querySelector("[data-msg-speak]");
+    TTSController.speakText(m.text, spk, m);
+  }
 }
 
 $("composer").onsubmit = (e) => { e.preventDefault(); send(); };
@@ -1342,6 +1842,7 @@ $("input").addEventListener("input", autosize);
 
 $("new-btn").onclick = () => {
   if (busy) { toast("warn", "Still writing", "Stop the answer first."); return; }
+  TTSController.stop();
   if (!messages.length) return;
   const backup = messages;
   messages = [];
@@ -2036,6 +2537,7 @@ $("scrim").onclick = () => openDrawer(false);
 // ------------------------------------------------------------------ start
 setBusy(false);
 renderChat();
+TTSController.init();
 const startQuestion = new URLSearchParams(location.search).get("q");   // /?q=... starts a chat (a shortcut)
 if (startQuestion) history.replaceState(null, "", location.pathname + location.hash);
 loadHealth().then(loadMcp).then(loadAvailableModels).then(() => { if (startQuestion) { $("input").value = startQuestion; send(); } });
