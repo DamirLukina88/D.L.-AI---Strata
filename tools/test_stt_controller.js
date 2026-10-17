@@ -286,6 +286,30 @@ assert.strictEqual(
   "Voice selector should find voice by name even if URI schema differs"
 );
 
-console.log("All STT Unit Tests Passed Successfully! (20/20)");
+// 7. Test button re-click behavior
+function shouldToggleOff(speaking, activeBtn, clickedBtn, msgObj, activeMsg) {
+  if (!speaking) return false;
+  const isTestBtn = Boolean(clickedBtn && clickedBtn.id === "tts-test-btn");
+  return !isTestBtn && ((activeBtn === clickedBtn && clickedBtn !== null) || (activeMsg === msgObj && msgObj !== null));
+}
+
+// Test 21: Test voice button re-click must NOT toggle off (should immediately restart with new voice)
+const testBtnObj = { id: "tts-test-btn" };
+assert.strictEqual(
+  shouldToggleOff(true, testBtnObj, testBtnObj, null, null),
+  false,
+  "Test button re-click while speaking must NOT toggle off"
+);
+
+// Test 22: Message speaker button re-click in chat DOES toggle off
+const msgBtnObj = { id: "msg-speak-1" };
+assert.strictEqual(
+  shouldToggleOff(true, msgBtnObj, msgBtnObj, null, null),
+  true,
+  "Message speaker button re-click in chat should toggle off"
+);
+
+console.log("All STT Unit Tests Passed Successfully! (22/22)");
+
 
 

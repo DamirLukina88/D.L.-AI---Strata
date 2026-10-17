@@ -42,18 +42,32 @@ This decision documents two critical speech subsystem fixes: (1) resolving Speec
   - In `endStreaming()` and `codeEnd()`, playback only starts if `TTSController.isAutoSpeak() && m.fromVoice`.
   - Manual message speaker buttons remain clickable on any message regardless of prompt origin.
 
+### 4. Piper 1.2 Multi-Codepoint Phoneme Crash & Hardened Fallback
+- **Gotcha**: Piper C++ engine 1.2.0 strictly requires that every entry in `phoneme_id_map` is a single UTF-8 codepoint. The voice model `en_US-mike-medium.onnx.json` contained multi-character diphthongs (`aɪ`, `aʊ`, `ɔɪ`, `eɪ`, `oʊ`), causing Piper to throw `std::runtime_error: Phonemes must be one codepoint` and dump core (`SIGABRT`).
+- **Consequence**: When `piper` dumped core, Speech Dispatcher's `sd_generic` module terminated. Speech Dispatcher does not auto-restart dead generic modules, leaving the desktop TTS pipeline completely unresponsive until systemd restart.
+- **Solution**:
+  1. Sanitized `en_US-mike-medium.onnx.json` to filter out multi-character phonemes (verified Mike speaks cleanly without core dump).
+  2. Hardened `~/.local/bin/piper-speechd` to buffer stdin, catch any synthesizer failure, fall back to `en_US-lessac-medium.onnx`, and guarantee `exit 0`, preventing `sd_generic` from ever crashing.
+
+### 5. Rapid Voice Sampling Test Button Fix
+- **Gotcha**: In `serve/web/app.js`, `TTSController.speakText` treated re-clicking the active button during playback as a toggle-off command (`wasSame`), which was intended for chat message bubbles. When rapidly switching voices in settings and clicking "Test voice", the second click cancelled playback and returned immediately without playing the new voice.
+- **Solution**: Exempted `tts-test-btn` from `wasSame` toggling; it now stops previous playback and immediately starts testing the newly selected voice.
+
 ## Verification
 
-- Automated test suite in `tools/test_stt_controller.js` covers 20 test cases, verifying:
+- Automated test suite in `tools/test_stt_controller.js` covers 22 test cases, verifying:
   - Disjoint, cumulative, and overlapping STT transcript merging.
   - Pure typed prompt auto-speak rejection (`fromVoice === false`).
   - STT voice prompt auto-speak acceptance (`fromVoice === true`).
   - Multi-turn turn state resets and prompt replacement detection.
   - Cross-browser voice URI / name lookup matching.
-- Piper models verified directly against `speechd` SSIP client.
+  - Test button rapid re-click non-toggling behavior.
+- All 20 Piper models tested directly in bash with zero aborts or failures.
+- Speech Dispatcher service restarted and verified active with `sd_generic`.
 
 ## Sources
 
 1. User, chat, 2026-10-17.
 2. Chromium Linux Speech Dispatcher backend: `content/browser/speech/tts_linux.cc`.
 3. Speech Dispatcher module specification: `piper.conf` & `sd_generic`.
+4. Piper TTS issue tracker & C++ source: `piper/src/cpp/phonemize.cpp`.

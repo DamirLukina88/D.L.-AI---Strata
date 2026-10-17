@@ -381,9 +381,10 @@ const TTSController = {
     }
 
     if (this.speaking) {
-      const wasSame = (this.activeBtn === btn && btn !== null) || (this.activeMsg === msgObj && msgObj !== null);
+      const isTestBtn = Boolean(btn && btn.id === "tts-test-btn");
+      const wasSame = !isTestBtn && ((this.activeBtn === btn && btn !== null) || (this.activeMsg === msgObj && msgObj !== null));
       this.stop();
-      if (wasSame) return; // Toggle off if clicked on same playing button
+      if (wasSame) return; // Toggle off if clicked on same playing button in chat
     }
 
     const clean = this.clean(rawText);
