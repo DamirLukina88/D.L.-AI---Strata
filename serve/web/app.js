@@ -52,8 +52,14 @@ async function copyText(text, btn) {
   }
   if (btn) {
     const use = btn.querySelector("use");
-    use.setAttribute("href", `${SPRITE}#i-check`);
-    setTimeout(() => use.setAttribute("href", `${SPRITE}#i-copy`), 1500);
+    if (use) {
+      use.setAttribute("href", `${SPRITE}#i-check`);
+      setTimeout(() => use.setAttribute("href", `${SPRITE}#i-copy`), 1500);
+    } else {
+      const origText = btn.textContent;
+      btn.textContent = "Copied!";
+      setTimeout(() => { btn.textContent = origText; }, 1500);
+    }
   }
   toast("success", "Copied to clipboard", "", 1800);
 }
@@ -377,7 +383,12 @@ const TTSController = {
     this.currentUtterance = u; // Anchor to avoid V8 GC mid-speech
 
     const v = this.getVoice();
-    if (v) u.voice = v;
+    if (v) {
+      u.voice = v;
+      u.lang = v.lang || "en-US";
+    } else {
+      u.lang = document.documentElement.lang || navigator.language || "en-US";
+    }
     u.rate = this.getRate();
     u.pitch = this.getPitch();
 
