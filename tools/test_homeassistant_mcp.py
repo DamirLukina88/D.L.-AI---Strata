@@ -252,6 +252,105 @@ class TestHomeAssistantMcp(unittest.TestCase):
         finally:
             Path(tmp_cfg).unlink()
 
+    def test_area_registry_and_filtering(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            storage_path = Path(tmp_dir)
+            (storage_path / "core.area_registry").write_text(
+                json.dumps({
+                    "data": {
+                        "areas": [
+                            {"id": "living_room", "name": "Living Room"},
+                            {"id": "office", "name": "Office"},
+                        ]
+                    }
+                }),
+                encoding="utf-8",
+            )
+            (storage_path / "core.device_registry").write_text(
+                json.dumps({
+                    "data": {
+                        "devices": [
+                            {"id": "dev1", "name": "Desk Lamp Device", "area_id": "office"},
+                            {"id": "dev2", "name": "Living Room Cam", "area_id": "living_room"},
+                        ]
+                    }
+                }),
+                encoding="utf-8",
+            )
+            (storage_path / "core.entity_registry").write_text(
+                json.dumps({
+                    "data": {
+                        "entities": [
+                            {"entity_id": "light.desk_lamp", "device_id": "dev1", "area_id": None},
+                            {"entity_id": "camera.xiaomi_camera_1", "device_id": "dev2", "area_id": None},
+                            {"entity_id": "sensor.bambu_a1_print_status", "device_id": None, "area_id": "office"},
+                        ]
+                    }
+                }),
+                encoding="utf-8",
+            )
+
+            client = M.HomeAssistantClient(
+                base_url=f"http://127.0.0.1:{self.port}",
+                token="test-valid-token",
+                storage_dir=storage_path,
+            )
+            out = io.BytesIO()
+            server = M.HomeAssistantMcpServer(client, out)
+
+            # Test 1: Filter by area="Office"
+            res = server.handle({
+                "jsonrpc": "2.0",
+                "id": 20,
+                "method": "tools/call",
+                "params": {"name": "list_entities", "arguments": {"area": "Office"}},
+            })
+            self.assertFalse(res["result"]["isError"])
+            data = json.loads(res["result"]["content"][0]["text"])
+            self.assertEqual(data["count"], 2)
+            eids = [e["entity_id"] for e in data["entities"]]
+            self.assertIn("light.desk_lamp", eids)
+            self.assertIn("sensor.bambu_a1_print_status", eids)
+            self.assertEqual(data["entities"][0]["area"], "Office")
+
+            # Test 2: Filter by area="living_room" (slug format)
+            res = server.handle({
+                "jsonrpc": "2.0",
+                "id": 21,
+                "method": "tools/call",
+                "params": {"name": "list_entities", "arguments": {"area": "living_room"}},
+            })
+            self.assertFalse(res["result"]["isError"])
+            data = json.loads(res["result"]["content"][0]["text"])
+            self.assertEqual(data["count"], 1)
+            self.assertEqual(data["entities"][0]["entity_id"], "camera.xiaomi_camera_1")
+            self.assertEqual(data["entities"][0]["area"], "Living Room")
+            self.assertEqual(data["entities"][0]["device_name"], "Living Room Cam")
+
+            # Test 3: Search by device_name
+            res = server.handle({
+                "jsonrpc": "2.0",
+                "id": 22,
+                "method": "tools/call",
+                "params": {"name": "list_entities", "arguments": {"search": "Living Room Cam"}},
+            })
+            self.assertFalse(res["result"]["isError"])
+            data = json.loads(res["result"]["content"][0]["text"])
+            self.assertEqual(data["count"], 1)
+            self.assertEqual(data["entities"][0]["entity_id"], "camera.xiaomi_camera_1")
+
+            # Test 4: get_state enriches area and device_name
+            res = server.handle({
+                "jsonrpc": "2.0",
+                "id": 23,
+                "method": "tools/call",
+                "params": {"name": "get_state", "arguments": {"entity_id": "light.desk_lamp"}},
+            })
+            self.assertFalse(res["result"]["isError"])
+            state = json.loads(res["result"]["content"][0]["text"])
+            self.assertEqual(state["area"], "Office")
+            self.assertEqual(state["device_name"], "Desk Lamp Device")
+
 
 if __name__ == "__main__":
     unittest.main()

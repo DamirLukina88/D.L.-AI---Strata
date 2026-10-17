@@ -39,6 +39,18 @@ Home Assistant Core is installed on dedicated storage (`/mnt/data/homeassistant`
    - Credentials configured in `/mnt/data/homeassistant/mcp_config.json` (mode 600) and `wiki/private/.env` (`HASS_TOKEN`).
    - Tool calling is fully autonomous: Strata reads the dynamic MCP JSON schemas and executes calls in conversation context without requiring manual invocations.
 
+5. **Smart Outlet Lighting & Area Intelligence (Options 2 & 3)**:
+   - Problem: Tuya imported smart plugs powering room lights as `switch.*` with `device_class: "outlet"`, causing AI queries like "turn off living room lights" to miss them.
+   - Solution (Option 2): Native `light.switch` wrappers configured in `/mnt/data/homeassistant/config/configuration.yaml`:
+     * Living Room: `light.kitchen_lights`, `light.corner_light`, `light.metal_shelf_light`, `light.monitor_light`
+     * Office: `light.work_table_light`, `light.printer_light_and_air_filtration_system`
+   - WebSocket Entity Registry Area Assignment: Assigned `area_id` (`living_room` and `office`) to all wrapper lights via HA WebSocket API (`config/entity_registry/update`).
+   - MCP Area Awareness (Option 3): Enhanced `tools/homeassistant_mcp.py`:
+     * Added `AreaDeviceRegistry` caching HA `core.area_registry`, `core.device_registry`, and `core.entity_registry`.
+     * Added `area` parameter to `list_entities` (matching room name or slug, e.g., `"Living Room"` or `"living_room"`).
+     * Enriched all returned entities in `list_entities` and `get_state` with `"area"` and `"device_name"`.
+     * Extended `search` query matching to check `area` and `device_name`.
+
 ## Gotchas
 
 1. **Xiaomi Camera Streaming (`chuangmi.camera.039c04`)**:
@@ -47,12 +59,15 @@ Home Assistant Core is installed on dedicated storage (`/mnt/data/homeassistant`
    - PTZ rotation, 180° image rollover, indicator LED, and night vision modes are standard MIoT properties and work 100%.
    - In contrast, Bambu Lab A1 built-in cameras (`camera.a1_*_camera`) support native live video streaming inside Home Assistant out-of-the-box.
 
+2. **Home Assistant YAML `light.switch` Platforms**:
+   - `unique_id` is not supported on `light.switch` YAML entries; Home Assistant core generates entity registry entries without unique_id from the friendly name. Area assignment must be done either through UI, entity registry WebSocket API, or MCP metadata fallback.
+
 ## Verification
 
-- Automated test suite: `python3 -m unittest tools/test_homeassistant_mcp.py -v` (handshake, token error handling, tool dispatch, mock REST endpoints).
-- Strata engine integration: verified using `serve/mcp.py` `McpServer` abstraction.
-- Syntax & lint: verified with `ruff check` and `python3 -m py_compile`.
-- Live device discovery: 236 entities across 27 devices recognized via Home Assistant REST API.
+- Automated test suite: `python3 -m unittest tools/test_homeassistant_mcp.py -v` (5 tests passing: handshake, error handling, tool dispatch, area registry & filtering, mock REST endpoints).
+- Live HA MCP execution: Verified `list_entities(domain='light', area='Living Room')` returns all 4 living room lights, and `list_entities(domain='light', area='Office')` returns all 6 office lights.
+- Non-light smart outlets preserved: `switch.pc_socket`, `switch.v11_charger_socket_1`, `switch.v13_charger_socket_1`, `switch.a1_a_socket_1`, and `switch.a1_b_socket_1` remain classified as outlets under `Office`.
+- Syntax & config validation: Passed `/mnt/data/homeassistant/venv/bin/hass --script check_config -c /mnt/data/homeassistant/config`.
 
 ## Related
 
@@ -64,6 +79,6 @@ Home Assistant Core is installed on dedicated storage (`/mnt/data/homeassistant`
 
 1. User, chat, 2026-10-17.
 2. Strata MCP client: `serve/mcp.py`.
-3. Configuration: `strata-coder-iq1_m.json`.
+3. Configuration: `/mnt/data/homeassistant/config/configuration.yaml`.
 4. Walkthrough artifact: `walkthrough.md`.
 

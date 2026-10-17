@@ -46,12 +46,94 @@ def log(msg: str) -> None:
     print(f"[homeassistant-mcp] {msg}", file=sys.stderr, flush=True)
 
 
+class AreaDeviceRegistry:
+    """Loads and caches Home Assistant area, device, and entity registries from disk."""
+
+    def __init__(self, storage_dir: Path | None = None):
+        self.storage_dir = storage_dir or Path("/mnt/data/homeassistant/config/.storage")
+        self._last_loaded = 0.0
+        self._cache_ttl = 30.0  # seconds
+        self._areas: dict[str, str] = {}  # area_id -> area_name
+        self._devices: dict[str, dict[str, Any]] = {}  # device_id -> {name, area_id}
+        self._entities: dict[str, dict[str, Any]] = {}  # entity_id -> {device_id, area_id, name}
+        self._lock = threading.Lock()
+
+    def refresh(self, force: bool = False) -> None:
+        now = time.time()
+        if not force and (now - self._last_loaded < self._cache_ttl):
+            return
+
+        with self._lock:
+            if not force and (time.time() - self._last_loaded < self._cache_ttl):
+                return
+            if not self.storage_dir.is_dir():
+                return
+
+            try:
+                area_file = self.storage_dir / "core.area_registry"
+                if area_file.exists():
+                    with open(area_file, "r", encoding="utf-8") as f:
+                        data = json.load(f).get("data", {}).get("areas", [])
+                        self._areas = {a["id"]: a.get("name", a["id"]) for a in data if "id" in a}
+
+                dev_file = self.storage_dir / "core.device_registry"
+                if dev_file.exists():
+                    with open(dev_file, "r", encoding="utf-8") as f:
+                        data = json.load(f).get("data", {}).get("devices", [])
+                        self._devices = {
+                            d["id"]: {
+                                "name": d.get("name_by_user") or d.get("name"),
+                                "area_id": d.get("area_id"),
+                            }
+                            for d in data
+                            if "id" in d
+                        }
+
+                ent_file = self.storage_dir / "core.entity_registry"
+                if ent_file.exists():
+                    with open(ent_file, "r", encoding="utf-8") as f:
+                        data = json.load(f).get("data", {}).get("entities", [])
+                        self._entities = {
+                            e["entity_id"]: {
+                                "device_id": e.get("device_id"),
+                                "area_id": e.get("area_id"),
+                                "name": e.get("name"),
+                            }
+                            for e in data
+                            if "entity_id" in e
+                        }
+
+                self._last_loaded = time.time()
+            except Exception as e:  # noqa: BLE001
+                log(f"Warning: failed to load Home Assistant registries: {e}")
+
+    def get_info(self, entity_id: str) -> tuple[str | None, str | None]:
+        """Returns (area_name, device_name) for an entity_id."""
+        self.refresh()
+        ent = self._entities.get(entity_id)
+        if not ent:
+            return (None, None)
+
+        area_id = ent.get("area_id")
+        dev_id = ent.get("device_id")
+        dev = self._devices.get(dev_id) if dev_id else None
+
+        if not area_id and dev:
+            area_id = dev.get("area_id")
+
+        area_name = self._areas.get(area_id) if area_id else None
+        dev_name = dev.get("name") if dev else None
+
+        return (area_name, dev_name)
+
+
 class HomeAssistantClient:
     """Direct HTTP REST client for Home Assistant."""
 
-    def __init__(self, base_url: str, token: str):
+    def __init__(self, base_url: str, token: str, storage_dir: Path | str | None = None):
         self.base_url = base_url.rstrip("/")
         self.token = token.strip()
+        self.registry = AreaDeviceRegistry(Path(storage_dir) if storage_dir else None)
 
     def _request(
         self,
@@ -142,9 +224,9 @@ TOOLS_DEFINITIONS = [
     {
         "name": "list_entities",
         "description": (
-            "List devices and entities from Home Assistant. "
-            "Filter by domain (e.g. 'light', 'switch', 'sensor', 'camera', 'climate', 'fan', 'binary_sensor') "
-            "or search query matching name or entity ID."
+            "List devices and entities from Home Assistant with room/area awareness. "
+            "Filter by domain (e.g. 'light', 'switch', 'sensor', 'camera', 'climate'), "
+            "area (e.g. 'Living Room', 'Office'), or search query matching name, entity ID, or device name."
         ),
         "inputSchema": {
             "type": "object",
@@ -153,9 +235,13 @@ TOOLS_DEFINITIONS = [
                     "type": "string",
                     "description": "Optional domain filter (e.g. 'light', 'switch', 'sensor', 'camera', 'climate').",
                 },
+                "area": {
+                    "type": "string",
+                    "description": "Optional area/room filter (e.g. 'Living Room', 'Office', 'living_room', 'office'). Matches area name or area ID.",
+                },
                 "search": {
                     "type": "string",
-                    "description": "Optional search term to filter entity_id or friendly_name.",
+                    "description": "Optional search term to filter entity_id, friendly_name, device_name, or area.",
                 },
                 "include_attributes": {
                     "type": "boolean",
@@ -336,6 +422,7 @@ class HomeAssistantMcpServer:
                 result_text = self.tool_list_entities(
                     domain=args.get("domain"),
                     search=args.get("search"),
+                    area=args.get("area"),
                     include_attributes=bool(args.get("include_attributes", False)),
                 )
             elif name == "get_state":
@@ -392,35 +479,66 @@ class HomeAssistantMcpServer:
     # ------------------ Tool Implementations ------------------
 
     def tool_list_entities(
-        self, domain: str | None = None, search: str | None = None, include_attributes: bool = False
+        self,
+        domain: str | None = None,
+        search: str | None = None,
+        area: str | None = None,
+        include_attributes: bool = False,
     ) -> str:
         states = self.client.get_states()
         filtered = []
 
         domain_lower = domain.lower().strip() if domain else None
         search_lower = search.lower().strip() if search else None
+        area_lower = area.lower().strip() if area else None
 
         for s in states:
             eid = s.get("entity_id", "")
             attrs = s.get("attributes") or {}
             friendly_name = attrs.get("friendly_name", "")
+            area_name, dev_name = self.client.registry.get_info(eid)
 
             if domain_lower:
                 ent_domain = eid.split(".")[0].lower()
                 if ent_domain != domain_lower:
                     continue
 
-            if search_lower and (search_lower not in eid.lower()) and (search_lower not in friendly_name.lower()):
-                continue
+            if area_lower:
+                if not area_name:
+                    continue
+                matches_area = (
+                    area_lower == area_name.lower()
+                    or area_lower == area_name.lower().replace(" ", "_")
+                    or area_lower in area_name.lower()
+                )
+                if not matches_area:
+                    continue
+
+            if search_lower:
+                in_eid = search_lower in eid.lower()
+                in_name = search_lower in friendly_name.lower()
+                in_dev = bool(dev_name and search_lower in dev_name.lower())
+                in_area = bool(area_name and search_lower in area_name.lower())
+                if not (in_eid or in_name or in_dev or in_area):
+                    continue
 
             if include_attributes:
-                filtered.append(s)
+                s_copy = dict(s)
+                if area_name and "area" not in s_copy:
+                    s_copy["area"] = area_name
+                if dev_name and "device_name" not in s_copy:
+                    s_copy["device_name"] = dev_name
+                filtered.append(s_copy)
             else:
                 item = {
                     "entity_id": eid,
-                    "state": s.get("state"),
                     "name": friendly_name,
+                    "state": s.get("state"),
                 }
+                if area_name:
+                    item["area"] = area_name
+                if dev_name:
+                    item["device_name"] = dev_name
                 if "unit_of_measurement" in attrs:
                     item["unit"] = attrs["unit_of_measurement"]
                 if "device_class" in attrs:
@@ -439,6 +557,12 @@ class HomeAssistantMcpServer:
         if not entity_id:
             raise ValueError("entity_id is required")
         state = self.client.get_state(entity_id)
+        area_name, dev_name = self.client.registry.get_info(entity_id)
+        if isinstance(state, dict):
+            if area_name and "area" not in state:
+                state["area"] = area_name
+            if dev_name and "device_name" not in state:
+                state["device_name"] = dev_name
         return json.dumps(state, indent=2, ensure_ascii=False)
 
     def tool_call_service(
@@ -538,6 +662,7 @@ def load_config(config_file: Path | None = None) -> dict[str, str]:
     cfg: dict[str, str] = {
         "url": os.environ.get("HASS_URL", DEFAULT_HASS_URL),
         "token": os.environ.get("HASS_TOKEN", ""),
+        "storage_dir": os.environ.get("HASS_STORAGE_DIR", "/mnt/data/homeassistant/config/.storage"),
     }
     path = config_file or DEFAULT_CONFIG_PATH
     if path.is_file():
@@ -547,6 +672,8 @@ def load_config(config_file: Path | None = None) -> dict[str, str]:
                 cfg["url"] = data["url"]
             if data.get("token"):
                 cfg["token"] = data["token"]
+            if data.get("storage_dir"):
+                cfg["storage_dir"] = data["storage_dir"]
         except (OSError, json.JSONDecodeError) as e:
             log(f"Warning: could not read config from {path}: {e}")
     return cfg
@@ -556,6 +683,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Home Assistant MCP Server for Strata")
     parser.add_argument("--url", help="Home Assistant base URL (default: http://127.0.0.1:8123)")
     parser.add_argument("--token", help="Home Assistant Long-Lived Access Token")
+    parser.add_argument("--storage-dir", help="Path to Home Assistant .storage directory")
     parser.add_argument("--config", help=f"Path to JSON config (default: {DEFAULT_CONFIG_PATH})")
     parser.add_argument("--test", action="store_true", help="Run self-test on tools/list and exit")
     args = parser.parse_args(argv)
@@ -566,8 +694,12 @@ def main(argv=None) -> int:
         config["url"] = args.url
     if args.token:
         config["token"] = args.token
+    if args.storage_dir:
+        config["storage_dir"] = args.storage_dir
 
-    client = HomeAssistantClient(base_url=config["url"], token=config["token"])
+    client = HomeAssistantClient(
+        base_url=config["url"], token=config["token"], storage_dir=config.get("storage_dir")
+    )
 
     if args.test:
         print("[TEST] Initializing HomeAssistantMcpServer self-test...")

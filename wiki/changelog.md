@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-17:** Update. Add native light switch wrappers and area intelligence for Home Assistant smart plugs. (Agent: Antigravity)
 - **2026-10-17:** Update. Upgraded Cloudflare Tunnel protocol from http2 to quic for connection migration and blip resilience. (Agent: Antigravity)
 - **2026-10-17:** Update. decisions/cloudflare-tunnel-remote-exposure.md. (Agent: Antigravity)
 - **2026-10-17:** Added tools/weather_reasoning_bench.py and test suite for benchmarking CLI reasoning levels (none, low, medium, high). (Agent: Antigravity)
