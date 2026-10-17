@@ -95,6 +95,11 @@ All 6 automated unit tests passed with 100% assertions:
 - **Resolution**: Configured `~/.config/speech-dispatcher/speechd.conf` with `AddModule "piper" "sd_generic" "piper.conf"` and `DefaultModule piper`, leaving eSpeak disabled so Speech Dispatcher serves exclusively the Piper neural voices (`en_US-lessac-medium` and `en_US-ryan-medium`).
 - **UI Prioritization**: Updated `getVoice()` in `app.js` to actively prioritize Piper neural voices and ignore stale eSpeak URIs in `localStorage`.
 
+### 4.4 Android Em-Dash Tokenizer & Watchdog Cancellation Gotcha
+- **Android Em-Dash Parser Bug**: When Android's Speech Services / Samsung TTS encounters raw unicode em-dashes (`—`), en-dashes (`–`), or horizontal bars without whitespace, the phoneme tokenizer crashes or prematurely fires `onend`, causing speech to cut off mid-sentence.
+- **Resolution**: Normalized all unicode dashes (`/\s*[\u2012\u2013\u2014\u2015\u2212]\s*/g`) to `", "` (natural pause comma), along with curly quotes, ellipsis, and zero-width characters in `cleanForSpeech`.
+- **Mobile Watchdog Cancellation**: On Android Chrome, invoking `speechSynthesis.pause()` aborts the utterance queue instead of pausing. Bypassed the watchdog on mobile browsers (`/Android|iOS/i`), relying solely on silent Web Audio buffer keep-alive and screen wake lock.
+
 ---
 
 ## 5. Artifacts & Commits
