@@ -100,6 +100,8 @@ The environment integrates high-throughput MoE execution (16 GB VRAM + 32 GB RAM
 - [Strata Full Project Audit Report (2026-10-16)](../artifacts/strata-full-project-audit-2026-10-16.md)
 - [Native Browser TTS Implementation Report](../artifacts/native-browser-tts-implementation-report.md)
 - [Native Browser TTS Implementation Plan](../artifacts/native-browser-tts-implementation-plan.md)
+- [Native Browser STT Implementation Report](../artifacts/native-browser-stt-implementation-report.md)
+- [Native Browser STT Implementation Plan](../artifacts/native-browser-stt-implementation-plan.md)
 
 ## Sources
 

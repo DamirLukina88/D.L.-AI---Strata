@@ -15,6 +15,8 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-17:** Artifact Backup. Native Browser Speech-to-Text (STT) implementation plan and verification report. (Agent: Antigravity)
+- **2026-10-17:** Ingestion. artifacts/native-browser-stt-implementation-report.md, artifacts/native-browser-stt-implementation-plan.md. (Agent: Antigravity)
 - **2026-10-17:** Artifact Backup. Saved Native Browser TTS Implementation Plan and Report to wiki/artifacts/. (Agent: Antigravity)
 - **2026-10-17:** Ingestion. artifacts/native-browser-tts-implementation-plan.md. (Agent: Antigravity)
 - **2026-10-17:** Native Browser TTS: Implemented client-side Web Speech API with Android MediaSession, Screen Wake Lock, 10s Chromium watchdog keepalive, sentence-boundary chunker, and App Chat + Code Chat action buttons. (Agent: Antigravity)
