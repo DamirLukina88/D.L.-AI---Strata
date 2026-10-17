@@ -47,6 +47,7 @@ Every page in this wiki is listed below. The list is generated; do not edit betw
 - [Shared CLI Session Daemon for Web and Terminal](decisions/shared-cli-session-daemon.md) — One D.L. CLI agent session in dl-ai-sessiond, used from the web Code tab and dl_cli.py --attach; replaced ttyd + tmux scraping
 - [Shared Workspace on Dedicated Storage](decisions/shared-workspace-d-disk.md) — Architecture, path mapping, and web integration for shared /mnt/data/DL-AI-workspace across Claude Code CLI and web app.
 - [Strata v0.1.43 Performance Switches and Memory Hygiene](decisions/strata-v0-1-43-performance-and-memory-optimizations.md) — Activation of adaptive tier memory overlap, resident RAM soft-commit, and Linux page cache release on exit
+- [Weather Reasoning Benchmark for CLI Thinking Levels](decisions/weather-reasoning-benchmark.md) — Standalone benchmark tools/weather_reasoning_bench.py evaluating CLI thinking levels with location inference, table quality, and Proton Mail.
 
 ## Preferences
 

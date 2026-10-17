@@ -5,7 +5,7 @@ description: "Architecture and configuration for exposing Strata Web GUI and API
 status: active
 tags: [strata, cloudflare, tunnel, remote-access, web-gui]
 created: 2026-10-10
-updated: 2026-10-13
+updated: 2026-10-17
 last_verified: 2026-10-10
 ---
 
@@ -15,6 +15,7 @@ last_verified: 2026-10-10
 The local Strata server (`http://localhost:8080`) is exposed securely to the internet using an existing Cloudflare Tunnel (`f0a42e7d-ef64-4da4-b529-c18759d79830`) under the user's custom domain at `https://ai.damir-lukina.com` (and `https://strata.damir-lukina.com`). This enables remote access to both the interactive Web GUI and OpenAI/Anthropic-compatible APIs from phones, laptops, and remote developer environments without opening router ports or exposing home IP addresses.
 
 - 2026-10-13: Browsers behind Cloudflare Access no longer need the API key: the server verifies the Access JWT itself. See [Cloudflare Access Login Replaces the API Key](cloudflare-access-login-auth.md). The ttyd /code/ path is gone; the Code tab uses /api/code/session (SSE) instead.
+- 2026-10-17: Upgraded tunnel transport protocol from `http2` (TCP) to `quic` (HTTP/3 over UDP) in `~/.config/cloudflared/config.yml`. QUIC enables seamless connection migration and eliminates TCP head-of-line blocking, keeping browser and API streams active during brief WAN packet drops or router renegotiations.
 
 ## Decisions & Configuration
 

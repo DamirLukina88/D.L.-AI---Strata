@@ -46,6 +46,9 @@ Harmonized all CLI terminal interfaces (D.L. CLI, Claude Code, DeepSeek) and the
 ### 7. DeepSeek CLI Live Thinking Streaming
 - See [DeepSeek CLI Live Thinking Stream](deepseek-cli-live-thinking-stream.md) for real-time dual Live streaming of reasoning and answer tokens without overwriting.
 
+### 8. Weather Reasoning Benchmark
+- See [Weather Reasoning Benchmark for CLI Thinking Levels](weather-reasoning-benchmark.md) for evaluating thinking levels (none, low, medium, high) on multi-step reasoning, location inference (Zagreb), and email dispatch.
+
 ## Sources
 - `tools/dl_cli.py` — D.L. CLI implementation, ANSI palette, argument parser, and banner card.
 - `tools/run-code-session.sh` — Multi-scaffold runner script and terminal cards.
