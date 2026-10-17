@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-17:** feat(tts): installed and registered all 20 US Piper neural voices with friendly voice selector badges. (Agent: Antigravity)
 - **2026-10-17:** fix(speech): resolved Android STT duplicate text and enforced Piper neural voice for Speech Dispatcher. (Agent: Antigravity)
 - **2026-10-17:** Artifact Backup. Native Browser Speech-to-Text (STT) implementation plan and verification report. (Agent: Antigravity)
 - **2026-10-17:** Ingestion. artifacts/native-browser-stt-implementation-report.md, artifacts/native-browser-stt-implementation-plan.md. (Agent: Antigravity)
