@@ -15,6 +15,9 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-17:** fix(voice): fixed desktop Piper voice switching in speechd wrapper and gated auto-speak to STT voice prompts only. (Agent: Antigravity)
+- **2026-10-17:** Update. private/.env (HASS_TOKEN). (Agent: Antigravity)
+- **2026-10-17:** Ingestion. decisions/home-assistant-strata-mcp.md. (Agent: Antigravity)
 - **2026-10-17:** fix(tts): resolved Android speech synthesis cutoffs caused by em-dashes and pause/resume watchdog. (Agent: Antigravity)
 - **2026-10-17:** feat(tts): installed and registered all 20 US Piper neural voices with friendly voice selector badges. (Agent: Antigravity)
 - **2026-10-17:** fix(speech): resolved Android STT duplicate text and enforced Piper neural voice for Speech Dispatcher. (Agent: Antigravity)

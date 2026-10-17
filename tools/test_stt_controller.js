@@ -206,5 +206,86 @@ assert.strictEqual(
   "Existing base text in textarea must not be duplicated when engine returns cumulative phrase"
 );
 
-console.log("All STT Unit Tests Passed Successfully! (14/14)");
+// 5. STT-only Auto-speak prompt origin detection
+function computeFromVoice(sttState, inputText) {
+  let fromVoice = false;
+  if (sttState.lastInputWasVoice && sttState.lastTranscribedText) {
+    const spokenLower = sttState.lastTranscribedText.toLowerCase();
+    const textLower = (inputText || "").trim().toLowerCase();
+    if (textLower.includes(spokenLower) || spokenLower.includes(textLower)) {
+      fromVoice = true;
+    }
+  }
+  // Reset after send
+  sttState.lastInputWasVoice = false;
+  sttState.lastTranscribedText = "";
+  return fromVoice;
+}
+
+// Test 15: Pure typed input without STT -> fromVoice is false
+const typedState = { lastInputWasVoice: false, lastTranscribedText: "" };
+assert.strictEqual(
+  computeFromVoice(typedState, "How do I configure nginx?"),
+  false,
+  "Manually typed request without STT should NOT trigger auto-speak"
+);
+
+// Test 16: STT dictated prompt -> fromVoice is true
+const sttState = { lastInputWasVoice: true, lastTranscribedText: "what is the speed of light" };
+assert.strictEqual(
+  computeFromVoice(sttState, "what is the speed of light"),
+  true,
+  "STT dictated prompt must trigger auto-speak"
+);
+// Subsequent typed message after reset should be false
+assert.strictEqual(
+  computeFromVoice(sttState, "thanks for the answer"),
+  false,
+  "Subsequent typed turn after STT turn must be false"
+);
+
+// Test 17: STT prompt modified with extra manual punctuation / word -> fromVoice is true
+const sttModifiedState = { lastInputWasVoice: true, lastTranscribedText: "how are you" };
+assert.strictEqual(
+  computeFromVoice(sttModifiedState, "how are you doing today?"),
+  true,
+  "STT dictated prompt with appended words should retain voice origin"
+);
+
+// Test 18: STT prompt replaced entirely with typed text -> fromVoice is false
+const sttReplacedState = { lastInputWasVoice: true, lastTranscribedText: "tell me a joke" };
+assert.strictEqual(
+  computeFromVoice(sttReplacedState, "explain binary search trees"),
+  false,
+  "Dictated text replaced with unrelated manual text must NOT trigger auto-speak"
+);
+
+// 6. Voice matching by URI or Name
+function findVoice(voices, savedUri) {
+  if (!savedUri) return null;
+  return voices.find((v) => v.voiceURI === savedUri || v.name === savedUri) || null;
+}
+
+const mockVoices = [
+  { voiceURI: "en_US-bryce-medium piper", name: "en_US-bryce-medium piper", lang: "en" },
+  { voiceURI: "en_US-lessac-medium piper", name: "en_US-lessac-medium piper", lang: "en" },
+  { voiceURI: "urn:moz-tts:speechd:en_US-amy-medium", name: "en_US-amy-medium", lang: "en" },
+];
+
+// Test 19: Match by voiceURI exactly
+assert.strictEqual(
+  findVoice(mockVoices, "en_US-bryce-medium piper")?.name,
+  "en_US-bryce-medium piper",
+  "Voice selector should find voice by exact voiceURI"
+);
+
+// Test 20: Match by name when voiceURI differs
+assert.strictEqual(
+  findVoice(mockVoices, "en_US-amy-medium")?.voiceURI,
+  "urn:moz-tts:speechd:en_US-amy-medium",
+  "Voice selector should find voice by name even if URI schema differs"
+);
+
+console.log("All STT Unit Tests Passed Successfully! (20/20)");
+
 

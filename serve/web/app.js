@@ -209,7 +209,7 @@ const TTSController = {
 
     const uri = store.get("tts_voice", "");
     if (uri) {
-      const match = voices.find((v) => v.voiceURI === uri);
+      const match = voices.find((v) => v.voiceURI === uri || v.name === uri);
       // Only keep saved match if it's not a legacy eSpeak voice when Piper is available
       if (match && (!/espeak/i.test(match.name || match.voiceURI) || !voices.some((v) => /piper|lessac|ryan/i.test(v.name || v.voiceURI)))) {
         return match;
@@ -519,12 +519,14 @@ const TTSController = {
         const next = autoToggle.getAttribute("aria-checked") !== "true";
         autoToggle.setAttribute("aria-checked", String(next));
         store.set("tts_auto_speak", next);
-        toast("info", `Auto-speak ${next ? "enabled" : "disabled"}`, next ? "New responses will be read aloud automatically." : "Tap the speaker icon on any message to listen.", 2500);
+        toast("info", `Auto-speak ${next ? "enabled" : "disabled"}`, next ? "Voice prompts (dictated via STT) will be read aloud automatically." : "Tap the speaker icon on any message to listen.", 2500);
       };
     }
     const testBtn = $("tts-test-btn");
     if (testBtn) {
       testBtn.onclick = () => {
+        const vSel = $("tts-voice-select");
+        if (vSel && vSel.value) store.set("tts_voice", vSel.value);
         this.speakText("Hello! This is D.L. AI voice running natively in your browser.", testBtn);
       };
     }
@@ -583,7 +585,7 @@ const TTSController = {
         const isNeural = /piper|lessac|ryan|natural|neural/i.test(v.name || v.voiceURI);
         opt.textContent = `${v.name} (${v.lang})${isNeural ? " [neural]" : (v.localService ? " [local]" : "")}`;
       }
-      if (v.voiceURI === saved) opt.selected = true;
+      if (saved && (v.voiceURI === saved || v.name === saved)) opt.selected = true;
       sel.appendChild(opt);
     });
   },
@@ -643,6 +645,8 @@ const STTController = {
   interimText: "",
   silenceTimer: null,
   autoSend: false,
+  lastInputWasVoice: false,
+  lastTranscribedText: "",
 
   isSupported() {
     return Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -702,6 +706,10 @@ const STTController = {
     const ta = this.getTargetInput();
     if (!ta) return;
     const spoken = mergeSpeechTranscripts(this.finalText, this.interimText);
+    if (spoken && spoken.trim()) {
+      this.lastInputWasVoice = true;
+      this.lastTranscribedText = spoken.trim();
+    }
     ta.value = mergeSpeechTranscripts(this.baseText, spoken);
     if (this.currentTarget === "chat") {
       if (typeof autosize === "function") autosize();
@@ -1084,7 +1092,7 @@ function codeAssistant() {
     `<button type="button" class="st-btn st-btn--icon st-btn--sm code-card-action" data-code-copy title="Copy answer" aria-label="Copy answer">${icon("copy")}</button>` +
     `<button type="button" class="st-btn st-btn--icon st-btn--sm code-card-action" data-code-speak title="Read aloud" aria-label="Read aloud">${icon("volume")}</button>` +
     `</div>`);
-  code.cur = { el, thinking: "", text: "" };
+  code.cur = { el, thinking: "", text: "", fromVoice: Boolean(code.lastInputWasVoice) };
   return code.cur;
 }
 
@@ -1092,12 +1100,13 @@ function codeEnd() {                                      // close the open repl
   if (code.cur) {
     const cur = code.cur;
     codeRenderCur(cur);
-    if (TTSController.isAutoSpeak() && cur.text) {
+    if (TTSController.isAutoSpeak() && cur.fromVoice && cur.text) {
       const sp = cur.el.querySelector("[data-code-speak]");
       TTSController.speakText(cur.text, sp);
     }
   }
   code.cur = null;
+  code.lastInputWasVoice = false;
 }
 
 function codeRenderCur(block) {
@@ -1324,6 +1333,19 @@ async function codeSend(text) {
   const ta = $("code-mobile-input");
   text = (text ?? (ta ? ta.value : "")).trim();
   if (!text) return;
+
+  let fromVoice = false;
+  if (STTController.lastInputWasVoice && STTController.lastTranscribedText && STTController.currentTarget === "code") {
+    const spokenLower = STTController.lastTranscribedText.toLowerCase();
+    const textLower = text.toLowerCase();
+    if (textLower.includes(spokenLower) || spokenLower.includes(textLower)) {
+      fromVoice = true;
+    }
+  }
+  code.lastInputWasVoice = fromVoice;
+  STTController.lastInputWasVoice = false;
+  STTController.lastTranscribedText = "";
+
   if (text === "/speak") {
     if (ta && ta.value.trim() === text) { ta.value = ""; ta.style.height = "auto"; }
     const cards = codeFeed() ? codeFeed().querySelectorAll(".code-mobile-card--assistant") : [];
@@ -1403,9 +1425,15 @@ if ($("code-mobile-input")) {
   $("code-mobile-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); codeSend(); }
   });
-  $("code-mobile-input").addEventListener("input", function () {
+  $("code-mobile-input").addEventListener("input", function (e) {
     this.style.height = "auto";
     this.style.height = Math.min(this.scrollHeight, 160) + "px";
+    if (e.isTrusted && !STTController.isRecording) {
+      if (!this.value.trim()) {
+        STTController.lastInputWasVoice = false;
+        STTController.lastTranscribedText = "";
+      }
+    }
   });
 }
 document.querySelectorAll(".code-mobile-chip").forEach((chip) => {
@@ -2251,13 +2279,26 @@ function setBusy(on) {
 async function send() {
   const text = $("input").value.trim();
   if ((!text && !attachments.length) || busy) return;
+
+  // Auto-speak condition: only when request was dictated via STT
+  let fromVoice = false;
+  if (STTController.lastInputWasVoice && STTController.lastTranscribedText) {
+    const spokenLower = STTController.lastTranscribedText.toLowerCase();
+    const textLower = text.toLowerCase();
+    if (textLower.includes(spokenLower) || spokenLower.includes(textLower)) {
+      fromVoice = true;
+    }
+  }
+  STTController.lastInputWasVoice = false;
+  STTController.lastTranscribedText = "";
+
   messages.push({role: "user", text, images: attachments.filter((a) => a.kind !== "file"),
                  files: attachments.filter((a) => a.kind === "file"), time: Date.now()});
   attachments = [];
   renderAttachments();
   $("input").value = "";
   autosize();
-  const m = {role: "assistant", text: "", reasoning: "", time: Date.now()};
+  const m = {role: "assistant", text: "", reasoning: "", time: Date.now(), fromVoice};
   messages.push(m);
   renderChat();
   const el = $("chat").lastElementChild;
@@ -2346,7 +2387,7 @@ async function send() {
   updateAssistant(el, m, false);
   saveChat();
   scrollDown();
-  if (TTSController.isAutoSpeak() && m.text && !m.error && !m.stopped) {
+  if (TTSController.isAutoSpeak() && m.fromVoice && m.text && !m.error && !m.stopped) {
     const spk = el.querySelector("[data-msg-speak]");
     TTSController.speakText(m.text, spk, m);
   }
@@ -2358,11 +2399,21 @@ $("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
 });
 function autosize() { const t = $("input"); t.style.height = "auto"; t.style.height = `${Math.min(t.scrollHeight, innerHeight * 0.4)}px`; }
-$("input").addEventListener("input", autosize);
+$("input").addEventListener("input", (e) => {
+  autosize();
+  if (e.isTrusted && !STTController.isRecording) {
+    if (!$("input").value.trim()) {
+      STTController.lastInputWasVoice = false;
+      STTController.lastTranscribedText = "";
+    }
+  }
+});
 
 $("new-btn").onclick = () => {
   if (busy) { toast("warn", "Still writing", "Stop the answer first."); return; }
   TTSController.stop();
+  STTController.lastInputWasVoice = false;
+  STTController.lastTranscribedText = "";
   if (!messages.length) return;
   const backup = messages;
   messages = [];
