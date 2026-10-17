@@ -1,0 +1,60 @@
+---
+title: "GitHub Fork and Public Sanitization Architecture"
+type: decision
+description: "Architecture for publishing customized Strata fork to GitHub while preventing credential leakage"
+status: active
+tags: [git, github, fork, security, sanitization]
+created: 2026-10-10
+updated: 2026-10-15
+last_verified: 2026-10-10
+---
+
+# GitHub Fork and Public Sanitization Architecture
+
+## Summary
+The customized Strata platform (featuring the authenticated Claude Code Web Terminal, recursive N-ary server workspace tree, mobile GUI enhancements, MCP agentic coder tools, system watchdog, and upstream v0.1.42 cherry-picks) was published to the public GitHub repository at [https://github.com/DamirLukina88/D.L.-AI---Strata](https://github.com/DamirLukina88/D.L.-AI---Strata). A zero-secret sanitization architecture was enforced to guarantee no API keys, private domains, or machine paths are leaked publicly.
+
+- 2026-10-13: The 2026-10-10 sanitization missed four secrets hardcoded as fallbacks in tools/dl_cli.py and tools/run-code-session.sh; they reached the public fork. Rotated, moved to ~/.config/dl-ai/secrets.env, history scrubbed with filter-repo limited to our own refs, and a pre-commit secret-scan hook added. See [Public Secret Leak and Rotation](secret-leak-rotation-2026-10.md).
+
+- 2026-10-13 (night): Pushed 30 commits (the 13 upstream PR merges, see [Upstream Open PR Review (2026-10-13)](../artifacts/upstream-open-prs-review-2026-10-13.md)) to the fork: `51fae4a6..b5e5b3ff`, fast-forward, no force. Before the push, `dl_auditing.scan_secrets_in_text` was run over all 40 changed files and the added lines were checked for the private domain, home paths and host name: 0 findings. Claude Code's auto mode blocks `git push` to this public fork, so the user ran the push.
+
+- 2026-10-13 (late): Pushed the v0.1.44 merge to the fork, `b5e5b3ff..9d614675` (273 commits, fast-forward). The secret scan beforehand checked 344 files and 46,263 added lines: 0 findings. This push went through from Claude Code after the user's explicit "Push".
+
+- 2026-10-15: Pushed `9d614675..3b6dfb4f` (one commit: on-demand MCP, outgoing credential filter, agent bench; 25 files), fast-forward. Before the commit, `dl_auditing.scan_secrets_in_text` (now also matching the exact stored credential values) checked all 25 files: only the marked fake fixtures in the two test files hit. The added lines had no private domain, home path or host name; `/mnt/data` paths were already in the tracked code. Pushed from Claude Code after the user's "commit and publish to git".
+
+- 2026-10-15 (later): Pushed `3b6dfb4f..937c318f` (Proton Mail, scheduled jobs, DeepL built-in, autonomous YOLO; 13 files), fast-forward. Secret scan of all changed files: only marked fake fixtures (the marker was added to `tools/test_dl_schedule.py`); no private domain, home path, host name or phone number in the added lines.
+
+- 2026-10-15 (late): Pushed `937c318f..4274fb11` (fixes from the live weather-email runs; 6 files), fast-forward. Secret scan: only the marked fake fixtures in `tools/test_dl_mcp.py`; no private strings in the added lines.
+
+- 2026-10-15 (late): Pushed `4274fb11..5209d07d` (audit fixes; 10 files), fast-forward. Secret scan: only the marked fake fixtures; no private strings in the added lines.
+
+## Decisions & Configuration
+
+### 1. Remote Layout
+- **Upstream:** `https://github.com/Niko1221/Strata.git` tracked under remote name `upstream`.
+- **Origin:** Personal fork `https://github.com/DamirLukina88/D.L.-AI---Strata.git` tracked under remote name `origin`.
+- **Branch Tracking:** Local `main` branch tracks `origin/main`.
+
+### 2. Zero-Secret Sanitization Architecture
+- **Web App Keys:** Hardcoded `DEFAULT_KEY` and index `<script>` pre-seed values were replaced with `""`. In the local environment, existing browser `localStorage` (`strata.apikey`) maintains transparent authentication without prompt.
+- **Dynamic Access Logout:** Domain-hardcoded Cloudflare Access logout links were replaced with `window.STRATA_LOGOUT_URL || "/cdn-cgi/access/logout"`, allowing portable session termination across any reverse proxy.
+- **Dynamic Systemd Injection:** `tools/run-code-session.sh` dynamically reads `STRATA_API_KEY` and `STRATA_WORKSPACE_DIR` from environment variables passed by systemd user unit `claude-terminal.service`.
+- **Runtime Ignores:** `.gitignore` excludes local runtime logs (`strata-server.out`, `strata-server.pid`), `.directory`, and `*.orig` files. Local hardware configs (`strata-*.json`) and `wiki/` remain strictly uncommitted.
+- **Graceful Workspace Fallback:** `serve/server.py` defaults `WORKSPACE_DIR` to `./workspace` if `STRATA_WORKSPACE_DIR` is not provided in the environment.
+
+## Verification
+- Staged git diff checked with zero matches for API key hashes, private domains, or local home paths.
+- Unit tests (`serve/test_request_hardening.py`) passed cleanly.
+- Live push succeeded: commit `ba2e5869` pushed to `origin/main`.
+
+## Related
+- [Local-Only Repository](../preferences/local-only-repository.md)
+- [Claude Code CLI Integration on Strata](claude-code-cli-integration.md)
+- [GitHub Fork Sanitization and Push Plan](../artifacts/github-fork-sanitization-and-push-plan.md)
+- [Public Secret Leak and Rotation (2026-10-13)](secret-leak-rotation-2026-10.md)
+
+## Sources
+- GitHub Fork: [https://github.com/DamirLukina88/D.L.-AI---Strata](https://github.com/DamirLukina88/D.L.-AI---Strata)
+- Upstream: [https://github.com/Niko1221/Strata](https://github.com/Niko1221/Strata)
+- Systemd user service: `~/.config/systemd/user/claude-terminal.service`
+1. User, chat, 2026-10-13.
