@@ -767,9 +767,26 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
   $("ram-text").textContent = isLoaded && eng.arena_mib ? `${gb(arenaBytes)} / ${gb(hw.ram_total, 0)} GB` : (isLoaded && eng.expert_slots ? "0 GB" : "–");
   const arenaPct = isLoaded && hw.ram_total && eng.arena_mib ? Math.min(100, (100 * arenaBytes) / hw.ram_total) : 0;
   $("ram-bar").style.width = `${arenaPct}%`;
-  if (arenaPct > 92) $("ram-progress").dataset.tone = "danger"; else delete $("ram-progress").dataset.tone;
-  $("temp-text").textContent = hw.gpu_temp == null ? "–" : `${fmt(hw.gpu_temp)} °C`;
-  $("temp-bar").style.width = hw.gpu_temp == null ? "0%" : `${Math.min(100, hw.gpu_temp)}%`;
+  const kvBpt = {k8v4: 9792, int8: 12672, q4_0: 6912, fp16: 24576}[eng.kv] || 9792;
+  const kvMaxBytes = ctx * kvBpt;
+  const kvUsedBytes = used * kvBpt;
+  const kvMemFmt = (b) => {
+    if (b == null || b <= 0) return "0 MB";
+    if (b >= 1073741824) return `${fmt(b / 1073741824, 1)} GB`;
+    return `${fmt(b / 1048576, b < 10485760 ? 1 : 0)} MB`;
+  };
+  const kvPct = ctx ? Math.min(100, (100 * used) / ctx) : 0;
+  if ($("kv-text")) {
+    $("kv-text").textContent = isLoaded && ctx ? `${kvMemFmt(kvUsedBytes)} / ${kvMemFmt(kvMaxBytes)}${eng.kv ? ` · ${eng.kv.toUpperCase()}` : ""}` : "–";
+  }
+  if ($("kv-bar")) {
+    $("kv-bar").style.width = isLoaded ? `${kvPct}%` : "0%";
+  }
+  if ($("kv-progress")) {
+    if (kvPct > 90) $("kv-progress").dataset.tone = "danger";
+    else if (kvPct > 75) $("kv-progress").dataset.tone = "warn";
+    else delete $("kv-progress").dataset.tone;
+  }
 
   // recent requests
   const body = $("req-body");
