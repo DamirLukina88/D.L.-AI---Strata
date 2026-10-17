@@ -98,6 +98,7 @@ The environment integrates high-throughput MoE execution (16 GB VRAM + 32 GB RAM
 - [D.L. AI Implementation Plan (2026-10-13)](../artifacts/dl-ai-2026-10-13-implementation-plan.md)
 - [Antigravity Change Requests, 5-12 Oct 2026](../artifacts/antigravity-change-requests-2026-10.md)
 - [Strata Full Project Audit Report (2026-10-16)](../artifacts/strata-full-project-audit-2026-10-16.md)
+- [Native Browser TTS Implementation Report](../artifacts/native-browser-tts-implementation-report.md)
 
 ## Sources
 
