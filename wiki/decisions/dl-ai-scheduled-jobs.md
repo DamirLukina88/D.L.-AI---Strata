@@ -5,7 +5,7 @@ description: "The session daemon runs prompts or one exact pre-approved action a
 status: active
 tags: [cli, schedule, daemon, proton]
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-10-17
 last_verified: 2026-10-15
 ---
 
@@ -34,7 +34,7 @@ last_verified: 2026-10-15
   - Jobs remember `yolo` from the turn that created them.
 
 - **Testing gotcha (2026-10-15, audit round 14):** the tool registry calls the built-ins as loaded by dl_cli (`tools.dl_proton`, `tools.dl_schedule`, `tools.dl_translate`), not the `dl_*` copies a script imports from `tools/` on sys.path. A fuzz run that patched only the `dl_*` copies reached the real Proton Bridge: 4 empty drafts in Drafts (UIDs 60-63, 23:46) and one send refused by Bridge ("invalid return path", made-up sender). Patch the registered module (`dl_mcp.BUILTINS[name][1].__module__`) and replace `imap_connect`/`smtp_connect`/`_post`/`STORE` with fakes before any registry fuzzing.
-- Audit loop result (2026-10-15): rounds 6-13 fixed the full stop after an address, whole weekday words, far-future dates, damaged entries, a job saved behind an error, reports sent while holding the job lock, concurrent saves, private file creation, a daemon stop mid-job (now recorded as interrupted at the next start, from the scheduler thread). Rounds 14 and 15 (re-read, isolated-daemon crash recovery, fuzzing with fakes, permissions/units/catalogue) were clean.
+- 2026-10-17: Resolved persistent SMTP 454 and IMAP "no such user" failures in Proton Bridge. At system boot, `protonmail-bridge.service` had started before desktop keyring (`SecretService`) unlock, leaving the vault unencrypted with 0 active accounts loaded in memory. The watchdog (`tools/strata-watchdog.sh`) was upgraded from a superficial TCP port ping to an authenticated IMAP probe (`dl_proton.imap_connect`); on boot when the keyring is initially locked, the watchdog automatically restarts Bridge once the user logs in and unlocks the desktop keyring.
 
 ## Usage
 

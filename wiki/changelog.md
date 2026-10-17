@@ -15,6 +15,8 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-17:** Update. Documented Proton Mail Bridge boot lockup root cause and watchdog auto-recovery in dl-ai-scheduled-jobs.md. (Agent: Antigravity)
+- **2026-10-17:** Update. decisions/dl-ai-scheduled-jobs.md. (Agent: Antigravity)
 - **2026-10-17:** Artifact Backup. Saved Home Assistant plan, session tools plan, and walkthrough artifacts. (Agent: Antigravity)
 - **2026-10-17:** Ingestion. artifacts/homeassistant-strata-core-plan.md, artifacts/session-commands-and-tools-plan.md, artifacts/homeassistant-and-session-tools-walkthrough.md. (Agent: Antigravity)
 - **2026-10-17:** fix(stt): removed 400ms delay on auto-send to make recognized speech submission completely instant (0ms delay). (Agent: Antigravity)
