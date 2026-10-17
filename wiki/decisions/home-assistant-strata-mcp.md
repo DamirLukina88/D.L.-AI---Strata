@@ -51,6 +51,12 @@ Home Assistant Core is installed on dedicated storage (`/mnt/data/homeassistant`
      * Enriched all returned entities in `list_entities` and `get_state` with `"area"` and `"device_name"`.
      * Extended `search` query matching to check `area` and `device_name`.
 
+6. **Gree Air Conditioner Integration (`climate.living_room_ac`)**:
+   - Hardware: Gree AC on local Wi-Fi network at `192.168.3.17:7000` (MAC `50:2c:c6:6c:b6:25`, hardware ID `362001061665+U-W05TV2.06.bin`, catalog `gree`, firmware `V1.2.1`).
+   - Protocol: Local encrypted UDP polling on port 7000 (`greeclimate` library).
+   - Entities: `climate.living_room_ac`, `switch.c66cb625_panel_light`, `switch.c66cb625_quiet_mode`, `switch.c66cb625_fresh_air`, `switch.c66cb625_xtra_fan`.
+   - Assigned to area: `Living Room`.
+
 ## Gotchas
 
 1. **Xiaomi Camera Streaming (`chuangmi.camera.039c04`)**:
@@ -62,10 +68,15 @@ Home Assistant Core is installed on dedicated storage (`/mnt/data/homeassistant`
 2. **Home Assistant YAML `light.switch` Platforms**:
    - `unique_id` is not supported on `light.switch` YAML entries; Home Assistant core generates entity registry entries without unique_id from the friendly name. Area assignment must be done either through UI, entity registry WebSocket API, or MCP metadata fallback.
 
+3. **Wi-Fi Broadcast Drop on Gree AC Discovery**:
+   - Standard Home Assistant Gree discovery broadcasts UDP packets to `192.168.3.255:7000`. Wi-Fi access points and routers commonly drop directed UDP broadcast packets to wireless clients.
+   - Solution: Deployed `custom_components/gree` configured with direct unicast discovery target `192.168.3.17`, allowing instant discovery and persistent polling without relying on router broadcast forwarding.
+
 ## Verification
 
 - Automated test suite: `python3 -m unittest tools/test_homeassistant_mcp.py -v` (5 tests passing: handshake, error handling, tool dispatch, area registry & filtering, mock REST endpoints).
 - Live HA MCP execution: Verified `list_entities(domain='light', area='Living Room')` returns all 4 living room lights, and `list_entities(domain='light', area='Office')` returns all 6 office lights.
+- Live Climate query: `list_entities(domain='climate', area='Living Room')` returns `climate.living_room_ac` (`state: auto`, `current_temperature: 23°C`, `target_temperature: 25°C`).
 - Non-light smart outlets preserved: `switch.pc_socket`, `switch.v11_charger_socket_1`, `switch.v13_charger_socket_1`, `switch.a1_a_socket_1`, and `switch.a1_b_socket_1` remain classified as outlets under `Office`.
 - Syntax & config validation: Passed `/mnt/data/homeassistant/venv/bin/hass --script check_config -c /mnt/data/homeassistant/config`.
 

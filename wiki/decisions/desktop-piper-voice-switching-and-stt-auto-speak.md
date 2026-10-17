@@ -53,15 +53,18 @@ This decision documents two critical speech subsystem fixes: (1) resolving Speec
 - **Gotcha**: In `serve/web/app.js`, `TTSController.speakText` treated re-clicking the active button during playback as a toggle-off command (`wasSame`), which was intended for chat message bubbles. When rapidly switching voices in settings and clicking "Test voice", the second click cancelled playback and returned immediately without playing the new voice.
 - **Solution**: Exempted `tts-test-btn` from `wasSame` toggling; it now stops previous playback and immediately starts testing the newly selected voice.
 
+### 6. TTS Emoji & Symbol Filtering
+- **Gotcha**: When reading responses aloud, the browser speech synthesis / Speech Dispatcher literally pronounced emoji names (e.g. reading 😄 as "open face smiley" or "smiling face with open mouth") and announced technical/formatting punctuation ("open parenthesis", "pipe", "asterisk", "tilde").
+- **Unicode Keycap Gotcha**: Unicode property escape `\p{Emoji_Component}` matches ASCII digits `0-9` because digits are components of keycap sequences (`1️⃣`). Using `\p{Emoji_Component}` inadvertently stripped all numbers.
+- **Solution**: Enhanced `cleanForSpeech()` in `serve/web/app.js`:
+  1. Strips emojis using `[\p{Extended_Pictographic}\p{Emoji_Modifier}\uFE0E\uFE0F\u200D]+` (excluding `Emoji_Component` so digits are preserved).
+  2. Strips technical punctuation (`~`, `|`, `^`, `#`, `*`, `_`, `\`, `/`, box drawing, decorative bullets, arrows).
+  3. Translates speech-friendly symbols into words (`%` $\rightarrow$ "percent", `&` $\rightarrow$ "and", `+` $\rightarrow$ "plus", `$` $\rightarrow$ "dollars", `°C` $\rightarrow$ "degrees Celsius").
+  4. Converts parentheses to gentle commas so speech intones naturally without vocalizing "parenthesis".
+
 ## Verification
 
-- Automated test suite in `tools/test_stt_controller.js` covers 22 test cases, verifying:
-  - Disjoint, cumulative, and overlapping STT transcript merging.
-  - Pure typed prompt auto-speak rejection (`fromVoice === false`).
-  - STT voice prompt auto-speak acceptance (`fromVoice === true`).
-  - Multi-turn turn state resets and prompt replacement detection.
-  - Cross-browser voice URI / name lookup matching.
-  - Test button rapid re-click non-toggling behavior.
+- Automated test suite in `tools/test_stt_controller.js` covers 50 test cases (including 5 dedicated TTS filter test cases for emojis, compound emojis, units/currencies, speech symbols, and punctuation stripping).
 - All 20 Piper models tested directly in bash with zero aborts or failures.
 - Speech Dispatcher service restarted and verified active with `sd_generic`.
 

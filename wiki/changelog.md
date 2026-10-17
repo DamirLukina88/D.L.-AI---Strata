@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-17:** Update. Add TTS emoji and symbol filter, and integrate Gree AC in Living Room into Home Assistant. (Agent: Antigravity)
 - **2026-10-17:** Update. Add native light switch wrappers and area intelligence for Home Assistant smart plugs. (Agent: Antigravity)
 - **2026-10-17:** Update. Upgraded Cloudflare Tunnel protocol from http2 to quic for connection migration and blip resilience. (Agent: Antigravity)
 - **2026-10-17:** Update. decisions/cloudflare-tunnel-remote-exposure.md. (Agent: Antigravity)

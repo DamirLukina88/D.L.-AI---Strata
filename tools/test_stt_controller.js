@@ -623,6 +623,52 @@ assert.strictEqual(simApplyClose.activeElement.id, "sampling-btn", "Active eleme
 const simCodeClose = simulateDrawerLifecycle({ initialFocusInside: true, triggerId: "code-sampling-btn" });
 assert.strictEqual(simCodeClose.triggerEl.focused, true, "#code-sampling-btn must receive focus when closed in CLI mode");
 
-console.log("All STT & Accessibility Unit Tests Passed Successfully! (45/45)");
+// 13. TTS cleanForSpeech Emoji & Symbol Filter Tests
+const fs = require("fs");
+const path = require("path");
+const vm = require("vm");
+const appJsPath = path.resolve(__dirname, "../serve/web/app.js");
+const appJsSource = fs.readFileSync(appJsPath, "utf-8");
+const cleanStart = appJsSource.indexOf("function cleanForSpeech");
+const cleanEnd = appJsSource.indexOf("\nfunction chunkText");
+const cleanFnSource = appJsSource.slice(cleanStart, cleanEnd);
+vm.runInThisContext(cleanFnSource);
+
+// Test 46: Strips standard emojis and smileys
+assert.strictEqual(
+  cleanForSpeech("Hello world! 😄 Great job 🚀"),
+  "Hello world! Great job",
+  "Standard emojis (smileys, rockets) must be stripped from speech"
+);
+
+// Test 47: Strips compound emojis and variations
+assert.strictEqual(
+  cleanForSpeech("Family 👨‍👩‍👧‍👦 and check ✔️ done."),
+  "Family and check done.",
+  "Compound emojis, skin tones, and variation selectors must be stripped"
+);
+
+// Test 48: Translates speech-friendly symbols to words and preserves digits
+assert.strictEqual(
+  cleanForSpeech("Temp is 24°C, humidity 45%, and price is $50."),
+  "Temp is 24 degrees Celsius, humidity 45 percent, and price is 50 dollars.",
+  "Common symbols (°, %, $) must be converted to natural spoken words without losing numbers"
+);
+
+// Test 49: Translates & and + to natural words
+assert.strictEqual(
+  cleanForSpeech("Lights & Fans + AC are on."),
+  "Lights and Fans plus AC are on.",
+  "Ampersands and plus signs must be translated naturally"
+);
+
+// Test 50: Strips technical punctuation (~, |, ^, \, /, <, >, #, *) and turns parentheses into commas
+assert.strictEqual(
+  cleanForSpeech("Check table: | Living Room AC | (Gree) -> active #1 ~15 min remaining."),
+  "Check table: Living Room AC , Gree, active 1 about 15 min remaining.",
+  "Technical symbols and box borders must be stripped and parentheses converted to natural pauses"
+);
+
+console.log("All STT, TTS Filter & Accessibility Unit Tests Passed Successfully! (50/50)");
 
 

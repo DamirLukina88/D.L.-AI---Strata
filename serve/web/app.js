@@ -151,21 +151,52 @@ function cleanForSpeech(rawText, codeMode = "skip") {
   // 11. Strip HTML tags
   text = text.replace(/<[^>]+>/g, " ");
 
-  // 12. Normalize LaTeX / Math formulas ($x^2$, $$formula$$)
+  // 12. Currency, percentages, temperatures, and numbers with units (before LaTeX/math stripping)
+  text = text.replace(/\$(\d+(?:\.\d+)?)/g, (_, num) => `${num} dollars`);
+  text = text.replace(/(\d+)\s*%/g, (_, num) => `${num} percent`);
+  text = text.replace(/%/g, " percent ");
+  text = text.replace(/(\d+)\s*°\s*C\b/gi, (_, num) => `${num} degrees Celsius`);
+  text = text.replace(/(\d+)\s*°\s*F\b/gi, (_, num) => `${num} degrees Fahrenheit`);
+  text = text.replace(/°/g, " degrees ");
+  text = text.replace(/~(\d+)/g, (_, num) => `about ${num}`);
+
+  // 13. Translate speech-friendly symbols into natural words
+  text = text.replace(/&/g, " and ");
+  text = text.replace(/@([a-zA-Z0-9_]+)/g, (_, handle) => `at ${handle}`);
+  text = text.replace(/@/g, " at ");
+  text = text.replace(/->|→|=>|⇒/g, ", ");
+  text = text.replace(/\s*\+\s*/g, " plus ");
+  text = text.replace(/\s*=\s*/g, " equals ");
+
+  // 14. Normalize LaTeX / Math formulas ($x^2$, $$formula$$)
   text = text.replace(/\$\$([^$]+)\$\$/g, "$1");
   text = text.replace(/\$([^$]+)\$/g, "$1");
 
-  // 13. Normalize em-dashes (—), en-dashes (–), horizontal bars (―), figure dashes (‒) to natural pause
+  // 15. Strip all Unicode Emojis, smileys, pictograms, modifiers, and joiners
+  text = text.replace(/[\p{Extended_Pictographic}\p{Emoji_Modifier}\uFE0E\uFE0F\u200D]+/gu, "");
+
+  // 16. Strip decorative, box-drawing, bullet, shape, and arrow symbols
+  text = text.replace(/[\u2190-\u21FF\u27F0-\u27FF\u2900-\u297F\u2500-\u257F\u2580-\u259F\u25A0-\u25FF\u2600-\u26FF\u2B00-\u2BFF]/g, " ");
+  text = text.replace(/[•●■◆▪▫◦★☆✓✔✕✖✗]/g, " ");
+
+  // 17. Strip technical punctuation and symbols that TTS engines pronounce awkwardly
+  text = text.replace(/[~|^\\<>/#*_§©®™]/g, " ");
+
+  // 18. Replace parentheses with gentle commas so speech intones naturally without pronouncing "parenthesis"
+  text = text.replace(/\(([^)]+)\)/g, ", $1, ");
+
+  // 19. Normalize em-dashes (—), en-dashes (–), horizontal bars (―), figure dashes (‒) to natural pause
   // Android TTS tokenizers crash or abort speech when encountering raw em-dashes without spaces
   text = text.replace(/\s*[\u2012\u2013\u2014\u2015\u2212]\s*/g, ", ");
 
-  // 14. Normalize smart quotes, apostrophes, ellipsis, zero-width characters
+  // 20. Normalize smart quotes, apostrophes, ellipsis, zero-width characters
   text = text.replace(/[\u2018\u2019]/g, "'");
   text = text.replace(/[\u201C\u201D]/g, '"');
   text = text.replace(/\u2026/g, "...");
   text = text.replace(/[\u200B-\u200D\uFEFF\u00AD]/g, "");
 
-  // 15. Collapse multiple whitespace, preserve natural sentence spacing
+  // 21. Collapse multiple punctuation marks and whitespace
+  text = text.replace(/,\s*,+/g, ",");
   text = text.replace(/[ \t]+/g, " ");
   text = text.replace(/\n\s*\n/g, "\n");
   text = text.trim();
