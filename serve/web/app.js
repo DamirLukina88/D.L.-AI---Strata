@@ -195,11 +195,34 @@ const TTSController = {
   getVoice() {
     if (!window.speechSynthesis) return null;
     const voices = window.speechSynthesis.getVoices();
+    if (!voices || voices.length === 0) return null;
+
     const uri = store.get("tts_voice", "");
     if (uri) {
       const match = voices.find((v) => v.voiceURI === uri);
-      if (match) return match;
+      // Only keep saved match if it's not a legacy eSpeak voice when Piper is available
+      if (match && (!/espeak/i.test(match.name || match.voiceURI) || !voices.some((v) => /piper|lessac|ryan/i.test(v.name || v.voiceURI)))) {
+        return match;
+      }
     }
+
+    // 1. Highest priority: Piper neural voices (lessac / ryan)
+    const piper = voices.find((v) => /piper|lessac|ryan/i.test(v.name || v.voiceURI));
+    if (piper) return piper;
+
+    // 2. High priority: Native neural / natural voices (Edge Natural / Chrome OS Neural / Apple Siri)
+    const natural = voices.find((v) => /natural|neural|online/i.test(v.name || v.voiceURI));
+    if (natural) return natural;
+
+    // 3. English non-eSpeak local voice
+    const enNonEspeak = voices.find((v) => /^en/i.test(v.lang) && !/espeak/i.test(v.name || v.voiceURI));
+    if (enNonEspeak) return enNonEspeak;
+
+    // 4. Any non-eSpeak local voice
+    const anyNonEspeak = voices.find((v) => !/espeak/i.test(v.name || v.voiceURI));
+    if (anyNonEspeak) return anyNonEspeak;
+
+    // 5. System default or first available
     return voices.find((v) => v.default) || voices.find((v) => v.localService) || voices[0] || null;
   },
 
@@ -495,16 +518,70 @@ const TTSController = {
     if (countEl) countEl.textContent = `${voices.length} available`;
     const saved = store.get("tts_voice", "");
 
-    sel.innerHTML = '<option value="">System default</option>';
-    voices.forEach((v) => {
+    sel.innerHTML = '<option value="">Auto (Piper / Neural preferred)</option>';
+
+    // Sort so Piper/neural voices appear first, followed by other voices
+    const sorted = [...voices].sort((a, b) => {
+      const aNeural = /piper|lessac|ryan|natural|neural/i.test(a.name || a.voiceURI);
+      const bNeural = /piper|lessac|ryan|natural|neural/i.test(b.name || b.voiceURI);
+      if (aNeural && !bNeural) return -1;
+      if (!aNeural && bNeural) return 1;
+      return (a.name || "").localeCompare(b.name || "");
+    });
+
+    sorted.forEach((v) => {
       const opt = document.createElement("option");
       opt.value = v.voiceURI;
-      opt.textContent = `${v.name} (${v.lang})${v.localService ? " [local]" : ""}`;
+      const isNeural = /piper|lessac|ryan|natural|neural/i.test(v.name || v.voiceURI);
+      opt.textContent = `${v.name} (${v.lang})${isNeural ? " [neural]" : (v.localService ? " [local]" : "")}`;
       if (v.voiceURI === saved) opt.selected = true;
       sel.appendChild(opt);
     });
   },
 };
+
+// Robust speech transcript merger: handles disjoint phrases, Android cumulative streaming,
+// duplicate events, and partial head/tail word overlaps without repeating text.
+function mergeSpeechTranscripts(existing, incoming) {
+  const ex = (existing || "").trim();
+  const inc = (incoming || "").trim();
+  if (!inc) return existing || "";
+  if (!ex) return incoming || "";
+
+  const exLower = ex.toLowerCase();
+  const incLower = inc.toLowerCase();
+
+  // 1. If incoming equals existing, ignore duplicate
+  if (exLower === incLower) return existing;
+
+  // 2. If incoming starts with existing (Android cumulative session)
+  if (incLower.startsWith(exLower)) {
+    return inc;
+  }
+
+  // 3. If existing ends with incoming (duplicate trailing phrase)
+  if (exLower.endsWith(incLower)) {
+    return existing;
+  }
+
+  // 4. Overlap check: tail of existing matches head of incoming
+  const exWords = ex.split(/\s+/);
+  const incWords = inc.split(/\s+/);
+  const maxOverlap = Math.min(exWords.length, incWords.length);
+  for (let len = maxOverlap; len > 0; len--) {
+    const exTail = exWords.slice(exWords.length - len).join(" ").toLowerCase();
+    const incHead = incWords.slice(0, len).join(" ").toLowerCase();
+    if (exTail === incHead) {
+      const remainder = incWords.slice(len).join(" ");
+      const sep = existing.endsWith(" ") || existing.endsWith("\n") ? "" : " ";
+      return remainder ? `${existing}${sep}${remainder}` : existing;
+    }
+  }
+
+  // 5. Disjoint: append with space or existing delimiter
+  const sep = existing.endsWith(" ") || existing.endsWith("\n") ? "" : " ";
+  return `${existing}${sep}${inc}`;
+}
 
 // ------------------------------------------------------------------ Speech-to-Text (STT) Native Engine
 const STTController = {
@@ -575,9 +652,8 @@ const STTController = {
   updateInput() {
     const ta = this.getTargetInput();
     if (!ta) return;
-    const prefix = this.baseText ? (this.baseText.endsWith(" ") || this.baseText.endsWith("\n") ? this.baseText : this.baseText + " ") : "";
-    const spoken = (this.finalText + (this.interimText ? (this.finalText ? " " : "") + this.interimText : "")).trim();
-    ta.value = prefix + spoken;
+    const spoken = mergeSpeechTranscripts(this.finalText, this.interimText);
+    ta.value = mergeSpeechTranscripts(this.baseText, spoken);
     if (this.currentTarget === "chat") {
       if (typeof autosize === "function") autosize();
     } else if (this.currentTarget === "code") {
@@ -611,7 +687,10 @@ const STTController = {
 
     try {
       this.recognition = new SpeechRec();
-      this.recognition.continuous = true;
+      const isAndroid = /Android/i.test(navigator.userAgent);
+      // On Android Chrome, continuous = true triggers a known engine bug where
+      // the recognizer loops, continuously restarts, or duplicates prior final transcripts.
+      this.recognition.continuous = !isAndroid;
       this.recognition.interimResults = true;
       this.recognition.lang = this.getLang();
 
@@ -625,11 +704,9 @@ const STTController = {
         this.resetSilenceTimer();
         let finalStr = "";
         let interimStr = "";
-        let lastFinalSegment = "";
 
-        // Reconstruct from event.results (0 to length - 1) on every event.
-        // This prevents the notorious Android Chrome bug where event.resultIndex is 0
-        // and appending with += causes cumulative phrases to repeat exponentially.
+        // Reconstruct from event.results using mergeSpeechTranscripts on every event.
+        // This eliminates duplicate words across disjoint, cumulative, or overlapping chunks.
         for (let i = 0; i < event.results.length; ++i) {
           const res = event.results[i];
           if (!res || !res[0]) continue;
@@ -637,12 +714,9 @@ const STTController = {
           if (!transcript) continue;
 
           if (res.isFinal) {
-            if (transcript !== lastFinalSegment) {
-              finalStr += (finalStr ? " " : "") + transcript;
-              lastFinalSegment = transcript;
-            }
+            finalStr = mergeSpeechTranscripts(finalStr, transcript);
           } else {
-            interimStr += (interimStr ? " " : "") + transcript;
+            interimStr = mergeSpeechTranscripts(interimStr, transcript);
           }
         }
 

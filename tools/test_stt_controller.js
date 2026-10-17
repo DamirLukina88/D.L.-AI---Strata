@@ -101,11 +101,40 @@ assert.strictEqual(shouldAutoSend(true, true, "", ""), false, "Auto-send on with
 // Test 9: Auto-send disabled with spoken words
 assert.strictEqual(shouldAutoSend(true, false, "hello", ""), false, "Auto-send off should NOT trigger send");
 
-// 4. Android onresult reconstruction test
+// 4. Android onresult reconstruction test with mergeSpeechTranscripts
+function mergeSpeechTranscripts(existing, incoming) {
+  const ex = (existing || "").trim();
+  const inc = (incoming || "").trim();
+  if (!inc) return existing || "";
+  if (!ex) return incoming || "";
+
+  const exLower = ex.toLowerCase();
+  const incLower = inc.toLowerCase();
+
+  if (exLower === incLower) return existing;
+  if (incLower.startsWith(exLower)) return inc;
+  if (exLower.endsWith(incLower)) return existing;
+
+  const exWords = ex.split(/\s+/);
+  const incWords = inc.split(/\s+/);
+  const maxOverlap = Math.min(exWords.length, incWords.length);
+  for (let len = maxOverlap; len > 0; len--) {
+    const exTail = exWords.slice(exWords.length - len).join(" ").toLowerCase();
+    const incHead = incWords.slice(0, len).join(" ").toLowerCase();
+    if (exTail === incHead) {
+      const remainder = incWords.slice(len).join(" ");
+      const sep = existing.endsWith(" ") || existing.endsWith("\n") ? "" : " ";
+      return remainder ? `${existing}${sep}${remainder}` : existing;
+    }
+  }
+
+  const sep = existing.endsWith(" ") || existing.endsWith("\n") ? "" : " ";
+  return `${existing}${sep}${inc}`;
+}
+
 function processResults(resultsList) {
   let finalStr = "";
   let interimStr = "";
-  let lastFinalSegment = "";
 
   for (let i = 0; i < resultsList.length; ++i) {
     const res = resultsList[i];
@@ -114,12 +143,9 @@ function processResults(resultsList) {
     if (!transcript) continue;
 
     if (res.isFinal) {
-      if (transcript !== lastFinalSegment) {
-        finalStr += (finalStr ? " " : "") + transcript;
-        lastFinalSegment = transcript;
-      }
+      finalStr = mergeSpeechTranscripts(finalStr, transcript);
     } else {
-      interimStr += (interimStr ? " " : "") + transcript;
+      interimStr = mergeSpeechTranscripts(interimStr, transcript);
     }
   }
   return { finalStr, interimStr };
@@ -136,7 +162,18 @@ assert.strictEqual(processResults(androidEvent2).finalStr, "how are");
 assert.strictEqual(processResults(androidEvent3).finalStr, "how are you");
 assert.strictEqual(processResults(androidEvent4).finalStr, "how are you doing today");
 
-// Test 11: Android duplicate identical segment suppression
+// Test 11: Android multi-item cumulative result list (The exact bug reported: "how are you" then "who are you")
+const androidMultiChunkCumulative = [
+  { isFinal: true, 0: { transcript: "how are you" } },
+  { isFinal: true, 0: { transcript: "how are you who are you" } }
+];
+assert.strictEqual(
+  processResults(androidMultiChunkCumulative).finalStr,
+  "how are you who are you",
+  "Cumulative result list must resolve to the full sentence without doubling 'how are you'"
+);
+
+// Test 12: Android duplicate identical segment suppression
 const duplicateSegments = [
   { isFinal: true, 0: { transcript: "who are you" } },
   { isFinal: true, 0: { transcript: "who are you" } },
@@ -148,4 +185,26 @@ assert.strictEqual(
   "Consecutive identical segments should be deduplicated"
 );
 
-console.log("All STT Unit Tests Passed Successfully! (11/11)");
+// Test 13: Partial overlap transition
+const partialOverlapSegments = [
+  { isFinal: true, 0: { transcript: "tell me how are you" } },
+  { isFinal: true, 0: { transcript: "how are you who are you" } }
+];
+assert.strictEqual(
+  processResults(partialOverlapSegments).finalStr,
+  "tell me how are you who are you",
+  "Overlapping phrases should merge seamlessly without stuttering"
+);
+
+// Test 14: Input value combination with base text
+const baseText = "how are you";
+const newSpeech = "how are you who are you";
+const mergedInput = mergeSpeechTranscripts(baseText, newSpeech);
+assert.strictEqual(
+  mergedInput,
+  "how are you who are you",
+  "Existing base text in textarea must not be duplicated when engine returns cumulative phrase"
+);
+
+console.log("All STT Unit Tests Passed Successfully! (14/14)");
+
