@@ -461,11 +461,11 @@
     </div>
   </div>
 </dialog>
-<dialog class="st-dialog" id="brave-stt-dialog" style="max-width:520px;">
+<dialog class="st-dialog" id="brave-stt-dialog" style="max-width:540px;">
   <div class="st-dialog__head">
     <div class="st-dialog__title-wrap">
       <svg class="st-icon" style="color:var(--st-accent);"><use href="web/sprite.svg#i-mic"/></svg>
-      <span class="st-dialog__title">Enable Speech in Brave Browser</span>
+      <span class="st-dialog__title">Speech Recognition in Brave Browser</span>
     </div>
     <div class="st-dialog__actions">
       <button type="button" class="st-btn st-btn--icon" id="brave-dialog-close-btn" title="Close" aria-label="Close">
@@ -474,24 +474,24 @@
     </div>
   </div>
   <div class="st-dialog__body" style="padding:16px 20px;line-height:1.6;">
-    <p style="margin-top:0;">Brave Browser protects privacy by disabling cloud speech recognition services by default. To enable native browser voice typing in Brave:</p>
-    <ol style="padding-left:20px;margin-bottom:16px;">
-      <li style="margin-bottom:8px;">Open a new tab and navigate to:<br>
-        <code style="background:var(--st-surface-variant);padding:2px 6px;border-radius:4px;user-select:all;display:inline-block;margin-top:4px;">brave://settings/system</code>
-      </li>
-      <li style="margin-bottom:8px;">Toggle <strong>ON</strong> the setting:<br>
-        <em>"Use Google services for speech recognition"</em>
-      </li>
-      <li>Relaunch Brave or refresh this page, then click the microphone button again.</li>
-    </ol>
+    <p style="margin-top:0;"><strong>Why Speech-to-Text is restricted in Brave:</strong></p>
+    <p style="margin-top:0;color:var(--st-muted);">Brave disables Google's proprietary cloud speech recognition servers by default to prevent transmitting your voice recordings to third parties. Unlike Google Chrome, current versions of Brave do not include cloud STT endpoints.</p>
+    <div style="background:var(--st-surface-variant);border-radius:var(--st-r-md,8px);padding:12px 14px;margin-bottom:14px;font-size:13.5px;">
+      <strong>Recommended Options:</strong>
+      <ul style="margin:6px 0 0;padding-left:18px;">
+        <li style="margin-bottom:6px;"><strong>Mobile / Android Brave:</strong> Use the microphone icon directly on your virtual keyboard (Gboard / Samsung Keyboard) to dictate into the input field.</li>
+        <li style="margin-bottom:6px;"><strong>Desktop Voice Typing:</strong> Use Google Chrome, Chromium, or your operating system's native voice typing (e.g. OS Dictation).</li>
+        <li><strong>Brave Flags Configured:</strong> System Speech-Dispatcher (for TTS audio playback) and on-device speech flags have been configured in <code>~/.config/brave-flags.conf</code>. Restart Brave for flags to take effect.</li>
+      </ul>
+    </div>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
-      <button type="button" class="st-btn st-btn--secondary" id="brave-copy-url-btn">Copy brave:// URL</button>
+      <button type="button" class="st-btn st-btn--secondary" id="brave-copy-flags-btn">Copy Flags Config</button>
       <button type="button" class="st-btn st-btn--primary" id="brave-dialog-ok-btn">Got it</button>
     </div>
   </div>
 </dialog>
 <div class="scrim" id="scrim" hidden></div>
 <div class="st-toasts" id="toasts" aria-live="polite"></div>
-<script src="web/app.js?v=20261017-stt"></script>
+<script src="web/app.js?v=20261017-stt2"></script>
 </body>
 </html>

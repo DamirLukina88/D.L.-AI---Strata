@@ -19,9 +19,9 @@ The solution operates entirely client-side using standard Web Speech APIs (`Spee
 
 ### Supported Platforms & Browsers
 - **Desktop Google Chrome / Chromium**: Full continuous speech recognition with real-time interim streaming.
-- **Desktop Brave Browser**: Automatic detection of Brave privacy blocks with guided setup modal (`#brave-stt-dialog`) pointing to `brave://settings/system`.
+- **Desktop Brave Browser**: Automatic detection of Brave privacy blocks with guided modal (`#brave-stt-dialog`) explaining on-device flags and keyboard/system dictation options.
 - **Android Google Chrome**: Native Android speech recognition engine bridge with real-time streaming into mobile input elements.
-- **Android Brave Browser**: Touch-friendly push-to-talk interaction, zero latency speech capture, and privacy settings guidance.
+- **Android Brave Browser**: Touch-friendly push-to-talk interaction, zero latency speech capture, and keyboard dictation (Gboard) compatibility.
 
 ---
 
@@ -50,10 +50,10 @@ Supports two interaction paradigms transparently across mouse and touch inputs:
 - **Language Selector (`#stt-lang-select`)**: Supports English (US, UK), German, French, Spanish, Italian, Croatian, Serbian, Bosnian, Mandarin, Japanese, and Russian.
 - Defaults intelligently to `navigator.language` or `en-US` and persists user preference in `localStorage` under `strata.stt_lang`.
 
-### 2.5 Brave Browser Compatibility Bypass
+### 2.5 Brave Browser Compatibility Guidance
 - Brave Browser blocks Google Speech Recognition API endpoints by default for privacy, returning `service-not-allowed` or `network`.
 - **Detection & Modal**: Detects Brave via `navigator.brave.isBrave()` or Brave user agents and automatically opens the `#brave-stt-dialog` modal.
-- Provides a 2-step setup guide with a one-click button to copy `brave://settings/system` to the clipboard.
+- Explains why cloud speech endpoints are restricted, recommends on-device options (Gboard mic on mobile, OS dictation or Chrome on desktop), and enables copying flag configurations.
 - Also permanently accessible via the "Setup Guide" button in Settings.
 
 ### 2.6 Visual Indicator & GUI Assets

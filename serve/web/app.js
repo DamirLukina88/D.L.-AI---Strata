@@ -390,6 +390,11 @@ const TTSController = {
       if (e.error !== "canceled" && e.error !== "interrupted") {
         console.warn("SpeechSynthesis error:", e);
       }
+      if (e.error === "synthesis-failed" || e.error === "language-unavailable") {
+        this.stop();
+        toast("warn", "Speech synthesis failed", "The browser's speech synthesizer failed. If using Linux/Brave, restart your browser so speech-dispatcher flags take effect.", 6000);
+        return;
+      }
       this.currentIndex++;
       if (this.currentIndex < this.queue.length && e.error !== "canceled") {
         this.speakNext();
@@ -848,10 +853,10 @@ const STTController = {
     if (braveOkBtn) {
       braveOkBtn.onclick = () => this.closeBraveGuide();
     }
-    const braveCopyBtn = $("brave-copy-url-btn");
+    const braveCopyBtn = $("brave-copy-flags-btn");
     if (braveCopyBtn) {
       braveCopyBtn.onclick = () => {
-        copyText("brave://settings/system", braveCopyBtn);
+        copyText("--enable-speech-dispatcher\n--enable-features=BraveOnDeviceSpeechRecognition,OnDeviceWebSpeech,OnDeviceSpeechRecognition", braveCopyBtn);
       };
     }
 
