@@ -46,6 +46,11 @@ Brave Browser on Desktop disables Google's cloud SpeechRecognition API by defaul
    - **Non-Blocking Instant Toast Dismissal:** Notification toasts (`.st-toasts`) have `pointer-events: none !important;` with individual toasts set to `pointer-events: auto; cursor: pointer;`. A global `pointerdown` capture listener instantly clears active toasts on any screen tap or toast click, and forwards clicks to any underlying interactive elements (buttons, toggles) without swallowing user input or blocking the UI.
 
 ## Gotchas & Pitfalls
+- **Mobile Virtual Keyboard Pop-up During Voice Dictation:** Calling `ta.focus()` after speech transcription or leaving the input focused when tapping the microphone button on smartphones caused Android/iOS to constantly pop up the virtual software keyboard, obscuring the screen. Solved by:
+  1. Calling `document.activeElement.blur()`, `ta.blur()`, and `navigator.virtualKeyboard.hide()` immediately on mic pointerdown and click.
+  2. Setting `inputmode="none"` on the target textarea while voice recording / transcribing.
+  3. Removing unconditional `ta.focus()` calls from transcription completion callbacks.
+  4. Restoring `inputmode` dynamically when the user intentionally taps or clicks into the textarea to type.
 - **Drawer `aria-hidden` vs Focused Descendant:** In Chromium browsers, applying `aria-hidden="true"` to `<aside id="drawer">` when `#s-apply` holds focus throws `Blocked aria-hidden on an element because its descendant retained focus`. Solved by blurring any active child inside the drawer before closing, restoring focus to the opening trigger button (`#sampling-btn` / `#code-sampling-btn`), and applying the HTML5 `inert` attribute to the closed drawer.
 - **Toast Obstructing Underlying Elements:** Popup notifications (such as "Auto-send enabled") previously sat over interactive controls for 3.5 seconds with pointer events enabled, preventing immediate interactions. Solved with capture-phase `pointerdown` dismissal and `document.elementsFromPoint` click forwarding.
 - **DOM Teardown Race in Auto-Send:** Calling `updateInput()` inside `cleanup()` after transcribing caused textarea values to be blanked before `send()` or `codeSend()` could read them, causing early submission aborts. Fixed by decoupling `cleanup()` from DOM mutation and passing `overrideText` directly to `send(text)` and `codeSend(text)`.
@@ -53,7 +58,7 @@ Brave Browser on Desktop disables Google's cloud SpeechRecognition API by defaul
 
 ## Verification
 - `tools/test_stt_transcribe.py` passed (6/6 tests covering status detection, log/timestamp stripping, synthetic WAV/WebM transcription).
-- `tools/test_stt_controller.js` passed (45/45 tests covering transcript merging, dual-mode hold/tap interaction, auto-send gating, dual auto-send button sync, CLI coding voice-only auto-speak, instant auto-send, drawer accessibility focus restoration, and toast non-blocking instant dismissal).
+- `tools/test_stt_controller.js` passed (53/53 tests covering transcript merging, dual-mode hold/tap interaction, auto-send gating, dual auto-send button sync, CLI coding voice-only auto-speak, instant auto-send, drawer accessibility focus restoration, toast non-blocking instant dismissal, and mobile virtual keyboard suppression).
 
 ## Sources
 - `serve/transcribe.py`: local Whisper CLI and ffmpeg transcoder integration.

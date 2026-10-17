@@ -22,6 +22,8 @@ const store = {
   set(k, v) { try { localStorage.setItem("strata." + k, JSON.stringify(v)); } catch (e) { /* private mode: in memory only */ } },
 };
 
+const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (typeof window !== "undefined" && window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+
 // ------------------------------------------------------------------ toasts
 function dismissAllToasts() {
   const container = $("toasts");
@@ -780,6 +782,27 @@ const STTController = {
     return $("mic-btn");
   },
 
+  dismissKeyboard(target) {
+    if (navigator.virtualKeyboard && typeof navigator.virtualKeyboard.hide === "function") {
+      try { navigator.virtualKeyboard.hide(); } catch (_) {}
+    }
+    if (document.activeElement && typeof document.activeElement.blur === "function") {
+      try { document.activeElement.blur(); } catch (_) {}
+    }
+    const ta = this.getTargetInput(target);
+    if (ta) {
+      try { ta.blur(); } catch (_) {}
+      ta.setAttribute("inputmode", "none");
+    }
+  },
+
+  restoreKeyboard(target) {
+    const ta = this.getTargetInput(target);
+    if (ta) {
+      ta.removeAttribute("inputmode");
+    }
+  },
+
   resetSilenceTimer() {
     if (this.silenceTimer) clearTimeout(this.silenceTimer);
     // 4-second silence auto-stop for browser SpeechRecognition
@@ -926,6 +949,7 @@ const STTController = {
     }
 
     this.cancelAutoSendTimer();
+    this.dismissKeyboard(target);
 
     if (this.isRecording) {
       if (this.currentTarget === target) return;
@@ -1083,8 +1107,9 @@ const STTController = {
         const ta = this.getTargetInput(targetToSend);
         if (ta) {
           this.baseText = ta.value;
-          ta.focus();
-          ta.selectionStart = ta.selectionEnd = ta.value.length;
+          try {
+            ta.selectionStart = ta.selectionEnd = ta.value.length;
+          } catch (_) {}
         }
 
         if (this.autoSend) {
@@ -1113,6 +1138,7 @@ const STTController = {
     }
 
     this.cancelAutoSendTimer();
+    this.dismissKeyboard(target);
 
     if (this.isRecording) {
       if (this.currentTarget === target) return;
@@ -1225,8 +1251,9 @@ const STTController = {
           const ta = this.getTargetInput(targetWas);
           if (ta) {
             this.baseText = ta.value;
-            ta.focus();
-            ta.selectionStart = ta.selectionEnd = ta.value.length;
+            try {
+              ta.selectionStart = ta.selectionEnd = ta.value.length;
+            } catch (_) {}
           }
 
           this.cleanup();
@@ -1250,6 +1277,7 @@ const STTController = {
   },
 
   async start(target = (tab === "code" ? "code" : "chat")) {
+    this.dismissKeyboard(target);
     const engine = this.getEngine();
     if (engine === "whisper") {
       return this.startMediaRecorder(target);
@@ -1302,11 +1330,20 @@ const STTController = {
     this.updateTranscribingUI(false);
     this.interimText = "";
     this.recognition = null;
+    const ta = this.getTargetInput();
+    if (ta) {
+      setTimeout(() => {
+        if (!this.isRecording) {
+          ta.removeAttribute("inputmode");
+        }
+      }, 400);
+    }
   },
 
   toggle(target) {
     if (this.isTranscribing) return;
     this.cancelAutoSendTimer();
+    this.dismissKeyboard(target);
     if (this.isRecording && this.currentTarget === target) {
       this.stop();
     } else {
@@ -1390,6 +1427,7 @@ const STTController = {
 
     const onPointerDown = (e) => {
       if (e.button !== undefined && e.button !== 0) return;
+      this.dismissKeyboard(target);
       didAction = false;
       isHold = false;
       pressTimer = setTimeout(() => {
@@ -1418,6 +1456,7 @@ const STTController = {
     };
 
     const onClick = (e) => {
+      this.dismissKeyboard(target);
       if (didAction) {
         didAction = false;
         e.preventDefault();
@@ -1526,6 +1565,19 @@ const STTController = {
     $("code-mobile-input")?.addEventListener("click", cancelOnInteract);
     $("code-mobile-input")?.addEventListener("pointerdown", cancelOnInteract);
 
+    // Restore virtual keyboard when user intentionally interacts directly with text boxes
+    const enableKeyboardOnTouch = (el) => {
+      if (!el) return;
+      const restore = () => {
+        el.removeAttribute("inputmode");
+      };
+      el.addEventListener("pointerdown", restore);
+      el.addEventListener("touchstart", restore, { passive: true });
+      el.addEventListener("focus", restore);
+    };
+    enableKeyboardOnTouch($("input"));
+    enableKeyboardOnTouch($("code-mobile-input"));
+
     // Fetch status of local Whisper engine asynchronously
     try {
       const r = await fetch("v1/audio/status", { headers: headers() });
@@ -1568,7 +1620,7 @@ function showTab(name) {
     if ($(`view-${v}`)) $(`view-${v}`).hidden = v !== tab;
   }
   if (location.hash.slice(1) !== tab) history.replaceState(null, "", tab === "chat" ? location.pathname : `#${tab}`);
-  if (tab === "chat") $("input").focus();
+  if (tab === "chat" && !isMobile) $("input").focus();
   if (tab === "code") openCodeSession(); else codeDisconnect();
   if (tab === "monitor") loadMcp();
   if (tab === "about") loadConfig();

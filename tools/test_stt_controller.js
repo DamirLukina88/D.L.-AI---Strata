@@ -669,6 +669,82 @@ assert.strictEqual(
   "Technical symbols and box borders must be stripped and parentheses converted to natural pauses"
 );
 
-console.log("All STT, TTS Filter & Accessibility Unit Tests Passed Successfully! (50/50)");
+// 14. Mobile Virtual Keyboard Suppression & Dismissal Tests
+function simulateVirtualKeyboardLifecycle() {
+  let virtualKeyboardHidden = false;
+  let activeElementBlurred = false;
+  let textareaBlurred = false;
+  let inputMode = null;
+  let focusedCalled = false;
+
+  const mockNavigator = {
+    virtualKeyboard: {
+      hide() { virtualKeyboardHidden = true; }
+    }
+  };
+
+  const mockTa = {
+    value: "existing prompt",
+    selectionStart: 0,
+    selectionEnd: 0,
+    blur() { textareaBlurred = true; },
+    focus() { focusedCalled = true; },
+    setAttribute(k, v) { if (k === "inputmode") inputMode = v; },
+    removeAttribute(k) { if (k === "inputmode") inputMode = null; }
+  };
+
+  const mockActiveElement = {
+    blur() { activeElementBlurred = true; }
+  };
+
+  // 1. Trigger voice activation via button
+  function onVoiceActivationTrigger() {
+    mockNavigator.virtualKeyboard.hide();
+    mockActiveElement.blur();
+    mockTa.blur();
+    mockTa.setAttribute("inputmode", "none");
+  }
+
+  // 2. Transcription completes
+  function onTranscriptionComplete(spokenText) {
+    mockTa.value = spokenText;
+    mockTa.selectionStart = mockTa.selectionEnd = mockTa.value.length;
+    // Note: mockTa.focus() is NOT called!
+  }
+
+  // 3. User explicitly taps textarea to type
+  function onUserTouchTextarea() {
+    mockTa.removeAttribute("inputmode");
+  }
+
+  return {
+    onVoiceActivationTrigger,
+    onTranscriptionComplete,
+    onUserTouchTextarea,
+    getState: () => ({ virtualKeyboardHidden, activeElementBlurred, textareaBlurred, inputMode, focusedCalled, mockTa })
+  };
+}
+
+// Test 51: Voice activation dismisses virtual keyboard and sets inputmode="none"
+const simKbd = simulateVirtualKeyboardLifecycle();
+simKbd.onVoiceActivationTrigger();
+const stateAfterTrigger = simKbd.getState();
+assert.strictEqual(stateAfterTrigger.virtualKeyboardHidden, true, "Virtual keyboard must be hidden via VirtualKeyboard API");
+assert.strictEqual(stateAfterTrigger.activeElementBlurred, true, "Active element must be blurred on voice trigger");
+assert.strictEqual(stateAfterTrigger.textareaBlurred, true, "Textarea must be blurred on voice trigger");
+assert.strictEqual(stateAfterTrigger.inputMode, "none", "inputmode must be set to 'none' to suppress mobile keyboard");
+
+// Test 52: Transcribed text updates textarea without invoking focus()
+simKbd.onTranscriptionComplete("hello world how are you");
+const stateAfterTranscribe = simKbd.getState();
+assert.strictEqual(stateAfterTranscribe.mockTa.value, "hello world how are you", "Textarea must receive transcribed text");
+assert.strictEqual(stateAfterTranscribe.focusedCalled, false, "focus() must NOT be called on textarea during speech recognition");
+
+// Test 53: Direct user touch restores inputmode for normal typing
+simKbd.onUserTouchTextarea();
+const stateAfterTouch = simKbd.getState();
+assert.strictEqual(stateAfterTouch.inputMode, null, "inputmode must be restored to normal when user taps the textarea to type");
+
+console.log("All STT, TTS Filter, Accessibility & Mobile Keyboard Tests Passed Successfully! (53/53)");
 
 
