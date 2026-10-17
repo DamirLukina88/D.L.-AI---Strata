@@ -69,7 +69,7 @@ Supports two interaction paradigms transparently across mouse and touch inputs:
 ## 3. Test Suite & Verification
 
 ### 3.1 Unit Testing (`tools/test_stt_controller.js`)
-All 9 automated unit tests passed (100%):
+All 11 automated unit tests passed (100%):
 - **Transcript Merging**:
   - Test 1: Empty base text with interim speech &rarr; trimmed speech.
   - Test 2: Existing base text without trailing space &rarr; cleanly spaced concatenation.
@@ -82,12 +82,15 @@ All 9 automated unit tests passed (100%):
   - Test 7: Auto-send enabled with spoken words triggers submission.
   - Test 8: Auto-send enabled with empty speech / aborted session suppresses submission.
   - Test 9: Auto-send disabled retains text in composer without submitting.
+- **Android Cumulative Result Deduplication**:
+  - Test 10: Android Chrome cumulative event sequence (`resultIndex = 0`) correctly reconstructs full transcript without repeating words.
+  - Test 11: Consecutive identical final segments emitted by mobile speech services are suppressed.
 
 ### 3.2 Regression & Secret Audit
 - `node --check serve/web/app.js`: Syntax check passed (Exit code 0).
 - `node tools/test_tts_sanitizer.js`: Existing TTS tests intact (6/6 passed).
 - `python3 tools/pre-commit-scan-secrets.py`: Clean scan across all modified files (zero leaks).
-- `curl -s http://127.0.0.1:8080/`: Live HTTP verification confirmed all assets served with fresh cache-busting headers (`?v=20261017-stt`).
+- `curl -s http://127.0.0.1:8080/`: Live HTTP verification confirmed all assets served with fresh cache-busting headers (`?v=20261017-stt4`).
 
 ---
 

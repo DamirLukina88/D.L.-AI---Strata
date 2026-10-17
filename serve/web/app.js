@@ -623,21 +623,31 @@ const STTController = {
 
       this.recognition.onresult = (event) => {
         this.resetSilenceTimer();
-        let interim = "";
-        let sessionFinal = "";
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
+        let finalStr = "";
+        let interimStr = "";
+        let lastFinalSegment = "";
+
+        // Reconstruct from event.results (0 to length - 1) on every event.
+        // This prevents the notorious Android Chrome bug where event.resultIndex is 0
+        // and appending with += causes cumulative phrases to repeat exponentially.
+        for (let i = 0; i < event.results.length; ++i) {
           const res = event.results[i];
-          const transcript = res[0] ? res[0].transcript : "";
+          if (!res || !res[0]) continue;
+          const transcript = (res[0].transcript || "").trim();
+          if (!transcript) continue;
+
           if (res.isFinal) {
-            sessionFinal += transcript;
+            if (transcript !== lastFinalSegment) {
+              finalStr += (finalStr ? " " : "") + transcript;
+              lastFinalSegment = transcript;
+            }
           } else {
-            interim += transcript;
+            interimStr += (interimStr ? " " : "") + transcript;
           }
         }
-        if (sessionFinal) {
-          this.finalText += (this.finalText ? " " : "") + sessionFinal.trim();
-        }
-        this.interimText = interim.trim();
+
+        this.finalText = finalStr;
+        this.interimText = interimStr;
         this.updateInput();
       };
 

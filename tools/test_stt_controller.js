@@ -101,4 +101,51 @@ assert.strictEqual(shouldAutoSend(true, true, "", ""), false, "Auto-send on with
 // Test 9: Auto-send disabled with spoken words
 assert.strictEqual(shouldAutoSend(true, false, "hello", ""), false, "Auto-send off should NOT trigger send");
 
-console.log("All STT Unit Tests Passed Successfully! (9/9)");
+// 4. Android onresult reconstruction test
+function processResults(resultsList) {
+  let finalStr = "";
+  let interimStr = "";
+  let lastFinalSegment = "";
+
+  for (let i = 0; i < resultsList.length; ++i) {
+    const res = resultsList[i];
+    if (!res || !res[0]) continue;
+    const transcript = (res[0].transcript || "").trim();
+    if (!transcript) continue;
+
+    if (res.isFinal) {
+      if (transcript !== lastFinalSegment) {
+        finalStr += (finalStr ? " " : "") + transcript;
+        lastFinalSegment = transcript;
+      }
+    } else {
+      interimStr += (interimStr ? " " : "") + transcript;
+    }
+  }
+  return { finalStr, interimStr };
+}
+
+// Test 10: Android Chrome cumulative event sequence should not duplicate words
+const androidEvent1 = [{ isFinal: true, 0: { transcript: "how" } }];
+const androidEvent2 = [{ isFinal: true, 0: { transcript: "how are" } }];
+const androidEvent3 = [{ isFinal: true, 0: { transcript: "how are you" } }];
+const androidEvent4 = [{ isFinal: true, 0: { transcript: "how are you doing today" } }];
+
+assert.strictEqual(processResults(androidEvent1).finalStr, "how");
+assert.strictEqual(processResults(androidEvent2).finalStr, "how are");
+assert.strictEqual(processResults(androidEvent3).finalStr, "how are you");
+assert.strictEqual(processResults(androidEvent4).finalStr, "how are you doing today");
+
+// Test 11: Android duplicate identical segment suppression
+const duplicateSegments = [
+  { isFinal: true, 0: { transcript: "who are you" } },
+  { isFinal: true, 0: { transcript: "who are you" } },
+  { isFinal: true, 0: { transcript: "and what can you do" } }
+];
+assert.strictEqual(
+  processResults(duplicateSegments).finalStr,
+  "who are you and what can you do",
+  "Consecutive identical segments should be deduplicated"
+);
+
+console.log("All STT Unit Tests Passed Successfully! (11/11)");
