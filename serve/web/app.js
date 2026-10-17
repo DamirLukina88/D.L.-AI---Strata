@@ -520,6 +520,26 @@ const TTSController = {
 
     sel.innerHTML = '<option value="">Auto (Piper / Neural preferred)</option>';
 
+    const knownMeta = {
+      amy: { name: "Amy", gender: "Female" },
+      bryce: { name: "Bryce", gender: "Male" },
+      danny: { name: "Danny", gender: "Male" },
+      hfc_female: { name: "HFC", gender: "Female" },
+      hfc_male: { name: "HFC", gender: "Male" },
+      joe: { name: "Joe", gender: "Male" },
+      john: { name: "John", gender: "Male" },
+      kathleen: { name: "Kathleen", gender: "Female" },
+      kristin: { name: "Kristin", gender: "Female" },
+      kusal: { name: "Kusal", gender: "Male" },
+      lessac: { name: "Lessac", gender: "Female" },
+      ljspeech: { name: "LJSpeech", gender: "Female" },
+      mike: { name: "Mike", gender: "Male" },
+      norman: { name: "Norman", gender: "Male" },
+      reza_ibrahim: { name: "Reza", gender: "Male" },
+      ryan: { name: "Ryan", gender: "Male" },
+      sam: { name: "Sam", gender: "Male" },
+    };
+
     // Sort so Piper/neural voices appear first, followed by other voices
     const sorted = [...voices].sort((a, b) => {
       const aNeural = /piper|lessac|ryan|natural|neural/i.test(a.name || a.voiceURI);
@@ -532,8 +552,17 @@ const TTSController = {
     sorted.forEach((v) => {
       const opt = document.createElement("option");
       opt.value = v.voiceURI;
-      const isNeural = /piper|lessac|ryan|natural|neural/i.test(v.name || v.voiceURI);
-      opt.textContent = `${v.name} (${v.lang})${isNeural ? " [neural]" : (v.localService ? " [local]" : "")}`;
+      const m = (v.name || "").match(/en_US-([a-z0-9_]+)-(low|medium|high)/i);
+      if (m) {
+        const id = m[1].toLowerCase();
+        const quality = m[2].toLowerCase();
+        const meta = knownMeta[id] || { name: id.charAt(0).toUpperCase() + id.slice(1), gender: "Neural" };
+        const qLabel = quality === "high" ? "High Quality" : (quality === "medium" ? "Medium" : "Low");
+        opt.textContent = `${meta.name} · US ${meta.gender} (${qLabel}) [neural]`;
+      } else {
+        const isNeural = /piper|lessac|ryan|natural|neural/i.test(v.name || v.voiceURI);
+        opt.textContent = `${v.name} (${v.lang})${isNeural ? " [neural]" : (v.localService ? " [local]" : "")}`;
+      }
       if (v.voiceURI === saved) opt.selected = true;
       sel.appendChild(opt);
     });
