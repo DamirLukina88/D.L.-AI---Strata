@@ -15,6 +15,8 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-17:** Artifact Backup. Saved Native Browser TTS Implementation Plan and Report to wiki/artifacts/. (Agent: Antigravity)
+- **2026-10-17:** Ingestion. artifacts/native-browser-tts-implementation-plan.md. (Agent: Antigravity)
 - **2026-10-17:** Native Browser TTS: Implemented client-side Web Speech API with Android MediaSession, Screen Wake Lock, 10s Chromium watchdog keepalive, sentence-boundary chunker, and App Chat + Code Chat action buttons. (Agent: Antigravity)
 - **2026-10-17:** Ingestion. artifacts/v0-1-45-component-2-simt-qsa-scorer-report.md, artifacts/v0-1-45-component-3-thinking-budget-protection-report.md, artifacts/v0-1-45-component-4-tokenizer-prefix-caching-report.md, artifacts/v0-1-45-component-5-web-monitor-observability-report.md, artifacts/v0-1-45-optimizations-and-tuning-report.md, artifacts/native-browser-tts-implementation-report.md. (Agent: Antigravity)
 - **2026-10-17:** Artifact Backup. Component 1 RDNA3 WMMA hardware validation and dual-tier benchmark report. (Agent: Antigravity)

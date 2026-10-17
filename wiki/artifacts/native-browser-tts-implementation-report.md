@@ -94,6 +94,7 @@ All 6 automated unit tests passed with 100% assertions:
 
 ## 5. Artifacts & Commits
 
+- **Implementation Plan**: [Native Browser TTS Implementation Plan](native-browser-tts-implementation-plan.md)
 - **Local Backup**: `/mnt/data/Strata-data/local_backups/tts_native_browser_20261017_131854/`
 - **Unit Test Suite**: `tools/test_tts_sanitizer.js`
 - **Git Commit**: `d04bbc8a` (`feat(web): implement native browser TTS in App Chat and Code Chat with Android and Brave optimizations`)
