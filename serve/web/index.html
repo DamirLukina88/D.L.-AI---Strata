@@ -8,7 +8,7 @@
 <link rel="icon" type="image/svg+xml" href="web/favicon.svg">
 <link rel="stylesheet" href="web/tokens.css">
 <link rel="stylesheet" href="web/components.css">
-<link rel="stylesheet" href="web/app.css?v=20261017-tts">
+<link rel="stylesheet" href="web/app.css?v=20261017-stt">
 <script>
   // the theme before the first paint: default dark for D.L. AI
   try {
@@ -82,6 +82,10 @@
           <span class="composer-hint" id="composer-hint"></span>
           <button type="button" class="st-btn st-btn--secondary" id="stop-btn" hidden>
             <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-stop"/></svg>Stop</button>
+          <button type="button" class="st-btn st-btn--icon composer-action-btn" id="auto-send-btn" title="Auto-send after speaking (Hands-free voice mode)" aria-label="Auto-send after speaking" aria-pressed="false">
+            <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-auto-send"/></svg></button>
+          <button type="button" class="st-btn st-btn--icon composer-action-btn" id="mic-btn" title="Voice typing (Click to speak, hold to talk)" aria-label="Voice typing">
+            <svg class="st-icon"><use href="web/sprite.svg#i-mic"/></svg></button>
           <button type="submit" class="st-btn st-btn--primary st-btn--send" id="send-btn" aria-label="Send">
             <svg class="st-icon"><use href="web/sprite.svg#i-send"/></svg></button>
         </div>
@@ -151,6 +155,9 @@
           </div>
           <div class="code-mobile-input-bar">
             <textarea id="code-mobile-input" class="code-mobile-textarea" placeholder="Prompt, /command or !shell&hellip;" rows="1"></textarea>
+            <button type="button" id="code-mobile-mic-btn" class="st-btn st-btn--icon code-mobile-mic" title="Voice typing (Click to speak, hold to talk)" aria-label="Voice typing">
+              <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-mic"/></svg>
+            </button>
             <button type="button" id="code-mobile-send-btn" class="st-btn st-btn--primary code-mobile-send" title="Send">
               <svg class="st-icon st-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
             </button>
@@ -265,13 +272,13 @@
       </div>
       <div class="st-card" id="tts-settings-card">
         <div class="req-head">
-          <span class="card-title">Voice &amp; Speech (TTS)</span>
+          <span class="card-title">Voice &amp; Dictation (TTS &amp; STT)</span>
           <span class="muted small" id="tts-status-badge">Native Engine</span>
         </div>
-        <p class="muted small">Uses your browser and operating system's native voice engine. 100% client-side, zero latency, completely private.</p>
+        <p class="muted small">Uses your browser and operating system's native speech engines. 100% client-side, zero latency, completely private.</p>
 
         <div class="st-field">
-          <label class="st-label" for="tts-voice-select">Voice <output id="tts-voice-count"></output></label>
+          <label class="st-label" for="tts-voice-select">Read-aloud voice (TTS) <output id="tts-voice-count"></output></label>
           <select class="st-select" id="tts-voice-select" aria-label="Select speech voice">
             <option value="">System default</option>
           </select>
@@ -306,6 +313,34 @@
             <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-volume"/></svg>
             <span>Test voice</span>
           </button>
+        </div>
+
+        <div class="st-field" style="border-top:1px solid var(--st-line-soft);margin-top:16px;padding-top:14px;">
+          <label class="st-label" for="stt-lang-select">Speech recognition language (STT)</label>
+          <select class="st-select" id="stt-lang-select" aria-label="Select speech recognition language">
+            <option value="en-US">English (United States)</option>
+            <option value="en-GB">English (United Kingdom)</option>
+            <option value="de-DE">Deutsch (Germany)</option>
+            <option value="fr-FR">Français (France)</option>
+            <option value="es-ES">Español (Spain)</option>
+            <option value="it-IT">Italiano (Italy)</option>
+            <option value="hr-HR">Hrvatski (Croatia)</option>
+            <option value="sr-RS">Srpski (Serbia)</option>
+            <option value="bs-BA">Bosanski (Bosnia)</option>
+            <option value="zh-CN">中文 (Mandarin)</option>
+            <option value="ja-JP">日本語 (Japanese)</option>
+            <option value="ru-RU">Русский (Russian)</option>
+          </select>
+        </div>
+
+        <div class="toggle-row">
+          <span>Auto-send on speech pause<br><span class="muted small">Hands-free mode: sends immediately when you finish speaking</span></span>
+          <button class="st-toggle" id="stt-auto-toggle" role="switch" aria-checked="false" aria-label="Auto send on speech pause"></button>
+        </div>
+
+        <div class="toggle-row" style="border-top:1px dashed var(--st-line);margin-top:8px;padding-top:8px;">
+          <span>Brave Browser Voice Dictation<br><span class="muted small">If voice typing is blocked in Brave Browser</span></span>
+          <button class="st-btn st-btn--secondary st-btn--sm" id="brave-guide-btn" type="button">Setup Guide</button>
         </div>
       </div>
       <div class="st-card cfg-card" id="cfg-card" hidden>
@@ -426,8 +461,37 @@
     </div>
   </div>
 </dialog>
+<dialog class="st-dialog" id="brave-stt-dialog" style="max-width:520px;">
+  <div class="st-dialog__head">
+    <div class="st-dialog__title-wrap">
+      <svg class="st-icon" style="color:var(--st-accent);"><use href="web/sprite.svg#i-mic"/></svg>
+      <span class="st-dialog__title">Enable Speech in Brave Browser</span>
+    </div>
+    <div class="st-dialog__actions">
+      <button type="button" class="st-btn st-btn--icon" id="brave-dialog-close-btn" title="Close" aria-label="Close">
+        <svg class="st-icon"><use href="web/sprite.svg#i-chevron"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="st-dialog__body" style="padding:16px 20px;line-height:1.6;">
+    <p style="margin-top:0;">Brave Browser protects privacy by disabling cloud speech recognition services by default. To enable native browser voice typing in Brave:</p>
+    <ol style="padding-left:20px;margin-bottom:16px;">
+      <li style="margin-bottom:8px;">Open a new tab and navigate to:<br>
+        <code style="background:var(--st-surface-variant);padding:2px 6px;border-radius:4px;user-select:all;display:inline-block;margin-top:4px;">brave://settings/system</code>
+      </li>
+      <li style="margin-bottom:8px;">Toggle <strong>ON</strong> the setting:<br>
+        <em>"Use Google services for speech recognition"</em>
+      </li>
+      <li>Relaunch Brave or refresh this page, then click the microphone button again.</li>
+    </ol>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+      <button type="button" class="st-btn st-btn--secondary" id="brave-copy-url-btn">Copy brave:// URL</button>
+      <button type="button" class="st-btn st-btn--primary" id="brave-dialog-ok-btn">Got it</button>
+    </div>
+  </div>
+</dialog>
 <div class="scrim" id="scrim" hidden></div>
 <div class="st-toasts" id="toasts" aria-live="polite"></div>
-<script src="web/app.js?v=20261017-tts"></script>
+<script src="web/app.js?v=20261017-stt"></script>
 </body>
 </html>

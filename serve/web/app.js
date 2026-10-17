@@ -3,7 +3,7 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const SPRITE = "web/sprite.svg?v=20261017-tts";
+const SPRITE = "web/sprite.svg?v=20261017-stt";
 const icon = (name, cls = "st-icon") => {
   if (name === "folder") {
     return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path opacity="0.25" d="M3 6C3 4.895 3.895 4 5 4H9.172C9.702 4 10.211 4.21 10.586 4.586L12.414 6.414C12.789 6.789 13.298 7 13.828 7H19C20.105 7 21 7.895 21 9V18C21 19.105 20.105 20 19 20H5C3.895 20 3 19.105 3 18V6Z" fill="currentColor"/><path d="M3 6C3 4.895 3.895 4 5 4H9.172C9.702 4 10.211 4.21 10.586 4.586L12.414 6.414C12.789 6.789 13.298 7 13.828 7H19C20.105 7 21 7.895 21 9V18C21 19.105 20.105 20 19 20H5C3.895 20 3 19.105 3 18V6Z"/></svg>`;
@@ -487,6 +487,377 @@ const TTSController = {
       if (v.voiceURI === saved) opt.selected = true;
       sel.appendChild(opt);
     });
+  },
+};
+
+// ------------------------------------------------------------------ Speech-to-Text (STT) Native Engine
+const STTController = {
+  recognition: null,
+  isRecording: false,
+  isPushToTalk: false,
+  currentTarget: null, // "chat" | "code"
+  baseText: "",
+  finalText: "",
+  interimText: "",
+  silenceTimer: null,
+  autoSend: false,
+
+  isSupported() {
+    return Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+  },
+
+  getLang() {
+    return store.get("stt_lang", "") || navigator.language || "en-US";
+  },
+
+  isAutoSend() {
+    return Boolean(store.get("stt_auto_send", false));
+  },
+
+  setAutoSend(val) {
+    this.autoSend = !!val;
+    store.set("stt_auto_send", this.autoSend);
+    const btn = $("auto-send-btn");
+    if (btn) {
+      btn.classList.toggle("is-active", this.autoSend);
+      btn.setAttribute("aria-pressed", String(this.autoSend));
+      btn.title = `Auto-Send: ${this.autoSend ? "ON (hands-free dictation)" : "OFF"}`;
+    }
+    const toggle = $("stt-auto-toggle");
+    if (toggle) {
+      toggle.setAttribute("aria-checked", String(this.autoSend));
+    }
+  },
+
+  getTargetInput(target = this.currentTarget) {
+    if (target === "code") return $("code-mobile-input");
+    return $("input");
+  },
+
+  getTargetMicBtn(target = this.currentTarget) {
+    if (target === "code") return $("code-mobile-mic-btn");
+    return $("mic-btn");
+  },
+
+  resetSilenceTimer() {
+    if (this.silenceTimer) clearTimeout(this.silenceTimer);
+    // 4-second silence auto-stop
+    this.silenceTimer = setTimeout(() => {
+      if (this.isRecording) {
+        this.stop();
+      }
+    }, 4000);
+  },
+
+  clearSilenceTimer() {
+    if (this.silenceTimer) {
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
+    }
+  },
+
+  updateInput() {
+    const ta = this.getTargetInput();
+    if (!ta) return;
+    const prefix = this.baseText ? (this.baseText.endsWith(" ") || this.baseText.endsWith("\n") ? this.baseText : this.baseText + " ") : "";
+    const spoken = (this.finalText + (this.interimText ? (this.finalText ? " " : "") + this.interimText : "")).trim();
+    ta.value = prefix + spoken;
+    if (this.currentTarget === "chat") {
+      if (typeof autosize === "function") autosize();
+    } else if (this.currentTarget === "code") {
+      ta.style.height = "auto";
+      ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
+    }
+  },
+
+  async start(target = (tab === "code" ? "code" : "chat")) {
+    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRec) {
+      toast("warn", "Speech recognition unavailable", "Your browser does not support native speech recognition. Please use Chrome, Brave, Edge, or Chromium.");
+      return;
+    }
+
+    if (this.isRecording) {
+      if (this.currentTarget === target) return;
+      this.stop();
+    }
+
+    // Stop TTS if speaking so speech input isn't confused by model's own voice
+    if (typeof TTSController !== "undefined" && TTSController.speaking) {
+      TTSController.stop();
+    }
+
+    this.currentTarget = target;
+    const ta = this.getTargetInput(target);
+    this.baseText = ta ? ta.value : "";
+    this.finalText = "";
+    this.interimText = "";
+
+    try {
+      this.recognition = new SpeechRec();
+      this.recognition.continuous = true;
+      this.recognition.interimResults = true;
+      this.recognition.lang = this.getLang();
+
+      this.recognition.onstart = () => {
+        this.isRecording = true;
+        this.updateMicUI(true);
+        this.resetSilenceTimer();
+      };
+
+      this.recognition.onresult = (event) => {
+        this.resetSilenceTimer();
+        let interim = "";
+        let sessionFinal = "";
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const res = event.results[i];
+          const transcript = res[0] ? res[0].transcript : "";
+          if (res.isFinal) {
+            sessionFinal += transcript;
+          } else {
+            interim += transcript;
+          }
+        }
+        if (sessionFinal) {
+          this.finalText += (this.finalText ? " " : "") + sessionFinal.trim();
+        }
+        this.interimText = interim.trim();
+        this.updateInput();
+      };
+
+      this.recognition.onerror = async (event) => {
+        const err = event.error;
+        if (err === "no-speech") {
+          return;
+        }
+
+        // Brave browser blocks third-party Google speech endpoints by default
+        let isBrave = false;
+        try {
+          if (navigator.brave && typeof navigator.brave.isBrave === "function") {
+            isBrave = await navigator.brave.isBrave();
+          } else if (window.chrome && !window.chrome.webstore && /Brave/i.test(navigator.userAgent)) {
+            isBrave = true;
+          }
+        } catch (e) {
+          isBrave = false;
+        }
+
+        if (err === "service-not-allowed" || err === "network") {
+          if (isBrave) {
+            this.openBraveGuide();
+            this.cleanup();
+            return;
+          }
+          toast("error", "Speech recognition failed", `Network or service issue (${err}). Make sure internet is connected.`);
+        } else if (err === "not-allowed") {
+          if (isBrave) {
+            this.openBraveGuide();
+            this.cleanup();
+            return;
+          }
+          toast("warn", "Microphone access blocked", "Please allow microphone access in your browser settings to use voice typing.");
+        } else if (err !== "aborted") {
+          toast("warn", "Speech recognition error", `Error: ${err}`);
+        }
+        this.cleanup();
+      };
+
+      this.recognition.onend = () => {
+        const hadRecording = this.isRecording;
+        const targetWas = this.currentTarget;
+        const hadFinalSpoken = Boolean((this.finalText + " " + this.interimText).trim());
+
+        this.cleanup();
+
+        // If auto-send is enabled and speech was transcribed, trigger submission!
+        if (hadRecording && this.autoSend && hadFinalSpoken) {
+          if (targetWas === "chat") {
+            if (typeof send === "function") send();
+          } else if (targetWas === "code") {
+            if (typeof codeSend === "function") codeSend();
+          }
+        }
+      };
+
+      this.recognition.start();
+    } catch (e) {
+      toast("error", "Voice typing error", e.message || String(e));
+      this.cleanup();
+    }
+  },
+
+  stop() {
+    this.clearSilenceTimer();
+    if (this.recognition) {
+      try {
+        this.recognition.stop();
+      } catch (e) {
+        // ignore
+      }
+    }
+  },
+
+  cleanup() {
+    this.clearSilenceTimer();
+    this.isRecording = false;
+    this.isPushToTalk = false;
+    this.updateMicUI(false);
+    this.interimText = "";
+    this.updateInput();
+    this.recognition = null;
+  },
+
+  toggle(target) {
+    if (this.isRecording && this.currentTarget === target) {
+      this.stop();
+    } else {
+      this.start(target);
+    }
+  },
+
+  updateMicUI(recording) {
+    const btn = this.getTargetMicBtn();
+    if (btn) {
+      btn.classList.toggle("is-recording", recording);
+      btn.setAttribute("aria-pressed", String(recording));
+      btn.title = recording ? "Listening... (Click to stop)" : "Voice typing (Click to speak / Hold to talk)";
+      const use = btn.querySelector("use");
+      if (use) {
+        use.setAttribute("href", `${SPRITE}#i-${recording ? "mic-off" : "mic"}`);
+      }
+    }
+  },
+
+  openBraveGuide() {
+    const d = $("brave-stt-dialog");
+    if (d) {
+      if (typeof d.showModal === "function") d.showModal();
+      else d.setAttribute("open", "");
+    }
+  },
+
+  closeBraveGuide() {
+    const d = $("brave-stt-dialog");
+    if (d) {
+      if (typeof d.close === "function") d.close();
+      else d.removeAttribute("open");
+    }
+  },
+
+  bindDualMode(btn, target) {
+    if (!btn) return;
+    let pressTimer = null;
+    let isHold = false;
+    let didAction = false;
+
+    const onPointerDown = (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      didAction = false;
+      isHold = false;
+      pressTimer = setTimeout(() => {
+        isHold = true;
+        this.isPushToTalk = true;
+        if (!this.isRecording) {
+          this.start(target);
+        }
+      }, 400);
+    };
+
+    const onPointerUp = (e) => {
+      if (pressTimer) {
+        clearTimeout(pressTimer);
+        pressTimer = null;
+      }
+      if (isHold) {
+        isHold = false;
+        this.isPushToTalk = false;
+        if (this.isRecording && this.currentTarget === target) {
+          this.stop();
+        }
+        didAction = true;
+        e.preventDefault();
+      }
+    };
+
+    const onClick = (e) => {
+      if (didAction) {
+        didAction = false;
+        e.preventDefault();
+        return;
+      }
+      this.isPushToTalk = false;
+      this.toggle(target);
+    };
+
+    btn.addEventListener("pointerdown", onPointerDown);
+    btn.addEventListener("pointerup", onPointerUp);
+    btn.addEventListener("pointercancel", onPointerUp);
+    btn.addEventListener("click", onClick);
+  },
+
+  init() {
+    this.autoSend = this.isAutoSend();
+    this.setAutoSend(this.autoSend);
+
+    const autoSendBtn = $("auto-send-btn");
+    if (autoSendBtn) {
+      autoSendBtn.onclick = () => {
+        const next = !this.autoSend;
+        this.setAutoSend(next);
+        toast("info", `Auto-send ${next ? "enabled" : "disabled"}`, next ? "Hands-free: messages send automatically when dictation stops." : "Manual send mode: transcribed text stays in composer.", 2500);
+      };
+    }
+
+    const sttAutoToggle = $("stt-auto-toggle");
+    if (sttAutoToggle) {
+      sttAutoToggle.onclick = () => {
+        const next = !this.autoSend;
+        this.setAutoSend(next);
+        toast("info", `Auto-send ${next ? "enabled" : "disabled"}`, next ? "Hands-free: messages send automatically when dictation stops." : "Manual send mode: transcribed text stays in composer.", 2500);
+      };
+    }
+
+    // Language selection
+    const langSel = $("stt-lang-select");
+    if (langSel) {
+      const savedLang = store.get("stt_lang", "");
+      if (savedLang) {
+        langSel.value = savedLang;
+      } else {
+        const browserLang = navigator.language || "en-US";
+        const match = [...langSel.options].find((o) => o.value === browserLang || o.value.startsWith(browserLang.slice(0, 2)));
+        if (match) langSel.value = match.value;
+      }
+      langSel.onchange = () => {
+        store.set("stt_lang", langSel.value);
+        toast("info", "Dictation language", `Language set to ${langSel.options[langSel.selectedIndex]?.text || langSel.value}`);
+      };
+    }
+
+    // Brave Dialog controls
+    const braveGuideBtn = $("brave-guide-btn");
+    if (braveGuideBtn) {
+      braveGuideBtn.onclick = () => this.openBraveGuide();
+    }
+    const braveCloseBtn = $("brave-dialog-close-btn");
+    if (braveCloseBtn) {
+      braveCloseBtn.onclick = () => this.closeBraveGuide();
+    }
+    const braveOkBtn = $("brave-dialog-ok-btn");
+    if (braveOkBtn) {
+      braveOkBtn.onclick = () => this.closeBraveGuide();
+    }
+    const braveCopyBtn = $("brave-copy-url-btn");
+    if (braveCopyBtn) {
+      braveCopyBtn.onclick = () => {
+        copyText("brave://settings/system", braveCopyBtn);
+      };
+    }
+
+    // Bind Dual-mode interaction to mic buttons
+    this.bindDualMode($("mic-btn"), "chat");
+    this.bindDualMode($("code-mobile-mic-btn"), "code");
   },
 };
 
@@ -2525,6 +2896,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if ($("drawer") && $("drawer").dataset.open === "true") openDrawer(false);
     if ($("workspace-dialog") && ($("workspace-dialog").hasAttribute("open") || $("workspace-dialog").open)) openWorkspace(false);
+    if ($("brave-stt-dialog") && ($("brave-stt-dialog").hasAttribute("open") || $("brave-stt-dialog").open)) STTController.closeBraveGuide();
   }
 });
 
@@ -2538,6 +2910,7 @@ $("scrim").onclick = () => openDrawer(false);
 setBusy(false);
 renderChat();
 TTSController.init();
+STTController.init();
 const startQuestion = new URLSearchParams(location.search).get("q");   // /?q=... starts a chat (a shortcut)
 if (startQuestion) history.replaceState(null, "", location.pathname + location.hash);
 loadHealth().then(loadMcp).then(loadAvailableModels).then(() => { if (startQuestion) { $("input").value = startQuestion; send(); } });

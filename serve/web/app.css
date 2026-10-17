@@ -1093,3 +1093,49 @@ main { flex: 1; min-height: 0; min-width: 0; max-width: 100vw; overflow-x: hidde
   color: var(--st-ink);
 }
 
+/* ============================ STT & Voice Typing Styles ============================ */
+.composer-action-btn {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--st-ink-muted);
+  border-radius: var(--st-r-md, 8px);
+  transition: all 0.15s ease;
+}
+.composer-action-btn:hover {
+  color: var(--st-ink);
+}
+.composer-action-btn.is-active {
+  color: var(--st-accent) !important;
+  background: var(--st-accent-tint) !important;
+  border-color: var(--st-accent) !important;
+}
+.code-mobile-mic {
+  height: 38px;
+  width: 38px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: var(--st-r-md);
+  color: var(--st-ink-muted);
+}
+.code-mobile-mic:hover {
+  color: var(--st-ink);
+}
+.st-btn.is-recording, .code-mobile-mic.is-recording {
+  color: #ef4444 !important;
+  background: rgba(239, 68, 68, 0.15) !important;
+  border-color: #ef4444 !important;
+  animation: st-mic-pulse 1.3s ease-in-out infinite;
+}
+@keyframes st-mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45); }
+  50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+}
+
