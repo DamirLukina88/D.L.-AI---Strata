@@ -2219,6 +2219,8 @@ class StrataEngine:
                 self.ended = True
                 self.progress, self.last = None, {}
                 self.progress_ms, self.reused = 0, 0
+                v = self.info.get("version")
+                self.info = {"version": v} if v is not None else {}
 
 
 IMAGE_URL_MAX = 32 << 20        # an image URL is read up to this (the web app attaches pictures of up to 20 MB)
@@ -3608,6 +3610,9 @@ class Service:
         if getattr(self, "lazy", False) or getattr(self.engine, "unloaded", False):
             self.engine.unloaded = True
             self.engine.ended = True
+            if hasattr(self.engine, "info") and isinstance(self.engine.info, dict):
+                v = self.engine.info.get("version")
+                self.engine.info = {"version": v} if v is not None else {}
             print("[strata] engine stopped and marked unloaded; ready for next request", flush=True)
             return "unloaded"
         else:
@@ -3910,8 +3915,12 @@ class Service:
                 live["state"] = "generating"
         if hasattr(self.engine, "replica_view"):        # opt-in replicas: each one's state and requests routed to it
             live["replicas"] = self.engine.replica_view()
+        is_loaded = self.loaded()
+        engine_info = dict(getattr(self.engine, "info", {}) or {}) if is_loaded else {
+            k: v for k, v in (getattr(self.engine, "info", {}) or {}).items() if k in ("version",)
+        }
         engine = {"model": self.model, "max_context": self.reported_ctx(), "images": self.vision is not None,
-                  **dict(getattr(self.engine, "info", {}) or {})}
+                  **engine_info}
         tel = self.telemetry.snapshot() if getattr(self, "telemetry", None) else {"now": {}, "history": {}, "static": {}}
         parked = self.conv_log.poll(getattr(self.engine, "log_path", None), getattr(self.engine, "log_start", None))
         return {"engine": engine, "live": live, "requests": hist[::-1][:None if all_requests else 12],

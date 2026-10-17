@@ -724,9 +724,10 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
   setMetric("gpu", hw.gpu_util == null ? null : fmt(hw.gpu_util), "%",
             multi ? per((g) => (g.util == null ? "–" : `${fmt(g.util)}%`)) : st.gpu_name || (st.gpu_note ? "not available" : ""));
   spark("sp-gpu", h.gpu_util, 100);
+  const isLoaded = live.state !== "unloaded";
   setMetric("vram", hw.gpu_mem_used == null ? null : gb(hw.gpu_mem_used), hw.gpu_mem_total ? `/ ${gb(hw.gpu_mem_total, 0)} GB` : "GB",
             multi ? per((g) => (g.mem_used == null ? "–" : `${gb(g.mem_used)} GB`))
-                  : eng.expert_slots ? `${fmt(eng.expert_slots)} experts cached` : (st.gpu_note ? "not available on Windows AMD yet" : ""));
+                  : (isLoaded && eng.expert_slots ? `${fmt(eng.expert_slots)} experts cached` : (st.gpu_note ? "not available on Windows AMD yet" : "")));
   spark("sp-vram", h.gpu_mem_used, hw.gpu_mem_total);
   setMetric("temp", hw.gpu_temp == null ? null : fmt(hw.gpu_temp), "°C",
             multi ? per((g) => (g.temp == null ? "–" : `${fmt(g.temp)}°`)) : "");
@@ -752,19 +753,19 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
   // context fill: the running request, else the last one
   const ctx = eng.max_context || 0;
   let used = 0;
-  if (live.state !== "idle") used = (live.prompt_tokens || 0) + (live.generated || 0);
-  else if (last) used = (last.prompt_tokens || 0) + (last.output_tokens || 0);
-  const frac = ctx ? Math.min(1, used / ctx) : 0;
+  if (live.state !== "idle" && isLoaded) used = (live.prompt_tokens || 0) + (live.generated || 0);
+  else if (last && isLoaded) used = (last.prompt_tokens || 0) + (last.output_tokens || 0);
+  const frac = ctx && isLoaded ? Math.min(1, used / ctx) : 0;
   $("ctx-fill").setAttribute("stroke-dasharray", `${(235.6 * frac).toFixed(1)} 314.2`);
   $("ctx-fill").style.opacity = 235.6 * frac >= 3 ? "1" : "0";         // a near-zero arc would draw just its round cap
-  $("ctx-pct").textContent = `${Math.round(frac * 100)}%`;
-  $("ctx-sub").textContent = ctx ? `${kfmt(used)} / ${ctxfmt(ctx)}` : "–";
+  $("ctx-pct").textContent = isLoaded ? `${Math.round(frac * 100)}%` : "0%";
+  $("ctx-sub").textContent = isLoaded && ctx ? `${kfmt(used)} / ${ctxfmt(ctx)}` : "–";
   const cacheBytes = (eng.expert_cache_mib || 0) * 1048576;
-  $("slots-text").textContent = eng.expert_slots ? `${fmt(eng.expert_slots)} · ${gb(cacheBytes)} GB` : "–";
-  $("slots-bar").style.width = hw.gpu_mem_total ? `${Math.min(100, (100 * cacheBytes) / hw.gpu_mem_total)}%` : "0%";
+  $("slots-text").textContent = isLoaded && eng.expert_slots ? `${fmt(eng.expert_slots)} · ${gb(cacheBytes)} GB` : "–";
+  $("slots-bar").style.width = isLoaded && hw.gpu_mem_total ? `${Math.min(100, (100 * cacheBytes) / hw.gpu_mem_total)}%` : "0%";
   const arenaBytes = (eng.arena_mib || 0) * 1048576;
-  $("ram-text").textContent = eng.arena_mib ? `${gb(arenaBytes)} / ${gb(hw.ram_total, 0)} GB` : (eng.expert_slots ? "0 GB" : "–");
-  const arenaPct = hw.ram_total && eng.arena_mib ? Math.min(100, (100 * arenaBytes) / hw.ram_total) : 0;
+  $("ram-text").textContent = isLoaded && eng.arena_mib ? `${gb(arenaBytes)} / ${gb(hw.ram_total, 0)} GB` : (isLoaded && eng.expert_slots ? "0 GB" : "–");
+  const arenaPct = isLoaded && hw.ram_total && eng.arena_mib ? Math.min(100, (100 * arenaBytes) / hw.ram_total) : 0;
   $("ram-bar").style.width = `${arenaPct}%`;
   if (arenaPct > 92) $("ram-progress").dataset.tone = "danger"; else delete $("ram-progress").dataset.tone;
   $("temp-text").textContent = hw.gpu_temp == null ? "–" : `${fmt(hw.gpu_temp)} °C`;
