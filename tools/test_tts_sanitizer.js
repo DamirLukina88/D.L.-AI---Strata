@@ -60,7 +60,16 @@ function cleanForSpeech(rawText, codeMode = "skip") {
   text = text.replace(/\$\$([^$]+)\$\$/g, "$1");
   text = text.replace(/\$([^$]+)\$/g, "$1");
 
-  // 13. Collapse multiple whitespace, preserve natural sentence spacing
+  // 13. Normalize em-dashes (—), en-dashes (–), horizontal bars (―), figure dashes (‒) to natural pause
+  text = text.replace(/\s*[\u2012\u2013\u2014\u2015\u2212]\s*/g, ", ");
+
+  // 14. Normalize smart quotes, apostrophes, ellipsis, zero-width characters
+  text = text.replace(/[\u2018\u2019]/g, "'");
+  text = text.replace(/[\u201C\u201D]/g, '"');
+  text = text.replace(/\u2026/g, "...");
+  text = text.replace(/[\u200B-\u200D\uFEFF\u00AD]/g, "");
+
+  // 15. Collapse multiple whitespace, preserve natural sentence spacing
   text = text.replace(/[ \t]+/g, " ");
   text = text.replace(/\n\s*\n/g, "\n");
   text = text.trim();
@@ -189,6 +198,22 @@ console.log("Running TTS Text Sanitizer & Chunker Test Suite...");
   console.log(`✓ Test 6 Passed: Unpunctuated run-on clause cleanly word-split into ${chunks.length} chunks`);
 }
 
+// Test 7: Em-dash and unicode dash normalization (prevents Android TTS cutoff)
+{
+  const input = "The city didn't erase old families—it folded new ones into its fabric.";
+  const cleaned = cleanForSpeech(input);
+  assert.strictEqual(cleaned, "The city didn't erase old families, it folded new ones into its fabric.");
+  console.log("✓ Test 7 Passed: Em-dash cleanly normalized to pause comma");
+}
+
+// Test 8: Smart quotes, en-dashes, and ellipsis normalization
+{
+  const input = "“Hello world”… said the author – with pride.";
+  const cleaned = cleanForSpeech(input);
+  assert.strictEqual(cleaned, '"Hello world"... said the author, with pride.');
+  console.log("✓ Test 8 Passed: Smart quotes, en-dash, and ellipsis normalized");
+}
+
 console.log("\n=======================================================");
-console.log("ALL 6 TTS SANITIZER & CHUNKER UNIT TESTS PASSED (100%)!");
+console.log("ALL 8 TTS SANITIZER & CHUNKER UNIT TESTS PASSED (100%)!");
 console.log("=======================================================\n");

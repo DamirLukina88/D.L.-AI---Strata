@@ -119,7 +119,17 @@ function cleanForSpeech(rawText, codeMode = "skip") {
   text = text.replace(/\$\$([^$]+)\$\$/g, "$1");
   text = text.replace(/\$([^$]+)\$/g, "$1");
 
-  // 13. Collapse multiple whitespace, preserve natural sentence spacing
+  // 13. Normalize em-dashes (—), en-dashes (–), horizontal bars (―), figure dashes (‒) to natural pause
+  // Android TTS tokenizers crash or abort speech when encountering raw em-dashes without spaces
+  text = text.replace(/\s*[\u2012\u2013\u2014\u2015\u2212]\s*/g, ", ");
+
+  // 14. Normalize smart quotes, apostrophes, ellipsis, zero-width characters
+  text = text.replace(/[\u2018\u2019]/g, "'");
+  text = text.replace(/[\u201C\u201D]/g, '"');
+  text = text.replace(/\u2026/g, "...");
+  text = text.replace(/[\u200B-\u200D\uFEFF\u00AD]/g, "");
+
+  // 15. Collapse multiple whitespace, preserve natural sentence spacing
   text = text.replace(/[ \t]+/g, " ");
   text = text.replace(/\n\s*\n/g, "\n");
   text = text.trim();
@@ -236,17 +246,22 @@ const TTSController = {
   },
 
   chunk(text) {
-    return chunkText(text, 180);
+    return chunkText(text, 140);
   },
 
   startWatchdog() {
     this.stopWatchdog();
+    // Android/iOS TTS engines glitch and cancel playback when pause()/resume() is invoked.
+    // Silent WebAudio buffer keep-alive already keeps the mobile audio pipeline active.
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    if (isMobile) return;
+
     this.watchdogTimer = setInterval(() => {
       if (window.speechSynthesis && window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
         window.speechSynthesis.pause();
         window.speechSynthesis.resume();
       }
-    }, 10000);
+    }, 12000);
   },
 
   stopWatchdog() {
@@ -424,13 +439,18 @@ const TTSController = {
       if (e.error !== "canceled" && e.error !== "interrupted") {
         console.warn("SpeechSynthesis error:", e);
       }
-      if (e.error === "synthesis-failed" || e.error === "language-unavailable") {
-        this.stop();
-        toast("warn", "Speech synthesis failed", "The browser's speech synthesizer failed. If using Linux/Brave, restart your browser so speech-dispatcher flags take effect.", 6000);
-        return;
+      // On desktop Linux, initial chunk failure suggests missing speech-dispatcher
+      if (this.currentIndex === 0 && (e.error === "synthesis-failed" || e.error === "language-unavailable")) {
+        const isLinux = /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent);
+        if (isLinux) {
+          this.stop();
+          toast("warn", "Speech synthesis failed", "The browser's speech synthesizer failed. If using Linux/Brave, restart your browser so speech-dispatcher flags take effect.", 6000);
+          return;
+        }
       }
+      // Gracefully advance to next chunk rather than dropping the remaining text
       this.currentIndex++;
-      if (this.currentIndex < this.queue.length && e.error !== "canceled") {
+      if (this.currentIndex < this.queue.length && e.error !== "canceled" && e.error !== "interrupted") {
         this.speakNext();
       } else {
         this.stop();
