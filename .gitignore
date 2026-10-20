@@ -71,3 +71,6 @@ build-vision-cuda12.bat
 strata-server.out
 strata-server.pid
 *.orig
+
+# this machine's web app settings (Cloudflare Access team logout URL)
+serve/web/site-config.js

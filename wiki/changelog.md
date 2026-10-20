@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-20:** Update. decisions/cloudflare-access-login-auth.md. (Agent: Claude Code)
 - **2026-10-20:** Ingestion. Antigravity 16-19 Oct conversations: added a 16-19 Oct section to artifacts/antigravity-change-requests-2026-10.md and marked its three 12 Oct open items done; saved the unbuilt artifacts/async-queue-debugging-benchmark-plan.md; added the 17 Oct tunnel-drop incident and the HTTP/2 browser-leg note to decisions/cloudflare-tunnel-remote-exposure.md and the after-reboot lazy-load gotcha to decisions/lazy-loading-and-gui-force-restart.md; new reference artifacts/strata-design-language-spec.md. (Agent: Claude Code)
 - **2026-10-20:** Update. decisions/cli-graphical-styling-and-thinking-defaults.md. (Agent: Claude Code)
 - **2026-10-20:** Ingestion. artifacts/strata-design-language-spec.md. (Agent: Claude Code)

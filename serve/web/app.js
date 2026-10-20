@@ -2142,16 +2142,21 @@ if ($("logout-btn")) {
         document.cookie = `${name}=; Path=/; ${d ? `Domain=${d}; ` : ""}Expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0;`;
       }
     }
-    const logoutUrl = window.STRATA_LOGOUT_URL || "/cdn-cgi/access/logout";
-    try {
-      if (window.top) {
-        window.top.location.href = logoutUrl;
-      } else {
-        window.location.href = logoutUrl;
-      }
-    } catch (e) {
-      window.location.href = logoutUrl;
-    }
+    // Cloudflare Access keeps two sessions: this app's CF_Authorization cookie (HttpOnly, so only Cloudflare's own
+    // logout page can clear it) and the session on the team domain, which silently signs the app in again on the next
+    // visit. So: end the app's cookie in the background, then open the team logout (site-config.js sets its URL).
+    const appLogout = "/cdn-cgi/access/logout";
+    const teamLogout = window.STRATA_LOGOUT_URL || "";
+    const go = (url) => {
+      try { (window.top || window).location.href = url; } catch (e) { window.location.href = url; }
+    };
+    if (!teamLogout || teamLogout === appLogout) { go(appLogout); return; }
+    let left = false;
+    const leave = () => { if (!left) { left = true; go(teamLogout); } };
+    setTimeout(leave, 3000);                  // never wait longer than this for the app logout
+    fetch(appLogout, { credentials: "include", cache: "no-store", redirect: "manual" })
+      .catch(() => {})
+      .finally(leave);
   };
 }
 
