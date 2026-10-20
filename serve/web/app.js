@@ -1761,6 +1761,15 @@ function codeResolve(id, ok) {
   delete code.approvals[id];
 }
 
+// The active plan (PLAN.md) the done check holds the agent to: "PLAN 12/34", red when it has a Blocked: line.
+function codePlanChip(plan) {
+  if (!plan) return "";
+  const total = (plan.done || 0) + (plan.open || 0);
+  const label = plan.blocked ? "BLOCKED" : `PLAN ${plan.done || 0}/${total}`;
+  const tip = `${plan.file}: ${plan.done || 0} steps done, ${plan.open || 0} open` + (plan.blocked ? ", blocked" : "");
+  return ` <span class="cs-mode cs-mode--progress${plan.blocked ? " cs-mode--blocked" : ""}" title="${esc(tip)}">${esc(label)}</span>`;
+}
+
 function codeSetState(st) {
   code.state = st || {};
   const meta = $("code-scaffold-meta");
@@ -1768,6 +1777,7 @@ function codeSetState(st) {
     const mode = (code.state.mode || "act").toUpperCase();
     meta.innerHTML = `<span class="cs-mode cs-mode--${esc(code.state.mode || "act")}">${mode}</span>` +
       (code.state.yolo ? ` <span class="cs-mode cs-mode--yolo">YOLO</span>` : "") +
+      codePlanChip(code.state.plan) +
       (code.state.mcp || []).map((m) => ` <span class="cs-mode cs-mode--mcp" title="${esc(m.description)} (${esc(m.why || "on")})">${esc(m.name)}</span>`).join("") +
       ` <code title="${esc(code.state.workspace || "")}">${esc((code.state.workspace || "").split("/").slice(-2).join("/"))}</code>`;
   }

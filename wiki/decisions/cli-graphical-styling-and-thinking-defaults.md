@@ -49,6 +49,10 @@ Harmonized all CLI terminal interfaces (D.L. CLI, Claude Code, DeepSeek) and the
 ### 8. Weather Reasoning Benchmark
 - See [Weather Reasoning Benchmark for CLI Thinking Levels](weather-reasoning-benchmark.md) for evaluating thinking levels (none, low, medium, high) on multi-step reasoning, location inference (Zagreb), and email dispatch.
 
+## Related
+
+- [Strata / D.L. AI Design Language (visual spec)](../artifacts/strata-design-language-spec.md) - the web app's tokens, components and layouts
+
 ## Sources
 - `tools/dl_cli.py` — D.L. CLI implementation, ANSI palette, argument parser, and banner card.
 - `tools/run-code-session.sh` — Multi-scaffold runner script and terminal cards.

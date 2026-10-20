@@ -81,6 +81,8 @@ On 2026-10-14 the user ran a test project through D.L. CLI: a single-file Tetris
 8. **Unknown tool names.** The error lists the valid names, and common aliases (`edit_file` → `replace_file_content`, `read_file` → `view_file`) map to the real tool.
 9. **Visibility.** One line in the terminal and a chip in the web Code tab (for example "review: 2 issues fixed"). The full findings go in a collapsible block and in the `/save` export.
 
+- 2026-10-20: items 2 (evidence check), 3 (fresh-context reviewer), 5 (browser check, run by D.L. CLI itself with playwright-core) and 6 (PLAN.md, written on approval instead of in Plan mode) are implemented and deployed, together with trim protection, a done check and a thinking-loop guard: see [D.L. CLI Keeps Its Task](../decisions/dl-cli-task-memory-and-finish-checks.md). Visibility (item 9) is a notice per check plus a plan chip in the Code tab, not a findings block.
+
 ## Scope
 
 `tools/dl_cli.py`, `tools/dl_sessiond.py` and the web Code tab. `tools/antigravity_local.py` is a **symlink** to `dl_cli.py` (checked 2026-10-14), so it gets every change automatically. The older plan pages that call it a "near-copy" are out of date.

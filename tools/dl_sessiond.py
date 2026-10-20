@@ -49,6 +49,11 @@ NAME_OK = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 EFFORTS = ("none", "low", "medium", "high")
 EXECUTE_PLAN = ("Proceed with executing the plan now. Perform the necessary tool calls (edits, writes, tests, "
                 "commands) to implement the agreed plan.")
+EXECUTE_PLAN_FILE = ("Execute the approved plan in {plan} now, step by step, with the tool calls it needs (edits, "
+                     "writes, tests, commands). Keep its \"## Progress\" checklist current: tick each line (\"- [x]\") "
+                     "as soon as its own check passes - one line at a time, not when the whole section is done - "
+                     "and if you cannot go on, add a \"Blocked: <reason>\" line and say why. "
+                     "The task is done when every step is ticked.")
 
 
 def plain(text: str) -> str:
@@ -74,6 +79,7 @@ class Session:
         self.cancel = threading.Event()
         self.pending: dict[str, dict] = {}       # approval id -> {"event", "ok", "kind", ...}
         self.plan_offer: str | None = None       # id of an open "Execute this plan?" offer
+        self.plan_file: str | None = None        # the approved plan (PLAN.md) the done check holds the agent to
         # MCP servers, on while a request needs them; "code": Google (Gmail) is allowed here, not in the REPL
         self.mcp = dl_mcp.McpRegistry(surface="code", notify=lambda t, level="info": self.notice(f"MCP {t}", level))
         self.mcp.on_change = self.emit_state
@@ -101,9 +107,18 @@ class Session:
         return {"type": "state", "session": self.name, "workspace": str(self.workspace), "mode": self.mode,
                 "settings": cli.chat_settings_summary(), "effort": self.effort, "yolo": self.yolo, "busy": self.busy,
                 "wiki": str(cli.resolve_wiki_root(self.workspace) or ""),
-                "mcp": [m for m in self.mcp.status() if m["on"]],
+                "mcp": [m for m in self.mcp.status() if m["on"]], "plan": self.plan_summary(),
                 "pending": [{"id": k, "kind": v["kind"], "summary": v["summary"], "reason": v["reason"]}
                             for k, v in self.pending.items()]}
+
+    def plan_summary(self) -> dict | None:
+        """For the web Code tab's plan chip: the active plan's file and its Progress counts."""
+        if not self.plan_file or not Path(self.plan_file).is_file():
+            return None
+        _, open_items, done_items, blocked = cli.plan_progress(Path(self.plan_file))
+        p = Path(self.plan_file)
+        return {"file": str(p.relative_to(self.workspace)) if p.is_relative_to(self.workspace) else str(p),
+                "done": len(done_items), "open": len(open_items), "blocked": blocked}
 
     def emit_state(self) -> None:
         self.emit(self.state())
@@ -121,7 +136,7 @@ class Session:
     def save(self) -> None:
         with self.lock, _save_lock:
             data = {"name": self.name, "workspace": str(self.workspace), "mode": self.mode, "effort": self.effort,
-                    "yolo": self.yolo,
+                    "yolo": self.yolo, "plan_file": self.plan_file,
                     "messages": self.messages, "events": self.events[-REPLAY_MAX:], "seq": self.seq}
             STATE_DIR.mkdir(parents=True, exist_ok=True)
             tmp = self.path().with_suffix(".tmp")
@@ -158,6 +173,8 @@ class Session:
         s = cls(name, ws if ws.is_dir() else default_ws)
         s.mode = data.get("mode") if data.get("mode") in ("act", "plan") else "act"
         s.effort = data.get("effort") if data.get("effort") in EFFORTS else None
+        pf = data.get("plan_file")
+        s.plan_file = pf if isinstance(pf, str) and Path(pf).is_file() else None
         s.yolo = data.get("yolo") is True             # YOLO stays on until it is turned off, also after restarts
         # what the model can be sent again: an assistant turn as saved (it may hold only tool calls), anything else
         # only with its text
@@ -165,7 +182,7 @@ class Session:
             m.get("role") == "assistant" or (m.get("role") in ("system", "user", "tool")
                                              and isinstance(m.get("content"), (str, list))))]   # list: parts, e.g. images
         s.messages = msgs or s.messages
-        system = {"role": "system", "content": cli.build_dl_system_prompt(s.workspace, s.mode)}
+        system = {"role": "system", "content": cli.build_dl_system_prompt(s.workspace, s.mode, s.plan_file)}
         if s.messages[0].get("role") == "system":
             s.messages[0] = system
         else:
@@ -256,7 +273,8 @@ class Session:
             self.emit_state()
 
     def _system(self) -> None:
-        self.messages[0] = {"role": "system", "content": cli.build_dl_system_prompt(self.workspace, self.mode)}
+        self.messages[0] = {"role": "system", "content": cli.build_dl_system_prompt(self.workspace, self.mode,
+                                                                                   self.plan_file)}
 
     def _transcript(self, prompt: str, out: str) -> None:
         self.messages.append({"role": "user", "content": prompt})
@@ -269,12 +287,16 @@ class Session:
         self.messages.append({"role": "user",
                               "content": cli.with_now(cli.resolve_file_references(prompt, self.workspace))})
         ctx = {"workspace": self.workspace, "messages": self.messages, "mode": self.mode, "yolo": self.yolo,
+               "plan_file": self.plan_file,
                "effort": self.effort,
                "emit": self.emit, "cancel": self.cancel, "approve": self.approve, "mcp": self.mcp, "user_text": prompt,
                "session": self}
         new_ws = cli.execute_agent_loop(messages=self.messages, url=cli.DEFAULT_URL, api_key=cli.DEFAULT_API_KEY,
                                         workspace=self.workspace, mode=self.mode,
                                         session_context=ctx)
+        if ctx.get("plan_file") != self.plan_file:          # the done check found it complete
+            self.plan_file = ctx.get("plan_file")
+            self.emit_state()
         if new_ws != self.workspace:
             self.workspace = new_ws
             self.emit_state()
@@ -300,10 +322,37 @@ class Session:
         cmd, _, arg = text.partition(" ")
         arg = arg.strip()
         if cmd in ("/act", "/execute"):
+            saved = cli.save_approved_plan(self.messages, self.workspace) if self.mode == "plan" else None
+            if saved:
+                self.plan_file = str(saved)
+                self.notice(f"Plan saved to {saved.name}; the agent works from it and ticks its Progress checklist.")
             self.mode = "act"
             self._system()
             self.emit_state()
-            return arg or EXECUTE_PLAN
+            if arg:
+                return arg
+            return EXECUTE_PLAN_FILE.format(plan=saved.name) if saved else EXECUTE_PLAN
+        if cmd == "/planfile":
+            if arg.lower() in ("off", "none", "clear"):
+                self.plan_file = None
+                self.notice("No active plan: the done check is off for this session.")
+            elif arg:
+                p = Path(arg).expanduser()
+                p = p if p.is_absolute() else (self.workspace / p)
+                if not p.is_file():
+                    self.notice(f"No such file: {p}", "warn")
+                    return None
+                self.plan_file = str(p.resolve())
+                _, open_items, done_items, _ = cli.plan_progress(p)
+                self.notice(f"Active plan: {p.name} ({len(done_items)} done, {len(open_items)} open)."
+                            + ("" if open_items or done_items else " It has no Progress checklist yet; the agent "
+                               "is asked to add one."))
+            else:
+                self.notice(f"Active plan: {self.plan_file or 'none'}. /planfile <path> sets it, /planfile off "
+                            "clears it.")
+            self._system()
+            self.emit_state()
+            return None
         if cmd == "/plan":
             if not arg and self.mode == "plan":
                 self.mode = "act"
@@ -338,6 +387,7 @@ class Session:
             self.emit_state()
             return None
         if cmd in ("/clear", "/reset"):
+            self.plan_file = None
             self.messages = [{"role": "system", "content": cli.build_dl_system_prompt(self.workspace, self.mode)}]
             with self.lock:
                 self.events = []
@@ -436,7 +486,8 @@ class Session:
 
 HELP = """Modes
 /plan [task]      Plan Mode: read-only research, ends with "Execute this plan?"
-/act [task]       Act Mode (executes the agreed plan when given no task); also /execute
+/act [task]       Act Mode (executes the agreed plan when given no task; it is saved as PLAN.md); also /execute
+/planfile [path]  The plan the agent is held to (ticks its Progress; done check); off clears it
 /yolo             Fully autonomous: nothing asks (sending email included) until you turn it off again
 /effort [level]   This session's thinking level: none, low, medium, high, or default (the Chat settings)
 

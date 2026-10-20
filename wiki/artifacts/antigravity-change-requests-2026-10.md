@@ -14,7 +14,33 @@ last_verified: 2026-10-13
 Source: Antigravity conversation `44aeb44c…` ("Local Wiki Initialization", workspace `~/Desktop/Strata` → `/mnt/data/Strata`, 215 user turns, 5 Oct – 12 Oct 2026), plus 3 short side conversations from 11 Oct.
 Only prompts that asked for a change are listed; questions, "status?" and "continue" turns are left out. Wording is condensed from yours, typos fixed. Secrets that were pasted into prompts are redacted.
 
+## 16-19 Oct — later Antigravity conversations (added 2026-10-20)
+
+Antigravity had no Strata conversation between 12 and 16 Oct. Five conversations from 16-19 Oct touched Strata / D.L. AI. Each topic links to the page that records it; the requests themselves are not repeated here.
+
+- **`b2d3ff29…`** (16 Oct 13:51 – 17 Oct 20:03, 68 user turns):
+  - Read-only full-project audit: [Strata Full Project Audit Report](strata-full-project-audit-2026-10-16.md).
+  - Benchmark: [Strata v0.1.44.1 Benchmark Report](strata-benchmark-2026-10-16.md).
+  - "Services not running after a reboot": they were running; the model only looked idle because of lazy loading. Autostart is linger + `WantedBy=default.target` + `Restart=always` + the watchdog ([Lazy Loading and GUI Force Restart](../decisions/lazy-loading-and-gui-force-restart.md)).
+  - Monitor tiles: PCIe tile replaced by a live RAM meter, Context fill shows "Experts in System RAM", GPU temperature replaced by "KV cache memory", tiles reset on unload (same page).
+  - Upstream v0.1.45 review, plan and components 1-5: [Upstream v0.1.45 Evaluation Plan](upstream-v0-1-45-evaluation-and-benchmark-plan.md), [v0.1.45 master report](v0-1-45-optimizations-and-tuning-report.md).
+  - Native browser TTS, Piper voices, auto-speak only for STT input: [TTS plan](native-browser-tts-implementation-plan.md), [TTS report](native-browser-tts-implementation-report.md), [Desktop Piper Voice Switching](../decisions/desktop-piper-voice-switching-and-stt-auto-speak.md).
+  - STT with the Brave/Firefox Speech Dispatcher issues, Android text duplication, the mandatory visual review window, instant submit (the 400 ms delay removed), auto-send in the Code tab and mobile keyboard suppression: [STT plan](native-browser-stt-implementation-plan.md), [STT report](native-browser-stt-implementation-report.md), [Local Whisper STT](../decisions/local-whisper-speech-to-text.md).
+  - `/save` chat to Markdown: [CLI Chat Markdown Export](../decisions/cli-chat-markdown-export.md).
+  - README updated and pushed (`74d597bd`, 17 Oct). It also asked how to contact the upstream maintainer; no change was made.
+- **`47cce368…`** (17 Oct 13:20 – 18:44, 27 user turns):
+  - Home Assistant Core and its Strata MCP server; Xiaomi integration and camera streams; `/help` and `/mcp` in the GUI; why the General Chat has no tools; outlets that are really light switches (native light wrappers, area-aware discovery); the Gree AC: [Home Assistant Core Deployment and Strata MCP](../decisions/home-assistant-strata-mcp.md), [HA plan](homeassistant-strata-core-plan.md), [HA walkthrough](homeassistant-and-session-tools-walkthrough.md), [Session Tools plan](session-commands-and-tools-plan.md).
+  - TTS emoji and symbol filter: [Desktop Piper Voice Switching](../decisions/desktop-piper-voice-switching-and-stt-auto-speak.md).
+  - Proton Bridge SMTP 454: [Scheduled Jobs in D.L. AI](../decisions/dl-ai-scheduled-jobs.md).
+  - "Strata crashed" at 17:44 was a Cloudflare tunnel drop; it led to the switch to QUIC: [Cloudflare Tunnel](../decisions/cloudflare-tunnel-remote-exposure.md).
+- **`9bf3cff9…`** (17 Oct 16:36 – 20:04, 6 user turns): the thinking-level weather benchmark, [Weather Reasoning Benchmark](../decisions/weather-reasoning-benchmark.md). A harder follow-up benchmark was planned but not built: [Async Queue Debugging Benchmark Plan](async-queue-debugging-benchmark-plan.md).
+- **`96e34383…`** (17-19 Oct, 16 user turns): live control of SolidCraft over its MCP server (a 3D-printable dispenser model). It is not Strata work, and its plans stay in Antigravity's folder and `~/Desktop/SolidCraft_MCP_Architecture_Guide.md`.
+- **`ed37fa1e…`** (19 Oct 20:19 – 21:09, 10 user turns): read-only status checks of the D.L. AI CONTRA run. What they found led to [D.L. CLI Keeps Its Task](../decisions/dl-cli-task-memory-and-finish-checks.md).
+- Other conversations from those days were not about Strata (the CachyOS login screen, Antigravity errors and Remote, installing and updating SolidCraft).
+
 ## Last session — still open (12 Oct, ended on an Antigravity quota error)
+
+**Update 2026-10-20: all three are done since.** (1) The zip download was fixed in `afc0e553` (13 Oct, "stream downloads from disk; resumable, any file name, no Blob"). (2) The README was rewritten in the 13 Oct plan ([D.L. AI Plan (2026-10-13): Shared Session, Guardrails, README](dl-ai-2026-10-13-plan-session-guardrails-readme.md)) and updated in `74d597bd` (17 Oct). (3) The guardrails were settled in [Approval Gate for Destructive Agent Actions](../decisions/destructive-action-approval-gate.md) (13 Oct: only destructive actions and writes outside the workspace ask; content is never restricted).
 
 The repo is clean at `20142315` and in sync with `origin/main`, so none of these three were committed.
 

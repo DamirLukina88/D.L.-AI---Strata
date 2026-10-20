@@ -5,7 +5,7 @@ description: "Deployment configuration for the RX 7600 XT on CachyOS, and how to
 status: active
 tags: [deployment, hardware, cachyos, amd, gfx1102, coder]
 created: 2026-10-05
-updated: 2026-10-16
+updated: 2026-10-20
 last_verified: 2026-10-09
 ---
 
@@ -47,6 +47,16 @@ Strata was successfully deployed on CachyOS Linux equipped with an AMD Ryzen 5 3
   - **Component 3 Ported & Verified:** Upstream commits `d0e990ba` and `194c2688` implemented automatic thinking budget protection (`#984`), reserving &ge;25% of `max_tokens` (floor 512) for the answer when no budget is specified, and mapping Anthropic `thinking.budget_tokens`. Verified via 38 unit tests (100% pass) and live dual-API calls. See [Component 3 Thinking Budget Protection Report](../artifacts/v0-1-45-component-3-thinking-budget-protection-report.md).
   - **Local-Only Policy:** All pre-evaluation snapshots saved to `/mnt/data/Strata-data/local_backups/v145_eval/`; zero git commits, branches, or tags created.
   - **Piper TTS & STT Voice Features:** 20 US Piper neural voices integrated via Speech Dispatcher and gated for STT-only auto-speak. Details: [Desktop Piper Voice Switching and STT-Only Auto-Speak Gating](desktop-piper-voice-switching-and-stt-auto-speak.md).
+- 2026-10-20: **`--max-context` stays at 65,536.** The user approved testing a larger window with abort rules: VRAM free at load under 1,024 MiB, MemAvailable under 1,536 MiB during the tests, any engine error or warning, or decode more than 3% slower, each meaning revert. Every larger size loaded in about 42 s with 3,498 MiB of VRAM free, but the engine warned that part of the prompt path's experts no longer fit in RAM (`FileExpertSource: WARNING: N of ~1732 lendable slots will read their experts from the pack during a long prompt; expect a slower prompt read on 50K+ token prompts (one measurement: 18% uncovered cost 26%)`, the others "read from the file when lent: not enough RAM for them"):
+
+  | `--max-context` | Lendable slots read from the pack | MemAvailable after load |
+  |---|---|---|
+  | 65,536 | 0 of 1,733 (all kept in RAM) | — |
+  | 73,728 | 79 of 1,732 (5%) | 4,284 MiB |
+  | 81,920 | 190 of 1,731 (11%) | 4,279 MiB |
+  | 98,304 | 570 of 1,732 (33%) | 4,763 MiB |
+
+  So **system RAM, not VRAM, limits the context** on this 32 GB PC: the larger KV cache takes RAM from the resident experts, and long prompts would then read experts from the SSD. Same-day 65,536 baseline (`tools/strata_bench.py --long`): chat decode 24.6, agent decode 27.7 tok/s, prompt 4K 293.9 / 16K 334.5 / 32K 334.5 tok/s; a 60k needle was found (61,038 tokens, 180 s). Lowest MemAvailable during that baseline was 1,444 MiB, below the test's own 1,536 MiB floor, so a RAM floor for future tests should be relative to the baseline. Gotcha: with `lazy_load: true` the engine says "ready" right away and loads the model only on the first request, so a test script must send one before it waits for `"loaded": true` in `/health`. Config backup: `strata-coder-iq1_m.json.bak-20261020-ctx65536` (identical to the restored config). Shrinking the conversation cache would not free start-up RAM on Linux; the upstream 0.2.x file-tier changes are the only lead for a larger window: [Upstream Strata 0.2.0-beta and 0.2.1 Review](../artifacts/upstream-v0-2-releases-review-2026-10-20.md).
 
 
 ## Key Facts

@@ -13,7 +13,9 @@ D.L. AI runs the 125-billion-parameter Qwen3.8-Flash-Next Coder model on one des
 - remote access through a Cloudflare Tunnel over QUIC, behind a Cloudflare Access login
 
 The inference engine is Strata, unchanged except for configuration and hardware kernel ports. Upstream
-Strata releases are merged as they come out (currently **v0.1.45**).
+Strata releases are merged as they come out (currently **v0.1.45**). Upstream 0.2.0-beta and 0.2.1 (the new desktop
+app, Terminal and engine 0.1.46) were reviewed on 2026-10-20 and not merged: most of their changes are for other
+hardware or the new app ([review](wiki/artifacts/upstream-v0-2-releases-review-2026-10-20.md)).
 
 ## How fast is it?
 
@@ -60,6 +62,14 @@ and seamlessly inspect or continue it from your terminal:
 - **Plan Mode:** `/plan` investigates read-only and presents an *Execute this plan?* prompt to transition cleanly into act mode.
 - **Conversational Continues:** naturally typing *"continue"*, *"keep going"*, or *"go on"* routes directly to turn continuation.
 
+**Keeps its task on long runs** (added 2026-10-20, after a 6-hour run lost its task to context trimming):
+- **Trim protection:** when the 64K context is trimmed, your own messages are kept; the CLI's own notes no longer push the task out.
+- **The plan is a file:** an approved plan is saved as `PLAN.md` with a `## Progress` checklist that the agent ticks line by line as each check passes. `/planfile <path>` attaches an existing plan. The Code tab shows the progress as a chip (`PLAN 12/34`, red `BLOCKED`).
+- **Memory files in the prompt:** `AGENTS.md` (and `CLAUDE.md` where it differs), the wiki's page list and the plan's Progress are part of the system prompt. They are rebuilt only at the start of a request and after a trim, so the engine's prompt cache keeps working.
+- **Checks before it may stop:** the done check (in YOLO it sends the agent back until the plan is done or has a `Blocked:` line, and stops after three tries with no change), a browser check (the changed page is loaded in headless Chromium and its console errors go back to the agent), an evidence check ("tests pass" with no test run after the last edit), and one fresh-context review of the diff. Each can be turned off: `DL_DONE_CHECK=0`, `DL_BROWSER_CHECK=0`, `DL_EVIDENCE=0`, `DL_REVIEW=0`.
+- **Thinking-loop guard:** a thinking stream that keeps repeating itself is stopped, and the agent is asked for its next action (`DL_LOOP_GUARD=0` turns it off).
+- **Measured** with `tools/dl_agent_bench.py` on a 12-step task with the context squeezed to force 15 trims: before, the task and the plan were trimmed away (2 of 3 checks, 186 tool calls, 56 min); after, 3 of 3 checks with `PLAN.md` kept, 105 tool calls, 50 min. One run each; details in [the wiki](wiki/decisions/dl-cli-task-memory-and-finish-checks.md).
+
 ### 2. Local Whisper Speech-to-Text (STT) & Hands-Free Auto-Send
 Dictate prompts privately with 100% offline speech recognition:
 - **Local Whisper Engine:** runs on the PC host via `whisper.cpp` (`ggml-base.bin`) through `POST /v1/audio/transcriptions` with zero cloud leaks.
@@ -82,6 +92,7 @@ A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) ex
 - Live camera snapshots: captures and saves camera feeds to the workspace for multimodal inspection.
 - Jinja2 template rendering and entity state history lookups.
 - Interactive MCP tools explorer in the web GUI via `/mcp`.
+- Loads when it is needed, not by default: when your message mentions the smart home, or when the agent turns it on itself.
 
 ### 5. Tools for the Agent
 
@@ -158,7 +169,8 @@ A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) ex
   | `/plan`, `/act` | switch between plan mode and act mode |
   | `/yolo` | turn approvals off and enable infinite continuation |
   | `/continue` | continue execution of multi-turn assistant plans |
-  | `/think none\|low\|medium\|high` | set the reasoning effort |
+  | `/planfile <path>\|off` | attach a plan file the agent works from and ticks (`PLAN.md`) |
+  | `/effort none\|low\|medium\|high\|default` | this session's reasoning effort (default: the web app's Chat settings) |
   | `/cd <path>` | change the project folder |
   | `/status`, `/health` | engine status, hardware health |
   | `/mcp <server>` | inspect and execute tools on connected MCP servers |

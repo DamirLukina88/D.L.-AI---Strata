@@ -5,7 +5,7 @@ description: "Record of every change the agent made to this wiki"
 status: active
 tags: [meta, changelog]
 created: 2026-10-05
-updated: 2026-10-17
+updated: 2026-10-20
 last_verified: 2026-10-05
 ---
 
@@ -15,6 +15,18 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-20:** Ingestion. Antigravity 16-19 Oct conversations: added a 16-19 Oct section to artifacts/antigravity-change-requests-2026-10.md and marked its three 12 Oct open items done; saved the unbuilt artifacts/async-queue-debugging-benchmark-plan.md; added the 17 Oct tunnel-drop incident and the HTTP/2 browser-leg note to decisions/cloudflare-tunnel-remote-exposure.md and the after-reboot lazy-load gotcha to decisions/lazy-loading-and-gui-force-restart.md; new reference artifacts/strata-design-language-spec.md. (Agent: Claude Code)
+- **2026-10-20:** Update. decisions/cli-graphical-styling-and-thinking-defaults.md. (Agent: Claude Code)
+- **2026-10-20:** Ingestion. artifacts/strata-design-language-spec.md. (Agent: Claude Code)
+- **2026-10-20:** Update. decisions/cloudflare-tunnel-remote-exposure.md, decisions/lazy-loading-and-gui-force-restart.md. (Agent: Claude Code)
+- **2026-10-20:** Ingestion. artifacts/async-queue-debugging-benchmark-plan.md. (Agent: Claude Code)
+- **2026-10-20:** Update. artifacts/antigravity-change-requests-2026-10.md. (Agent: Claude Code)
+- **2026-10-20:** Artifact Backup. Saved the upstream Strata 0.2.0-beta / 0.2.1 review and the conversation-cache check as artifacts/upstream-v0-2-releases-review-2026-10-20.md, linked from decisions/rx-7600-xt-cachyos-deployment.md. (Agent: Claude Code)
+- **2026-10-20:** Ingestion. artifacts/upstream-v0-2-releases-review-2026-10-20.md. (Agent: Claude Code)
+- **2026-10-20:** Artifact Backup. Saved the approved D.L. CLI task-memory plan (2026-10-19) as artifacts/dl-cli-task-memory-plan-2026-10-19.md; added the 2026-10-20 context-window test to decisions/rx-7600-xt-cachyos-deployment.md and the measurements to decisions/dl-cli-task-memory-and-finish-checks.md. (Agent: Claude Code)
+- **2026-10-20:** Ingestion. artifacts/dl-cli-task-memory-plan-2026-10-19.md. (Agent: Claude Code)
+- **2026-10-20:** Update. decisions/dl-cli-task-memory-and-finish-checks.md, artifacts/dl-cli-agent-quality-plan.md, decisions/rx-7600-xt-cachyos-deployment.md. (Agent: Claude Code)
+- **2026-10-19:** Ingestion. decisions/dl-cli-task-memory-and-finish-checks.md. (Agent: Claude Code)
 - **2026-10-17:** fix(stt & mobile): suppressed virtual smartphone keyboard pop-up during voice dictation by blurring active inputs, calling navigator.virtualKeyboard.hide(), removing ta.focus() after transcription, and restoring inputmode on explicit touch. (Agent: Antigravity)
 
 - **2026-10-17:** Update. Add TTS emoji and symbol filter, and integrate Gree AC in Living Room into Home Assistant. (Agent: Antigravity)

@@ -64,6 +64,7 @@ class Task:
     score: Callable[[Path, list[dict], Path], dict]
     fixture: str | None = None
     notes: str = ""
+    setup: tuple[str, ...] = ()               # session commands after /clear and /cd, e.g. ("/yolo",)
 
 
 TETRIS_STEPS = [
@@ -104,6 +105,23 @@ EXPR_STEPS = [
     "between tokens. Usual precedence, left to right for equal precedence, / is true division. Division by zero "
     "raises ZeroDivisionError; anything malformed (empty, '1+', '(1', '2 3', '1..2', letters) raises ValueError. "
     "Do not use eval, exec, compile or the ast module. Make sure it is correct.",
+]
+# The CONTRA run of 2026-10-19 in miniature: an unrelated first message, the task in a later one, a plan, /act, YOLO,
+# and enough steps that the context is trimmed several times (run it with DL_CONTEXT_RESERVE=40000 on the daemon).
+LONGPLAN_SPEC = (
+    "mathkit.py with 12 functions, one plan step each, and for each step a test file tests/test_<name>.py "
+    "(unittest) that you run together with all earlier tests before the next step: "
+    "1 is_prime(n) - False below 2. 2 gcd(a, b) - non-negative, gcd(0, 0) == 0. 3 lcm(a, b) - non-negative, 0 if "
+    "either is 0. 4 fib(n) - fib(0) == 0, fib(1) == 1, ValueError for n < 0. 5 factorial(n) - ValueError for n < 0. "
+    "6 digit_sum(n) - of abs(n). 7 is_palindrome(s) - ignore case and anything that is not a letter or digit. "
+    "8 count_vowels(s) - a e i o u, either case. 9 rle_encode(s) - 'aaab' -> '3a1b', counts in decimal. "
+    "10 rle_decode(s) - the inverse, ValueError for malformed input like 'a3'. 11 chunk(lst, n) - consecutive "
+    "lists of n, the last may be shorter, ValueError for n < 1. 12 flatten(nested) - lists of any depth to one flat "
+    "list. The requirements are complete: do not ask questions.")
+LONGPLAN_STEPS = [
+    "hi, we will work in this folder today",
+    "/plan " + LONGPLAN_SPEC,
+    "/act",
 ]
 
 
@@ -302,8 +320,18 @@ def score_expr(ws: Path, steps: list[dict], scratch: Path) -> dict:
     return r
 
 
+def score_longplan(ws: Path, steps: list[dict], scratch: Path) -> dict:
+    r = _hidden(ws, "check_longplan.py", steps, r"\b(complete|all \d+|verified|passes|passed|done)\b")
+    r["checks"]["ran_tests_after_last_edit"] = ran_check_after_last_edit(steps, r"unittest|test")
+    r["checks"]["plan_file_written"] = (ws / "PLAN.md").is_file()
+    tests = list((ws / "tests").glob("test_*.py")) if (ws / "tests").is_dir() else []
+    r["notes"]["test_files"] = len(tests)
+    return r
+
+
 TASKS = {
     "tetris": Task("tetris", TETRIS_STEPS, score_tetris),
+    "longplan": Task("longplan", LONGPLAN_STEPS, score_longplan, setup=("/yolo",)),
     "bugfix": Task("bugfix", BUGFIX_STEPS, score_bugfix, fixture="bugfix"),
     "crc32c": Task("crc32c", CRC_STEPS, score_crc32c),
     "roman": Task("roman", ROMAN_STEPS, score_roman),
@@ -524,6 +552,10 @@ def run_task(task: Task, session: str, ws: Path, run_dir: Path, step_timeout: fl
 
     try:
         for setup in ("/clear", f"/cd {ws}", f"/effort {effort or 'default'}"):   # fresh, in the task's folder
+            drive(live, setup, ws, 60)
+        for setup in task.setup:
+            if setup == "/yolo" and live.state.get("yolo"):
+                continue                            # /yolo toggles: a session that already has it keeps it
             drive(live, setup, ws, 60)
         if live.state.get("mode") == "plan":
             drive(live, "/plan", ws, 60)            # bare /plan in Plan mode switches back to Act

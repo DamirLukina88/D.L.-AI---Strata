@@ -16,10 +16,13 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import difflib
+import hashlib
 import json
 import os
 import re
 import readline
+import shutil
 import subprocess
 import sys
 import threading
@@ -320,11 +323,28 @@ DL_TOOLS = [
                     },
                     "title": {
                         "type": "string",
-                        "description": "Title (for 'new_page')."
+                        "description": "Title (required for 'new_page')."
                     },
                     "summary": {
                         "type": "string",
                         "description": "Content or summary (for 'new_page')."
+                    },
+                    "page_type": {
+                        "type": "string",
+                        "enum": ["decision", "artifact", "concept", "entity", "preference", "log"],
+                        "description": "Page type (required for 'new_page')."
+                    },
+                    "slug": {
+                        "type": "string",
+                        "description": "kebab-case file name without .md (required for 'new_page')."
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "One line under 150 characters (required for 'new_page')."
+                    },
+                    "tags": {
+                        "type": "string",
+                        "description": "Comma-separated tags (optional, for 'new_page')."
                     }
                 },
                 "required": ["action"]
@@ -596,7 +616,120 @@ def print_banner(workspace: Path, settings_text: str, mode: str = "act"):
     sys.stdout.flush()
 
 
-def build_dl_system_prompt(workspace: Path, mode: str = "act") -> str:
+# ---------------------------------------------------------------------------------------------------- project memory
+PLAN_FILE = "PLAN.md"
+MEMORY_CAPS = {"rules": 8000, "wiki": 3000, "progress": 3000}      # chars of each part in the system prompt
+PROGRESS_HEAD = re.compile(r"^#{1,6}\s*Progress\b.*$", re.I | re.M)
+OPEN_ITEM = re.compile(r"^\s*[-*]\s*\[ \]\s*(.+?)\s*$", re.M)
+DONE_ITEM = re.compile(r"^\s*[-*]\s*\[[xX]\]\s*(.+?)\s*$", re.M)
+BLOCKED_LINE = re.compile(r"^\s*(?:[-*]\s*)?\**Blocked\**\s*:", re.I | re.M)
+
+
+def _read_text(p: Path, cap: int) -> str:
+    try:
+        t = p.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+    return t if len(t) <= cap else t[:cap] + f"\n[... {len(t) - cap:,} more chars - view_file {p.name} for the rest]"
+
+
+def plan_progress(plan: Path) -> tuple[str, list[str], list[str], bool]:
+    """(the Progress section's text, its open items, its done items, whether it has a Blocked: line).  The section
+    runs from a "## Progress" heading to the next heading of the same or a higher level; a plan without one has
+    no section, so nothing counts as open."""
+    try:
+        text = plan.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "", [], [], False
+    m = PROGRESS_HEAD.search(text)
+    if not m:
+        return "", [], [], False
+    level = len(m.group(0)) - len(m.group(0).lstrip("#"))
+    rest = text[m.end():]
+    nxt = re.search(r"^#{1,%d}\s" % level, rest, re.M)
+    section = (m.group(0) + rest[:nxt.start()] if nxt else m.group(0) + rest).strip()
+    return section, OPEN_ITEM.findall(section), DONE_ITEM.findall(section), bool(BLOCKED_LINE.search(section))
+
+
+def _wiki_titles(workspace: Path) -> str:
+    root = resolve_wiki_root(workspace)
+    if not root or not (root / "index.md").is_file():
+        return ""
+    lines = [l.strip() for l in _read_text(root / "index.md", 200_000).splitlines() if l.strip().startswith("- [")]
+    out, used = [], 0
+    for i, l in enumerate(lines):
+        if used + len(l) > MEMORY_CAPS["wiki"]:
+            out.append(f"- ... {len(lines) - i} more pages: search the wiki")
+            break
+        out.append(l)
+        used += len(l) + 1
+    return "\n".join(out)
+
+
+def _imports_only(text: str, target: str) -> bool:
+    """CLAUDE.md that only imports AGENTS.md (Claude Code's @AGENTS.md line), so it adds nothing."""
+    lines = [l.strip() for l in text.splitlines() if l.strip() and not l.strip().startswith("<!--")]
+    return bool(lines) and all(l.lstrip("@").strip() == target for l in lines)
+
+
+def project_memory(workspace: Path, plan_file: str | Path | None = None) -> str:
+    """The <project_memory> part of the system prompt: AGENTS.md (CLAUDE.md only where it says something else),
+    the wiki's page list and the active plan's Progress section.  Built only from the files, so the same files
+    give the same bytes and the prompt prefix stays cached; it is rebuilt at the start of a request and after a
+    trim (execute_agent_loop), never between two model calls of the same stretch."""
+    parts = []
+    agents = _read_text(workspace / "AGENTS.md", MEMORY_CAPS["rules"]) if (workspace / "AGENTS.md").is_file() else ""
+    claude = _read_text(workspace / "CLAUDE.md", MEMORY_CAPS["rules"]) if (workspace / "CLAUDE.md").is_file() else ""
+    if agents:
+        parts.append(f'<file path="AGENTS.md">\n{agents}\n</file>')
+    if claude and claude != agents and not _imports_only(claude, "AGENTS.md"):
+        parts.append(f'<file path="CLAUDE.md">\n{claude}\n</file>')
+    titles = _wiki_titles(workspace)
+    if titles:
+        parts.append(f"<wiki_pages>\n{titles}\n</wiki_pages>")
+    plan = Path(plan_file) if plan_file else None
+    if plan and plan.is_file():
+        section, open_items, done_items, blocked = plan_progress(plan)
+        rel = plan.relative_to(workspace) if plan.is_relative_to(workspace) else plan
+        if section:
+            if len(section) > MEMORY_CAPS["progress"]:
+                section = section[:MEMORY_CAPS["progress"]] + "\n[... view_file the plan for the rest]"
+            state = f"{len(done_items)} done, {len(open_items)} open" + (", BLOCKED" if blocked else "")
+            parts.append(f'<active_plan path="{rel}" progress="{state}">\n{section}\n</active_plan>')
+        else:
+            parts.append(f'<active_plan path="{rel}">\nIt has no "## Progress" checklist yet: add one, one '
+                         f'"- [ ] step" line per step, before you start.\n</active_plan>')
+    if not parts:
+        return ""
+    return ("\n<project_memory>\nThese files are your memory across trims and sessions; they are current as of "
+            "this request. Rules and conventions go in AGENTS.md (after changing it, copy it to CLAUDE.md so the two "
+            "match); progress goes in the plan's Progress checklist (tick each line (\"- [x]\") as soon as its own check passes - one line at a time, not when the whole section is done, and add a "
+            "\"Blocked:\" line if you cannot go on); decisions go in the wiki. When you see \"earlier messages were "
+            "removed\", re-read the parts you need instead of guessing.\n" + "\n".join(parts) + "\n</project_memory>")
+
+
+def save_approved_plan(messages: list[dict], workspace: Path) -> Path | None:
+    """On approval, write the plan (the last assistant message with text) to PLAN.md, so it no longer lives only
+    in a message that trimming can remove.  An older, different PLAN.md is kept as PLAN.<time>.md.  A plan with no
+    Progress checklist gets a one-line one that tells the agent to write it."""
+    text = next((m["content"].strip() for m in reversed(messages) if m.get("role") == "assistant"
+                 and isinstance(m.get("content"), str) and m["content"].strip()), "")
+    if not text:
+        return None
+    if not PROGRESS_HEAD.search(text):
+        text += "\n\n## Progress\n\n- [ ] Replace this line with the plan's steps, one \"- [ ] step\" line each\n"
+    path = workspace / PLAN_FILE
+    try:
+        if path.is_file() and path.read_text(encoding="utf-8", errors="replace").strip() != text.strip():
+            path.rename(workspace / f"PLAN.{datetime.datetime.now():%Y%m%d-%H%M%S}.md")
+        path.write_text(text.rstrip() + "\n", encoding="utf-8")
+    except OSError:
+        return None
+    return path
+
+
+def build_dl_system_prompt(workspace: Path, mode: str = "act", plan_file: str | Path | None = None) -> str:
+    memory = project_memory(workspace, plan_file)
     wiki_root = resolve_wiki_root(workspace)
     wiki_section = ""
     if wiki_root:
@@ -625,7 +758,7 @@ The USER's OS version is linux.
 Command Working Directory: {workspace}
 Active Workspaces:
 - {workspace}
-</user_information>{wiki_section}{mcp_prompt_section()}
+</user_information>{wiki_section}{mcp_prompt_section()}{memory}
 
 <plan_mode_guidelines>
 - YOU ARE IN PLAN MODE: File edits are disabled. Focus on inspection, code architecture, and designing an implementation plan.
@@ -643,6 +776,7 @@ Active Workspaces:
   3. Step-by-Step Implementation Phases
   4. Verification & Testing Strategy
 - End with the finished plan. The CLI then asks the user whether to execute it, and on yes switches to Act Mode and runs it.
+- Your final message is saved as PLAN.md in the project when the user approves it, and the work is checked against it. Make it complete on its own (no "as discussed above") and end it with a "## Progress" checklist: one "- [ ] <item>" line per step and per check or sub-part, in order, small enough that a line gets ticked every few tool calls.
 </plan_mode_guidelines>"""
 
     return f"""<identity>
@@ -656,13 +790,14 @@ The USER's OS version is linux.
 Command Working Directory: {workspace}
 Active Workspaces:
 - {workspace}
-</user_information>{wiki_section}{mcp_prompt_section()}
+</user_information>{wiki_section}{mcp_prompt_section()}{memory}
 
 <guidelines>
 - Reference code as `file_path:line_number` — it is clickable in terminal emulators.
 - Start editing once you know the first change. A design worked out in files persists, while long thinking can be cut off and lost.
 - Match existing codebase conventions, comment density, architecture patterns, and naming style.
 - Report outcomes faithfully: if a test fails or command errors, state the exact error and diagnose it immediately.
+- Back every claim with evidence from this task: a test or command you ran after your last edit, a tool result, or a cited source. Never call something verified, tested or correct from memory; a worked derivation shown in your answer counts.
 - Use the provided tools directly to inspect files, edit code, execute commands, and search:
   * Project Knowledge: `local_wiki` (search, read_page, new_page)
   * Files: `view_file`, `write_to_file`, `replace_file_content` (protected by active AST syntax & leak guardrails)
@@ -1307,6 +1442,29 @@ def unknown_tool(name: str, args: dict, workspace: Path, mode: str, session_cont
     return f"Error: Unknown tool {name}.{hint} Tools you have: {', '.join(names)}"
 
 
+# (window of the latest thinking in chars, shortest sentence that counts, repeats that make a loop).  A short cycle:
+# the IQ1_M model repeated three sentences ~530 times in one 180,333-char block (17 min, tetris after-memory,
+# 2026-10-20).  A long cycle: ~21 lines repeated 18 times in a 79,173-char block (crc32c, same run).  Checked on the
+# 189 thinking blocks over 3,000 chars saved on 2026-10-20: these rules flag 4, and all 4 go round in circles.
+LOOP_RULES = ((8000, 30, 8), (24000, 60, 4))
+LOOP_CHECK_EVERY = 3000         # chars of new thinking between two checks
+_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def thinking_loops(text: str) -> str | None:
+    """The sentence the thinking keeps repeating, or None."""
+    for window, shortest, repeats in LOOP_RULES:
+        counts: dict[str, int] = {}
+        for sent in _SENTENCE.split(text[-window:]):
+            sent = sent.strip()
+            if len(sent) < shortest:
+                continue
+            counts[sent] = counts.get(sent, 0) + 1
+            if counts[sent] >= repeats:
+                return sent
+    return None
+
+
 def stream_chat_turn(messages: list[dict], url: str, api_key: str, tools: list[dict] | None = None,
                      emit=None, cancel=None, effort: str | None = None):
     """One streamed model reply.  `emit(event)` replaces terminal printing (the session daemon); `cancel` is a
@@ -1341,6 +1499,8 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str, tools: list[d
     tok_count = 0
     finish_reason = None
     usage = {}
+    loop_guard = _switch("DL_LOOP_GUARD")
+    reasoning_len, next_loop_check, loop_sentence = 0, LOOP_CHECK_EVERY, None
 
     try:
         with urllib.request.urlopen(req, timeout=600) as resp:
@@ -1369,6 +1529,14 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str, tools: list[d
 
                     # 1. Reasoning chunk
                     reasoning_chunk = delta.get("reasoning_content")
+                    if reasoning_chunk and loop_guard:
+                        reasoning_len += len(reasoning_chunk)
+                        if reasoning_len >= next_loop_check:
+                            next_loop_check = reasoning_len + LOOP_CHECK_EVERY
+                            loop_sentence = thinking_loops("".join(full_reasoning) + reasoning_chunk)
+                            if loop_sentence:
+                                finish_reason = "loop"      # closing the stream stops the generation
+                                break
                     if reasoning_chunk and emit:
                         tok_count += 1
                         reasoning_started = True
@@ -1446,6 +1614,7 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str, tools: list[d
         "wall_time": dt,
         "rate": rate,
         "prompt_tokens": usage.get("prompt_tokens"),     # Strata reports the exact prompt size at the end
+        "loop_sentence": loop_sentence,
     }
 
 
@@ -1464,7 +1633,9 @@ CONTEXT_RESERVE = int(os.environ.get("DL_CONTEXT_RESERVE") or 16000)   # tokens 
 CHARS_PER_TOKEN = 2.8          # measured 2026-10-14: a 212 kB D.L. session was 65,575 prompt tokens (~2.9), rounded down
 ELIDED = "[{n:,} chars removed by D.L. CLI to fit the context; the file on disk has the current content - view_file it]"
 DROPPED = ("[D.L. CLI: {n} earlier messages were removed to fit the context window. Files on disk are current; "
-           "use view_file to read them again instead of relying on memory of earlier content.]")
+           "use view_file to read them again instead of relying on memory of earlier content. The user's own "
+           "messages are all still here, and your memory files (AGENTS.md, the active plan's Progress, the wiki's "
+           "pages) are in the system prompt's project_memory section: re-read the parts you need now.]")
 BIG_ARGS = ("CodeContent", "ReplacementContent", "TargetContent", "content")
 _ctx_cache: dict[str, int] = {}
 
@@ -1548,13 +1719,41 @@ def _units(messages: list[dict], start: int, stop: int) -> list[tuple[int, int]]
     return out
 
 
+def is_cli_note(m: dict) -> bool:
+    """A user-role message D.L. CLI wrote itself (trim note, text-tool-call note, turn cap, done check), not the
+    user's words.  Every such note starts with "[D.L. CLI"; the user's own messages start with with_now's "[Now:"."""
+    return m.get("role") == "user" and str(m.get("content") or "").startswith("[D.L. CLI")
+
+
+PROTECT_SHARE = 0.25            # at most this part of the trim target goes to keeping older user messages
+
+
+def protected_user_messages(messages: list[dict], target: int) -> set[int]:
+    """Indexes of the user's own messages that trimming keeps: always the first and the latest, then the others
+    newest first while they fit in PROTECT_SHARE of the target (a pasted @file can be huge).  D.L. CLI's notes never
+    count, so a note can no longer push the user's task out, as it did in the CONTRA run of 2026-10-19."""
+    real = [i for i, m in enumerate(messages) if m.get("role") == "user" and not is_cli_note(m)]
+    if not real:
+        return set()
+    keep = {real[0], real[-1]}
+    budget = target * PROTECT_SHARE - sum(_msg_chars(messages[i]) for i in keep) / CHARS_PER_TOKEN
+    for i in reversed(real[1:-1]):
+        cost = _msg_chars(messages[i]) / CHARS_PER_TOKEN
+        if cost > budget:
+            break
+        keep.add(i)
+        budget -= cost
+    return keep
+
+
 def compact_history(messages: list[dict], tools: list[dict] | None, limit: int, target: int,
                     measured: tuple[int, int] | None = None, force: bool = False) -> dict | None:
     """Shrink the conversation in place when its prompt would exceed `limit` tokens (or always with force), in
     stages, until it is under `target`: (1) messages older than the last 6 lose their reasoning, whole-file
     contents in tool calls and the middle of long tool results; (2) the same down to the last 2 messages with
     tighter sizes; (3) the oldest messages are removed in whole units, keeping the system prompt, the first and
-    the latest user message and a note.  Returns what it did, or None when nothing was needed."""
+    the user's own messages (protected_user_messages) and a note.  Returns what it did, or None when nothing was
+    needed."""
     before = estimate_prompt_tokens(messages, tools, measured)
     if before <= limit and not force:
         return None
@@ -1566,14 +1765,14 @@ def compact_history(messages: list[dict], tools: list[dict] | None, limit: int, 
         if est() <= target:
             break
     if est() > target:
+        protected = protected_user_messages(messages, target)
         users = [i for i, m in enumerate(messages) if m.get("role") == "user"]
-        first = users[0] if users else 0
-        last_user = users[-1] if users else len(messages) - 1
+        first = min(protected) if protected else (users[0] if users else 0)
         start = first + 1
         if start < len(messages) and str(messages[start].get("content", "")).startswith("[D.L. CLI:"):
             start += 1                                              # keep one note, counting on from it
         stop = len(messages) - 2
-        removable = [u for u in _units(messages, start, stop) if not (u[0] <= last_user < u[1])]
+        removable = [u for u in _units(messages, start, stop) if not any(u[0] <= i < u[1] for i in protected)]
         cut = []
         for u in removable:
             cut.append(u)
@@ -1599,9 +1798,10 @@ def compact_history(messages: list[dict], tools: list[dict] | None, limit: int, 
 
 
 def fit_context(messages: list[dict], tools: list[dict] | None, url: str, api_key: str, emit=None,
-                measured: tuple[int, int] | None = None, over: int | None = None) -> None:
+                measured: tuple[int, int] | None = None, over: int | None = None) -> dict | None:
     """Keep the next request inside the context with room for the reply; `over` = the prompt size Strata
-    reported when it refused one (forces a compaction)."""
+    reported when it refused one (forces a compaction).  Returns compact_history's stats, None when nothing
+    was needed."""
     ctx = context_window(url, api_key)
     limit = max(4096, ctx - CONTEXT_RESERVE)
     target = int(limit * 0.6)
@@ -1612,8 +1812,8 @@ def fit_context(messages: list[dict], tools: list[dict] | None, url: str, api_ke
             target = int(target * est / over)
     stats = compact_history(messages, tools, limit, target, measured=measured, force=bool(over))
     if not stats:
-        return
-    did = [f"{stats[k]} {label}" for k, label in (("reasoning", "old reasoning blocks"),
+        return None
+    did =[f"{stats[k]} {label}" for k, label in (("reasoning", "old reasoning blocks"),
                                                     ("file_contents", "old file contents"),
                                                     ("tool_results", "long tool results"),
                                                     ("removed", "oldest messages removed")) if stats[k]]
@@ -1623,13 +1823,17 @@ def fit_context(messages: list[dict], tools: list[dict] | None, url: str, api_ke
         emit({"type": "notice", "level": "info", "text": note})
     else:
         print(f"{C_MUTED}{note}{C_RESET}")
+    return stats
 
 
 def chat_turn_in_context(messages: list[dict], url: str, api_key: str, tools: list[dict], emit=None, cancel=None,
-                         measured: tuple[int, int] | None = None, effort: str | None = None) -> dict:
+                         measured: tuple[int, int] | None = None, effort: str | None = None,
+                         on_compact=None) -> dict:
     """stream_chat_turn after fit_context; if Strata still refuses the prompt as too long, compact to what it
-    reported and try once more."""
-    fit_context(messages, tools, url, api_key, emit=emit, measured=measured)
+    reported and try once more.  on_compact(messages) runs after a compaction, before the request: the prompt
+    prefix is new then anyway, so it is the moment to refresh the memory section and the trim note."""
+    if fit_context(messages, tools, url, api_key, emit=emit, measured=measured) and on_compact:
+        on_compact(messages)
     try:
         return stream_chat_turn(messages=messages, url=url, api_key=api_key, tools=tools, emit=emit, cancel=cancel,
                                 effort=effort)
@@ -1637,11 +1841,15 @@ def chat_turn_in_context(messages: list[dict], url: str, api_key: str, tools: li
         m = re.search(r"exceeds the context window: prompt \((\d+) tokens\)", str(e))
         if not m:
             raise
-        fit_context(messages, tools, url, api_key, emit=emit, over=int(m.group(1)))
+        if fit_context(messages, tools, url, api_key, emit=emit, over=int(m.group(1))) and on_compact:
+            on_compact(messages)
         return stream_chat_turn(messages=messages, url=url, api_key=api_key, tools=tools, emit=emit, cancel=cancel,
                                 effort=effort)
 
 
+LOOP_RETRIES = 3                    # per request
+LOOP_NOTE = ("[D.L. CLI] Your thinking went round in circles (it kept repeating: \"{sentence}\"), so D.L. CLI stopped "
+             "it. Decide now with what you already know: make the next tool call, or answer. Keep your thinking short.")
 TEXT_TOOL_CALL = re.compile(r"<tool_call>|<function=[\w-]*|<parameter=[\w-]*>")
 TEXT_CALL_RETRIES = 2                       # per request: a model that keeps doing it is not looped forever
 TEXT_CALL_NOTE = ("[D.L. CLI] Your last reply contains a tool call written as text (<tool_call>, <function=...>), "
@@ -1683,6 +1891,250 @@ def turn_cap_wrap_up(messages: list[dict], url: str, api_key: str, tools: list[d
     return text
 
 
+# ---------------------------------------------------------------------------------------------------- finish checks
+# Before an Act-mode reply is taken as the end of the task, D.L. CLI checks it (items 2, 3, 5 of
+# wiki/artifacts/dl-cli-agent-quality-plan.md plus the plan done check).  Each one can be turned off: DL_DONE_CHECK=0,
+# DL_BROWSER_CHECK=0, DL_EVIDENCE=0, DL_REVIEW=0.  Each sends the agent back at most once per request, except the
+# done check, which in YOLO keeps sending it back until the plan is done, blocked, or nothing changes 3 times in a row.
+def _switch(name: str) -> bool:
+    return os.environ.get(name, "1").strip() not in ("0", "off", "false", "no")
+
+
+DONE_STALL_LIMIT = 3
+DONE_NOTE = ("[D.L. CLI] {plan} still has {n} open step(s) in its Progress checklist: {items}. Continue with the next "
+             "open step and tick each line (\"- [x]\") as soon as its own check passes - one line at a time, not when the whole section is done. If you cannot go on, add a \"Blocked: <reason>\" "
+             "line to the Progress section and say why.")
+EVIDENCE_NOTE = ("[D.L. CLI] Your answer says \"{word}\", but no test or check command ran after your last file edit. "
+                 "Run one now and report its real output, or say plainly what is not verified.")
+BROWSER_NOTE = ("[D.L. CLI] Browser check: D.L. CLI loaded {page} in headless Chromium after your edits and it "
+                "reported {n} error(s):\n{errors}\nFix them and run your checks again, then finish.")
+REVIEW_NOTE = ("[D.L. CLI] A reviewer with a fresh context read your changes and your final answer and reported:\n"
+               "{findings}\nFix the real problems and re-run the checks; for any finding you reject, say why. Then "
+               "finish.")
+REVIEWER_SYSTEM = (
+    "You review a coding agent's finished work. You see the task, the agent's plan progress (if any), the diff of the "
+    "files it changed, and its final answer. Report only real problems: bugs, requirements of the task that the diff "
+    "does not meet, and claims in the final answer that the diff or the task does not support. Do not report style. "
+    "Write each problem on its own line as \"- <file>:<line or area> - <problem>\". If there are none, answer exactly "
+    "NO PROBLEMS.")
+CLAIM_WORDS = re.compile(r"\b(verified|tested|all (?:\d+ )?(?:tests|checks) pass(?:ed)?|tests? pass(?:ed|es)?|passes|"
+                         r"passed|confirmed|works correctly|is correct|cross-checked)\b", re.I)
+CHECK_CMD = re.compile(r"\b(test|tests|pytest|unittest|node|python3?|bash|make|npm|npx|harness|check|audit|curl|go|"
+                       r"cargo|ctest)\b")
+WEB_SUFFIXES = (".html", ".htm", ".js", ".mjs", ".css")
+PLAYWRIGHT_CORE = os.environ.get("DL_PLAYWRIGHT_CORE",
+                                 str(Path.home() / ".local/share/dl-ai/mcp-npm/node_modules/playwright-core"))
+REVIEW_DIFF_MAX = 16000
+REVIEW_EFFORT = "low"           # the review at the session's level took 9.5 min on crc32c (2026-10-20), mostly thinking
+BROWSER_JS = r"""
+const { chromium } = require(process.argv[2]);
+(async () => {
+  const b = await chromium.launch({ headless: true });
+  const p = await b.newPage(); const errs = [];
+  p.on('console', m => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
+  p.on('pageerror', e => errs.push('uncaught: ' + String(e)));
+  p.on('requestfailed', r => errs.push('request failed: ' + r.url()));
+  await p.goto(process.argv[3], { waitUntil: 'load', timeout: 20000 });
+  await p.waitForTimeout(2000);
+  console.log(JSON.stringify({ errors: errs.slice(0, 20) }));
+  await b.close();
+})().catch(e => { console.log(JSON.stringify({ launch_error: String(e).slice(0, 400) })); });
+"""
+
+
+class RequestChanges:
+    """What this request changed through the file tools: each file's content before its first edit (for the
+    reviewer's diff), and the order of edits and check commands (for the evidence check)."""
+
+    def __init__(self, workspace: Path):
+        self.workspace = workspace
+        self.before: dict[Path, str | None] = {}
+        self.last_edit = -1
+        self.last_check = -1
+        self.step = 0
+
+    def _path(self, args: dict) -> Path | None:
+        raw = args.get("TargetFile") or args.get("AbsolutePath") or args.get("path")
+        if not raw:
+            return None
+        p = Path(str(raw)).expanduser()
+        return (p if p.is_absolute() else (self.workspace / p)).resolve()
+
+    def before_tool(self, name: str, args: dict) -> None:
+        self.step += 1
+        if name in ("write_to_file", "replace_file_content"):
+            p = self._path(args)
+            if p is not None and p not in self.before:
+                try:
+                    self.before[p] = p.read_text(encoding="utf-8", errors="replace") if p.is_file() else None
+                except OSError:
+                    self.before[p] = None
+            self.last_edit = self.step
+        elif name == "run_command" and CHECK_CMD.search(str(args.get("CommandLine") or "")):
+            self.last_check = self.step
+
+    def changed(self) -> list[Path]:
+        out = []
+        for p, old in self.before.items():
+            try:
+                new = p.read_text(encoding="utf-8", errors="replace") if p.is_file() else None
+            except OSError:
+                new = None
+            if new != old:
+                out.append(p)
+        return out
+
+    def diff(self) -> str:
+        chunks = []
+        for p in self.changed():
+            old = self.before.get(p) or ""
+            try:
+                new = p.read_text(encoding="utf-8", errors="replace") if p.is_file() else ""
+            except OSError:
+                new = ""
+            rel = p.relative_to(self.workspace) if p.is_relative_to(self.workspace) else p
+            chunks.append("".join(difflib.unified_diff(old.splitlines(True), new.splitlines(True),
+                                                       f"a/{rel}", f"b/{rel}", n=2)))
+        text = "\n".join(chunks)
+        return text if len(text) <= REVIEW_DIFF_MAX else (
+            text[:REVIEW_DIFF_MAX] + f"\n[... diff cut at {REVIEW_DIFF_MAX:,} of {len(text):,} chars]")
+
+
+def workspace_snapshot(ws: Path, cap: int = 20000) -> str:
+    """A cheap fingerprint of the folder (names, sizes, mtimes) for the done check's "nothing changed" guard."""
+    h, n = hashlib.sha256(), 0
+    for root, dirs, files in os.walk(ws):
+        dirs[:] = sorted(d for d in dirs if d not in (".git", "node_modules", "__pycache__", ".venv"))
+        for f in sorted(files):
+            try:
+                st = os.stat(os.path.join(root, f))
+            except OSError:
+                continue
+            h.update(f"{root}/{f}:{st.st_size}:{st.st_mtime_ns}\n".encode())
+            n += 1
+            if n >= cap:
+                return h.hexdigest()
+    return h.hexdigest()
+
+
+def browser_errors(page: Path, timeout: int = 60) -> tuple[list[str] | None, str]:
+    """Load a page in headless Chromium (playwright-core from the MCP install); (errors, "") or (None, why not)."""
+    if not Path(PLAYWRIGHT_CORE).is_dir() or not shutil.which("node"):
+        return None, "playwright-core or node not found"
+    try:
+        r = subprocess.run(["node", "-e", BROWSER_JS, PLAYWRIGHT_CORE, page.resolve().as_uri()],
+                           capture_output=True, text=True, timeout=timeout)
+        data = json.loads((r.stdout or "").strip().splitlines()[-1])
+    except (subprocess.TimeoutExpired, ValueError, IndexError, OSError) as e:
+        return None, f"browser check failed: {e}"
+    if "launch_error" in data:
+        return None, data["launch_error"]
+    return [str(e)[:300] for e in data.get("errors") or []], ""
+
+
+def _latest_task(messages: list[dict]) -> str:
+    real = [m for m in messages if m.get("role") == "user" and not is_cli_note(m)
+            and isinstance(m.get("content"), str)]
+    return "\n\n".join(NOW_PREFIX.sub("", m["content"]).strip()[:3000] for m in real[-2:])
+
+
+def review_changes(messages: list[dict], changes: RequestChanges, final: str, plan_section: str, url: str,
+                   api_key: str, cancel=None, effort: str | None = None) -> str:
+    """One call to the same model with a clean context; the findings, or "" when it found nothing."""
+    body = (f"TASK (the user's latest messages):\n{_latest_task(messages)}\n\n"
+            + (f"PLAN PROGRESS:\n{plan_section[:3000]}\n\n" if plan_section else "")
+            + f"DIFF:\n{changes.diff()}\n\nFINAL ANSWER:\n{final[:3000]}")
+    try:
+        res = stream_chat_turn([{"role": "system", "content": REVIEWER_SYSTEM}, {"role": "user", "content": body}],
+                               url, api_key, tools=[], emit=lambda e: None, cancel=cancel,
+                               effort=os.environ.get("DL_REVIEW_EFFORT") or REVIEW_EFFORT)
+    except RuntimeError:
+        return ""
+    text = (res.get("content") or "").strip()
+    if not text or text.upper().startswith("NO PROBLEMS"):
+        return ""
+    return text[:2500]
+
+
+def _note(emit, text: str, level: str = "info") -> None:
+    if emit:
+        emit({"type": "notice", "level": level, "text": text})
+    else:
+        print(f"{C_YELLOW if level == 'warn' else C_MUTED}{text}{C_RESET}")
+
+
+def finish_checks(state: dict, messages: list[dict], final: str, mode: str, ws: Path, session_context: dict | None,
+                  url: str, api_key: str, emit=None, cancel=None, effort: str | None = None) -> str | None:
+    """Run when the model ended with no tool call.  Returns a note to send the agent back with, or None when the
+    reply really is the end.  `state` lives for one request (which checks already ran, the stall counter)."""
+    if mode != "act" or (cancel is not None and cancel.is_set()):
+        return None
+    ctx = session_context if session_context is not None else {}
+    yolo = bool(ctx.get("yolo"))
+    plan = Path(ctx["plan_file"]) if ctx.get("plan_file") else None
+    section = ""
+    if plan is not None and plan.is_file() and _switch("DL_DONE_CHECK"):
+        section, open_items, done_items, blocked = plan_progress(plan)
+        if not section:                     # nothing to tick yet: writing the checklist is the open step
+            open_items = ['add a "## Progress" checklist to the plan, one "- [ ] <step>" line per step, ticking '
+                          'the steps that are already done']
+        if section and not open_items:
+            _note(emit, f"Plan complete: all {len(done_items)} steps in {plan.name} are ticked.")
+            ctx["plan_file"] = None
+        elif open_items and blocked:
+            _note(emit, f"{plan.name} is blocked: see its Blocked line. {len(open_items)} step(s) still open.", "warn")
+            return None
+        elif open_items and not yolo:
+            _note(emit, f"{len(open_items)} step(s) in {plan.name} are still open; /continue to go on.", "warn")
+            return None
+        elif open_items:
+            snap = workspace_snapshot(ws)
+            state["stalls"] = state.get("stalls", 0) + 1 if snap == state.get("snap") else 0
+            state["snap"] = snap
+            if state["stalls"] >= DONE_STALL_LIMIT:
+                _note(emit, f"Stopped: {plan.name} has {len(open_items)} open step(s), but the last "
+                            f"{DONE_STALL_LIMIT} times it was sent back nothing in the folder changed.", "warn")
+                return None
+            items = "; ".join(i[:120] for i in open_items[:3]) + (" ..." if len(open_items) > 3 else "")
+            _note(emit, f"Done check: {len(open_items)} plan step(s) still open; sent the agent back to them.")
+            return DONE_NOTE.format(plan=plan.name, n=len(open_items), items=items)
+    changes: RequestChanges | None = state.get("changes")
+    changed = changes.changed() if changes else []
+    if changed and _switch("DL_BROWSER_CHECK") and not state.get("browser"):
+        web = [p for p in changed if p.suffix.lower() in WEB_SUFFIXES]
+        if web:
+            state["browser"] = True
+            pages = [p for p in web if p.suffix.lower() in (".html", ".htm")] or \
+                    [p for p in (ws / "index.html",) if p.is_file()]
+            if pages:
+                errs, why = browser_errors(pages[0])
+                rel = pages[0].relative_to(ws) if pages[0].is_relative_to(ws) else pages[0]
+                if errs is None:
+                    _note(emit, f"Browser check skipped: {why}", "warn")
+                elif errs:
+                    _note(emit, f"Browser check: {rel} reported {len(errs)} error(s); sent the agent back.", "warn")
+                    return BROWSER_NOTE.format(page=rel, n=len(errs), errors="\n".join(f"- {e}" for e in errs))
+                else:
+                    _note(emit, f"Browser check: {rel} loads with no console errors.")
+    if changed and _switch("DL_EVIDENCE") and not state.get("evidence"):
+        m = CLAIM_WORDS.search(final or "")
+        if m and changes.last_check < changes.last_edit:
+            state["evidence"] = True
+            _note(emit, f"Evidence check: the answer says \"{m.group(0)}\" with no check after the last edit; "
+                        f"sent the agent back.", "warn")
+            return EVIDENCE_NOTE.format(word=m.group(0))
+    if changed and _switch("DL_REVIEW") and not state.get("review"):
+        state["review"] = True
+        _note(emit, f"Reviewing the changes to {len(changed)} file(s) with a fresh context...")
+        findings = review_changes(messages, changes, final, section, url, api_key, cancel=cancel, effort=effort)
+        if findings:
+            n = sum(1 for l in findings.splitlines() if l.strip().startswith("-")) or 1
+            _note(emit, f"Review: {n} finding(s); sent the agent back to check them.", "warn")
+            return REVIEW_NOTE.format(findings=findings)
+        _note(emit, "Review: no problems found.")
+    return None
+
+
 def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                        workspace: Path, max_turns: int | None = None,
                        mode: str = "act", session_context: dict | None = None) -> Path:
@@ -1699,12 +2151,23 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
         registry.route((session_context or {}).get("user_text") or "")
     active_tools = get_active_tools(current_ws, mode=mode, registry=registry)
 
+    def refresh_memory(msgs: list[dict]) -> None:
+        # the start of a request and right after a trim: the only moments the prompt prefix may change
+        if msgs and msgs[0].get("role") == "system":
+            msgs[0] = {"role": "system", "content": build_dl_system_prompt(
+                current_ws, mode=mode, plan_file=(session_context or {}).get("plan_file"))}
+
+    refresh_memory(messages)
+    finish = {"changes": RequestChanges(current_ws)}    # one request's finish-check state
     measured = None                         # (messages in the last request, its prompt tokens)
     text_call_retries = 0
+    loop_retries = 0
+    total_rounds = 0                        # model calls in this request, across YOLO's auto-continues
     while turn < max_turns:
         turn += 1
+        total_rounds += 1
         res = chat_turn_in_context(messages, url, api_key, active_tools, emit=emit, cancel=cancel,
-                                   measured=measured, effort=effort)
+                                   measured=measured, effort=effort, on_compact=refresh_memory)
         if res.get("prompt_tokens"):           # messages is now exactly what was sent (after any compaction)
             measured = (len(messages), res["prompt_tokens"])
         total_tokens += res["tokens"]
@@ -1718,6 +2181,15 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
         if res["tool_calls"]:
             asst_msg["tool_calls"] = res["tool_calls"]
         messages.append(asst_msg)
+
+        # The thinking went round in circles: drop it (it is only noise) and ask for the next action instead.
+        if res["finish_reason"] == "loop" and loop_retries < LOOP_RETRIES:
+            loop_retries += 1
+            messages.pop()
+            messages.append({"role": "user", "content": LOOP_NOTE.format(sentence=(res.get("loop_sentence") or "")[:200])})
+            _note(emit, f"Loop guard: the thinking kept repeating itself; stopped it and asked for the next action "
+                        f"({loop_retries}/{LOOP_RETRIES}).", "warn")
+            continue
 
         if res["finish_reason"] == "cancelled":
             if emit:
@@ -1738,6 +2210,16 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             else:
                 print(f"{C_YELLOW}{note}{C_RESET}")
             continue
+
+        # No tool calls: the model thinks it is done.  The finish checks may send it back once more.
+        if not res["tool_calls"]:
+            back = finish_checks(finish, messages, res["content"] or "", mode, current_ws, session_context, url,
+                                 api_key, emit=emit, cancel=cancel, effort=effort)
+            if back:
+                messages.append({"role": "user", "content": back})
+                if turn >= max_turns and (session_context or {}).get("yolo"):
+                    turn = 0                    # a send-back must not run into the cap and end a YOLO run
+                continue
 
         # If no tool calls, turn is complete
         if not res["tool_calls"] and emit:
@@ -1779,6 +2261,8 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             else:
                 print(f"{C_ACCENT}◆{C_RESET} {C_INK_SOFT}[Tool]{C_RESET} {C_BOLD}{fn_name}{C_RESET}({C_MUTED}{format_args_preview(args)}{C_RESET})")
 
+            if not bad_args:
+                finish["changes"].before_tool(fn_name, args)
             result_str = bad_args or dispatch_dl_tool(fn_name, args, current_ws, mode=mode,
                                                       session_context=session_context)
 
@@ -1812,7 +2296,8 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             if cancel is not None and cancel.is_set():
                 break
             turn = 0
-            note = f"⚡ [YOLO] Reached {max_turns} tool rounds (DL_MAX_TURNS). Auto-continuing..."
+            note = (f"⚡ [YOLO] {total_rounds} tool rounds so far in this request ({max_turns} per stretch, "
+                    f"DL_MAX_TURNS). Auto-continuing...")
             if emit:
                 emit({"type": "notice", "level": "info", "text": note})
             else:
@@ -1953,6 +2438,7 @@ def interactive_loop(workspace: Path, url: str, api_key: str, initial_mode: str 
     mcp = dl_mcp.McpRegistry(surface="terminal",
                              notify=lambda t, level="info": print(f"{C_MUTED}  ⚙ MCP {t}{C_RESET}")) if dl_mcp else None
     pending_prompt = None         # a command queued by the CLI itself (plan approved -> /act)
+    plan_file = None              # the approved plan (PLAN.md) the done check holds the agent to
     custom_prefix = None
     system_prompt = build_dl_system_prompt(workspace, mode=current_mode)
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
@@ -1981,9 +2467,27 @@ def interactive_loop(workspace: Path, url: str, api_key: str, initial_mode: str 
                 print("Exiting D.L. CLI.")
                 break
             elif prompt in ("/clear", "/reset"):
+                plan_file = None
                 messages = [{"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}]
                 sync_current_chat_state(messages, workspace)
                 print(f"{C_GREEN}✓ D.L. memory reset ({current_mode.upper()} mode).{C_RESET}\n")
+                continue
+            elif prompt.split(" ", 1)[0] == "/planfile":
+                arg = prompt[len("/planfile"):].strip()
+                if arg.lower() in ("off", "none", "clear"):
+                    plan_file = None
+                    print(f"{C_MUTED}No active plan: the done check is off.{C_RESET}\n")
+                elif arg:
+                    pf = Path(arg).expanduser()
+                    pf = pf if pf.is_absolute() else (workspace / pf)
+                    if pf.is_file():
+                        plan_file = str(pf.resolve())
+                        _, o, d, _ = plan_progress(pf)
+                        print(f"{C_MUTED}Active plan: {pf.name} ({len(d)} done, {len(o)} open).{C_RESET}\n")
+                    else:
+                        print(f"{C_YELLOW}No such file: {pf}{C_RESET}\n")
+                else:
+                    print(f"{C_MUTED}Active plan: {plan_file or 'none'}.{C_RESET}\n")
                 continue
             elif prompt == "/help":
                 print(f"\n{C_BOLD}D.L. CLI Commands:{C_RESET}")
@@ -2142,12 +2646,18 @@ def interactive_loop(workspace: Path, url: str, api_key: str, initial_mode: str 
                     sub = prompt[3:].strip()
                 else:
                     sub = prompt[7:].strip()
+                saved = save_approved_plan(messages, workspace) if current_mode == "plan" else None
+                if saved:
+                    plan_file = str(saved)
+                    print(f"{C_MUTED}Plan saved to {saved.name}; the agent works from it and ticks its Progress checklist.{C_RESET}")
                 current_mode = "act"
-                messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
+                messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode,
+                                                                                   plan_file=plan_file)}
                 if not sub:
                     msg_text = "⚡ Switched to ACT MODE. Executing agreed plan..."
                     print(f"{C_GREEN}{msg_text}{C_RESET}\n")
-                    prompt = "Proceed with executing the plan now. Perform the necessary tool calls (edits, writes, tests, commands) to implement the agreed plan."
+                    prompt = (f"Execute the approved plan in {saved.name} now, step by step, with the tool calls it needs (edits, writes, tests, commands). Keep its \"## Progress\" checklist current: tick each line (\"- [x]\") as soon as its own check passes - one line at a time, not when the whole section is done, and if you cannot go on, add a \"Blocked: <reason>\" line and say why. The task is done when every step is ticked."
+                              if saved else "Proceed with executing the plan now. Perform the necessary tool calls (edits, writes, tests, commands) to implement the agreed plan.")
                 else:
                     print(f"{C_GREEN}⚡ Executing in ACT MODE: {sub}{C_RESET}\n")
                     prompt = sub
@@ -2352,7 +2862,7 @@ def interactive_loop(workspace: Path, url: str, api_key: str, initial_mode: str 
 
             try:
                 session_ctx = {"workspace": workspace, "messages": messages, "mode": current_mode, "yolo": yolo,
-                               "mcp": mcp, "user_text": prompt}
+                               "mcp": mcp, "user_text": prompt, "plan_file": plan_file}
                 new_ws = execute_agent_loop(
                     messages=messages,
                     url=url,
@@ -2361,6 +2871,7 @@ def interactive_loop(workspace: Path, url: str, api_key: str, initial_mode: str 
                     mode=current_mode,
                     session_context=session_ctx,
                 )
+                plan_file = session_ctx.get("plan_file")
                 if new_ws != workspace:
                     workspace = new_ws
                 sync_current_chat_state(messages, workspace)
