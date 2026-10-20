@@ -2163,6 +2163,22 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
     text_call_retries = 0
     loop_retries = 0
     total_rounds = 0                        # model calls in this request, across YOLO's auto-continues
+
+    def yolo_rollover() -> None:
+        # YOLO: a stretch that reached the cap starts a new one instead of ending the request.  Every path that goes
+        # on to the next round calls this; on 2026-10-20 a text tool call on round 40 skipped it and ended a CONTRA
+        # run.  A new stretch also gets fresh text-call and loop-guard retries.
+        nonlocal turn, text_call_retries, loop_retries
+        if turn < max_turns or not (session_context or {}).get("yolo") or (cancel is not None and cancel.is_set()):
+            return
+        turn = text_call_retries = loop_retries = 0
+        note = (f"⚡ [YOLO] {total_rounds} tool rounds so far in this request ({max_turns} per stretch, "
+                f"DL_MAX_TURNS). Auto-continuing...")
+        if emit:
+            emit({"type": "notice", "level": "info", "text": note})
+        else:
+            print(f"\n{C_ACCENT}{note}{C_RESET}\n")
+
     while turn < max_turns:
         turn += 1
         total_rounds += 1
@@ -2189,6 +2205,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             messages.append({"role": "user", "content": LOOP_NOTE.format(sentence=(res.get("loop_sentence") or "")[:200])})
             _note(emit, f"Loop guard: the thinking kept repeating itself; stopped it and asked for the next action "
                         f"({loop_retries}/{LOOP_RETRIES}).", "warn")
+            yolo_rollover()
             continue
 
         if res["finish_reason"] == "cancelled":
@@ -2209,6 +2226,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                 emit({"type": "notice", "level": "warn", "text": note})
             else:
                 print(f"{C_YELLOW}{note}{C_RESET}")
+            yolo_rollover()
             continue
 
         # No tool calls: the model thinks it is done.  The finish checks may send it back once more.
@@ -2217,8 +2235,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                                  api_key, emit=emit, cancel=cancel, effort=effort)
             if back:
                 messages.append({"role": "user", "content": back})
-                if turn >= max_turns and (session_context or {}).get("yolo"):
-                    turn = 0                    # a send-back must not run into the cap and end a YOLO run
+                yolo_rollover()                 # a send-back must not run into the cap and end a YOLO run
                 continue
 
         # If no tool calls, turn is complete
@@ -2292,17 +2309,9 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                 "content": result_str
             })
 
-        if turn >= max_turns and (session_context or {}).get("yolo"):
-            if cancel is not None and cancel.is_set():
-                break
-            turn = 0
-            note = (f"⚡ [YOLO] {total_rounds} tool rounds so far in this request ({max_turns} per stretch, "
-                    f"DL_MAX_TURNS). Auto-continuing...")
-            if emit:
-                emit({"type": "notice", "level": "info", "text": note})
-            else:
-                print(f"\n{C_ACCENT}{note}{C_RESET}\n")
-            continue
+        if turn >= max_turns and (session_context or {}).get("yolo") and cancel is not None and cancel.is_set():
+            break
+        yolo_rollover()
     else:                                   # the cap ended the loop, not the model: ask it for a status
         if not (cancel is not None and cancel.is_set()):
             turn_cap_wrap_up(messages, url, api_key, active_tools, max_turns, emit=emit, cancel=cancel, effort=effort)

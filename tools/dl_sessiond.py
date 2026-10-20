@@ -80,6 +80,7 @@ class Session:
         self.pending: dict[str, dict] = {}       # approval id -> {"event", "ok", "kind", ...}
         self.plan_offer: str | None = None       # id of an open "Execute this plan?" offer
         self.plan_file: str | None = None        # the approved plan (PLAN.md) the done check holds the agent to
+        self._plan_mtime: int | None = None      # the plan's mtime when a state was last sent for it
         # MCP servers, on while a request needs them; "code": Google (Gmail) is allowed here, not in the REPL
         self.mcp = dl_mcp.McpRegistry(surface="code", notify=lambda t, level="info": self.notice(f"MCP {t}", level))
         self.mcp.on_change = self.emit_state
@@ -102,6 +103,22 @@ class Session:
                     del self.events[:len(self.events) - REPLAY_MAX]
             for q in list(self.clients):
                 q.put(ev)
+        if ev["type"] == "tool_result":
+            self._plan_changed()
+
+    def _plan_changed(self) -> None:
+        """A tool may have ticked the plan: send a fresh state when PLAN.md changed, so the Code tab's plan chip
+        follows a long YOLO request instead of showing the count from its start (2026-10-20: 15/99 shown at 27/99)."""
+        pf = self.plan_file
+        if not pf:
+            return
+        try:
+            mtime = os.stat(pf).st_mtime_ns
+        except OSError:
+            return
+        if mtime != self._plan_mtime:
+            self._plan_mtime = mtime
+            self.emit_state()
 
     def state(self) -> dict:
         return {"type": "state", "session": self.name, "workspace": str(self.workspace), "mode": self.mode,

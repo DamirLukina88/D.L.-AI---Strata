@@ -802,8 +802,27 @@ main { flex: 1; min-height: 0; min-width: 0; max-width: 100vw; overflow-x: hidde
     padding: 6px 8px;
     gap: 6px;
   }
+  /* phones show the same session line as the desktop (mode, YOLO, plan, MCP, folder): "CLI" and the buttons stay on
+     the first row, the session line gets a full-width row of its own below them */
+  .code-terminal-info {
+    display: contents;
+  }
   .code-meta {
-    display: none;
+    order: 2;
+    flex: 1 1 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    white-space: normal;
+    font-size: 11px;
+  }
+  .code-meta code {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .code-title {
     max-width: 140px;

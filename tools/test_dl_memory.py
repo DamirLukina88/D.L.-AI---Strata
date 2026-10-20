@@ -8,6 +8,7 @@ checks (done check, browser check, evidence check, reviewer) send the agent back
 from __future__ import annotations
 
 import json
+import time
 import sys
 import tempfile
 import unittest
@@ -335,6 +336,48 @@ class Counters(unittest.TestCase):
         self.assertIn("3 tool rounds so far", yolo[0])
         self.assertIn("6 tool rounds so far", yolo[1])
 
+    def run_yolo(self, script, max_turns=3):
+        """script: one entry per model call - 'tool', 'textcall', 'loop' or 'done'."""
+        it = iter(script)
+        notices = []
+
+        def turn(*a, **k):
+            kind = next(it)
+            if kind == "tool":
+                return reply("", call(id(kind), "run_command", {"CommandLine": "x"}))
+            if kind == "textcall":
+                return reply("<tool_call><function=run_command>")
+            if kind == "loop":
+                return {**reply(""), "finish_reason": "loop", "loop_sentence": "again."}
+            return reply("done")
+
+        msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "[Now: x]\ntask"}]
+        ctx = {"workspace": Path(tempfile.mkdtemp()), "messages": msgs, "mode": "act", "yolo": True,
+               "emit": lambda e: notices.append(e.get("text", "")) if e.get("type") == "notice" else None}
+        with patch.object(cli, "chat_turn_in_context", side_effect=turn), \
+             patch.object(cli, "dispatch_dl_tool", return_value="ok"), patch.dict("os.environ", {"DL_REVIEW": "0"}):
+            cli.execute_agent_loop(msgs, "http://127.0.0.1:1", "k", ctx["workspace"], max_turns=max_turns,
+                                   session_context=ctx)
+        return msgs, notices
+
+    def test_text_call_on_the_last_round_does_not_end_yolo(self):
+        # 2026-10-20 15:39: a text tool call on round 40 of 40 skipped the YOLO reset and ended the CONTRA run
+        msgs, notices = self.run_yolo(["tool", "tool", "textcall", "tool", "done"])
+        self.assertFalse(any(str(m.get("content", "")).startswith("[D.L. CLI] You have used all") for m in msgs))
+        self.assertEqual(msgs[-1]["content"], "done")
+        self.assertTrue(any("tool rounds so far" in n for n in notices))
+
+    def test_loop_guard_on_the_last_round_does_not_end_yolo(self):
+        msgs, _ = self.run_yolo(["tool", "tool", "loop", "tool", "done"])
+        self.assertFalse(any(str(m.get("content", "")).startswith("[D.L. CLI] You have used all") for m in msgs))
+        self.assertEqual(msgs[-1]["content"], "done")
+
+    def test_each_stretch_gets_fresh_text_call_retries(self):
+        # two text calls per stretch are allowed; a third one in a new stretch is still caught
+        msgs, _ = self.run_yolo(["textcall", "textcall", "tool", "textcall", "tool", "done"])
+        self.assertEqual(sum(1 for m in msgs if m.get("content") == cli.TEXT_CALL_NOTE), 3)
+        self.assertEqual(msgs[-1]["content"], "done")
+
     def test_prompts_ask_to_tick_each_line(self):
         ws = Path(tempfile.mkdtemp())
         (ws / "PLAN.md").write_text(PLAN)
@@ -387,6 +430,38 @@ class Daemon(unittest.TestCase):
         self.assertEqual(s.plan_file, str((ws / "PLAN.md").resolve()))
         s._command("/clear")
         self.assertIsNone(s.plan_file)
+        s.mcp.close()
+
+    def test_chip_follows_ticks_during_a_request(self):
+        import os
+        import queue
+        import dl_sessiond as sessiond
+        ws = Path(tempfile.mkdtemp())
+        plan = ws / "PLAN.md"
+        plan.write_text(PLAN)
+        s = sessiond.Session("chiptest", ws)
+        s.plan_file = str(plan)
+        q: queue.Queue = queue.Queue()
+        s.clients.add(q)
+
+        def states():
+            out = []
+            while not q.empty():
+                ev = q.get()
+                if ev["type"] == "state":
+                    out.append(ev["plan"])
+            return out
+
+        s.emit({"type": "tool_result", "name": "run_command", "text": "ok"})
+        self.assertEqual(states(), [{"file": "PLAN.md", "done": 1, "open": 2, "blocked": False}])
+        s.emit({"type": "tool_result", "name": "run_command", "text": "ok"})
+        self.assertEqual(states(), [])                                     # unchanged plan: no new state
+        plan.write_text(PLAN.replace("- [ ] S2 two", "- [x] S2 two"))
+        os.utime(plan, ns=(time.time_ns(), time.time_ns() + 1_000_000))    # a distinct mtime on coarse clocks
+        s.emit({"type": "tool_result", "name": "replace_file_content", "text": "ok"})
+        self.assertEqual(states(), [{"file": "PLAN.md", "done": 2, "open": 1, "blocked": False}])
+        s.emit({"type": "thinking", "text": "x"})
+        self.assertEqual(states(), [])                                     # only tool results check the plan
         s.mcp.close()
 
 
