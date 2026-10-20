@@ -5,7 +5,7 @@ description: "Home Assistant Core on D disk (/mnt/data), systemd boot service, a
 status: active
 tags: [homeassistant, mcp, iot, systemd, strata]
 created: 2026-10-17
-updated: 2026-10-17
+updated: 2026-10-21
 last_verified: 2026-10-17
 ---
 
@@ -72,6 +72,11 @@ Home Assistant Core is installed on dedicated storage (`/mnt/data/homeassistant`
    - Standard Home Assistant Gree discovery broadcasts UDP packets to `192.168.3.255:7000`. Wi-Fi access points and routers commonly drop directed UDP broadcast packets to wireless clients.
    - Solution: Deployed `custom_components/gree` configured with direct unicast discovery target `192.168.3.17`, allowing instant discovery and persistent polling without relying on router broadcast forwarding.
 
+4. **Trigger words loaded the server during code work (fixed 2026-10-21)**:
+   - D.L. CLI's router turns this MCP on when a message matches one of its `triggers` (regexes in `~/.config/dl-ai/mcp.json`, case-insensitive `search`). The old list had bare words that hit everyday code: `ams` in "params" and "streams", `light` in "highlight" and "flight", `plug` in "plugin", `socket` in "websocket", `temperat` in the model's sampling temperature, `printer` in "pretty printer", `camera` in a game's camera (the CONTRA run). It had already stopped being on by default on 2026-10-20.
+   - Now 34 patterns. Unambiguous words stay as whole words (Home Assistant, hass, Bambu, 3D print, filament, AMS unit/slot/tray/spool, Zigbee, Xiaomi, purifier, humidity, Gree, the Croatian words). Lights, cameras, plugs, sockets, printers, temperature and the air conditioners need context: a switching verb, on/off, a room, a snapshot or stream, a print word, or a room or sensor temperature. Game-camera and UI words (`camera position`, `light mode`) are excluded.
+   - Backup of the old file: `mcp.json.bak-20261021-ha-triggers`. Test: class `HomeAssistantTriggers` in `tools/test_dl_mcp.py`, which reads this machine's config: 16 code phrases must not match and 19 smart-home requests must. It fails on the old config.
+
 ## Verification
 
 - Automated test suite: `python3 -m unittest tools/test_homeassistant_mcp.py -v` (5 tests passing: handshake, error handling, tool dispatch, area registry & filtering, mock REST endpoints).
@@ -92,4 +97,4 @@ Home Assistant Core is installed on dedicated storage (`/mnt/data/homeassistant`
 2. Strata MCP client: `serve/mcp.py`.
 3. Configuration: `/mnt/data/homeassistant/config/configuration.yaml`.
 4. Walkthrough artifact: `walkthrough.md`.
-
+5. User, chat, 2026-10-21 ("Fix home assistant trigger").

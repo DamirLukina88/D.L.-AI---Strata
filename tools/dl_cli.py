@@ -22,7 +22,9 @@ import json
 import os
 import re
 import readline
+import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -920,6 +922,19 @@ def tool_switch_workspace(args: dict, workspace: Path, session_context: dict | N
     return f"Working directory successfully switched to: {new_path}\n{wiki_status}"
 
 
+def stand_in_error(new_text: str, old_text: str, what: str) -> str:
+    """An error when new_text holds more trim stand-ins (STAND_IN) than the file had: the model copied one out of
+    its trimmed history (CONTRA, 2026-10-20: 33 times in 6 h; twice it overwrote a 14k test file with one). A file
+    that already holds stand-ins can still be edited, and an edit that replaces one with real text is a repair."""
+    added = len(STAND_IN.findall(new_text)) - len(STAND_IN.findall(old_text))
+    if added <= 0:
+        return ""
+    return (f"Error [stand_in_guard]: {what} blocked: the new text holds {added} trim stand-in(s) like "
+            f"\"{STAND_IN.search(new_text).group(0)[:60]}...\". D.L. CLI puts that line where it trimmed old text "
+            "out of the conversation; it is not file content. view_file the file (or the source you are copying "
+            "from) and send the real text.")
+
+
 def tool_write_to_file(args: dict, workspace: Path) -> str:
     path_str = args.get("TargetFile") or args.get("path")
     if not path_str:
@@ -931,6 +946,14 @@ def tool_write_to_file(args: dict, workspace: Path) -> str:
     if p.exists() and not overwrite:
         return f"Error: File {p} already exists and Overwrite is False"
     content = args.get("CodeContent") or args.get("content") or ""
+
+    try:
+        old = p.read_text(encoding="utf-8", errors="replace") if p.is_file() else ""
+    except OSError:
+        old = ""
+    err = stand_in_error(content, old, "Write")
+    if err:
+        return err
 
     # Pre-write Guardrail 1: scan_secrets
     is_clean, sec_err = scan_secrets_in_text(content, p)
@@ -964,8 +987,15 @@ def tool_replace_file_content(args: dict, workspace: Path) -> str:
     try:
         orig = p.read_text(encoding="utf-8", errors="replace")
         if target not in orig:
+            if STAND_IN.search(target):
+                return (f"Error: TargetContent not found in {p}: it holds a trim stand-in "
+                        f"(\"{STAND_IN.search(target).group(0)[:60]}...\"), not the file's text. view_file the "
+                        "lines you want to change and copy them exactly.")
             return f"Error: TargetContent not found in {p}"
         new_text = orig.replace(target, replacement, 1)
+        err = stand_in_error(new_text, orig, "File modification")
+        if err:
+            return err
 
         # Pre-write Guardrail 1: scan_secrets
         is_clean, sec_err = scan_secrets_in_text(new_text, p)
@@ -1631,7 +1661,10 @@ def format_args_preview(args: dict) -> str:
 # ---------------------------------------------------------------------------------------------------- context budget
 CONTEXT_RESERVE = int(os.environ.get("DL_CONTEXT_RESERVE") or 16000)   # tokens kept free for the model's reply
 CHARS_PER_TOKEN = 2.8          # measured 2026-10-14: a 212 kB D.L. session was 65,575 prompt tokens (~2.9), rounded down
-ELIDED = "[{n:,} chars removed by D.L. CLI to fit the context; the file on disk has the current content - view_file it]"
+ELIDED = ("[{n:,} chars removed by D.L. CLI to fit the context. This is a stand-in, not the content: never copy it "
+          "into a tool call; view_file the file for its current text]")
+# Any stand-in trimming leaves: ELIDED (old and new wording) and the "[... N chars removed ...]" in a long tool result.
+STAND_IN = re.compile(r"\[(?:\.\.\. )?[\d,]+ chars removed by D\.L\. CLI to fit the context[^\]\n]*\]")
 DROPPED = ("[D.L. CLI: {n} earlier messages were removed to fit the context window. Files on disk are current; "
            "use view_file to read them again instead of relying on memory of earlier content. The user's own "
            "messages are all still here, and your memory files (AGENTS.md, the active plan's Progress, the wiki's "
@@ -1746,6 +1779,19 @@ def protected_user_messages(messages: list[dict], target: int) -> set[int]:
     return keep
 
 
+def current_check_note(messages: list[dict]) -> set[int]:
+    """The newest finish-check note (review findings, browser errors, evidence check) while it is still the agent's
+    current job - after the user's last own message - so a trim cannot drop it half-way through: on 2026-10-21 a
+    CONTRA trim came 6 minutes after a 6-finding review.  The done check's note is left out: the open plan steps
+    are in the system prompt anyway."""
+    prefixes = tuple(n.split("{", 1)[0][:40] for n in (REVIEW_NOTE, BROWSER_NOTE, BROWSER_LIVE_NOTE, EVIDENCE_NOTE))
+    last_user = max((i for i, m in enumerate(messages) if m.get("role") == "user" and not is_cli_note(m)), default=-1)
+    for i in range(len(messages) - 1, last_user, -1):
+        if messages[i].get("role") == "user" and str(messages[i].get("content") or "").startswith(prefixes):
+            return {i}
+    return set()
+
+
 def compact_history(messages: list[dict], tools: list[dict] | None, limit: int, target: int,
                     measured: tuple[int, int] | None = None, force: bool = False) -> dict | None:
     """Shrink the conversation in place when its prompt would exceed `limit` tokens (or always with force), in
@@ -1765,7 +1811,7 @@ def compact_history(messages: list[dict], tools: list[dict] | None, limit: int, 
         if est() <= target:
             break
     if est() > target:
-        protected = protected_user_messages(messages, target)
+        protected = protected_user_messages(messages, target) | current_check_note(messages)
         users = [i for i, m in enumerate(messages) if m.get("role") == "user"]
         first = min(protected) if protected else (users[0] if users else 0)
         start = first + 1
@@ -1793,8 +1839,29 @@ def compact_history(messages: list[dict], tools: list[dict] | None, limit: int, 
             else:
                 kept.insert(first + 1, note_msg)
             messages[:] = kept
+    if est() > target:                      # (4) last resort: the newest tool results (2026-10-20 22:12: one 106k
+        for result_max in (4000, 1200):     # result was the last message, so (1)-(3) could not reach it)
+            for m in messages[-2:]:
+                if m.get("role") == "tool":
+                    _shrink(m, 10 ** 9, result_max, stats)
+            if est() <= target:
+                break
     stats["after"] = est()
     return stats
+
+
+TOOL_RESULT_MAX = int(os.environ.get("DL_TOOL_RESULT_MAX") or 30000)    # chars of one tool result the model gets
+
+
+def cap_tool_result(text: str, limit: int | None = None) -> str:
+    """The start and the end of a result longer than limit, with a stand-in that says how to get the rest."""
+    limit = limit or TOOL_RESULT_MAX
+    if len(text) <= limit:
+        return text
+    head, tail = int(limit * 0.7), int(limit * 0.3)
+    return (f"{text[:head]}\n[... {len(text) - head - tail:,} chars removed by D.L. CLI to fit the context: the "
+            f"result had {len(text):,}. Ask for less - redirect long output to a file and read it in parts "
+            f"(sed -n, grep, tail), or read a smaller range ...]\n{text[-tail:]}")
 
 
 def fit_context(messages: list[dict], tools: list[dict] | None, url: str, api_key: str, emit=None,
@@ -1908,6 +1975,9 @@ EVIDENCE_NOTE = ("[D.L. CLI] Your answer says \"{word}\", but no test or check c
                  "Run one now and report its real output, or say plainly what is not verified.")
 BROWSER_NOTE = ("[D.L. CLI] Browser check: D.L. CLI loaded {page} in headless Chromium after your edits and it "
                 "reported {n} error(s):\n{errors}\nFix them and run your checks again, then finish.")
+BROWSER_LIVE_NOTE = ("[D.L. CLI] Browser check during the run: D.L. CLI loaded {page} in headless Chromium and it "
+                     "reported {n} error(s):\n{errors}\nThese happen in a real browser; a check that runs without "
+                     "one may not see them. Fix them as part of your current work.")
 REVIEW_NOTE = ("[D.L. CLI] A reviewer with a fresh context read your changes and your final answer and reported:\n"
                "{findings}\nFix the real problems and re-run the checks; for any finding you reject, say why. Then "
                "finish.")
@@ -1926,15 +1996,18 @@ PLAYWRIGHT_CORE = os.environ.get("DL_PLAYWRIGHT_CORE",
                                  str(Path.home() / ".local/share/dl-ai/mcp-npm/node_modules/playwright-core"))
 REVIEW_DIFF_MAX = 16000
 REVIEW_EFFORT = "low"           # the review at the session's level took 9.5 min on crc32c (2026-10-20), mostly thinking
+# `node -e` puts the first argument at process.argv[1], not [2]; reading [2]/[3] made every check fail with "list
+# index out of range" and get skipped (found 2026-10-20 22:45: the check had never run).
 BROWSER_JS = r"""
-const { chromium } = require(process.argv[2]);
+const [PW, PAGE] = process.argv.slice(-2);
+const { chromium } = require(PW);
 (async () => {
   const b = await chromium.launch({ headless: true });
   const p = await b.newPage(); const errs = [];
   p.on('console', m => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
   p.on('pageerror', e => errs.push('uncaught: ' + String(e)));
   p.on('requestfailed', r => errs.push('request failed: ' + r.url()));
-  await p.goto(process.argv[3], { waitUntil: 'load', timeout: 20000 });
+  await p.goto(PAGE, { waitUntil: 'load', timeout: 20000 });
   await p.waitForTimeout(2000);
   console.log(JSON.stringify({ errors: errs.slice(0, 20) }));
   await b.close();
@@ -2017,6 +2090,180 @@ def workspace_snapshot(ws: Path, cap: int = 20000) -> str:
     return h.hexdigest()
 
 
+# ---------------------------------------------------------------------------------------------------- checkpoints
+# 2026-10-20 21:23: a run_command Python edit emptied CONTRA's 33 KB data module, the command still said "exit 0",
+# and nothing could undo it (no git, no snapshots). Now every round that changes files is committed to a git history
+# kept outside the workspace, and a tool call that empties, deletes or halves a file says so in its result, with the
+# command that restores it.
+CHECKPOINT_DIR = Path(os.environ.get("DL_CHECKPOINT_DIR") or Path.home() / ".local" / "state" / "dl-ai" / "checkpoints")
+CHECKPOINT_MAX_FILES = 20000                   # a bigger folder gets no checkpoints (a notice says so)
+CHECKPOINT_MAX_FILE = 20 * 1024 * 1024         # bigger files (models, archives) are left out of the history
+SHRINK_MIN = 1024                              # smaller files never raise the shrink alarm
+WRITE_TOOLS = ("run_command", "write_to_file", "replace_file_content")
+SCAN_SKIP = (".git", "node_modules", "__pycache__", ".venv")
+SHRINK_NOTE = ("[D.L. CLI] Warning: {what}. If that was not intended, restore it from the checkpoint taken before "
+               "this round:\n  {restore}")
+
+
+def scan_workspace(ws: Path, cap: int | None = None) -> dict[str, tuple[int, int]] | None:
+    """{relative path: (size, mtime_ns)} of the folder's regular files, or None when it has more than cap."""
+    cap = CHECKPOINT_MAX_FILES if cap is None else cap
+    out: dict[str, tuple[int, int]] = {}
+    for root, dirs, files in os.walk(ws):
+        dirs[:] = [d for d in dirs if d not in SCAN_SKIP]
+        for f in files:
+            p = os.path.join(root, f)
+            try:
+                st = os.lstat(p)
+            except OSError:
+                continue
+            if stat.S_ISREG(st.st_mode):
+                out[os.path.relpath(p, ws)] = (st.st_size, st.st_mtime_ns)
+                if len(out) > cap:
+                    return None
+    return out
+
+
+def shrunk_files(before: dict, after: dict) -> list[tuple[str, str]]:
+    """(path, what happened) for the files of at least SHRINK_MIN bytes a tool call emptied, deleted or cut below
+    half.  Files in a top-level tmp/ or temp/ folder are scratch and left out."""
+    out = []
+    for rel, (size, _) in sorted(before.items()):
+        if size < SHRINK_MIN or rel.split(os.sep, 1)[0] in ("tmp", "temp"):
+            continue
+        new = after.get(rel)
+        if new is None:
+            out.append((rel, f"deleted {rel} ({size:,} bytes)"))
+        elif new[0] == 0:
+            out.append((rel, f"emptied {rel} ({size:,} -> 0 bytes)"))
+        elif new[0] < size // 2:
+            out.append((rel, f"cut {rel} from {size:,} to {new[0]:,} bytes"))
+    return out
+
+
+def shrink_note(hits: list[tuple[str, str]], cps: "Checkpoints | None") -> str:
+    what = "this call " + "; ".join(h[1] for h in hits[:5]) + (f"; and {len(hits) - 5} more" if len(hits) > 5 else "")
+    if cps is not None and cps.head:
+        restore = cps.restore_command(hits[0][0]) + (" (the same command with another path restores the others)"
+                                                      if len(hits) > 1 else "")
+        return SHRINK_NOTE.format(what=what, restore=restore)
+    why = f" ({cps.off})" if cps is not None and cps.off else ""
+    return f"[D.L. CLI] Warning: {what}. There is no checkpoint to restore it from{why}: check that it was intended."
+
+
+def _exclude_line(rel: str) -> str:
+    return "/" + re.sub(r"([\\*?\[\]!# ])", r"\\\1", rel.replace(os.sep, "/"))
+
+
+class Checkpoints:
+    """A git history of one workspace, kept outside it in CHECKPOINT_DIR and committed after every round that changed
+    files, so an edit by any tool - a shell command included - can be undone.  The workspace's own .gitignore files
+    apply; files over CHECKPOINT_MAX_FILE are left out.  Off with DL_CHECKPOINTS=0, and for the home folder, / and
+    folders with more than CHECKPOINT_MAX_FILES files."""
+
+    def __init__(self, ws: Path, emit=None):
+        self.ws = Path(ws).resolve()
+        key = hashlib.sha256(str(self.ws).encode()).hexdigest()[:12]
+        self.git_dir = CHECKPOINT_DIR / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', self.ws.name) or 'root'}-{key}.git"
+        self.emit = emit
+        self.head: str | None = None
+        self.files: dict | None = None             # the scan the last checkpoint was taken from
+        self.off = ""
+        if os.environ.get("DL_CHECKPOINTS", "1") == "0":
+            self.off = "DL_CHECKPOINTS=0"
+        elif not shutil.which("git"):
+            self.off = "git is not installed"
+        elif self.ws in (Path.home().resolve(), Path("/")):
+            self.off = f"{self.ws} is too broad a folder"
+
+    def _git(self, *args: str, timeout: int = 120) -> subprocess.CompletedProcess:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update(GIT_AUTHOR_NAME="D.L. CLI", GIT_AUTHOR_EMAIL="dl-cli@localhost", GIT_COMMITTER_NAME="D.L. CLI",
+                   GIT_COMMITTER_EMAIL="dl-cli@localhost")
+        return subprocess.run(["git", f"--git-dir={self.git_dir}", f"--work-tree={self.ws}", *args],
+                              capture_output=True, text=True, timeout=timeout, env=env, cwd=self.ws)
+
+    def _disable(self, why: str) -> None:
+        self.off = why
+        _note(self.emit, f"Checkpoints are off for {self.ws}: {why}.", "warn")
+
+    def changed_since(self, start: str | None) -> list[str]:
+        """Paths changed between the checkpoint `start` and the latest one, by any tool (shell commands too)."""
+        if self.off or not start or not self.head or start == self.head:
+            return []
+        try:
+            out = self._git("diff", "--name-only", "-z", f"{start}..{self.head}").stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return []
+        return [n for n in out.split("\0") if n]
+
+    def diff_since(self, start: str, limit: int, per_file: int = 6000) -> str:
+        """The diff since `start`, smallest files first; a file whose diff is over per_file (a built page, an
+        assembled harness) is named with its size instead, so the hand-written changes fit in `limit`."""
+        parts, big = [], []
+        for name in self.changed_since(start):
+            try:
+                d = self._git("diff", "-U2", "--no-color", f"{start}..{self.head}", "--", name).stdout
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            (big if len(d) > per_file else parts).append((len(d), name, d))
+        text, used = [], 0
+        for size, name, d in sorted(parts):
+            if used + size > limit:
+                big.append((size, name, ""))
+                continue
+            text.append(d)
+            used += size
+        if big:
+            text.append("[left out of this diff, too long: " + ", ".join(f"{n} ({s:,} chars)" for s, n, _ in
+                                                                         sorted(big, reverse=True)) + "]")
+        return "\n".join(text)
+
+    def restore_command(self, rel: str) -> str:
+        return (f"git --git-dir={shlex.quote(str(self.git_dir))} --work-tree={shlex.quote(str(self.ws))} "
+                f"checkout {self.head} -- {shlex.quote(rel.replace(os.sep, '/'))}")
+
+    def take(self, label: str) -> str | None:
+        """Commit the workspace if it changed since the last checkpoint; the new commit's short hash, else None."""
+        if self.off:
+            return None
+        files = scan_workspace(self.ws)
+        if files is None:
+            self._disable(f"it has more than {CHECKPOINT_MAX_FILES:,} files")
+            return None
+        if files == self.files:
+            return None
+        try:
+            if not (self.git_dir / "HEAD").is_file():
+                CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+                r = self._git("init", "-q")
+                if r.returncode:
+                    self._disable(f"git init failed: {(r.stderr or r.stdout).strip()[:200]}")
+                    return None
+                _note(self.emit, f"Checkpoints of {self.ws} are kept in {self.git_dir} (a git history, committed "
+                                 "after every round that changes files; DL_CHECKPOINTS=0 turns them off).")
+            (self.git_dir / "info").mkdir(exist_ok=True)
+            big = sorted(rel for rel, (size, _) in files.items() if size > CHECKPOINT_MAX_FILE)
+            (self.git_dir / "info" / "exclude").write_text(
+                "\n".join(["node_modules/", ".venv/", "__pycache__/", *map(_exclude_line, big)]) + "\n")
+            r = self._git("add", "-A")
+            if r.returncode:
+                self._disable(f"git add failed: {(r.stderr or r.stdout).strip()[:200]}")
+                return None
+            self.files = files
+            if not self._git("diff", "--cached", "--quiet").returncode and self.head:
+                return None                         # only mtimes changed
+            r = self._git("commit", "-q", "--no-verify", "--allow-empty", "-m", label[:200])
+            if r.returncode:
+                self._disable(f"git commit failed: {(r.stderr or r.stdout).strip()[:200]}")
+                return None
+            self.head = self._git("rev-parse", "--short=10", "HEAD").stdout.strip() or None
+        except (OSError, subprocess.TimeoutExpired) as e:
+            self._disable(str(e)[:200])
+            return None
+        return self.head
+
+
 def browser_errors(page: Path, timeout: int = 60) -> tuple[list[str] | None, str]:
     """Load a page in headless Chromium (playwright-core from the MCP install); (errors, "") or (None, why not)."""
     if not Path(PLAYWRIGHT_CORE).is_dir() or not shutil.which("node"):
@@ -2032,6 +2279,50 @@ def browser_errors(page: Path, timeout: int = 60) -> tuple[list[str] | None, str
     return [str(e)[:300] for e in data.get("errors") or []], ""
 
 
+def web_pages(ws: Path) -> dict[Path, int]:
+    """{page: mtime_ns} of the HTML pages at the workspace's top level and one folder down."""
+    out: dict[Path, int] = {}
+    for pattern in ("*.html", "*.htm", "*/*.html", "*/*.htm"):
+        for p in ws.glob(pattern):
+            if any(part in SCAN_SKIP or part in ("tmp", "temp") for part in p.relative_to(ws).parts[:-1]):
+                continue
+            try:
+                out[p] = p.stat().st_mtime_ns
+            except OSError:
+                pass
+    return out
+
+
+def changed_pages(state: dict, ws: Path) -> list[Path]:
+    """Pages new or changed since state["pages"] was taken, index.html first.  This sees pages a build script
+    writes, which the file tools never touch: CONTRA edits src/*.part and builds index.html with tools/build.sh, so
+    until 2026-10-20 the browser check never chose its page."""
+    old = state.get("pages") or {}
+    return sorted((p for p, m in web_pages(ws).items() if old.get(p) != m),
+                  key=lambda p: (p.name != "index.html", str(p)))
+
+
+def browser_nudge(state: dict, ws: Path, emit=None) -> str | None:
+    """At each YOLO auto-continue: load a page that changed since the last look and hand the agent its console
+    errors.  The finish check alone runs only when a request ends, and a YOLO request can run for hours.  The same
+    errors are not sent twice in a row."""
+    if not _switch("DL_BROWSER_CHECK"):
+        return None
+    pages = changed_pages(state, ws)
+    if not pages:
+        return None
+    state["pages"] = web_pages(ws)
+    errs, why = browser_errors(pages[0])
+    if errs is None or errs == state.get("browser_errs"):
+        return None
+    state["browser_errs"] = errs
+    if not errs:
+        return None
+    rel = pages[0].relative_to(ws) if pages[0].is_relative_to(ws) else pages[0]
+    _note(emit, f"Browser check during the run: {rel} reported {len(errs)} error(s); told the agent.", "warn")
+    return BROWSER_LIVE_NOTE.format(page=rel, n=len(errs), errors="\n".join(f"- {e}" for e in errs))
+
+
 def _latest_task(messages: list[dict]) -> str:
     real = [m for m in messages if m.get("role") == "user" and not is_cli_note(m)
             and isinstance(m.get("content"), str)]
@@ -2039,11 +2330,12 @@ def _latest_task(messages: list[dict]) -> str:
 
 
 def review_changes(messages: list[dict], changes: RequestChanges, final: str, plan_section: str, url: str,
-                   api_key: str, cancel=None, effort: str | None = None) -> str:
-    """One call to the same model with a clean context; the findings, or "" when it found nothing."""
+                   api_key: str, cancel=None, effort: str | None = None, diff: str | None = None) -> str:
+    """One call to the same model with a clean context; the findings, or "" when it found nothing.  `diff` (from
+    the checkpoints) replaces the file tools' own diff when given."""
     body = (f"TASK (the user's latest messages):\n{_latest_task(messages)}\n\n"
             + (f"PLAN PROGRESS:\n{plan_section[:3000]}\n\n" if plan_section else "")
-            + f"DIFF:\n{changes.diff()}\n\nFINAL ANSWER:\n{final[:3000]}")
+            + f"DIFF:\n{diff if diff is not None else changes.diff()}\n\nFINAL ANSWER:\n{final[:3000]}")
     try:
         res = stream_chat_turn([{"role": "system", "content": REVIEWER_SYSTEM}, {"role": "user", "content": body}],
                                url, api_key, tools=[], emit=lambda e: None, cancel=cancel,
@@ -2100,11 +2392,12 @@ def finish_checks(state: dict, messages: list[dict], final: str, mode: str, ws: 
             return DONE_NOTE.format(plan=plan.name, n=len(open_items), items=items)
     changes: RequestChanges | None = state.get("changes")
     changed = changes.changed() if changes else []
-    if changed and _switch("DL_BROWSER_CHECK") and not state.get("browser"):
+    built = changed_pages(state, ws) if "pages" in state else []
+    if (changed or built) and _switch("DL_BROWSER_CHECK") and not state.get("browser"):
         web = [p for p in changed if p.suffix.lower() in WEB_SUFFIXES]
-        if web:
+        if web or built:
             state["browser"] = True
-            pages = [p for p in web if p.suffix.lower() in (".html", ".htm")] or \
+            pages = [p for p in web if p.suffix.lower() in (".html", ".htm")] or built or \
                     [p for p in (ws / "index.html",) if p.is_file()]
             if pages:
                 errs, why = browser_errors(pages[0])
@@ -2123,13 +2416,23 @@ def finish_checks(state: dict, messages: list[dict], final: str, mode: str, ws: 
             _note(emit, f"Evidence check: the answer says \"{m.group(0)}\" with no check after the last edit; "
                         f"sent the agent back.", "warn")
             return EVIDENCE_NOTE.format(word=m.group(0))
-    if changed and _switch("DL_REVIEW") and not state.get("review"):
+    # 2026-10-21: the CONTRA review saw 1 of the request's changed files; the rest came from shell commands and
+    # builds, which only the checkpoints record.
+    cps, start = state.get("cps"), state.get("cp_start")
+    via_cps = cps.changed_since(start) if cps is not None else []
+    if (changed or via_cps) and _switch("DL_REVIEW") and not state.get("review"):
         state["review"] = True
-        _note(emit, f"Reviewing the changes to {len(changed)} file(s) with a fresh context...")
-        findings = review_changes(messages, changes, final, section, url, api_key, cancel=cancel, effort=effort)
+        n_files = len(set(via_cps) | {str(p.relative_to(ws)) if p.is_relative_to(ws) else str(p) for p in changed})
+        _note(emit, f"Reviewing the changes to {n_files} file(s) with a fresh context...")
+        findings = review_changes(messages, changes, final, section, url, api_key, cancel=cancel, effort=effort,
+                                  diff=cps.diff_since(start, REVIEW_DIFF_MAX) if via_cps else None)
         if findings:
             n = sum(1 for l in findings.splitlines() if l.strip().startswith("-")) or 1
             _note(emit, f"Review: {n} finding(s); sent the agent back to check them.", "warn")
+            if emit:                        # the findings themselves, for the Code tab and the transcript
+                emit({"type": "output", "title": "Review findings", "text": findings, "ansi": findings})
+            else:
+                print(f"{C_MUTED}{findings}{C_RESET}")
             return REVIEW_NOTE.format(findings=findings)
         _note(emit, "Review: no problems found.")
     return None
@@ -2158,7 +2461,13 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                 current_ws, mode=mode, plan_file=(session_context or {}).get("plan_file"))}
 
     refresh_memory(messages)
-    finish = {"changes": RequestChanges(current_ws)}    # one request's finish-check state
+    finish = {"changes": RequestChanges(current_ws), "pages": web_pages(current_ws)}   # one request's check state
+    # on in the daemon and the CLI (their main() sets DL_CHECKPOINTS=1 unless it is set), not in tests that import this
+    cps = Checkpoints(current_ws, emit) if os.environ.get("DL_CHECKPOINTS") == "1" else None
+    if cps is not None:
+        cps.take("request start")
+        finish["cps"], finish["cp_start"] = cps, cps.head     # the reviewer's diff: everything since this point
+    alarm = os.environ.get("DL_SHRINK_ALARM", "1") != "0"
     measured = None                         # (messages in the last request, its prompt tokens)
     text_call_retries = 0
     loop_retries = 0
@@ -2178,6 +2487,12 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             emit({"type": "notice", "level": "info", "text": note})
         else:
             print(f"\n{C_ACCENT}{note}{C_RESET}\n")
+        nudge = browser_nudge(finish, current_ws, emit)     # a long run gets the real browser's errors too
+        if nudge:
+            if messages and messages[-1].get("role") == "user":
+                messages[-1]["content"] = f"{messages[-1]['content']}\n\n{nudge}"
+            else:
+                messages.append({"role": "user", "content": nudge})
 
     while turn < max_turns:
         turn += 1
@@ -2280,8 +2595,17 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
 
             if not bad_args:
                 finish["changes"].before_tool(fn_name, args)
+            before = scan_workspace(current_ws) if alarm and not bad_args and fn_name in WRITE_TOOLS else None
             result_str = bad_args or dispatch_dl_tool(fn_name, args, current_ws, mode=mode,
                                                       session_context=session_context)
+            result_str = cap_tool_result(result_str)    # 2026-10-20 22:12: a 106k debug print ended a CONTRA run
+            if before is not None:                  # did it empty, delete or halve a file?
+                after = scan_workspace(current_ws)
+                hits = shrunk_files(before, after) if after is not None else []
+                if hits:
+                    result_str = f"{result_str}\n\n{shrink_note(hits, cps)}"
+                    _note(emit, f"Shrink alarm: {fn_name} " + "; ".join(h[1] for h in hits[:3])
+                                + (f"; and {len(hits) - 3} more" if len(hits) > 3 else ""), "warn")
 
             # Check if directory was switched
             if session_context and session_context.get("workspace"):
@@ -2308,6 +2632,12 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                 "name": fn_name,
                 "content": result_str
             })
+
+        if cps is not None:                         # this round's changes, so the next one can be undone
+            if cps.ws != Path(current_ws).resolve():
+                cps = Checkpoints(current_ws, emit)
+            cps.take(f"round {total_rounds}: " + ", ".join(
+                (tc.get("function") or {}).get("name", "?") for tc in res["tool_calls"]))
 
         if turn >= max_turns and (session_context or {}).get("yolo") and cancel is not None and cancel.is_set():
             break
@@ -2906,6 +3236,7 @@ def interactive_loop(workspace: Path, url: str, api_key: str, initial_mode: str 
 
 
 def main():
+    os.environ.setdefault("DL_CHECKPOINTS", "1")             # workspace checkpoints (see Checkpoints)
     parser = argparse.ArgumentParser(description="D.L. CLI Autonomous Agent on Strata Engine")
     parser.add_argument("--workspace", default=os.getcwd(), help="Workspace directory")
     parser.add_argument("--url", default=DEFAULT_URL, help="Strata URL")

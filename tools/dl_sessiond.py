@@ -42,6 +42,10 @@ SOCKET_PATH = RUNTIME / "sessiond.sock"
 STATE_DIR = Path.home() / ".local" / "state" / "dl-ai" / "sessions"
 DEFAULT_SESSION = "dl-ai-code"
 REPLAY_MAX = 3000                 # events kept for a client that attaches later
+# Every event, one JSON line each, in <name>/<date>.jsonl (off with DL_TRANSCRIPT=0). The replay above keeps only
+# the last 3,000 and the chat export only what is still in the context: on 2026-10-20 the CONTRA export had 47 of
+# its 4,383 messages.  "/save full" renders the transcript since the last /clear.
+TRANSCRIPT_DIR = STATE_DIR.parent / "transcripts"
 APPROVAL_TIMEOUT = 30 * 60        # an unanswered approval is a "no"
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 NAME_OK = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
@@ -72,6 +76,7 @@ class Session:
         self.effort: str | None = None            # /effort: this session's thinking level; None = the Chat settings
         self.messages: list[dict] = [{"role": "system", "content": cli.build_dl_system_prompt(workspace, "act")}]
         self.events: list[dict] = []
+        self._open_block: dict | None = None    # the thinking/text block still growing; transcribed once complete
         self.seq = 0
         self.clients: set[queue.Queue] = set()
         self.lock = threading.RLock()
@@ -91,20 +96,42 @@ class Session:
             self.seq += 1
             ev = {**ev, "seq": self.seq, "ts": round(time.time(), 3)}
             last = self.events[-1] if self.events else None
-            merge = bool(last and ev["type"] in ("thinking", "text") and last["type"] == ev["type"])
+            merge = bool(last and ev["type"] in ("thinking", "text") and last["type"] == ev["type"]
+                         and last is self._open_block)          # never grow a block already transcribed
             if ev["type"] in ("thinking", "text"):             # a stable id for the block, live and in replay
                 ev["block"] = last.get("block", last["seq"]) if merge else self.seq
             if merge:
                 last["text"] += ev["text"]                     # replay keeps one block, live clients get deltas
                 last["seq"] = ev["seq"]
             else:
-                self.events.append(dict(ev))
+                if self._open_block is not None:               # the block before this event is complete
+                    self._transcribe(self._open_block)
+                    self._open_block = None
+                stored = dict(ev)
+                self.events.append(stored)
+                if ev["type"] in ("thinking", "text"):
+                    self._open_block = stored
+                else:
+                    self._transcribe(stored)
                 if len(self.events) > REPLAY_MAX:
                     del self.events[:len(self.events) - REPLAY_MAX]
             for q in list(self.clients):
                 q.put(ev)
         if ev["type"] == "tool_result":
             self._plan_changed()
+
+    def _transcribe(self, ev: dict) -> None:
+        if os.environ.get("DL_TRANSCRIPT") != "1":       # main() turns it on; tests that import this stay off
+            return
+        try:
+            folder = TRANSCRIPT_DIR / self.name
+            folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+            day = time.strftime("%Y-%m-%d", time.localtime(ev.get("ts") or time.time()))
+            fd = os.open(folder / f"{day}.jsonl", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(fd, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(ev, ensure_ascii=False) + "\n")
+        except OSError:
+            pass                                 # a full disk must not stop the session
 
     def _plan_changed(self) -> None:
         """A tool may have ticked the plan: send a fresh state when PLAN.md changed, so the Code tab's plan chip
@@ -152,6 +179,9 @@ class Session:
 
     def save(self) -> None:
         with self.lock, _save_lock:
+            if self._open_block is not None and not self.busy:   # between turns the last block cannot grow
+                self._transcribe(self._open_block)
+                self._open_block = None
             data = {"name": self.name, "workspace": str(self.workspace), "mode": self.mode, "effort": self.effort,
                     "yolo": self.yolo, "plan_file": self.plan_file,
                     "messages": self.messages, "events": self.events[-REPLAY_MAX:], "seq": self.seq}
@@ -483,7 +513,9 @@ class Session:
             self.output("Local wiki", cli.tool_local_wiki(args, self.workspace, mode=self.mode))
             return None
         if cmd in ("/save", "/export"):
-            name, md = self.export()
+            full = arg.split(" ", 1)[0].lower() == "full"
+            arg = arg.split(" ", 1)[1].strip() if full and " " in arg else ("" if full else arg)
+            name, md = self.export(full=full)
             out = Path(arg).expanduser() if arg else self.workspace / name
             out = out if out.is_absolute() else self.workspace / out
             out.write_text(md, encoding="utf-8")
@@ -495,10 +527,68 @@ class Session:
         self.notice(f"Unknown command {cmd} - /help lists them.", "warn")
         return None
 
-    def export(self) -> tuple[str, str]:
+    def export(self, full: bool = False) -> tuple[str, str]:
         stamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M")
+        if full:
+            return f"dl-ai-code-chat-{stamp}-full.md", self.transcript_markdown()
         return (f"dl-ai-code-chat-{stamp}.md",
                 cli.format_messages_to_markdown(self.messages, workspace=self.workspace))
+
+    def transcript_events(self) -> list[dict]:
+        """This session's transcript since its last /clear, oldest first (newest files are read first, so a long
+        history before the /clear is not read)."""
+        out: list[dict] = []
+        for p in sorted((TRANSCRIPT_DIR / self.name).glob("*.jsonl"), reverse=True):
+            try:
+                lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            for line in reversed(lines):
+                try:
+                    ev = json.loads(line)
+                except ValueError:
+                    continue
+                if ev.get("type") == "cleared":
+                    return out[::-1]
+                out.append(ev)
+        return out[::-1]
+
+    def transcript_markdown(self) -> str:
+        """The chat export with everything the transcript has: every message, thinking block, tool call with its
+        result (as the Code tab showed it, up to 4,000 chars) and D.L. CLI notice."""
+        model = "Qwen3.8-Flash-Next Coder"
+        events = self.transcript_events()
+        results = {e.get("id"): e for e in events if e.get("type") == "tool_result"}
+        out = ["# Strata CLI Chat Export (full transcript)",
+               f"- **Date**: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", f"- **Model**: {model}",
+               f"- **Workspace**: `{self.workspace}`", f"- **Events**: {len(events):,}", "", "---", ""]
+        who = None
+        for ev in events:
+            kind = ev.get("type")
+            stamp = time.strftime("%H:%M:%S", time.localtime(ev.get("ts") or 0))
+            if kind == "user":
+                out += [f"## You ({stamp})", "", str(ev.get("text") or ""), ""]
+                who = "user"
+                continue
+            if kind not in ("thinking", "text", "tool_call", "notice"):
+                continue
+            if who != "model":
+                out += [f"## {model} ({stamp})", ""]
+                who = "model"
+            if kind == "thinking":
+                out += ["<details><summary>Thinking</summary>", "", str(ev.get("text") or "").strip(), "",
+                        "</details>", ""]
+            elif kind == "text":
+                out += [str(ev.get("text") or "").strip(), ""]
+            elif kind == "notice":
+                out += [f"> **D.L. CLI ({stamp}):** {ev.get('text') or ''}", ""]
+            else:
+                r = results.get(ev.get("id")) or {}
+                out += [f"<details><summary>Tool {ev.get('name')} ({stamp})</summary>", "", "````json",
+                        json.dumps(ev.get("args"), indent=2, ensure_ascii=False), "````", "", "````",
+                        str(r.get("text") or ""), "````", *(["(result cut to 4,000 chars)"] if r.get("truncated") else []),
+                        "", "</details>", ""]
+        return "\n".join(out)
 
 
 HELP = """Modes
@@ -525,6 +615,7 @@ Session
 /status /health   Engine status (also /model), hardware health (also /sys)
 /continue         Go on after the agent stopped at its tool-round limit (DL_MAX_TURNS)
 /save [file]      Save the chat as Markdown in the workspace (also /export)
+/save full [file] The same with the whole run since /clear from the transcript, thinking included
 /clear            Reset the conversation (also /reset)
 /help             This list
 
@@ -833,6 +924,8 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 
 def main() -> int:
     import argparse
+    os.environ.setdefault("DL_CHECKPOINTS", "1")             # workspace checkpoints (cli.Checkpoints)
+    os.environ.setdefault("DL_TRANSCRIPT", "1")              # every event to TRANSCRIPT_DIR
     ap = argparse.ArgumentParser(description="D.L. AI shared CLI session daemon")
     ap.add_argument("--workspace", default=os.environ.get("STRATA_WORKSPACE_DIR") or os.getcwd())
     ap.add_argument("--socket", default=str(SOCKET_PATH))

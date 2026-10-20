@@ -558,5 +558,44 @@ class Builtins(unittest.TestCase):
             r.close()
 
 
+def _real_ha_triggers():
+    try:
+        catalog = dl_mcp.load_catalog(dl_mcp.CATALOG_PATH)[0]
+    except Exception:
+        return None
+    entry = catalog.get("homeassistant")
+    return entry.triggers if entry is not None else None
+
+
+@unittest.skipUnless(_real_ha_triggers(), "no homeassistant server in this machine's mcp.json")
+class HomeAssistantTriggers(unittest.TestCase):
+    """This machine's config (~/.config/dl-ai/mcp.json). Until 2026-10-21 bare words loaded Home Assistant in
+    ordinary code work: `ams` in "params", `light` in "highlight", `plug` in "plugin", `socket` in "websocket",
+    `temperat` in the model's sampling temperature, `camera` in a game's camera (the CONTRA run)."""
+
+    def hit(self, text):
+        return next((rx.pattern for rx in _real_ha_triggers() if rx.search(text)), None)
+
+    def test_code_work_does_not_load_it(self):
+        for text in ("the camera follows the commando and shakes on a boss hit", "check the camera position",
+                     "CAM.x is the camera offset", "highlight the selected row", "the flight of each bullet",
+                     "a lightweight renderer", "switch the theme to light mode", "add a plugin for the parser",
+                     "the params and streams of the teams programs", "open a websocket to the server",
+                     "socket.io reconnects", "temperature 0.6, top_p 0.95", "set the sampling temperature to 0.2",
+                     "write a pretty printer for the AST", "print the debug lines", "the light blue accent"):
+            with self.subTest(text=text):
+                self.assertIsNone(self.hit(text))
+
+    def test_smart_home_requests_still_load_it(self):
+        for text in ("turn on the kitchen light", "switch the lights off", "show me a camera snapshot",
+                     "check the front door camera", "how is the 3D print going?", "is the printer done yet",
+                     "bambu printer status", "check the AMS slot", "what's the humidity",
+                     "turn off the smart plug", "kolika je temperatura u sobi", "upali svjetlo u kuhinji",
+                     "uključi utičnicu", "what is the temperature in the living room", "open Home Assistant",
+                     "is the air purifier on", "turn on the AC", "set the air conditioner to 22", "upali klimu"):
+            with self.subTest(text=text):
+                self.assertIsNotNone(self.hit(text))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

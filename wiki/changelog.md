@@ -5,7 +5,7 @@ description: "Record of every change the agent made to this wiki"
 status: active
 tags: [meta, changelog]
 created: 2026-10-05
-updated: 2026-10-20
+updated: 2026-10-21
 last_verified: 2026-10-05
 ---
 
@@ -15,6 +15,10 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-21:** Artifact Backup. contra-goal-loop-2026-10-21 (loop rules, watch_review.py, pw_contra.js, notes sent to the D.L. AI); Home Assistant trigger narrowing (34 patterns, test); 2026-10-21 GPU-busy-while-idle check on the RX 7600 XT page. (Agent: Claude Code)
+- **2026-10-21:** Update. decisions/home-assistant-strata-mcp.md. (Agent: Claude Code)
+- **2026-10-21:** Ingestion. artifacts/contra-goal-loop-2026-10-21.md. (Agent: Claude Code)
+- **2026-10-21:** Update. decisions/dl-cli-task-memory-and-finish-checks.md. (Agent: Claude Code)
 - **2026-10-20:** Update. decisions/cloudflare-access-login-auth.md. (Agent: Claude Code)
 - **2026-10-20:** Ingestion. Antigravity 16-19 Oct conversations: added a 16-19 Oct section to artifacts/antigravity-change-requests-2026-10.md and marked its three 12 Oct open items done; saved the unbuilt artifacts/async-queue-debugging-benchmark-plan.md; added the 17 Oct tunnel-drop incident and the HTTP/2 browser-leg note to decisions/cloudflare-tunnel-remote-exposure.md and the after-reboot lazy-load gotcha to decisions/lazy-loading-and-gui-force-restart.md; new reference artifacts/strata-design-language-spec.md. (Agent: Claude Code)
 - **2026-10-20:** Update. decisions/cli-graphical-styling-and-thinking-defaults.md. (Agent: Claude Code)

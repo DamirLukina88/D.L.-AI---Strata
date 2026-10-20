@@ -8,6 +8,7 @@ checks (done check, browser check, evidence check, reviewer) send the agent back
 from __future__ import annotations
 
 import json
+import os
 import time
 import sys
 import tempfile
@@ -411,6 +412,339 @@ class LoopGuard(unittest.TestCase):
         self.assertTrue(any(str(m.get("content", "")).startswith("[D.L. CLI] Your thinking went round") for m in msgs))
         self.assertFalse(any(m.get("reasoning_content") == "x" * 50 for m in msgs))     # the loop is not kept
         self.assertEqual(msgs[-1]["content"], "done")
+
+
+class StandIn(unittest.TestCase):
+    """CONTRA, 2026-10-20: the model copied trim stand-ins out of its own trimmed edit calls into new ones, and
+    twice overwrote a 14k test file with the one-line stand-in."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ws = Path(self.tmp.name)
+        self.f = self.ws / "h14.mjs.part"     # CONTRA's parts: no syntax check
+        self.f.write_text("const a = 1;\nconst b = 2;\n")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def trimmed_arg(self) -> str:
+        """The stand-in _shrink really leaves, so a change to ELIDED cannot slip past the guard."""
+        m = {"role": "assistant", "content": "", "tool_calls": [{"id": "c", "type": "function", "function": {
+             "name": "write_to_file", "arguments": json.dumps({"TargetFile": "h14.mjs.part", "CodeContent": "y" * 12035})}}]}
+        cli._shrink(m, 400, 4000, {"reasoning": 0, "file_contents": 0, "tool_results": 0})
+        return json.loads(m["tool_calls"][0]["function"]["arguments"])["CodeContent"]
+
+    def test_write_of_a_stand_in_is_refused(self):
+        out = cli.tool_write_to_file({"TargetFile": "h14.mjs.part", "CodeContent": self.trimmed_arg()}, self.ws)
+        self.assertIn("stand_in_guard", out)
+        self.assertEqual(self.f.read_text(), "const a = 1;\nconst b = 2;\n")
+        out = cli.tool_write_to_file({"TargetFile": "new.mjs", "CodeContent": "x\n" + self.trimmed_arg()}, self.ws)
+        self.assertIn("stand_in_guard", out)
+        self.assertFalse((self.ws / "new.mjs").exists())
+
+    def test_edit_that_adds_a_stand_in_is_refused(self):
+        old_form = "[1,048 chars removed by D.L. CLI to fit the context; the file on disk has the current content - view_file it]"
+        result_form = "[... 2,310 chars removed by D.L. CLI to fit the context ...]"
+        for stand_in in (self.trimmed_arg(), old_form, result_form):
+            out = cli.tool_replace_file_content({"TargetFile": "h14.mjs.part", "TargetContent": "const b = 2;",
+                                                 "ReplacementContent": stand_in}, self.ws)
+            self.assertIn("stand_in_guard", out)
+        self.assertEqual(self.f.read_text(), "const a = 1;\nconst b = 2;\n")
+
+    def test_stand_in_target_says_why_it_is_not_found(self):
+        out = cli.tool_replace_file_content({"TargetFile": "h14.mjs.part", "TargetContent": self.trimmed_arg(),
+                                             "ReplacementContent": "const c = 3;"}, self.ws)
+        self.assertIn("not found", out)
+        self.assertIn("stand-in", out)
+
+    def test_repairs_and_files_that_hold_stand_ins_still_work(self):
+        stand_in = self.trimmed_arg()
+        self.f.write_text(f"const a = 1;\n{stand_in}\n")                  # a bad write from an older run
+        out = cli.tool_replace_file_content({"TargetFile": "h14.mjs.part", "TargetContent": "const a = 1;",
+                                             "ReplacementContent": "const a = 10;"}, self.ws)
+        self.assertIn("Successfully", out)                                  # the stand-in was already there
+        out = cli.tool_replace_file_content({"TargetFile": "h14.mjs.part", "TargetContent": stand_in,
+                                             "ReplacementContent": "const b = 2;"}, self.ws)
+        self.assertIn("Successfully", out)                                  # the repair
+        self.assertNotIn("removed by D.L. CLI", self.f.read_text())
+        code = 'ELIDED = "[{n:,} chars removed by D.L. CLI to fit the context]"\n'   # D.L. CLI's own source
+        out = cli.tool_write_to_file({"TargetFile": "cli.py", "CodeContent": code}, self.ws)
+        self.assertIn("Successfully", out)
+
+
+class Checkpointing(unittest.TestCase):
+    """CONTRA, 2026-10-20 21:23: a shell-command edit emptied a 33 KB part and nothing could undo it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.ws, self.cps = root / "ws", root / "checkpoints"
+        (self.ws / "src").mkdir(parents=True)
+        self.data = self.ws / "src" / "data.part"
+        self.data.write_text("const C = 1;\n" * 400)
+        patcher = patch.object(cli, "CHECKPOINT_DIR", self.cps)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self.tmp.cleanup)
+
+    def git(self, cp, *args):
+        import subprocess
+        return subprocess.run(["git", f"--git-dir={cp.git_dir}", *args], capture_output=True, text=True,
+                              cwd=self.ws).stdout
+
+    def test_alarm_names_the_file_and_the_restore_works(self):
+        import subprocess
+        notices, n = [], 0
+
+        def turn(*a, **k):
+            nonlocal n
+            n += 1
+            if n == 1:   # the 21:23 accident: the file is opened for writing, then building its text fails
+                return reply("", call(1, "run_command", {"CommandLine": "python3 -c \"f=open('src/data.part','w'); "
+                                                                       "f.write('x' + 1)\""}))
+            return reply("done")
+
+        msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "[Now: x]\ntask"}]
+        ctx = {"workspace": self.ws, "messages": msgs, "mode": "act", "yolo": True,
+               "emit": lambda e: notices.append(e.get("text", "")) if e.get("type") == "notice" else None}
+        with patch.object(cli, "chat_turn_in_context", side_effect=turn), \
+             patch.dict("os.environ", {"DL_REVIEW": "0", "DL_CHECKPOINTS": "1"}):
+            cli.execute_agent_loop(msgs, "http://127.0.0.1:1", "k", self.ws, max_turns=5, session_context=ctx)
+        self.assertEqual(self.data.stat().st_size, 0)
+        result = next(m["content"] for m in msgs if m.get("role") == "tool")
+        self.assertIn("emptied src/data.part (5,200 -> 0 bytes)", result)
+        self.assertTrue(any(t.startswith("Shrink alarm: run_command emptied src/data.part") for t in notices))
+        restore = result.split("taken before this round:\n  ", 1)[1].splitlines()[0]
+        subprocess.run(restore, shell=True, check=True, cwd=self.ws)
+        self.assertEqual(self.data.read_text(), "const C = 1;\n" * 400)
+        log = self.git(cli.Checkpoints(self.ws), "log", "--format=%s")
+        self.assertEqual(log.split("\n")[:2], ["round 1: run_command", "request start"])
+
+    def test_off_unless_the_entry_point_turns_it_on(self):
+        msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "[Now: x]\ntask"}]
+        with patch.object(cli, "chat_turn_in_context", return_value=reply("done")), \
+             patch.dict("os.environ", {"DL_REVIEW": "0"}):
+            os.environ.pop("DL_CHECKPOINTS", None)
+            cli.execute_agent_loop(msgs, "http://127.0.0.1:1", "k", self.ws, max_turns=2,
+                                   session_context={"workspace": self.ws, "messages": msgs, "mode": "act"})
+        self.assertFalse(self.cps.exists())
+
+    def test_shrink_rules(self):
+        before = {"a.js": (5000, 1), "b.js": (5000, 1), "c.js": (5000, 1), "small.js": (900, 1),
+                  os.path.join("tmp", "x.mjs"): (9000, 1), "d.js": (5000, 1)}
+        after = {"a.js": (0, 2), "c.js": (2400, 2), "small.js": (0, 2), "d.js": (2600, 2)}
+        self.assertEqual([h[0] for h in cli.shrunk_files(before, after)], ["a.js", "b.js", "c.js"])
+
+    def test_big_files_and_broad_folders_are_left_out(self):
+        (self.ws / "model.bin").write_bytes(b"0" * 7000)                   # data.part is 5,200 bytes
+        with patch.object(cli, "CHECKPOINT_MAX_FILE", 6000):
+            cp = cli.Checkpoints(self.ws)
+            self.assertTrue(cp.take("start"))
+        self.assertEqual(self.git(cp, f"--work-tree={self.ws}", "ls-files").split(), ["src/data.part"])
+        self.assertIsNone(cp.take("again"))                                  # nothing changed
+        self.assertTrue(cli.Checkpoints(Path.home()).off)
+        with patch.object(cli, "CHECKPOINT_MAX_FILES", 1):
+            many = cli.Checkpoints(self.ws)
+            self.assertIsNone(many.take("start"))
+            self.assertIn("more than 1 files", many.off)
+
+
+class BigOutput(unittest.TestCase):
+    """CONTRA, 2026-10-20 22:12: a debug run printed 105,947 chars; the newest tool result was out of the trimmer's
+    reach, so the prompt stayed at 79,813 tokens, Strata refused it twice and the request ended."""
+
+    def history(self):
+        return [{"role": "system", "content": "s" * 26000}, {"role": "user", "content": "[Now: x]\ntask"},
+                {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "type": "function", "function": {
+                    "name": "run_command", "arguments": json.dumps({"CommandLine": "node dbg.mjs"})}}]},
+                {"role": "tool", "tool_call_id": "c1", "name": "run_command",
+                 "content": "DBG f=1 live=0 enemies=0\n" * 4200 + "[Command exited with code 0]"}]
+
+    def test_results_are_capped_where_they_enter(self):
+        out = cli.cap_tool_result("x" * 100000 + "\n[Command exited with code 0]")
+        self.assertLess(len(out), cli.TOOL_RESULT_MAX + 400)
+        self.assertTrue(out.endswith("[Command exited with code 0]"))
+        self.assertTrue(cli.STAND_IN.search(out))                 # copying the cut output into a file is refused
+        self.assertEqual(cli.cap_tool_result("short"), "short")
+
+    def test_overflow_retry_reaches_the_newest_result(self):
+        msgs = self.history()
+        calls = []
+
+        def stream(messages, **k):
+            calls.append(len(messages[-1]["content"]))
+            if len(messages[-1]["content"]) > 50000:             # what Strata did with the 106k result
+                raise RuntimeError('Strata API HTTP 400: {"error": {"message": "request exceeds the context window: '
+                                   'prompt (79813 tokens) leaves no room to answer in the context (65536)"}}')
+            return reply("next step")
+
+        with patch.object(cli, "stream_chat_turn", side_effect=stream), \
+             patch.object(cli, "context_window", return_value=65536):
+            res = cli.chat_turn_in_context(msgs, "http://127.0.0.1:1", "k", [], measured=(4, 30000))
+        self.assertEqual(res["content"], "next step")
+        self.assertLess(len(msgs[-1]["content"]), 5000)
+        self.assertIn("[Command exited with code 0]", msgs[-1]["content"])
+        self.assertEqual(msgs[1]["content"], "[Now: x]\ntask")       # the task is still there
+
+
+@unittest.skipUnless(Path(cli.PLAYWRIGHT_CORE).is_dir() and cli.shutil.which("node"), "needs playwright-core and node")
+class RealBrowserCheck(unittest.TestCase):
+    """2026-10-20 22:45: the browser check read the wrong process.argv slots and had never run (every call was
+    "skipped"); the other tests mock browser_errors, so only a real Chromium run catches that."""
+
+    def test_reports_errors_and_passes_a_clean_page(self):
+        with tempfile.TemporaryDirectory() as d:
+            bad, good = Path(d) / "bad.html", Path(d) / "good.html"
+            bad.write_text("<!doctype html><title>t</title><script>console.error('boom'); undefinedThing();</script>")
+            good.write_text("<!doctype html><title>t</title><script>document.title = 'ok';</script>")
+            errs, why = cli.browser_errors(bad)
+            self.assertEqual(why, "")
+            self.assertTrue(any("boom" in e for e in errs) and any("undefinedThing" in e for e in errs), errs)
+            self.assertEqual(cli.browser_errors(good), ([], ""))
+
+
+class BuiltPageBrowserCheck(unittest.TestCase):
+    """2026-10-20: CONTRA edits src/*.part and builds index.html with a script, so the browser check (which looked
+    only at files the edit tools changed) never chose its page, and a YOLO request that runs for hours never reached
+    the finish checks at all; in a real browser the page died on its first frame."""
+    ERRS = ["uncaught: ReferenceError: roundRectPath is not defined"]
+
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp())
+        self.page = self.ws / "index.html"
+        self.page.write_text("<!doctype html><title>t</title>")
+        self.ns = time.time_ns()
+
+    def rebuild(self):                                   # what tools/build.sh does: rewrite the page
+        self.ns += 1_000_000
+        self.page.write_text(f"<!doctype html><title>{self.ns}</title>")
+        os.utime(self.page, ns=(self.ns, self.ns))
+
+    def test_a_built_page_is_checked_when_the_run_ends(self):
+        state = {"changes": cli.RequestChanges(self.ws), "pages": cli.web_pages(self.ws)}
+        self.rebuild()
+        with patch.object(cli, "browser_errors", return_value=(self.ERRS, "")), \
+             patch.dict("os.environ", {"DL_REVIEW": "0", "DL_EVIDENCE": "0"}):
+            back = cli.finish_checks(state, [], "done", "act", self.ws, {"yolo": True}, "http://127.0.0.1:1", "k")
+        self.assertIsNotNone(back)
+        self.assertIn("roundRectPath is not defined", back)
+
+    def test_a_long_yolo_run_gets_the_errors_once(self):
+        it = iter(["tool"] * 6 + ["done"])
+
+        def turn(*a, **k):
+            return reply("", call(time.time_ns(), "run_command", {"CommandLine": "bash tools/build.sh"})) \
+                if next(it) == "tool" else reply("done")
+
+        def build(*a, **k):
+            self.rebuild()
+            return "built index.html"
+
+        msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "[Now: x]\ntask"}]
+        ctx = {"workspace": self.ws, "messages": msgs, "mode": "act", "yolo": True, "emit": lambda e: None}
+        with patch.object(cli, "chat_turn_in_context", side_effect=turn), \
+             patch.object(cli, "dispatch_dl_tool", side_effect=build), \
+             patch.object(cli, "browser_errors", return_value=(self.ERRS, "")), \
+             patch.dict("os.environ", {"DL_REVIEW": "0", "DL_EVIDENCE": "0"}):
+            cli.execute_agent_loop(msgs, "http://127.0.0.1:1", "k", self.ws, max_turns=2, session_context=ctx)
+        live = [m for m in msgs if m.get("role") == "user" and "Browser check during the run" in str(m.get("content"))]
+        self.assertEqual(len(live), 1)                    # three auto-continues, the same errors: told once
+        self.assertIn("roundRectPath is not defined", live[0]["content"])
+
+
+class ReviewSeesEverything(unittest.TestCase):
+    """2026-10-21: CONTRA's final review saw 1 changed file (the edit tools' own record) while the request had
+    changed dozens through shell commands and builds; its 6 findings showed only as a count; and a trim 6 minutes
+    later could have dropped the findings before the agent was through them."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.ws = Path(self.tmp.name) / "ws"
+        self.ws.mkdir()
+        (self.ws / "game.js").write_text("const speed = 1;\n")
+        patcher = patch.object(cli, "CHECKPOINT_DIR", Path(self.tmp.name) / "cps")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_the_reviewer_gets_shell_edits_and_its_findings_are_shown(self):
+        cps = cli.Checkpoints(self.ws)
+        cps.take("request start")
+        start = cps.head
+        (self.ws / "game.js").write_text("const speed = 1;\nconst gravity = -9;\n")   # as a shell command would
+        cps.take("round 1: run_command")
+        state = {"changes": cli.RequestChanges(self.ws), "pages": {}, "cps": cps, "cp_start": start}
+        bodies, events = [], []
+
+        def review(messages, *a, **k):
+            bodies.append(messages[1]["content"])
+            return reply("- gravity points the wrong way")
+
+        msgs = [{"role": "user", "content": "[Now: x]\nbuild it"}]
+        with patch.object(cli, "stream_chat_turn", side_effect=review), \
+             patch.dict("os.environ", {"DL_BROWSER_CHECK": "0", "DL_EVIDENCE": "0"}):
+            back = cli.finish_checks(state, msgs, "done", "act", self.ws, {"yolo": True}, "http://127.0.0.1:1", "k",
+                                     emit=events.append)
+        self.assertIn("gravity points the wrong way", back or "")
+        self.assertIn("+const gravity = -9;", bodies[0])
+        shown = [e for e in events if e.get("type") == "output" and e.get("title") == "Review findings"]
+        self.assertEqual(shown[0]["text"], "- gravity points the wrong way")
+
+    def test_the_current_review_note_survives_a_trim(self):
+        msgs = contra_like(0)
+        msgs.append({"role": "user", "content": cli.REVIEW_NOTE.format(findings="- the audit cannot fail")})
+        for i in range(40):
+            msgs.append({"role": "assistant", "content": "", "tool_calls": [{"id": f"r{i}", "type": "function",
+                         "function": {"name": "run_command", "arguments": json.dumps({"CommandLine": "ls"})}}]})
+            msgs.append({"role": "tool", "tool_call_id": f"r{i}", "name": "run_command", "content": BIG})
+        cli.compact_history(msgs, None, limit=8000, target=5000, force=True)
+        self.assertTrue(any("the audit cannot fail" in str(m.get("content")) for m in msgs))
+
+
+class Transcript(unittest.TestCase):
+    def setUp(self):
+        import dl_sessiond as sessiond
+        self.sd = sessiond
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = patch.object(sessiond, "TRANSCRIPT_DIR", Path(self.tmp.name) / "transcripts")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def lines(self, name):
+        files = sorted((self.sd.TRANSCRIPT_DIR / name).glob("*.jsonl"))
+        return [json.loads(x) for f in files for x in f.read_text().splitlines()]
+
+    def test_every_event_once_with_whole_blocks(self):
+        s = self.sd.Session("ttest", Path(self.tmp.name))
+        with patch.dict("os.environ", {"DL_TRANSCRIPT": "1"}):
+            s.emit({"type": "user", "text": "build it"})
+            for t in ("thin", "king"):
+                s.emit({"type": "thinking", "text": t})
+            s.emit({"type": "tool_call", "id": "c1", "name": "run_command", "args": {"CommandLine": "ls"}})
+            s.emit({"type": "tool_result", "id": "c1", "name": "run_command", "text": "index.html"})
+            for t in ("all ", "done"):
+                s.emit({"type": "text", "text": t})
+            s.emit({"type": "turn_end"})
+            got = self.lines("ttest")
+            self.assertEqual([e["type"] for e in got], ["user", "thinking", "tool_call", "tool_result", "text",
+                                                        "turn_end"])
+            self.assertEqual((got[1]["text"], got[4]["text"]), ("thinking", "all done"))
+            md = s.transcript_markdown()
+            for part in ("## You", "build it", "<details><summary>Thinking</summary>", "Tool run_command",
+                         "index.html", "all done"):
+                self.assertIn(part, md)
+            s._command("/clear")
+            s.emit({"type": "user", "text": "next task"})
+            self.assertEqual([e.get("text") for e in s.transcript_events() if e["type"] == "user"], ["next task"])
+        s.mcp.close()
+
+    def test_off_unless_the_daemon_turns_it_on(self):
+        s = self.sd.Session("toff", Path(self.tmp.name))
+        os.environ.pop("DL_TRANSCRIPT", None)
+        s.emit({"type": "user", "text": "x"})
+        self.assertEqual(self.lines("toff"), [])
+        s.mcp.close()
 
 
 class Daemon(unittest.TestCase):
