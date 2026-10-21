@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-21:** Update. github-fork-and-sanitization: the 2026-10-21 push and the open wiki-sanitization question. (Agent: Claude Code)
 - **2026-10-21:** Artifact Backup. contra-goal-loop-2026-10-21 (loop rules, watch_review.py, pw_contra.js, notes sent to the D.L. AI); Home Assistant trigger narrowing (34 patterns, test); 2026-10-21 GPU-busy-while-idle check on the RX 7600 XT page. (Agent: Claude Code)
 - **2026-10-21:** Update. decisions/home-assistant-strata-mcp.md. (Agent: Claude Code)
 - **2026-10-21:** Ingestion. artifacts/contra-goal-loop-2026-10-21.md. (Agent: Claude Code)
