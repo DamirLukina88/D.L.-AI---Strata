@@ -42,3 +42,5 @@ Shrinking `--conversation-cache-mib 1024` was considered to give a larger contex
 2. `git fetch upstream --tags`; `git log` / `git show --stat` of the commits named above, 2026-10-20.
 3. `/mnt/data/Strata/strata-coder-iq1_m.log` (engine start-up, CPU pool, vision and conversation-cache lines), `/proc/<engine pid>/limits`, `journalctl --user -u strata-server`, 2026-10-20.
 4. User, chat, 2026-10-20: keep pictures on; asked whether the conversation cache could be reduced without side effects.
+
+Newer: [Upstream Strata 0.2.2 Review (2026-10-21)](upstream-v0-2-2-review-2026-10-21.md).

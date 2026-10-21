@@ -15,7 +15,12 @@ Newest entries first.
 
 ## Log
 
-- **2026-10-21:** Update. github-fork-and-sanitization: the 2026-10-21 push and the open wiki-sanitization question. (Agent: Claude Code)
+- **2026-10-21:** Update. artifacts/upstream-v0-2-2-review-2026-10-21.md (ported and deployed fixes, checks, corrected footer finding); decisions/rx-7600-xt-cachyos-deployment.md (engine 0.1.44.1+0.2.2-fixes). (Agent: Claude Code)
+- **2026-10-21:** Update. artifacts/upstream-v0-2-2-review-2026-10-21.md: what of 0.2.2 is already here, tried, or missing. (Agent: Claude Code)
+- **2026-10-21:** Update. artifacts/upstream-v0-2-releases-review-2026-10-20.md. (Agent: Claude Code)
+- **2026-10-21:** Ingestion. artifacts/upstream-v0-2-2-review-2026-10-21.md (upstream 0.2.2 checked against this install). (Agent: Claude Code)
+- **2026-10-21:** Ingestion. artifacts/upstream-v0-2-2-review-2026-10-21.md. (Agent: Claude Code)
+- **2026-10-21:** Update. github-fork-and-sanitization: the 2026-10-21 push and the open wiki-sanitization question, decisions/github-fork-and-sanitization.md, decisions/rx-7600-xt-cachyos-deployment.md. (Agent: Claude Code)
 - **2026-10-21:** Artifact Backup. contra-goal-loop-2026-10-21 (loop rules, watch_review.py, pw_contra.js, notes sent to the D.L. AI); Home Assistant trigger narrowing (34 patterns, test); 2026-10-21 GPU-busy-while-idle check on the RX 7600 XT page. (Agent: Claude Code)
 - **2026-10-21:** Update. decisions/home-assistant-strata-mcp.md. (Agent: Claude Code)
 - **2026-10-21:** Ingestion. artifacts/contra-goal-loop-2026-10-21.md. (Agent: Claude Code)
