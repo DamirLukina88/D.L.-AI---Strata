@@ -686,6 +686,10 @@ CALL_END = "</tool_call>"
 PARAM_END = "</parameter>"
 FUNC_START = "<function="
 FUNC_END = "</function>"
+# #3441: the opener a model writes when it drifts by a token inside the envelope the template documents:
+# `<=NAME>` (the word `function` dropped), `<function:NAME>`, `<function =NAME>`, or the bare `<NAME>`
+_LOOSE_OPEN = re.compile(r"<\s*(?:function\s*[=:]\s*|=\s*)?([A-Za-z0-9_.\-]+)\s*>")
+_LOOSE_PART = re.compile(r"<\s*(?:function[ \t]*[=:]?\s*|=\s*)?[A-Za-z0-9_.\-]*\s*$")
 
 
 def param_end(text: str, final: bool = False) -> int:
@@ -884,7 +888,7 @@ class OutputParser:
     until it is complete, so clients never see `<tool_` or `</thi`."""
 
     def __init__(self, thinking: bool = True, tools: list[dict] | None = None, stream_tools: bool = False,
-                 recover: bool = False):
+                 recover: bool = False, declared_only: bool = False):
         self.state = "reasoning" if thinking else "content"
         self.buf = ""
         self.lead = False
@@ -897,6 +901,15 @@ class OutputParser:
                 aliases.setdefault(f"{namespace}__{member}", set()).add(name)
         self.aliases = {alias: next(iter(names)) for alias, names in aliases.items()
                         if len(names) == 1 and alias not in self.schemas}
+        # #804/#3075: in the answer too, a call counts only for a tool the request declared.  With tools declared a
+        # call for another name stays text (the Responses spelling `namespace__tool` of a `namespace.tool` counts as
+        # that tool); `declared_only` extends the rule to a request that declared none (Chat Completions, Anthropic:
+        # the client has no tool to run).  The Responses route leaves it off: a Codex compaction request keeps its
+        # conversation's tools in the prompt only, and its calls come back as before.
+        self.declared_only = declared_only
+        # every namespace__member spelling of a declared namespace.tool, ambiguous ones too (#2284 passes those through)
+        self._alias = set(aliases) | {k.replace(".", "__", 1) for k in self.schemas if isinstance(k, str) and "." in k}
+        self.unread = 0              # #3441: `<tool_call>` blocks that opened like a call and were returned as text
         # stream_tools: a tool call is also reported while it is being written - "tool_start" (its name and id) as
         # soon as the name is known, then "tool_args" pieces of its JSON arguments (string parameters character by
         # character; other types whole, once complete) - before the final "tool_call".  Without it, a client sees
@@ -924,6 +937,32 @@ class OutputParser:
         ok = self._opener_ok()
         self.fence, self.line, self.ticks = snap
         return ok
+
+    def _callable(self, name: str) -> bool:
+        """#3441: may a drifted opener (`<=NAME>`, `<function:NAME>`, `<NAME>`) be a call?  Only for a tool the request
+        declared (or its namespace__member spelling).  Local change: a well-formed `<function=NAME>` of an undeclared
+        name stays a call when the request declared tools (#2284 tests, and D.L. CLI corrects typos and answers a
+        made-up name with its tool list); upstream's #3075 text rule applies only to a request that declared none."""
+        if not self.schemas:
+            return not self.declared_only
+        return name in self.schemas or name in self._alias
+
+    def _loose_open(self, after: str):
+        """#3441: `after` (text after a `<tool_call>`, whitespace dropped) opens a call in a drifted form that names a
+        declared tool -> (name, length of the opener); "wait" while it may still become one; None otherwise."""
+        m = _LOOSE_OPEN.match(after)
+        if m:
+            name = m.group(1)
+            return (name, m.end()) if self._callable(name) else None
+        if ">" in after or "\n" in after or not after.startswith("<"):
+            return None
+        if _LOOSE_PART.match(after):
+            bare = after[1:].strip().lstrip("=").strip()
+            if after[1:].lstrip().startswith(("=", "function")):
+                return "wait"
+            if any(k.startswith(bare) for k in list(self.schemas) + list(self._alias) if isinstance(k, str)):
+                return "wait"
+        return None
 
     def _follower(self, after: str) -> str:
         """recover: what a `<tool_call>` followed (after whitespace) by `after` opens: "call" (`<function=`), "param"
@@ -1323,7 +1362,24 @@ class OutputParser:
                 # it is prose that names the format ("I'll use a <tool_call> block") - content, not a malformed call
                 # that ends the request.  Until its follower has arrived it is held, like a partial tag.
                 after = self.buf[i + len(CALL_START):].lstrip()
+                if self.schemas and not after.startswith(FUNC_START):
+                    loose = self._loose_open(after)
+                    if loose == "wait":                  # may still become one: held like a partial tag
+                        j = i
+                        while j > 0 and self.buf[j - 1] == "\n":
+                            j -= 1
+                        if j > 0:
+                            out.append(Event("content", self._track(self.buf[:j])))
+                            self.buf = self.buf[j:]
+                        return out
+                    if loose:                            # #3441: `<=NAME>` etc. is `<function=NAME>`
+                        at = len(self.buf) - len(after)
+                        self.buf = self.buf[:at] + FUNC_START + loose[0] + ">" + after[loose[1]:]
+                        continue
                 kind = self._follower(after) if self.recover else None
+                if (after.startswith("<") and kind is None and not FUNC_START.startswith(after)
+                        and not after.startswith(FUNC_START)):
+                    self.unread += 1
                 if kind in ("param", "json"):
                     if i and self.buf[:i].strip():
                         out.append(Event("content", self._track(self.buf[:i].rstrip("\n"))))
@@ -1356,6 +1412,22 @@ class OutputParser:
                         out.append(Event("content", self._track(self.buf[:j])))
                         self.buf = self.buf[j:]
                     return out
+                if not self.schemas and self.declared_only:
+                    # #3075 (local scope): a request that declared no tools gets no call; the name must be complete to tell
+                    gt = after.find(">")
+                    nl = after.find("\n")
+                    if gt < 0 and nl < 0:
+                        j = i
+                        while j > 0 and self.buf[j - 1] == "\n":
+                            j -= 1
+                        if j > 0:
+                            out.append(Event("content", self._track(self.buf[:j])))
+                            self.buf = self.buf[j:]
+                        return out
+                    if gt >= 0 and (nl < 0 or gt < nl) and not self._callable(after[len(FUNC_START):gt].strip()):
+                        out.append(Event("content", self._track(self.buf[:i + len(CALL_START)])))
+                        self.buf = self.buf[i + len(CALL_START):]
+                        continue
                 if i and self.buf[:i].strip():
                     out.append(Event("content", self._track(self.buf[:i].rstrip("\n"))))
                 self.buf = self.buf[i + len(CALL_START):]

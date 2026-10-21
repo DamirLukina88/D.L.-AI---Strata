@@ -459,6 +459,7 @@ private:
     cudaEvent_t df_join_[2] = {};
     cudaGraphExec_t exec_[9] = {};
     cudaGraphExec_t exec_nr_[9] = {};   // #871: the doorbell variant of a stage that is all-resident otherwise
+    bool launched_[9] = {}, launched_nr_[9] = {};   ///< this graph has been launched once (early_ple_flag: a cold first launch raises the PLE flag first)
     cudaGraphExec_t commit_exec_ = nullptr;
 
     // mapped staging (host pointer, device alias)

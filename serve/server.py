@@ -4343,7 +4343,7 @@ class Service:
             done = f"{pr[0]:,} of {pr[1]:,}" if pr and pr[1] else f"{s.get('prompt_tokens', 0):,}"   # as read (#29)
             print(f"[strata] reading the prompt: {done} tokens, {el:.0f} s so far", flush=True)
         else:
-            rate = s["generated"] / max(1e-6, now - s["first_token"])
+            rate = s["generated"] / max(RATE_MIN_SPAN_S, now - s["first_token"])
             # #984: while a thinking budget applies, the thinking line shows it, not the request's max_tokens
             limit = (f"budget {s['thinking_budget']} (max {s.get('max_tokens')})"
                      if s["phase"] == "thinking" and s.get("thinking_budget") else f"max {s.get('max_tokens')}")
@@ -4351,18 +4351,20 @@ class Service:
                   f"{el:.0f} s", flush=True)
         return now
 
-    def run(self, ids, thinking, tools, max_new, sampling, cancel, force=None) -> Iterator[tuple[str, object]]:
+    def run(self, ids, thinking, tools, max_new, sampling, cancel, force=None,
+            declared_only=False) -> Iterator[tuple[str, object]]:
         """The request's events (see _run); with "prevent_sleep" in the config, the PC stays awake while it runs or waits."""
         ka = self.keep_awake
         if ka is not None:
             ka.acquire()
         try:
-            yield from self._run(ids, thinking, tools, max_new, sampling, cancel, force)
+            yield from self._run(ids, thinking, tools, max_new, sampling, cancel, force, declared_only)
         finally:
             if ka is not None:
                 ka.release()
 
-    def _run(self, ids, thinking, tools, max_new, sampling, cancel, force=None) -> Iterator[tuple[str, object]]:
+    def _run(self, ids, thinking, tools, max_new, sampling, cancel, force=None,
+             declared_only=False) -> Iterator[tuple[str, object]]:
         """Yields ("event", Event) as text arrives, then ("done", {"finish": .., "completion_tokens": ..}).
         `force` (forced_call): the opening of the call the reply must make - see prepare()."""
         defaults = {**self.sampling_defaults, **self.shared}   # the config's, then the Chat settings shared with apps
@@ -4388,7 +4390,8 @@ class Service:
                 print(f"[strata] thinking capped at {max_new - reserve} of max_tokens {max_new} to leave room for "
                       f"the answer (budget {budget})", flush=True)
                 budget = max(1, max_new - reserve)
-        parser = OutputParser(thinking=thinking, tools=tools, stream_tools=True, recover=self.tool_call_recovery)
+        parser = OutputParser(thinking=thinking, tools=tools, stream_tools=True, recover=self.tool_call_recovery,
+                              declared_only=declared_only)
         detok, n, finish = Detokenizer(self.tok), 0, "length"
         run_tok, run_len, repeated = None, 0, False     # #606: the current run of one repeated token
         thinking_n = 0                                  # tokens written while thinking (Responses' reasoning_tokens)
@@ -4781,11 +4784,12 @@ class Service:
                             now = time.time()
                             el = now - st.get("started", now)
                             ft = st.get("first_token")
-                            rate = n / max(1e-6, now - ft) if ft else 0.0
+                            rate = answer_speed(last, n, now - ft if ft else None)
                             hit_msg = f", expert cache {hit_rate*100:.1f}% hit" if hit_rate is not None else ""
                             if hit_msg and pcie_share:
                                 hit_msg += f" (+{pcie_share*100:.1f}% of the routed experts over PCIe)"
-                            print(f"[strata] done: {n} tokens in {el:.0f} s ({rate:.1f} tok/s) "
+                            rate_txt = f"{rate:.1f} tok/s" if rate is not None else "no speed"
+                            print(f"[strata] done: {n} tokens in {el:.0f} s ({rate_txt}) "
                                   f"({finish}, cancel={cancel.is_set()}){hit_msg}", flush=True)
                             if finish == "length" and parser.state in ("reasoning", "rcall"):   # #530
                                 print("[strata] the reply reached max tokens while still thinking, so it has no "
@@ -4813,6 +4817,10 @@ class Service:
             self.totals["tool_calls_from_reasoning"] = self.totals.get("tool_calls_from_reasoning", 0) + parser.rescued
             print(f"[strata] tool calls inside the thinking: {parser.rescued} read as calls, {parser.refused} kept as "
                   f"reasoning (quoted, or the turn did not end on a stop)", flush=True)
+        if parser.unread:
+            print(f"[strata] {parser.unread} <tool_call> block(s) in the answer did not read as a call of a declared "
+                  "tool and went back as text (a name the request did not declare, or a form the template does "
+                  "not use)", flush=True)
         if stops is not None and stops.hit is None and stops.held:
             yield "event", Event("content", stops.flush())     # the held tail was not a stop string after all
         done = {"finish": finish, "completion_tokens": n, "reused": (timings or {}).get("cache_n", 0),
@@ -4853,6 +4861,19 @@ def add_carry(carry: dict, last: dict) -> dict:
     if "prompt_read" in carry:
         out["prompt_read"] = carry["prompt_read"]
     return out
+
+
+def answer_speed(last: dict, generated: int, wall_s: float | None = None) -> float | None:
+    """The one definition of "answer speed" (upstream 0.2.2, fccfd343): every token the model produced (thinking and answer,
+    the tokens it kept - not the MTP drafts it threw away) over the engine's decode time.  Only an engine that sent no DONE
+    falls back to the server's clock from the first token, and a clock younger than RATE_MIN_SPAN_S says nothing (it printed
+    1000000 tok/s for a one-token reply).  Prompt reading is never in it."""
+    produced, decode_ms = last.get("generated"), last.get("decode_ms")
+    if produced and decode_ms and decode_ms > 0:
+        return round(produced / (decode_ms / 1000), 1)
+    if generated and wall_s is not None and wall_s >= RATE_MIN_SPAN_S:
+        return round(generated / wall_s, 1)
+    return None
 
 
 def request_timings(prompt_tokens: int, generated: int, last: dict) -> dict | None:
@@ -4953,7 +4974,7 @@ def run_with_mcp(svc: Service, hub, messages, tools, kw, ids, thinking, max_new,
     messages = list(messages)
     while True:
         text, reasoning, calls, own_calls = [], [], [], 0
-        for kind, x in svc.run(ids, thinking, tools, max_new, sampling, cancel):
+        for kind, x in svc.run(ids, thinking, tools, max_new, sampling, cancel, declared_only=True):
             if kind == "done":
                 done = x
                 continue
@@ -5074,7 +5095,7 @@ def openai_chunks(svc: Service, req: dict, ids, thinking, tools, max_new, cancel
     calls = 0
     streamed = {}                                  # tool call id -> index, for calls sent piece by piece
     finished = set()                               # ... and the ones whose final tool_call came (#211)
-    for kind, x in run if run is not None else svc.run(ids, thinking, tools, max_new, req, cancel, force=force):
+    for kind, x in run if run is not None else svc.run(ids, thinking, tools, max_new, req, cancel, force=force, declared_only=True):
         if kind == "ping":
             # a PP line: the prompt is being read and there is nothing to say yet.  It used to be only the SSE comment;
             # now it carries the progress when the client asked, and stays the comment when there is nothing to report.
@@ -5200,7 +5221,7 @@ def anthropic_events(svc: Service, req: dict, ids, thinking, tools, max_new, can
         return ("content_block_stop", {"type": "content_block_stop", "index": index})
 
     streamed, finished = set(), set()              # calls sent piece by piece; those whose final tool_call came (#211)
-    for kind, x in svc.run(ids, thinking, tools, max_new, req, cancel, force=force):
+    for kind, x in svc.run(ids, thinking, tools, max_new, req, cancel, force=force, declared_only=True):
         if kind == "ping":
             yield None
             continue

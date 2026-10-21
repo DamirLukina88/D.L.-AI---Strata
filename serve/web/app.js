@@ -2950,7 +2950,7 @@ async function send(overrideText) {
   // General chat is completely isolated from tools (all tools belong to Code tab & CLI)
   body.strata_mcp = false;
 
-  let firstAt = null, thinkStart = null, usage = null, frame = 0;
+  let firstAt = null, thinkStart = null, usage = null, timings = null, frame = 0;
   const paint = () => { frame = 0; updateAssistant(el, m, true); scrollDown(); };
   try {
     const r = await fetch("v1/chat/completions", {method: "POST", headers: headers(true), body: JSON.stringify(body),
@@ -2978,6 +2978,7 @@ async function send(overrideText) {
         try { j = JSON.parse(data); } catch (e) { continue; }
         if (j.error) throw new Error(j.error.message || "the engine reported an error");
         if (j.usage) usage = j.usage;
+        if (j.timings) timings = j.timings;
         if (j.strata_mcp) onTool(m, j.strata_mcp);
         const d = (j.choices && j.choices[0] && j.choices[0].delta) || {};
         const lastTool = m.tools && m.tools.length ? m.tools[m.tools.length - 1] : null;   // a new round after a tool
@@ -3003,8 +3004,11 @@ async function send(overrideText) {
   if (thinkStart && m.thinkSecs == null) m.thinkSecs = (performance.now() - thinkStart) / 1000;
   const n = usage ? usage.completion_tokens : null;
   if (n && firstAt) {
+    // Answer speed as upstream 0.2.2 defines it: the engine's produced tokens over its decode time (timings), so tool
+    // rounds and prompt reading between them are not in it; only a reply without timings falls back to the page's clock.
     const secs = (performance.now() - firstAt) / 1000;
-    m.meta = `${fmt(n)} tokens${secs > 0.25 ? ` · ${fmt(n / secs, 1)} tok/s` : ""}${m.stopped ? " · stopped" : ""}` +
+    const rate = timings && timings.predicted_per_second ? timings.predicted_per_second : (secs > 0.25 ? n / secs : null);
+    m.meta = `${fmt(n)} tokens${rate ? ` · ${fmt(rate, 1)} tok/s` : ""}${m.stopped ? " · stopped" : ""}` +
              (projectionLoaded() ? (settings.esp ? " · projection on" : " · projection off") : "");
   } else if (m.stopped) {
     m.meta = "Stopped";
