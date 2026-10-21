@@ -54,6 +54,10 @@ Checks:
 - Same-day bench (`tools/strata_bench.py`, 3 runs), new vs old engine: chat decode 24.3 vs 23.8, 4K prompt 297.0 vs 296.2, 16K 326.2 vs 326.8 tok/s, agent decode 27.9 vs 26.4, agent first token 11.50 vs 11.45 s. All inside run-to-run spread. Results: `bench/results/v0.2.2-fixes-2026-10-21/{new1,old1}`.
 - No hang, no error lines in the journal. A streamed reply's last chunk carries `timings`, and the console done line shows the same rate (21.5 tok/s).
 
+## Related
+
+- [Engine Port Check Scripts (2026-10-21)](engine-port-check-scripts-2026-10-21.md): the scripts behind the checks above.
+
 ## Sources
 
 1. Upstream release notes 0.2.2, GitHub notification email pasted by the user in chat, 2026-10-21.

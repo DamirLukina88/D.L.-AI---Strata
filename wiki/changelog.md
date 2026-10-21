@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-21:** Artifact Backup. artifacts/engine-port-check-scripts-2026-10-21.md (greedy answer check, A/B bench wrapper, streamed-timings check, serve tests already failing before the port); linked from the 0.2.2 review. (Agent: Claude Code)
 - **2026-10-21:** Update. artifacts/upstream-v0-2-2-review-2026-10-21.md (ported and deployed fixes, checks, corrected footer finding); decisions/rx-7600-xt-cachyos-deployment.md (engine 0.1.44.1+0.2.2-fixes). (Agent: Claude Code)
 - **2026-10-21:** Update. artifacts/upstream-v0-2-2-review-2026-10-21.md: what of 0.2.2 is already here, tried, or missing. (Agent: Claude Code)
 - **2026-10-21:** Update. artifacts/upstream-v0-2-releases-review-2026-10-20.md. (Agent: Claude Code)
