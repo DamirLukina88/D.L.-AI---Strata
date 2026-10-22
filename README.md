@@ -1,21 +1,29 @@
-<h1 align="center">D.L. AI</h1>
+<h1 align="center">Ray</h1>
 
-<p align="center"><b>A private AI workstation built on <a href="https://github.com/Niko1221/Strata">Strata</a></b><br>
-Dedicated private AI without external tracking. Your own model, your own rules.</p>
+<p align="center"><b>A private AI assistant and coding agent built on <a href="https://github.com/Niko1221/Strata">Strata</a></b><br>
+One desktop PC, no cloud model, nothing sent anywhere. Your own model, your own rules.</p>
 
-D.L. AI runs the 125-billion-parameter Qwen3.8-Flash-Next Coder model on one desktop PC (an AMD RX 7600 XT with
-16 GB and 32 GB of RAM) and turns it into a workstation you can reach from anywhere:
+Ray is a household AI assistant that runs entirely on one desktop PC: the 125-billion-parameter Qwen3.8-Flash-Next
+Coder model on an AMD RX 7600 XT with 16 GB, plus 32 GB of system RAM. This fork, by
+[Damir](https://github.com/DamirLukina88), adds everything around the engine and makes it a workstation you can
+reach from anywhere:
 
-- a coding agent (the **CLI**), with one shared session you can use from the terminal and from the browser
-- **Local Whisper STT & Neural TTS:** hands-free voice dictation with zero cloud data leaks, paired with neural voice read-aloud
-- **Home Assistant MCP Server:** direct voice and text control of lights, climate, smart plugs, 3D printers, and camera feeds
+- **Ray**, the assistant: you talk to her and she answers out loud, with a female neural voice and her own casual
+  personality. She knows she runs on this PC, not in someone's cloud.
+- **D.L. CLI**, a coding agent with one shared session you can use from the terminal and from the browser
+- **Offline voice:** local Whisper speech-to-text and Piper text-to-speech, with no audio leaving the PC
+- **Home Assistant MCP server:** the coding agent switches lights and climate and reads printers and cameras
+  (a Gree air conditioner, a Bambu Lab A1 3D printer, Xiaomi cameras, Tuya plugs and sensors)
 - a chat, a live monitor of the GPU, RAM and engine, and a file workspace on the server
 - remote access through a Cloudflare Tunnel over QUIC, behind a Cloudflare Access login
 
 The inference engine is Strata, unchanged except for configuration and hardware kernel ports. Upstream
 Strata releases are merged as they come out (currently **v0.1.45**). Upstream 0.2.0-beta and 0.2.1 (the new desktop
 app, Terminal and engine 0.1.46) were reviewed on 2026-10-20 and not merged: most of their changes are for other
-hardware or the new app ([review](wiki/artifacts/upstream-v0-2-releases-review-2026-10-20.md)).
+hardware or the new app ([review](wiki/artifacts/upstream-v0-2-releases-review-2026-10-20.md)). From 0.2.2, four
+fixes that apply to this PC were ported by hand on 2026-10-21: the HIP verify-window hang, the batched prompt retry
+after non-finite logits, drifted tool-call openers, and one answer-speed figure
+([review](wiki/artifacts/upstream-v0-2-2-review-2026-10-21.md)).
 
 ## How fast is it?
 
@@ -52,7 +60,18 @@ from coding traces with `tools/make_profile_mix.py`.
 
 ## What it adds to Strata
 
-### 1. Unified Shared CLI & Autonomous Coding Agent
+### 1. Ray, the Assistant
+The web app's Chat tab is Ray:
+- **Who she is:** a casual, direct household assistant with a light sense of humour. She never calls you "sir" or
+  "madam". Every Chat request starts with a short identity note: who built what, the hardware she runs on, and that
+  the model weights come from Alibaba's Qwen team, who neither run her nor see anything she does. Without it, the
+  model credits everything to Alibaba.
+- **Talk to her:** a spoken prompt adds voice rules (one to three plain sentences, no markdown, numbers said as words)
+  and is read back in the female Piper HFC voice. A typed prompt gets a normal written answer.
+- **Fast spoken answers:** with *Settings > Speech > Skip thinking for voice prompts* (on by default), a spoken prompt
+  is answered without thinking first, in Chat and in the Code tab. Typed prompts keep your Thinking setting.
+
+### 2. Unified Shared CLI & Autonomous Coding Agent
 The coding agent runs in a persistent background daemon (`tools/dl_sessiond.py`). Both the web app's **Code** tab
 and `dl_cli.py --attach` in a terminal are clients of the same session, allowing you to start a task on your phone
 and seamlessly inspect or continue it from your terminal:
@@ -73,31 +92,33 @@ and seamlessly inspect or continue it from your terminal:
 - **Checks that see the whole run:** the browser check also finds pages a build script writes, and it runs at every YOLO auto-continue, not only when a request ends. The fresh-context reviewer reads every change since the request started, shell-command edits included (from the checkpoints). Its findings are shown on the Code tab, and its note survives trimming while the agent works through it.
 - **Measured** with `tools/dl_agent_bench.py` on a 12-step task with the context squeezed to force 15 trims: before, the task and the plan were trimmed away (2 of 3 checks, 186 tool calls, 56 min); after, 3 of 3 checks with `PLAN.md` kept, 105 tool calls, 50 min. One run each; details in [the wiki](wiki/decisions/dl-cli-task-memory-and-finish-checks.md).
 
-### 2. Local Whisper Speech-to-Text (STT) & Hands-Free Auto-Send
+### 3. Local Whisper Speech-to-Text (STT) & Hands-Free Auto-Send
 Dictate prompts privately with 100% offline speech recognition:
 - **Local Whisper Engine:** runs on the PC host via `whisper.cpp` (`ggml-base.bin`) through `POST /v1/audio/transcriptions` with zero cloud leaks.
 - **Real-Time Interim Speech:** progressive interim speech population renders in the composer while walking or talking.
 - **Dual-Mode Voice Typing:** click to toggle recording, or hold-to-talk with visual recording pulse.
 - **Instant Auto-Send (0ms Delay):** hands-free auto-send populates the text field and submits immediately upon speech pause.
+- **Answers without the wait:** spoken prompts skip the model's thinking by default (see Ray, above).
 - **Mobile Keyboard Suppression:** taps on voice triggers call `navigator.virtualKeyboard.hide()` and set `inputmode="none"`, preventing smartphone on-screen keyboards from obscuring the screen.
 - **Browser Speech Fallback:** Web Speech API fallback available when local Whisper is uninstalled.
 
-### 3. Native Browser Text-to-Speech (TTS) & Neural Piper
+### 4. Native Browser Text-to-Speech (TTS) & Neural Piper
 Listen to responses hands-free without third-party audio streaming:
 - **Voice-Gated Auto-Speak:** *"Automatically read new answers aloud"* speaks replies only when the input was dictated via STT, preserving silence when typing.
-- **20 US Neural Piper Voices:** high-quality local Piper speech synthesis integrated via Linux Speech Dispatcher and Web Speech API.
+- **20 US Neural Piper Voices:** high-quality local Piper speech synthesis integrated via Linux Speech Dispatcher and Web Speech API. Ray's voice, `en_US-hfc_female-medium`, is the default in the browser and on the desktop; any other voice can be picked in Settings.
 - **Natural Speech Cleaner (`cleanForSpeech`):** strips markdown, emojis, code blocks, box borders, and converts math, units, and symbols to natural spoken words.
 - **Mobile Keep-Alive & Controls:** Android Screen WakeLock and MediaSession notification drawer controls (play, pause, stop).
 
-### 4. Home Assistant Smart Home MCP Server
-A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) exposes your smart home directly to the agent:
+### 5. Home Assistant Smart Home MCP Server
+A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) exposes your smart home to the coding agent (the Code tab and the terminal CLI; the Chat tab has no tools). It runs here with lights on Tuya smart plugs, a Gree air conditioner, a Bambu Lab A1 3D printer and two Xiaomi cameras:
 - Direct entity control: lights, switches, media players, climate units (Gree AC), covers, and smart plugs.
+- Rooms: entities carry their Home Assistant area, so "turn off the living room lights" finds every light there, plug-powered ones included.
 - Live camera snapshots: captures and saves camera feeds to the workspace for multimodal inspection.
 - Jinja2 template rendering and entity state history lookups.
 - Interactive MCP tools explorer in the web GUI via `/mcp`.
 - Loads when it is needed, not by default: when your message mentions the smart home, or when the agent turns it on itself.
 
-### 5. Tools for the Agent
+### 6. Tools for the Agent
 
 | Tool | What it does |
 | :--- | :--- |
@@ -115,7 +136,7 @@ A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) ex
 | `clear_conversation` | resets conversation state cleanly |
 | `list_entities`, `get_state`, `call_service`, `toggle`, `render_template`, `get_history`, `get_camera_snapshot` | Home Assistant smart home control suite |
 
-### 6. Workspace, JIT Model Loading & Remote Access
+### 7. Workspace, JIT Model Loading & Remote Access
 - **Server File Workspace:** upload files by drag and drop, browse folder trees, stream and resume large downloads.
 - **JIT Model Loading & Memory Hygiene:** models load on demand and unload after 8 hours idle. `STRATA_DROP_CACHE_ON_EXIT=1` returns Linux page cache (20+ GB) immediately on exit.
 - **Zero-Port Remote Access:** Cloudflare Tunnel over QUIC publishes the app, authenticated via Cloudflare Access JWT.
@@ -161,7 +182,7 @@ A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) ex
 
 - **Browser:** open the app (`http://127.0.0.1:8080` locally, or your tunnel hostname).
   - **Code:** shared coding agent with mobile cards and terminal views.
-  - **Chat:** voice typing, read-aloud TTS, and attachments.
+  - **Chat:** Ray, with voice typing, read-aloud TTS, and attachments.
   - **Monitor:** real-time GPU, VRAM, RAM, and KV cache monitoring.
 - **Terminal:** run `python3 tools/dl_cli.py --attach` to join the shared session, and `/detach` to leave it
   running.
@@ -198,6 +219,8 @@ A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) ex
 ## Credits and license
 
 Strata, the engine, the server and the installer, is by
-[Niko1221 and the Strata contributors](https://github.com/Niko1221/Strata), under the MIT license. This fork keeps
+[Niko1221 and the Strata contributors](https://github.com/Niko1221/Strata), under the MIT license. The model weights
+are Qwen3.8-Flash-Next from Alibaba's Qwen team. Ray, D.L. CLI and the rest of this fork are by
+[Damir](https://github.com/DamirLukina88). This fork keeps
 that license ([LICENSE](LICENSE)). Upstream's own documentation is in [docs/](docs/), and its paper is in
 [docs/paper](docs/paper).
