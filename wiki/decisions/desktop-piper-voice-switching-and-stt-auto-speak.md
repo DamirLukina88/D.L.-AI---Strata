@@ -70,7 +70,7 @@ This decision documents two critical speech subsystem fixes: (1) resolving Speec
 
 ## Related
 
-- [Ray: Assistant Name, Female Voice and Voice-Only Persona](ray-assistant-persona.md): the default voice is now HFC female.
+- [Ray: Assistant Name, Female Voice and Persona](ray-assistant-persona.md): the default voice is now HFC female.
 
 ## Sources
 

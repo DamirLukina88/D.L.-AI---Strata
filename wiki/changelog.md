@@ -15,6 +15,8 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-22:** Ray persona revised: casual tone, full credit to Damir's stack, sent with every Chat request. (Agent: Claude Code)
+- **2026-10-22:** Update. decisions/desktop-piper-voice-switching-and-stt-auto-speak.md, decisions/home-assistant-strata-mcp.md. (Agent: Claude Code)
 - **2026-10-22:** Ray rename, female voice and voice-only persona; work table light moved to Living Room. (Agent: Claude Code)
 - **2026-10-22:** Ingestion. decisions/ray-assistant-persona.md. (Agent: Claude Code)
 - **2026-10-21:** Artifact Backup. artifacts/engine-port-check-scripts-2026-10-21.md (greedy answer check, A/B bench wrapper, streamed-timings check, serve tests already failing before the port); linked from the 0.2.2 review. (Agent: Claude Code)
