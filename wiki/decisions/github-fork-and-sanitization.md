@@ -5,7 +5,7 @@ description: "Architecture for publishing customized Strata fork to GitHub while
 status: active
 tags: [git, github, fork, security, sanitization]
 created: 2026-10-10
-updated: 2026-10-21
+updated: 2026-10-22
 last_verified: 2026-10-10
 ---
 
@@ -29,6 +29,12 @@ The customized Strata platform (featuring the authenticated Claude Code Web Term
 - 2026-10-15 (late): Pushed `4274fb11..5209d07d` (audit fixes; 10 files), fast-forward. Secret scan: only the marked fake fixtures; no private strings in the added lines.
 
 - 2026-10-21: Pushed 5 commits to the fork (`74d597bd..f67a53a6`, fast-forward, `main` only, no force): the D.L. CLI task-memory and finish-check work, the YOLO and plan-chip fixes, the Cloudflare logout fix, and the CONTRA-run D.L. CLI fixes. Before the push, `scan_secrets_in_text` ran over all 11 staged files. The only hit was the existing fake OAuth tokens in `tools/test_dl_mcp.py` (`...FAKEfake...`). The diff adds no email addresses, but it does add 12 lines with machine paths (`/mnt/data/...`, a Claude scratchpad path) and one with the private domain. The fork already had the same kind of detail (36 of its 82 wiki pages carry machine paths, 15 files name the domain), so the 2026-10-10 "no private domains or machine paths" rule is not being kept for the wiki. *(Open: sanitize the wiki or keep it out of the fork.)*
+
+- 2026-10-22: Pushed 7 commits to the fork (`d53a4361..964c4a67`, fast-forward, `main` only, no force): the four
+  ported upstream 0.2.2 fixes and their wiki pages, the Ray rename, persona and female voice, thinking off for spoken
+  prompts, and the Home Assistant area script. `scan_secrets_in_text` passed on all 29 changed files (a planted fake key
+  was caught, so the scan ran). The added lines have no email address, home IP or host name; 6 carry `/mnt/data` paths,
+  as before. The Ray persona in `serve/web/app.js` names the user (Damir) and this PC's hardware, on purpose.
 
 ## Decisions & Configuration
 
