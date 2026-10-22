@@ -858,7 +858,7 @@ def main() -> int:
     r.add_argument("--effort", default="", choices=["", "none", "low", "medium", "high"],
                    help="thinking level for the bench sessions (default: the web app's Chat settings)")
     r.add_argument("--allow-stale", action="store_true", help="run even if the daemon started before a code change")
-    r.add_argument("--email-to", default="", help="when done, D.L. AI emails the result here with its Gmail tool")
+    r.add_argument("--email-to", default="", help="when done, Ray emails the result here with its Gmail tool")
     w = sub.add_parser("sweep", help="run the same tasks once per thinking level and compare")
     w.add_argument("--label", dest="base_label", default="quick", help="label prefix; each part adds -<level>")
     w.add_argument("--efforts", default="low,medium,high",
@@ -869,7 +869,7 @@ def main() -> int:
     w.add_argument("--max-nudges", type=int, default=0)
     w.add_argument("--socket", default="")
     w.add_argument("--allow-stale", action="store_true")
-    w.add_argument("--email-to", dest="mail_to", default="", help="D.L. AI emails the results here with its Gmail tool")
+    w.add_argument("--email-to", dest="mail_to", default="", help="Ray emails the results here with its Gmail tool")
     w.add_argument("--email-at", default="each", choices=["each", "end"], help="after each part, or once at the end")
     s = sub.add_parser("score", help="re-score a finished run without the model")
     s.add_argument("run_dir")

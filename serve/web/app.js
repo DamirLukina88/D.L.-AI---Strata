@@ -285,8 +285,9 @@ const TTSController = {
       }
     }
 
-    // 1. Highest priority: Piper neural voices (lessac / ryan)
-    const piper = voices.find((v) => /piper|lessac|ryan/i.test(v.name || v.voiceURI));
+    // 1. Highest priority: Ray's voice (Piper HFC female), then other Piper neural voices (lessac / ryan)
+    const piper = voices.find((v) => /hfc_female/i.test(v.name || v.voiceURI)) ||
+                  voices.find((v) => /piper|lessac|ryan/i.test(v.name || v.voiceURI));
     if (piper) return piper;
 
     // 2. High priority: Native neural / natural voices (Edge Natural / Chrome OS Neural / Apple Siri)
@@ -356,12 +357,12 @@ const TTSController = {
     }
   },
 
-  updateMediaSession(title = "D.L. AI Response") {
+  updateMediaSession(title = "Ray Response") {
     if (!("mediaSession" in navigator)) return;
     try {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: title,
-        artist: "D.L. AI · Strata",
+        artist: "Ray · Strata",
         album: "Local AI Voice",
       });
       navigator.mediaSession.playbackState = "playing";
@@ -597,7 +598,7 @@ const TTSController = {
       testBtn.onclick = () => {
         const vSel = $("tts-voice-select");
         if (vSel && vSel.value) store.set("tts_voice", vSel.value);
-        this.speakText("Hello! This is D.L. AI voice running natively in your browser.", testBtn);
+        this.speakText("Good day. I am Ray, running locally on this computer.", testBtn);
       };
     }
   },
@@ -610,7 +611,7 @@ const TTSController = {
     if (countEl) countEl.textContent = `${voices.length} available`;
     const saved = store.get("tts_voice", "");
 
-    sel.innerHTML = '<option value="">Auto (Piper / Neural preferred)</option>';
+    sel.innerHTML = '<option value="">Auto (Ray: Piper HFC female)</option>';
 
     const knownMeta = {
       amy: { name: "Amy", gender: "Female" },
@@ -2204,7 +2205,7 @@ if ($("model-select")) {
   };
 }
 
-let health = {model: "D.L. AI", images: false, max_context: 0};
+let health = {model: "Ray", images: false, max_context: 0};
 async function loadHealth() {
   try {
     health = await (await fetch("health")).json();
@@ -2905,6 +2906,12 @@ function setBusy(on) {
   $("composer-hint").textContent = on ? "" : "Shift+Enter: new line";
 }
 
+// D.L. AI: the assistant is Ray; this system message goes with voice (STT) prompts in the Chat tab only
+const RAY_PERSONA = "You are Ray, a household AI assistant running entirely on this computer. You are female (she/her). " +
+  "Your manner is that of a professional butler: polite, composed, attentive and discreet, with quiet dry wit at most. " +
+  "Never address the user as \"sir\", \"madam\" or by name. Your reply will be spoken aloud: answer in one to three short " +
+  "sentences of plain speech, with no markdown, lists, tables, code, emoji or URLs, unless the user asks for detail. " +
+  "Say numbers and units as a person would say them. If you are unsure, say so briefly rather than guessing.";
 async function send(overrideText) {
   if (typeof STTController !== "undefined") {
     STTController.cancelAutoSendTimer();
@@ -2938,8 +2945,10 @@ async function send(overrideText) {
   busy = {controller, msg: m};
   setBusy(true);
 
-  const body = {model: health.model, messages: apiMessages(), stream: true,
-                reasoning_effort: settings.thinking};
+  // Ray's persona only for a spoken prompt: the answer is read aloud, typed chats send what they always sent
+  const body = {model: health.model, messages: fromVoice ? [{role: "system", content: RAY_PERSONA}, ...apiMessages()]
+                                                         : apiMessages(),
+                stream: true, reasoning_effort: settings.thinking};
   if (settings.temperature > 0) {
     Object.assign(body, {temperature: +settings.temperature, top_p: +settings.top_p, top_k: +settings.top_k});
   } else {

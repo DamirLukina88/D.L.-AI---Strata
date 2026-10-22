@@ -794,7 +794,7 @@ class JobRunner:
         def approve(kind: str, summary: str, reason: str) -> bool:
             if not asked:
                 asked.append(1)
-                self.notify(f"D.L. AI: job #{job['id']} waits for your approval",
+                self.notify(f"Ray: job #{job['id']} waits for your approval",
                             f"The scheduled job #{job['id']} wants to:\n\n{summary}\n\n({reason})\n\n"
                             "Answer it on the Code tab; it counts as a no after 30 minutes.")
             return main.approve(kind, f"[scheduled job #{job['id']}] {summary}", reason, cancel=s.cancel)
@@ -926,7 +926,7 @@ def main() -> int:
     import argparse
     os.environ.setdefault("DL_CHECKPOINTS", "1")             # workspace checkpoints (cli.Checkpoints)
     os.environ.setdefault("DL_TRANSCRIPT", "1")              # every event to TRANSCRIPT_DIR
-    ap = argparse.ArgumentParser(description="D.L. AI shared CLI session daemon")
+    ap = argparse.ArgumentParser(description="Ray shared CLI session daemon")
     ap.add_argument("--workspace", default=os.environ.get("STRATA_WORKSPACE_DIR") or os.getcwd())
     ap.add_argument("--socket", default=str(SOCKET_PATH))
     a = ap.parse_args()

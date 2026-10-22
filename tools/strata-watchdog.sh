@@ -49,7 +49,7 @@ check_bridge() {
 check_sessiond() {
     systemctl --user is-enabled --quiet "$SESSIOND_UNIT" 2>/dev/null || return 0
     if ! systemctl --user is-active --quiet "$SESSIOND_UNIT"; then
-        log "D.L. AI session daemon is not running. Starting it..."
+        log "Ray session daemon is not running. Starting it..."
         systemctl --user reset-failed "$SESSIOND_UNIT" 2>/dev/null
         systemctl --user start "$SESSIOND_UNIT"
         SESSIOND_FAILURES=0
@@ -60,9 +60,9 @@ check_sessiond() {
         SESSIOND_FAILURES=0
     else
         SESSIOND_FAILURES=$((SESSIOND_FAILURES + 1))
-        log "D.L. AI session daemon check failed ($SESSIOND_FAILURES/$MAX_FAILURES)"
+        log "Ray session daemon check failed ($SESSIOND_FAILURES/$MAX_FAILURES)"
         if [ "$SESSIOND_FAILURES" -ge "$MAX_FAILURES" ]; then
-            log "D.L. AI session daemon is unresponsive. Restarting it..."
+            log "Ray session daemon is unresponsive. Restarting it..."
             systemctl --user restart "$SESSIOND_UNIT"
             SESSIOND_FAILURES=0
         fi

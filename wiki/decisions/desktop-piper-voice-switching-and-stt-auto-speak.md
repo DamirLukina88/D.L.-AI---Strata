@@ -68,6 +68,10 @@ This decision documents two critical speech subsystem fixes: (1) resolving Speec
 - All 20 Piper models tested directly in bash with zero aborts or failures.
 - Speech Dispatcher service restarted and verified active with `sd_generic`.
 
+## Related
+
+- [Ray: Assistant Name, Female Voice and Voice-Only Persona](ray-assistant-persona.md): the default voice is now HFC female.
+
 ## Sources
 
 1. User, chat, 2026-10-17.

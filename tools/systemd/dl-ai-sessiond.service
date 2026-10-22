@@ -3,7 +3,7 @@
 #   cp tools/systemd/dl-ai-sessiond.service ~/.config/systemd/user/   (set the two paths below)
 #   systemctl --user daemon-reload && systemctl --user enable --now dl-ai-sessiond
 [Unit]
-Description=D.L. AI shared CLI session daemon
+Description=Ray shared CLI session daemon
 After=strata-server.service
 
 [Service]

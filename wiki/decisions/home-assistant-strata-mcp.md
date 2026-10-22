@@ -5,7 +5,7 @@ description: "Home Assistant Core on D disk (/mnt/data), systemd boot service, a
 status: active
 tags: [homeassistant, mcp, iot, systemd, strata]
 created: 2026-10-17
-updated: 2026-10-21
+updated: 2026-10-22
 last_verified: 2026-10-17
 ---
 
@@ -42,8 +42,8 @@ Home Assistant Core is installed on dedicated storage (`/mnt/data/homeassistant`
 5. **Smart Outlet Lighting & Area Intelligence (Options 2 & 3)**:
    - Problem: Tuya imported smart plugs powering room lights as `switch.*` with `device_class: "outlet"`, causing AI queries like "turn off living room lights" to miss them.
    - Solution (Option 2): Native `light.switch` wrappers configured in `/mnt/data/homeassistant/config/configuration.yaml`:
-     * Living Room: `light.kitchen_lights`, `light.corner_light`, `light.metal_shelf_light`, `light.monitor_light`
-     * Office: `light.work_table_light`, `light.printer_light_and_air_filtration_system`
+     * Living Room: `light.kitchen_lights`, `light.corner_light`, `light.metal_shelf_light`, `light.monitor_light`, `light.work_table_light` (moved from Office on 2026-10-22; its outlet device "Lantern", `switch.lantern_socket`, stays in Office)
+     * Office: `light.printer_light_and_air_filtration_system`
    - WebSocket Entity Registry Area Assignment: Assigned `area_id` (`living_room` and `office`) to all wrapper lights via HA WebSocket API (`config/entity_registry/update`).
    - MCP Area Awareness (Option 3): Enhanced `tools/homeassistant_mcp.py`:
      * Added `AreaDeviceRegistry` caching HA `core.area_registry`, `core.device_registry`, and `core.entity_registry`.
@@ -98,3 +98,4 @@ Home Assistant Core is installed on dedicated storage (`/mnt/data/homeassistant`
 3. Configuration: `/mnt/data/homeassistant/config/configuration.yaml`.
 4. Walkthrough artifact: `walkthrough.md`.
 5. User, chat, 2026-10-21 ("Fix home assistant trigger").
+6. User, chat, 2026-10-22 (move the work table light to the living room).

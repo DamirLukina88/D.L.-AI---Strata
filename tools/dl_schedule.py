@@ -650,8 +650,8 @@ class Scheduler:
             what = j.get("prompt") or (j.get("action") or {}).get("tool")
             self.post(f"Scheduled job #{j.get('id')}: interrupted", f"{what}\n\nThe session daemon stopped while "
                       "it ran (restart, crash or power cut); it was not run again.", "warn")
-            self.notify(f"D.L. AI: job #{j.get('id')} interrupted",
-                        f"The scheduled job #{j.get('id')} was running when the D.L. AI session daemon stopped. It may "
+            self.notify(f"Ray: job #{j.get('id')} interrupted",
+                        f"The scheduled job #{j.get('id')} was running when the Ray session daemon stopped. It may "
                         f"have done part of its work, so it was not run again.\n\nJob: {what}")
         return [j.get("id") for j in found]
 
@@ -748,7 +748,7 @@ class Scheduler:
             mail = (f"The scheduled job #{job['id']} was due {fmt(scheduled)} but the PC or the daemon was off; it is "
                     f"{late / 3600:.1f} h late, so it was skipped.\n\n{job.get('prompt')}")
             reports.append(lambda i=job["id"], t=text: self.post(f"Skipped job #{i}", t, "warn"))
-            reports.append(lambda i=job["id"], m=mail: self.notify(f"D.L. AI: job #{i} skipped", m))
+            reports.append(lambda i=job["id"], m=mail: self.notify(f"Ray: job #{i} skipped", m))
             return "changed"
         return (scheduled, late)
 
@@ -799,11 +799,11 @@ class Scheduler:
                   "info" if status == "ok" else "warn")
         if status != "ok":
             what = {"failed": "failed", "interrupted": "was interrupted half-way and was not run again"}[status]
-            self.notify(f"D.L. AI: job #{job['id']} {status}",
+            self.notify(f"Ray: job #{job['id']} {status}",
                         f"The scheduled job #{job['id']} ({describe(job['spec'])}) {what}.\n\n"
                         f"Job: {job.get('prompt') or job['action'].get('tool')}\n\n{text[:3000]}")
         elif job.get("email_result") and not job.get("action"):
-            self.notify(f"D.L. AI: {(job.get('prompt') or '')[:60]}", text[:20000])
+            self.notify(f"Ray: {(job.get('prompt') or '')[:60]}", text[:20000])
 
     def _record(self, job_id: int, status: str, text: str) -> None:
         with _lock:
