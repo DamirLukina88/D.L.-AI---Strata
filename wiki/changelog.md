@@ -15,6 +15,8 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-22:** Artifact Backup. Home Assistant entity area script (ha-entity-area-script). (Agent: Claude Code)
+- **2026-10-22:** Ingestion. artifacts/ha-entity-area-script.md. (Agent: Claude Code)
 - **2026-10-22:** Voice prompts skip thinking in Chat and Code (Settings toggle, on by default). (Agent: Claude Code)
 - **2026-10-22:** Ray persona revised: casual tone, full credit to Damir's stack, sent with every Chat request. (Agent: Claude Code)
 - **2026-10-22:** Update. decisions/desktop-piper-voice-switching-and-stt-auto-speak.md, decisions/home-assistant-strata-mcp.md. (Agent: Claude Code)

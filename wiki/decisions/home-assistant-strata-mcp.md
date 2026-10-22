@@ -90,6 +90,7 @@ Home Assistant Core is installed on dedicated storage (`/mnt/data/homeassistant`
 - [Home Assistant Core and Strata MCP Integration Plan](../artifacts/homeassistant-strata-core-plan.md)
 - [Home Assistant Server and Session Tools Walkthrough](../artifacts/homeassistant-and-session-tools-walkthrough.md)
 - [D.L. CLI On-Demand MCP Loading Plan](../artifacts/dl-cli-on-demand-mcp-plan.md)
+- [Home Assistant Entity Area Script](../artifacts/ha-entity-area-script.md)
 
 ## Sources
 
