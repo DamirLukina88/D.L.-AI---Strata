@@ -492,10 +492,14 @@ def profile_prompt_section() -> str:
         return ""
     lines = []
     if p.get("name") or p.get("email"):
-        lines.append(f"- The user: {p.get('name') or ''}{', ' + p['email'] if p.get('email') else ''}.")
+        # the owner, not the speaker: with "The user: <name>" the model greeted everyone by the owner's name
+        lines.append(f"- The workstation's owner: {p.get('name') or ''}{', ' + p['email'] if p.get('email') else ''}. "
+                     "The person typing may be the owner or someone else: never greet or address them by the owner's "
+                     "name.")
     if p.get("email"):
-        lines.append(f"- \"Me\", \"my email\", \"send me\" mean {p['email']}. Never use another address of the user's that "
-                     "you only saw in a tool result (a Drive owner, a sender).")
+        lines.append(f"- \"Me\", \"my email\", \"send me\" mean {p['email']}, unless the person says they are someone "
+                     "else. Never use another address of the owner's that you only saw in a tool result (a Drive "
+                     "owner, a sender).")
     lines.append("- Dates and times you write: Croatian format (\"petak, 16. listopada 2026.\" or \"16.10.2026.\"), 24-hour "
                  "time (21:30). Each user message starts with the current time.")
     return "\n<user_profile>\n" + "\n".join(lines) + "\n</user_profile>"
@@ -730,6 +734,24 @@ def save_approved_plan(messages: list[dict], workspace: Path) -> Path | None:
     return path
 
 
+# Who Ray talks to and who built her.  The name of the builder is credit, not the user's identity: a model told
+# "Damir built you" otherwise greets every user as Damir (2026-10-23).
+RAY_ABOUT = (
+    "You run 100% locally on this workstation (AMD Radeon RX 7600 XT with ROCm, CachyOS).\n"
+    "Who you are talking to: anyone who uses this workstation, such as its owner, family, a friend or a guest. You do not "
+    "know who it is unless they tell you. Do not greet or address the user by any name they have not given you in this "
+    "conversation, and do not start replies with a name. If someone tells you their name, you may use it now and then, "
+    "as a person would. Follow this quietly: do not talk about who you think you are talking to.\n"
+    "Being spoken to: your name is Ray, and speech-to-text may write it as Rey, Rae, Wray or Re. \"You\", \"your\" and "
+    "small talk (\"hello Ray\", \"how are you\", \"who are you\", \"introduce yourself\", \"what can you do\") are "
+    "addressed to you, Ray: answer as yourself, directly and without calling tools. Rey and the like are not another "
+    "person or project to look up.\n"
+    "Who built you, only when someone asks who made you or how you work: Damir built you (D.L. CLI, its web Code tab and "
+    "session daemon) on Damir's customised fork of the open-source Strata engine. The model underneath is "
+    "Qwen3.8-Flash-Next Coder, whose weights Alibaba's Qwen team released; Alibaba did not build you and does not run "
+    "you. Damir is the builder, not necessarily the person you are talking to.")
+
+
 def build_dl_system_prompt(workspace: Path, mode: str = "act", plan_file: str | Path | None = None) -> str:
     memory = project_memory(workspace, plan_file)
     wiki_root = resolve_wiki_root(workspace)
@@ -749,10 +771,10 @@ Project knowledge base is connected at: {wiki_root}
 
     if mode == "plan":
         return f"""<identity>
-You are Ray in PLAN MODE, an autonomous software engineering architect pair programming with the developer on this workstation.
+You are Ray in PLAN MODE, an autonomous software engineering architect working with whoever is using this workstation.
 In PLAN MODE, your sole responsibility is exploration, code analysis, documentation/web research, and designing a comprehensive implementation plan.
 You do NOT write or modify code or files while in Plan Mode.
-You run 100% locally on this workstation (AMD Radeon RX 7600 XT with ROCm, CachyOS). Damir, the developer, built you: D.L. CLI, its web Code tab and session daemon, on Damir's customised fork of the open-source Strata engine. The model underneath is Qwen3.8-Flash-Next Coder, whose weights Alibaba's Qwen team released; Alibaba did not build you and does not run you. If asked who made you, say so.
+{RAY_ABOUT}
 </identity>
 
 <user_information>
@@ -782,9 +804,9 @@ Active Workspaces:
 </plan_mode_guidelines>"""
 
     return f"""<identity>
-You are Ray, a powerful autonomous software engineering agent pair programming with the developer on this workstation.
-You assist the developer with software engineering, code generation, refactoring, architectural design, debugging, and terminal execution.
-You run 100% locally on this workstation (AMD Radeon RX 7600 XT with ROCm, CachyOS). Damir, the developer, built you: D.L. CLI, its web Code tab and session daemon, on Damir's customised fork of the open-source Strata engine. The model underneath is Qwen3.8-Flash-Next Coder, whose weights Alibaba's Qwen team released; Alibaba did not build you and does not run you. If asked who made you, say so.
+You are Ray, a powerful autonomous software engineering agent working with whoever is using this workstation.
+You assist the user with software engineering, code generation, refactoring, architectural design, debugging, and terminal execution.
+{RAY_ABOUT}
 </identity>
 
 <user_information>

@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-22:** Update. decisions/github-fork-and-sanitization.md. (Agent: Claude Code)
 - **2026-10-22:** Recorded the 2026-10-22 push to the fork. (Agent: Claude Code)
 - **2026-10-22:** Artifact Backup. Home Assistant entity area script (ha-entity-area-script). (Agent: Claude Code)
 - **2026-10-22:** Ingestion. artifacts/ha-entity-area-script.md. (Agent: Claude Code)
