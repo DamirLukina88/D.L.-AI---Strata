@@ -56,15 +56,24 @@ hands-free (STT → model → TTS).
   - Checked in the browser pane with requests intercepted: spoken Chat → none, typed Chat → the Thinking setting, spoken
     Code → none, typed Code → no effort (session level); with the toggle off, spoken prompts send no override.
 
+- **Gotcha: the model took the owner's name for the speaker's** (2026-10-23). The coding agent greeted everyone as
+  Damir ("Hello Damir — I'm Ray") because its prompt said "The user: <name>, <email>" (from
+  `~/.config/dl-ai/profile.json`) and "Damir, the developer, built you". Fix: the profile line no longer names
+  anyone (the email stays for "send me"); `RAY_ABOUT` in `tools/dl_cli.py` says the speaker is unknown unless they give
+  a name, names Damir only for credit, treats "you", small talk and STT spellings (Rey, Rae, Wray, Re) as addressed to
+  Ray and answered without tools, and says not to talk about the rule (one run recited it: "Whoever's using this
+  machine"). Chat's `RAY_IDENTITY` has the same rules. Benchmark and the prompt trim: [Ray Persona Bench](../artifacts/ray-persona-bench-2026-10-23.md).
+
 ## Verification
 
 - Browser pane, 2026-10-22 (after the revision): a typed prompt's request starts with one system message holding the
   identity; a simulated spoken one has the identity plus the voice rules. Title, header and empty chat read "Ray". No live answer was checked (the local server needs the API key).
 - `node tools/test_stt_controller.js` 53/53; `tools/test_dl_{schedule,sessiond,agent_bench,context,memory,mcp}.py` OK.
-- `app.js` cache tag bumped to `v=20261022-ray3` in `serve/web/index.html`.
+- `app.js` cache tag bumped to `v=20261023-ray5` in `serve/web/index.html`.
 
 ## Related
 
+- [Ray Persona Bench and Prompt Trim (2026-10-23)](../artifacts/ray-persona-bench-2026-10-23.md)
 - [Desktop Piper Voice Switching and STT-Only Auto-Speak Gating](desktop-piper-voice-switching-and-stt-auto-speak.md)
 
 ## Sources

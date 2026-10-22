@@ -5,7 +5,7 @@ description: "Record of every change the agent made to this wiki"
 status: active
 tags: [meta, changelog]
 created: 2026-10-05
-updated: 2026-10-22
+updated: 2026-10-23
 last_verified: 2026-10-05
 ---
 
@@ -15,6 +15,10 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-23:** Ray persona bench and prompt trim. (Agent: Claude Code)
+- **2026-10-23:** Ingestion. artifacts/ray-persona-bench-2026-10-23.md. (Agent: Claude Code)
+- **2026-10-23:** Update. decisions/ray-assistant-persona.md. (Agent: Claude Code)
+- **2026-10-23:** Gotcha: owner name in the profile made Ray greet every user by it. (Agent: Claude Code)
 - **2026-10-22:** Update. decisions/github-fork-and-sanitization.md. (Agent: Claude Code)
 - **2026-10-22:** Recorded the 2026-10-22 push to the fork. (Agent: Claude Code)
 - **2026-10-22:** Artifact Backup. Home Assistant entity area script (ha-entity-area-script). (Agent: Claude Code)
