@@ -310,6 +310,8 @@ const TTSController = {
   getPitch() { return +store.get("tts_pitch", 1.0); },
   getCodeMode() { return store.get("tts_code_mode", "skip"); },
   isAutoSpeak() { return !!store.get("tts_auto_speak", false); },
+  // spoken prompts (Chat and Code) are sent with thinking off; on unless turned off in Settings
+  isFastVoice() { return store.get("voice_no_thinking", true) !== false; },
 
   clean(rawText) {
     return cleanForSpeech(rawText, this.getCodeMode());
@@ -591,6 +593,16 @@ const TTSController = {
         autoToggle.setAttribute("aria-checked", String(next));
         store.set("tts_auto_speak", next);
         toast("info", `Auto-speak ${next ? "enabled" : "disabled"}`, next ? "Voice prompts (dictated via STT) will be read aloud automatically." : "Tap the speaker icon on any message to listen.", 2500);
+      };
+    }
+    const fastToggle = $("tts-fast-voice-toggle");
+    if (fastToggle) {
+      fastToggle.setAttribute("aria-checked", String(this.isFastVoice()));
+      fastToggle.onclick = () => {
+        const next = fastToggle.getAttribute("aria-checked") !== "true";
+        fastToggle.setAttribute("aria-checked", String(next));
+        store.set("voice_no_thinking", next);
+        toast("info", `Thinking for voice prompts ${next ? "off" : "on"}`, next ? "Spoken prompts answer right away." : "Spoken prompts use the Thinking setting.", 2500);
       };
     }
     const testBtn = $("tts-test-btn");
@@ -1978,7 +1990,9 @@ async function codeSend(text) {
     }
     return;
   }
-  if (await codeOp("input", { text })) {
+  // a spoken prompt runs this one turn without thinking (Settings > Skip thinking for voice prompts)
+  const turn = fromVoice && TTSController.isFastVoice() ? { text, effort: "none" } : { text };
+  if (await codeOp("input", turn)) {
     if (ta && ta.value.trim() === text) { ta.value = ""; ta.style.height = "auto"; }
   }
 }
@@ -2958,7 +2972,7 @@ async function send(overrideText) {
 
   const persona = fromVoice ? `${RAY_IDENTITY}\n\n${RAY_VOICE}` : RAY_IDENTITY;
   const body = {model: health.model, messages: [{role: "system", content: persona}, ...apiMessages()],
-                stream: true, reasoning_effort: settings.thinking};
+                stream: true, reasoning_effort: fromVoice && TTSController.isFastVoice() ? "none" : settings.thinking};
   if (settings.temperature > 0) {
     Object.assign(body, {temperature: +settings.temperature, top_p: +settings.top_p, top_k: +settings.top_k});
   } else {

@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-22:** Voice prompts skip thinking in Chat and Code (Settings toggle, on by default). (Agent: Claude Code)
 - **2026-10-22:** Ray persona revised: casual tone, full credit to Damir's stack, sent with every Chat request. (Agent: Claude Code)
 - **2026-10-22:** Update. decisions/desktop-piper-voice-switching-and-stt-auto-speak.md, decisions/home-assistant-strata-mcp.md. (Agent: Claude Code)
 - **2026-10-22:** Ray rename, female voice and voice-only persona; work table light moved to Living Room. (Agent: Claude Code)

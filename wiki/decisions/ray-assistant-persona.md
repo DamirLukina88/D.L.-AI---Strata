@@ -46,12 +46,22 @@ hands-free (STT → model → TTS).
     prompt adds `RAY_VOICE` (one to three spoken sentences, no markdown).
   - The D.L. CLI identity prompts (act and plan mode) carry the same credit line; their coding manner is unchanged.
 
+- **Thinking off for spoken prompts** (2026-10-22): Settings > Speech > "Skip thinking for voice prompts"
+  (`#tts-fast-voice-toggle`, `TTSController.isFastVoice()`, browser key `voice_no_thinking`, **on by default**, per
+  browser). When on, a spoken (STT) prompt is sent with thinking off; typed prompts are unchanged.
+  - Chat tab: `send()` sets `reasoning_effort: "none"`.
+  - Code tab: `codeSend()` adds `effort: "none"` to the `input` op; `serve/server.py` passes `effort` through to
+    `tools/dl_sessiond.py`, where `submit(..., effort=)` runs that one turn at it. The session's `/effort` level is left
+    as it was. Test: `TurnEffort` in `tools/test_dl_sessiond.py`.
+  - Checked in the browser pane with requests intercepted: spoken Chat → none, typed Chat → the Thinking setting, spoken
+    Code → none, typed Code → no effort (session level); with the toggle off, spoken prompts send no override.
+
 ## Verification
 
 - Browser pane, 2026-10-22 (after the revision): a typed prompt's request starts with one system message holding the
   identity; a simulated spoken one has the identity plus the voice rules. Title, header and empty chat read "Ray". No live answer was checked (the local server needs the API key).
 - `node tools/test_stt_controller.js` 53/53; `tools/test_dl_{schedule,sessiond,agent_bench,context,memory,mcp}.py` OK.
-- `app.js` cache tag bumped to `v=20261022-ray2` in `serve/web/index.html`.
+- `app.js` cache tag bumped to `v=20261022-ray3` in `serve/web/index.html`.
 
 ## Related
 
