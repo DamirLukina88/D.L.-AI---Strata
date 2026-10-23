@@ -23,11 +23,12 @@ app, Terminal and engine 0.1.46) were reviewed on 2026-10-20 and not merged: mos
 hardware or the new app ([review](wiki/artifacts/upstream-v0-2-releases-review-2026-10-20.md)). From 0.2.2, four
 fixes that apply to this PC were ported by hand on 2026-10-21: the HIP verify-window hang, the batched prompt retry
 after non-finite logits, drifted tool-call openers, and one answer-speed figure
-([review](wiki/artifacts/upstream-v0-2-2-review-2026-10-21.md)). From 0.2.3 (and the remaining 0.2.2 commits), six
-more engine, vision, server and CSS fixes were ported on 2026-10-23 (1-token `--spec` fix, speculative adaptive tier
-warm-up, elastic vision encoder for tool-returned images, enforced vision token limits, unread tool-call logging, and
-narrow `.cfg-form` layout) alongside enabling 8-bit hyper-connection weights (`STRATA_HC_Q8=1`) after a same-day A/B
-benchmark ([review](wiki/artifacts/upstream-v0-2-3-review-2026-10-23.md)).
+([review](wiki/artifacts/upstream-v0-2-2-review-2026-10-21.md)). From 0.2.3 and 0.2.3.1 (and the remaining 0.2.2 commits), seven
+more engine, vision, server, CSS and `setup.py` fixes were ported on 2026-10-23 (1-token `--spec` fix, speculative
+adaptive tier warm-up, elastic vision encoder for tool-returned images, enforced vision token limits, unread tool-call
+logging, narrow `.cfg-form` layout, and `BUILD.json` `archs`/`vision_archs` string-or-list parsing) alongside enabling
+8-bit hyper-connection weights (`STRATA_HC_Q8=1`) after a same-day A/B benchmark
+([review](wiki/artifacts/upstream-v0-2-3-review-2026-10-23.md)).
 
 ## How fast is it?
 
