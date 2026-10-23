@@ -98,6 +98,13 @@ hands-free (STT → model → TTS).
     `/clear`.
   - The server-side MCP servers on the Monitor (`serve/mcp.py`) stay for API clients that ask for them.
 
+- **"The home server", not "this PC"** (2026-10-23). The user reaches Ray from a phone too, where "this PC" and
+  "this workstation" sound wrong. The coding agent's prompt now says she runs on "the home server" and never to call
+  it "this PC", "this machine", "this workstation" or "right here"; "whoever is using this workstation" became
+  "whoever is using you", and the profile line says "the home server's owner". She still mentions where she runs in
+  introductions and may name the hardware (the user's choice). A first wording that explained why ("people reach you
+  from a phone") was repeated back in her answer, so the reason was left out.
+
 ## Verification
 
 - Browser pane, 2026-10-22 (after the revision): a typed prompt's request starts with one system message holding the

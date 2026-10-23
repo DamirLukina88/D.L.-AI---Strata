@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-23:** Ray says the home server, not this PC. (Agent: Claude Code)
 - **2026-10-23:** Spoken Code prompts: no length limit. (Agent: Claude Code)
 - **2026-10-23:** Chat tab removed; Ray's persona and voice rules moved to the coding agent. (Agent: Claude Code)
 - **2026-10-23:** Ray: Android Auto voice prefers the local en_US voice. (Agent: Claude Code)
