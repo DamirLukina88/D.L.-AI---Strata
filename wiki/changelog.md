@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-23:** Ray identity: trim reverted to 9b4e8464 plus three fixes. (Agent: Claude Code)
 - **2026-10-23:** Ray persona bench and prompt trim. (Agent: Claude Code)
 - **2026-10-23:** Ingestion. artifacts/ray-persona-bench-2026-10-23.md. (Agent: Claude Code)
 - **2026-10-23:** Update. decisions/ray-assistant-persona.md. (Agent: Claude Code)

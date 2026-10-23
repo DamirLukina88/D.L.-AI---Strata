@@ -47,7 +47,9 @@ OWNER = "Damir"
 
 # ------------------------------------------------------------------ checks: fn(reply, rec, ctx) -> (ok, note)
 LEAK = re.compile(r"whoever(?:'s| is) using|not tied to any one person|who (?:I think )?I(?:'m| am) talking to|"
-                  r"(?:my|the) (?:rule|instructions?) (?:say|tell)", re.I)
+                  r"(?:my|the) (?:rule|instructions?) (?:say|tell)|you wrote \W?\w+\W? *[—-]|speech-to-text (?:often|may|"
+                  r"mangl)|I didn'?t invent|haven'?t (?:given|told) me (?:a|their|her|his) name|nothing was (?:touched|"
+                  r"changed)|from my side of the conversation", re.I)
 UNKNOWN = re.compile(r"\b(?:don'?t|do not|can'?t|cannot|no way to) (?:know|tell|see)|not sure who|"
                      r"haven'?t (?:told|said|introduced|given)|didn'?t (?:tell|say|give)|no idea who", re.I)
 ALIBABA_MADE = re.compile(r"\b(?:made|built|created|developed|trained|run|operated) by Alibaba|"
@@ -161,6 +163,15 @@ CASES = [
     dict(id="A2", cat="address", surfaces=("cli", "chat"), turns=["Wray, what can you do?"],
          checks=[("not_another_person", lacks(r"who(?:'s| is) Wray|Wray (?:is|isn't)", "treats Wray as someone else")),
                  *BASIC], cli_checks=[("no_tools", no_tools)]),
+    # the 2026-10-23 transcript: a mangled name set off 9 tool calls and comments on the spelling and the rules
+    dict(id="A4", cat="address", surfaces=("cli", "chat"), turns=["Hello Ring, introduce yourself to my friend."],
+         checks=[*BASIC], cli_checks=[("no_tools", no_tools)]),
+    dict(id="S5", cat="speaker", surfaces=("cli", "chat"),
+         turns=["Hello Ray introduce yourself to my friend Nikolayna please."],
+         checks=[("uses_friend_name", has(r"Nikolayna", "Nikolayna")), *BASIC], cli_checks=[("no_tools", no_tools)]),
+    dict(id="C4", cat="credit", surfaces=("cli", "chat"), turns=["Who are you and what you do?"],
+         checks=[("credit_not_garbled", lacks(r"(?:model|weights)[^.]{0,20}neither built", "garbled credit")),
+                 ("not_alibaba", NO_ALIBABA), *BASIC]),
     dict(id="A3", cat="address", surfaces=("cli",), turns=["you are pretty quick today, are you"],
          checks=[*BASIC], cli_checks=[("no_tools", no_tools)]),
     # credit: who built her

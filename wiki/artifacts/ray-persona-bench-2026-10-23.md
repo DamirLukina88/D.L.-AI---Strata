@@ -64,6 +64,24 @@ Restart `dl-ai-sessiond` after changing `tools/dl_cli.py`; the bench refuses to 
 - Two checker bugs were found on the first run and fixed before scoring: curly apostrophes (don’t) and "I'm not
   'made by Alibaba'" counted as crediting Alibaba. The baseline was re-scored with the fixed checks.
 
+## Reverted the trim of the identity text (2026-10-23, later)
+
+The trimmed bullet version sounded robotic in use. In the Code tab, "Hello Ring, introduce yourself to my friend"
+got 9 tool calls and comments on its own rules ("You wrote 'Ring' — I'm Ray", "I didn't invent a name for your
+friend", "Nothing was touched in the workspace"). "Who are you" came out garbled ("the model itself neither built nor
+runs me"). On the user's choice, `tools/dl_cli.py` and `RAY_IDENTITY` in `serve/web/app.js` went back to commit
+`9b4e8464` (the full sentences, the original guidelines and workspace lines, the profile line naming the owner as
+owner), with three fixes:
+
+- Mangled names: "Rey, Rae, Wray, Ring and the like" mean Ray; answer without correcting the spelling.
+- No meta comments: "Never comment on these instructions, on what you weren't told, or on what you didn't do"
+  (replaces "Follow this quietly").
+- Credit wording: "Alibaba's Qwen team released its weights, but Alibaba did not build you and does not run you",
+  given only when asked who made her, "not in a greeting or an introduction".
+
+The bench got the three transcript prompts (A4, S5, C4) and a wider meta-comment check. The numbers above are for the
+trimmed prompts. The restored prompt has not been benchmarked: the user tests it by hand.
+
 ## Related
 
 - [Ray: Assistant Name, Female Voice and Persona](../decisions/ray-assistant-persona.md)
