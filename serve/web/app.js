@@ -295,8 +295,12 @@ const TTSController = {
     if (piper) return piper;
 
     // Ray is female: without Piper (a phone, Edge, macOS) each step below takes a female voice of its kind first, since
-    // the first "Natural" voice is often male (Edge lists "Microsoft Andrew Online (Natural)" early)
-    const female = (list) => list.find((v) => RAY_FEMALE_VOICE.test(v.name || v.voiceURI)) || list[0];
+    // the first "Natural" voice is often male (Edge lists "Microsoft Andrew Online (Natural)" early).  Android Chrome
+    // names voices by language only ("English United States", lang en_US): there the local US voice, female by
+    // default, comes before the first English voice in the list (which was male, 2026-10-23)
+    const us = (v) => /^en[-_]us$/i.test(v.lang || "");
+    const female = (list) => list.find((v) => RAY_FEMALE_VOICE.test(v.name || v.voiceURI)) ||
+                             list.find((v) => us(v) && v.localService) || list.find(us) || list[0];
 
     // 2. High priority: Native neural / natural voices (Edge Natural / Chrome OS Neural / Apple Siri)
     const natural = female(voices.filter((v) => /natural|neural|online/i.test(v.name || v.voiceURI)));

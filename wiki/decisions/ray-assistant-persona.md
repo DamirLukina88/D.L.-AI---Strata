@@ -38,6 +38,11 @@ hands-free (STT → model → TTS).
     first (`RAY_FEMALE_VOICE` in `serve/web/app.js`: Ava, Jenny, Aria, Google US English, Samantha, Android `-x-sfg`
     and more). Checked in the browser pane with fake voice lists: Edge → Ava, Chrome → Google US English, Android →
     `en-us-x-sfg-local`, desktop Piper → hfc_female.
+  - Android Chrome (92 voices on the user's phone) names voices by language only ("English United States", lang
+    `en_US` with an underscore, `[local]`), so no female name matched and Auto took the first English voice, which
+    was male. The user fixed it by hand by picking "English United States (en_US) [local]". Now, with no female name,
+    each step prefers a local `en-US`/`en_US` voice, then any `en-US` one (checked with an Android-style list in the
+    browser pane).
   - A voice saved in a browser still wins over Auto, and "Test voice" saves the selected one: sampling a male voice
     keeps it. Pick "Auto" in Settings to go back.
 - **Auto-read on by default** (2026-10-23): "Automatically read new answers aloud" (`tts_auto_speak`) is on unless

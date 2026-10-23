@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-23:** Ray: Android Auto voice prefers the local en_US voice. (Agent: Claude Code)
 - **2026-10-23:** Ray: female voice fallbacks without Piper; auto-read on by default. (Agent: Claude Code)
 - **2026-10-23:** Ray identity: trim reverted to 9b4e8464 plus three fixes. (Agent: Claude Code)
 - **2026-10-23:** Ray persona bench and prompt trim. (Agent: Claude Code)
