@@ -233,6 +233,47 @@ class TurnEffort(unittest.TestCase):
         self.assertEqual(seen, ["none", "high"])
         self.assertEqual(s.effort, "high")
 
+    def test_auto_effort_resolves_per_turn_and_explicit_turn_effort_still_wins(self):
+        sys.path.insert(0, str(HERE))
+        import dl_sessiond
+        seen = []
+        orig = dl_sessiond.cli.execute_agent_loop
+        dl_sessiond.cli.execute_agent_loop = lambda **kw: (
+            seen.append((kw["session_context"]["effort"], kw["session_context"].get("auto_effort"))),
+            kw["workspace"],
+        )[1]
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                s = dl_sessiond.Session("t", Path(tmp))
+                s.save = lambda: None
+                s._command("/effort auto")
+                self.assertEqual(s.effort, "auto")
+                for prompt, turn_eff in [
+                    ("Hey Ray!", None),
+                    ("What is the capital of Japan?", None),
+                    ("Explain how a B-tree works", None),
+                    ("Refactor tools/dl_cli.py and run unit tests", None),
+                    ("Refactor tools/dl_cli.py", "none"),  # explicit per-turn override (e.g. voice_no_thinking)
+                ]:
+                    s.submit(prompt, effort=turn_eff)
+                    for _ in range(200):
+                        if not s.busy:
+                            break
+                        time.sleep(0.01)
+        finally:
+            dl_sessiond.cli.execute_agent_loop = orig
+        self.assertEqual(
+            seen,
+            [
+                ("none", True),
+                ("low", True),
+                ("medium", True),
+                ("high", True),
+                ("none", False),
+            ],
+        )
+        self.assertEqual(s.effort, "auto")
+
     def test_a_spoken_turn_gets_the_voice_note(self):
         """voice: true (the web Code tab's microphone) adds the spoken-answer note to that prompt only."""
         sys.path.insert(0, str(HERE))

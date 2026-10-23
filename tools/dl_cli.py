@@ -79,6 +79,14 @@ except ImportError:
     except ImportError:          # serve/ not next to tools/: MCP servers are simply not offered
         dl_mcp = None
 
+try:
+    from tools import dl_effort
+except ImportError:
+    try:
+        import dl_effort
+    except ImportError:
+        dl_effort = None
+
 # ANSI colors & formatting (Strata Dark & Orange Aesthetic)
 C_RESET = "\033[0m"
 C_BOLD = "\033[1m"
@@ -2487,6 +2495,24 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
     emit = (session_context or {}).get("emit")
     cancel = (session_context or {}).get("cancel")
     effort = (session_context or {}).get("effort")
+    auto_effort = bool((session_context or {}).get("auto_effort")) or effort == "auto"
+    if effort == "auto" and dl_effort is not None:
+        effort, _ = dl_effort.resolve_turn(
+            (session_context or {}).get("user_text") or "",
+            mode=mode,
+            plan_file=(session_context or {}).get("plan_file"),
+            messages=messages[:-1] if messages and messages[-1].get("role") == "user" else messages,
+        )
+    seen_tool_calls: set[tuple[str, str]] = set()
+
+    def _escalate_effort(reason: str) -> None:
+        nonlocal effort
+        if auto_effort and effort != "high":
+            effort = "high"
+            if session_context is not None:
+                session_context["effort"] = "high"
+            _note(emit, f"Thinking level escalated to high ({reason}).", "info")
+
     registry = (session_context or {}).get("mcp")
     if registry is not None and registry.active:
         registry.route((session_context or {}).get("user_text") or "")
@@ -2558,6 +2584,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             messages.append({"role": "user", "content": LOOP_NOTE.format(sentence=(res.get("loop_sentence") or "")[:200])})
             _note(emit, f"Loop guard: the thinking kept repeating itself; stopped it and asked for the next action "
                         f"({loop_retries}/{LOOP_RETRIES}).", "warn")
+            _escalate_effort("loop guard retry")
             yolo_rollover()
             continue
 
@@ -2579,6 +2606,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                 emit({"type": "notice", "level": "warn", "text": note})
             else:
                 print(f"{C_YELLOW}{note}{C_RESET}")
+            _escalate_effort("tool call written in text")
             yolo_rollover()
             continue
 
@@ -2588,6 +2616,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                                  api_key, emit=emit, cancel=cancel, effort=effort)
             if back:
                 messages.append({"role": "user", "content": back})
+                _escalate_effort("incomplete work check")
                 yolo_rollover()                 # a send-back must not run into the cap and end a YOLO run
                 continue
 
@@ -2670,6 +2699,12 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                 "name": fn_name,
                 "content": result_str
             })
+            if auto_effort and dl_effort is not None and effort != "high":
+                esc_reason = dl_effort.check_tool_result_failure(
+                    fn_name, args, raw_args, result_str, seen_tool_calls, bad_args=bool(bad_args)
+                )
+                if esc_reason:
+                    _escalate_effort(esc_reason)
 
         if cps is not None:                         # this round's changes, so the next one can be undone
             if cps.ws != Path(current_ws).resolve():

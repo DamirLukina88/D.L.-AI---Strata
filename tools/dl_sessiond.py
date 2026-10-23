@@ -34,6 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dl_cli as cli  # noqa: E402
+import dl_effort  # noqa: E402
 import dl_mcp  # noqa: E402
 import dl_schedule  # noqa: E402
 from dl_auditing import format_health_card, get_system_health  # noqa: E402
@@ -51,7 +52,7 @@ APPROVAL_TIMEOUT = 30 * 60        # an unanswered approval is a "no"
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 NAME_OK = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
-EFFORTS = ("none", "low", "medium", "high")
+EFFORTS = ("none", "low", "medium", "high", "auto")
 EXECUTE_PLAN = ("Proceed with executing the plan now. Perform the necessary tool calls (edits, writes, tests, "
                 "commands) to implement the agreed plan.")
 EXECUTE_PLAN_FILE = ("Execute the approved plan in {plan} now, step by step, with the tool calls it needs (edits, "
@@ -332,12 +333,22 @@ class Session:
         # what built-ins (schedule, deepl, proton) need to know about this turn; the user asked "now"
         dl_mcp.CALL.ctx = {"workspace": self.workspace, "yolo": self.yolo, "request_time": time.time(),
                            "registry": self.mcp, "job": getattr(self, "job_id", None)}
+        raw_effort = effort or self.effort                 # a turn's own level (a spoken prompt: none) wins
+        auto_effort = raw_effort == "auto"
+        if auto_effort:
+            resolved_effort, reason = dl_effort.resolve_turn(
+                prompt, voice=voice, mode=self.mode, plan_file=self.plan_file, messages=self.messages
+            )
+            self.notice(f"Thinking level (auto): {resolved_effort} ({reason})")
+        else:
+            resolved_effort = raw_effort
         self.messages.append({"role": "user",
                               "content": cli.with_now(cli.resolve_file_references(prompt, self.workspace))
                               + (f"\n\n{cli.VOICE_NOTE}" if voice else "")})   # spoken: the answer is read aloud
         ctx = {"workspace": self.workspace, "messages": self.messages, "mode": self.mode, "yolo": self.yolo,
                "plan_file": self.plan_file,
-               "effort": effort or self.effort,          # a turn's own level (a spoken prompt: none) wins
+               "effort": resolved_effort,
+               "auto_effort": auto_effort,
                "emit": self.emit, "cancel": self.cancel, "approve": self.approve, "mcp": self.mcp, "user_text": prompt,
                "session": self}
         new_ws = cli.execute_agent_loop(messages=self.messages, url=cli.DEFAULT_URL, api_key=cli.DEFAULT_API_KEY,
@@ -454,7 +465,7 @@ class Session:
         if cmd == "/think":
             self.notice("/think is gone: the CLI follows the web app's Chat settings "
                         f"({cli.chat_settings_summary()}). Change them under Chat > Settings, or set this "
-                        "session's own level with /effort none|low|medium|high.")
+                        "session's own level with /effort none|low|medium|high|auto.")
             return None
         if cmd == "/cd":
             cand = Path(arg or str(Path.home())).expanduser()
@@ -598,7 +609,7 @@ HELP = """Modes
 /act [task]       Act Mode (executes the agreed plan when given no task; it is saved as PLAN.md); also /execute
 /planfile [path]  The plan the agent is held to (ticks its Progress; done check); off clears it
 /yolo             Fully autonomous: nothing asks (sending email included) until you turn it off again
-/effort [level]   This session's thinking level: none, low, medium, high, or default (the Chat settings)
+/effort [level]   This session's thinking level: none, low, medium, high, auto, or default (the Chat settings)
 
 Tools and jobs
 /mcp [on|off N]   On-demand tools: Home Assistant (3D printers, cameras, plugs, sensors), web search (Exa),
