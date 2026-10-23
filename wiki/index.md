@@ -25,6 +25,7 @@ Every page in this wiki is listed below. The list is generated; do not edit betw
 ## Decisions
 
 - [Approval Gate for Destructive Agent Actions](decisions/destructive-action-approval-gate.md) — D.L. CLI asks before destructive commands or writes outside the workspace; /yolo disables per session; content never restricted
+- [Auto Thinking Level (/effort auto)](decisions/auto-thinking-level.md) — Opt-in /effort auto: rules pick none/low/medium/high per turn, raise to high on failures; measured level costs
 - [Claude Code CLI Integration on Strata](decisions/claude-code-cli-integration.md) — How Claude Code CLI routes to local Strata with fit_max_tokens while isolating Claude Desktop.
 - [CLI Chat Markdown Export Feature](decisions/cli-chat-markdown-export.md) — Parity export feature for saving CLI conversations as structured Markdown via /save slash command and Web Code toolbar button.
 - [CLI Graphical Styling & Thinking Defaults](decisions/cli-graphical-styling-and-thinking-defaults.md) — Harmonization of CLI terminal interfaces and Web Code view with Strata dark and orange aesthetic, and default thinking effort configuration.
@@ -110,6 +111,7 @@ Every page in this wiki is listed below. The list is generated; do not edit betw
 - [Upstream PRs Merge Plan (2026-10-13)](artifacts/upstream-prs-merge-plan-2026-10-13.md) — Approved step plan for merging 13 open upstream PRs: backups, merge order, tests, bench-then-enable flag sweep, rollback
 - [Upstream Strata 0.2.0-beta and 0.2.1 Review (2026-10-20)](artifacts/upstream-v0-2-releases-review-2026-10-20.md) — Which 0.2.0-beta / 0.2.1 changes fit this install (RX 7600 XT, Linux, 32 GB RAM): most do not apply; the file-tier ports are the one lead
 - [Upstream Strata 0.2.2 Review (2026-10-21)](artifacts/upstream-v0-2-2-review-2026-10-21.md) — Which 0.2.2 changes fit this install (RX 7600 XT, Linux, 32 GB RAM, one NUMA node): the HIP verify-hang fix and a few server fixes; most of the release does not apply
+- [Upstream Strata 0.2.3 Review (2026-10-23)](artifacts/upstream-v0-2-3-review-2026-10-23.md) — Which upstream 0.2.3 changes fit this install (RX 7600 XT, Linux, 32 GB RAM): 6 engine/server/vision/web fixes ported; STRATA_HC_Q8=1 and speculative warm-up queued for same-day GPU bench
 - [Upstream Strata v0.1.43 Integration Plan](artifacts/upstream-v0-1-43-integration-plan.md) — Architecture and merge resolution plan for integrating upstream Strata v0.1.43 while preserving custom dark aesthetic, CLI, and guardrails
 - [Upstream v0.1.42 Fixes Integration Plan](artifacts/upstream-v0-1-42-fixes-plan.md) — Plan and execution details for integrating upstream Strata v0.1.42 fixes into the custom local installation.
 - [Upstream v0.1.45 Enhancements: Evaluation and Dual-Tier Benchmark Plan](artifacts/upstream-v0-1-45-evaluation-and-benchmark-plan.md) — Evaluation, technical spec, validation protocol, and exhaustive dual-tier benchmarks for upstream v0.1.45 on RX 7600 XT

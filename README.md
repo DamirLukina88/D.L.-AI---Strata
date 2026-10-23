@@ -23,7 +23,11 @@ app, Terminal and engine 0.1.46) were reviewed on 2026-10-20 and not merged: mos
 hardware or the new app ([review](wiki/artifacts/upstream-v0-2-releases-review-2026-10-20.md)). From 0.2.2, four
 fixes that apply to this PC were ported by hand on 2026-10-21: the HIP verify-window hang, the batched prompt retry
 after non-finite logits, drifted tool-call openers, and one answer-speed figure
-([review](wiki/artifacts/upstream-v0-2-2-review-2026-10-21.md)).
+([review](wiki/artifacts/upstream-v0-2-2-review-2026-10-21.md)). From 0.2.3 (and the remaining 0.2.2 commits), six
+more engine, vision, server and CSS fixes were ported on 2026-10-23 (1-token `--spec` fix, speculative adaptive tier
+warm-up, elastic vision encoder for tool-returned images, enforced vision token limits, unread tool-call logging, and
+narrow `.cfg-form` layout) alongside enabling 8-bit hyper-connection weights (`STRATA_HC_Q8=1`) after a same-day A/B
+benchmark ([review](wiki/artifacts/upstream-v0-2-3-review-2026-10-23.md)).
 
 ## How fast is it?
 
@@ -35,27 +39,28 @@ Measured on the workstation this fork is built for, with `tools/strata_bench.py`
 - **Model:** `qwen3.8-flash-next-coder-iq1_m`, 64K context, int8 KV cache, MTP draft 4
 
 <table>
-<tr><td align="center"><b>31.2 tok/s</b><br>peak chat decode</td>
-<td align="center"><b>291.7 tok/s</b><br>16K prompt ingestion</td>
+<tr><td align="center"><b>32.3 tok/s</b><br>peak decode</td>
+<td align="center"><b>334.4 tok/s</b><br>16K prompt ingestion</td>
 <td align="center"><b>1.62 s</b><br>chat time to first token</td>
-<td align="center"><b>26.1 tok/s</b><br>coding-agent decode</td></tr>
+<td align="center"><b>25.9 tok/s</b><br>coding-agent decode</td></tr>
 </table>
 
 Each column adds switches to the one before it:
 
-| Metric | A: baseline | B: + adaptive overlap | C: + route tail skip 7 | D1: + route resident 0.5 | E: + fusions, coding expert profile | F: + RDNA3 switches, core isolation | v0.1.43.1 / v0.1.45 config |
-| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Chat decode (median) | 20.0 tok/s | 20.7 | 22.7 | 21.0 | 20.9 (peak 31.2) | 18.4 (peak 28.0) | 18.3 (peak 29.8) |
-| Chat time to first token | 2.03 s | 1.93 | 2.13 | 2.03 | 1.86 | 1.81 | **1.62** |
-| 4K prompt ingestion | 258.4 tok/s | 265.9 | 264.2 | 268.1 | 268.1 | 265.8 | **277.2** |
-| 16K prompt ingestion | 281.8 tok/s | 285.6 | 283.9 | 286.0 | 288.8 | **291.7** | 289.9 |
-| 16K time to first token | 57.0 s | 56.3 | 56.6 | 56.2 | 55.7 | **55.1** | 55.4 |
-| Agent decode | 22.8 tok/s | 21.5 | 23.8 | **26.1** | 25.9 | 21.3 | 20.2 |
-| Agent turn time to first token | 13.3 s | 13.0 | 12.9 | 12.9 | 12.8 | 12.9 | **12.3** |
+| Metric | A: baseline | B: + adaptive overlap | C: + route tail skip 7 | D1: + route resident 0.5 | E: + fusions, coding expert profile | F: + RDNA3 switches, core isolation | v0.1.43.1 / v0.1.45 config | G: v0.2.3 fixes + `STRATA_HC_Q8=1` |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Chat decode (median) | 20.0 tok/s | 20.7 | 22.7 | 21.0 | 20.9 (peak 31.2) | 18.4 (peak 28.0) | 18.3 (peak 29.8) | **24.2** (peak **32.3**) |
+| Chat time to first token | 2.03 s | 1.93 | 2.13 | 2.03 | 1.86 | 1.81 | **1.62** | 1.82 (1.66–2.06) |
+| 4K prompt ingestion | 258.4 tok/s | 265.9 | 264.2 | 268.1 | 268.1 | 265.8 | 277.2 | **302.8** |
+| 16K prompt ingestion | 281.8 tok/s | 285.6 | 283.9 | 286.0 | 288.8 | 291.7 | 289.9 | **334.4** |
+| 16K time to first token | 57.0 s | 56.3 | 56.6 | 56.2 | 55.7 | 55.1 | 55.4 | **48.1** |
+| Agent decode | 22.8 tok/s | 21.5 | 23.8 | **26.1** | 25.9 | 21.3 | 20.2 | **25.9** (peak **31.0**) |
+| Agent turn time to first token | 13.3 s | 13.0 | 12.9 | 12.9 | 12.8 | 12.9 | 12.3 | **11.3** |
 
-Numbers are medians over the bench's runs. The active configuration combines Arm E and Arm F: `STRATA_ADAPT_OVERLAP=1`,
+Numbers are medians over the bench's runs. The active configuration combines Arm E, Arm F and Arm G: `STRATA_ADAPT_OVERLAP=1`,
 `STRATA_ADAPT_OVERLAP_RESIDENT=1`, `STRATA_ROUTE_TAIL_SKIP=7`, `STRATA_ROUTE_RESIDENT=0.5`, fusion and RDNA3 switches,
-the gfx1102 SIMT QSA scorer (`STRATA_SELECT_SIMT=1`), core isolation (`STRATA_AUX_CPUS=auto`), and a custom expert profile built
+WMMA prompt GEMMs (`STRATA_HIP_WMMA=1`), the gfx1102 SIMT QSA scorer (`STRATA_SELECT_SIMT=1`), Q8_0 hyper-connection weights
+(`STRATA_HC_Q8=1`), core isolation (`STRATA_AUX_CPUS=auto`), and a custom expert profile built
 from coding traces with `tools/make_profile_mix.py`.
 
 ## What it adds to Strata
@@ -87,6 +92,7 @@ and seamlessly inspect or continue it from your terminal:
 - **Approvals for destructive actions:** recursive deletes, `sudo`, disk tools, git history rewriting, and writes outside workspace require explicit Approve/Deny.
 - **YOLO Mode & Infinite Continuation:** `/yolo` disables approval prompts per session and enables infinite autonomous auto-continuation past `DL_MAX_TURNS` for complex workflows.
 - **Plan Mode:** `/plan` investigates read-only and presents an *Execute this plan?* prompt to transition cleanly into act mode.
+- **Automatic Thinking Level (`/effort auto`):** opt-in per-turn thinking selector (`tools/dl_effort.py`) that picks `none` for greetings, wake words and smart-home/clock commands, `low` for short factual questions, `medium` for conceptual explanations, and `high` for code, files, errors, plan mode, or follow-up complaints—and escalates mid-turn to `high` if any tool call errors, repeats, or hits a retry guard ([decision](wiki/decisions/auto-thinking-level.md)).
 - **Conversational Continues:** naturally typing *"continue"*, *"keep going"*, or *"go on"* routes directly to turn continuation.
 
 **Keeps its task on long runs** (added 2026-10-20, after a 6-hour run lost its task to context trimming):
@@ -202,7 +208,7 @@ A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) ex
   | `/yolo` | turn approvals off and enable infinite continuation |
   | `/continue` | continue execution of multi-turn assistant plans |
   | `/planfile <path>\|off` | attach a plan file the agent works from and ticks (`PLAN.md`) |
-  | `/effort none\|low\|medium\|high\|default` | this session's reasoning effort (default: the web app's Thinking setting) |
+  | `/effort none\|low\|medium\|high\|auto\|default` | this session's reasoning effort (`auto` picks per turn and escalates on tool failures; `default`: the web app's Thinking setting) |
   | `/cd <path>` | change the project folder |
   | `/status`, `/health` | engine status, hardware health |
   | `/mcp <server>` | inspect and execute tools on connected MCP servers |

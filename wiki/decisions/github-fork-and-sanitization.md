@@ -5,8 +5,8 @@ description: "Architecture for publishing customized Strata fork to GitHub while
 status: active
 tags: [git, github, fork, security, sanitization]
 created: 2026-10-10
-updated: 2026-10-22
-last_verified: 2026-10-10
+updated: 2026-10-23
+last_verified: 2026-10-23
 ---
 
 # GitHub Fork and Public Sanitization Architecture
@@ -35,6 +35,12 @@ The customized Strata platform (featuring the authenticated Claude Code Web Term
   prompts, and the Home Assistant area script. `scan_secrets_in_text` passed on all 29 changed files (a planted fake key
   was caught, so the scan ran). The added lines have no email address, home IP or host name; 6 carry `/mnt/data` paths,
   as before. The Ray persona in `serve/web/app.js` names the user (Damir) and this PC's hardware, on purpose.
+
+- 2026-10-23: Pushed the upstream 0.2.3/0.2.2 fixes port (`aece46db`, `2ccf57ec`, `c40a03e6`, `828a2559`, `8bf178fe`,
+  `9471faa5`), `/effort auto` (`tools/dl_effort.py`, `tools/dl_sessiond.py`, `tools/dl_cli.py`, `tools/test_dl_effort.py`),
+  `README.md` updates, and wiki pages (`upstream-v0-2-3-review-2026-10-23.md`, `auto-thinking-level.md`,
+  `rx-7600-xt-cachyos-deployment.md`) to `origin/main` (fast-forward, no force) after `scan_secrets_in_text` verified 0
+  findings across all staged files.
 
 ## Decisions & Configuration
 
