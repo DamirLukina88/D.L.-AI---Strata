@@ -8,7 +8,7 @@ serve/server.py at /api/code/session).  Start a task on the phone, continue it i
 Protocol: JSON lines on $XDG_RUNTIME_DIR/dl-ai/sessiond.sock (mode 600).
   {"op": "attach", "session": "dl-ai-code"}       -> {"type": "hello", "state": {...}, "events": [...]}, then live
   {"op": "input", "session": ..., "text": "...", "effort": "none"}  a prompt, a /command or !shell; effort (optional):
-                                                  this turn's thinking level, over the session's /effort
+                                                  this turn's thinking level, over the session's /effort; voice: true adds the spoken-answer note
   {"op": "approve" | "deny", "session": ..., "id": "..."}
   {"op": "interrupt", "session": ...}
   {"op": "export", "session": ...}                -> {"type": "export", "markdown": ..., "filename": ...}
@@ -284,7 +284,7 @@ class Session:
                     p["event"].set()
 
     # ---------------------------------------------------------------- input
-    def submit(self, text: str, origin: str = "", effort: str | None = None) -> None:
+    def submit(self, text: str, origin: str = "", effort: str | None = None, voice: bool = False) -> None:
         text = (text or "").strip()
         if not text:
             return
@@ -297,15 +297,15 @@ class Session:
             if self.plan_offer:                       # a new prompt replaces the open "Execute this plan?"
                 self.emit({"type": "approval_resolved", "id": self.plan_offer, "ok": False})
                 self.plan_offer = None
-        threading.Thread(target=self._run, args=(text, origin, effort), daemon=True).start()
+        threading.Thread(target=self._run, args=(text, origin, effort, voice), daemon=True).start()
 
-    def _run(self, text: str, origin: str, effort: str | None = None) -> None:
+    def _run(self, text: str, origin: str, effort: str | None = None, voice: bool = False) -> None:
         self.emit({"type": "user", "text": text, "origin": origin})
         self.emit_state()
         try:
             prompt = self._command(text)
             if prompt is not None:
-                self._agent(prompt, effort)
+                self._agent(prompt, effort, voice)
         except Exception as e:                        # a turn's failure never takes the daemon down
             self.emit({"type": "error", "text": str(e)})
             if self.messages and self.messages[-1].get("role") == "user":
@@ -328,12 +328,13 @@ class Session:
         self.messages.append({"role": "user", "content": prompt})
         self.messages.append({"role": "assistant", "content": plain(out)})
 
-    def _agent(self, prompt: str, effort: str | None = None) -> None:
+    def _agent(self, prompt: str, effort: str | None = None, voice: bool = False) -> None:
         # what built-ins (schedule, deepl, proton) need to know about this turn; the user asked "now"
         dl_mcp.CALL.ctx = {"workspace": self.workspace, "yolo": self.yolo, "request_time": time.time(),
                            "registry": self.mcp, "job": getattr(self, "job_id", None)}
         self.messages.append({"role": "user",
-                              "content": cli.with_now(cli.resolve_file_references(prompt, self.workspace))})
+                              "content": cli.with_now(cli.resolve_file_references(prompt, self.workspace))
+                              + (f"\n\n{cli.VOICE_NOTE}" if voice else "")})   # spoken: the answer is read aloud
         ctx = {"workspace": self.workspace, "messages": self.messages, "mode": self.mode, "yolo": self.yolo,
                "plan_file": self.plan_file,
                "effort": effort or self.effort,          # a turn's own level (a spoken prompt: none) wins
@@ -882,7 +883,8 @@ class Handler(socketserver.StreamRequestHandler):
                 reply: dict = {"type": "ok"}
                 if op == "input":
                     sess.submit(str(msg.get("text", "")), origin=msg.get("origin") or client_id,
-                                effort=msg.get("effort") if msg.get("effort") in EFFORTS else None)
+                                effort=msg.get("effort") if msg.get("effort") in EFFORTS else None,
+                                voice=msg.get("voice") is True)
                 elif op in ("approve", "deny"):
                     if not sess.answer(str(msg.get("id", "")), op == "approve"):
                         reply = {"type": "error", "text": "no such approval (already answered?)"}

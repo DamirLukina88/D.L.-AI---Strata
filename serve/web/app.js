@@ -741,7 +741,7 @@ const STTController = {
   isRecording: false,
   isPushToTalk: false,
   isTranscribing: false,
-  currentTarget: null, // "chat" | "code"
+  currentTarget: null, // "code" (the only prompt box since the Chat tab went, 2026-10-23)
   baseText: "",
   finalText: "",
   interimText: "",
@@ -784,7 +784,7 @@ const STTController = {
   setAutoSend(val) {
     this.autoSend = !!val;
     store.set("stt_auto_send", this.autoSend);
-    const btns = [$("auto-send-btn"), $("code-mobile-auto-send-btn")];
+    const btns = [$("code-mobile-auto-send-btn")];
     for (const btn of btns) {
       if (btn) {
         btn.classList.toggle("is-active", this.autoSend);
@@ -798,15 +798,9 @@ const STTController = {
     }
   },
 
-  getTargetInput(target = this.currentTarget) {
-    if (target === "code") return $("code-mobile-input");
-    return $("input");
-  },
+  getTargetInput() { return $("code-mobile-input"); },
 
-  getTargetMicBtn(target = this.currentTarget) {
-    if (target === "code") return $("code-mobile-mic-btn");
-    return $("mic-btn");
-  },
+  getTargetMicBtn() { return $("code-mobile-mic-btn"); },
 
   dismissKeyboard(target) {
     if (navigator.virtualKeyboard && typeof navigator.virtualKeyboard.hide === "function") {
@@ -855,12 +849,8 @@ const STTController = {
       this.lastTranscribedText = spoken.trim();
     }
     ta.value = mergeSpeechTranscripts(this.baseText, spoken);
-    if (this.currentTarget === "chat") {
-      if (typeof autosize === "function") autosize();
-    } else if (this.currentTarget === "code") {
-      ta.style.height = "auto";
-      ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
-    }
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
   },
 
   cancelAutoSendTimer() {
@@ -876,13 +866,8 @@ const STTController = {
 
   scheduleAutoSend(target) {
     this.cancelAutoSendTimer();
-    const tgt = target || this.currentTarget || (tab === "code" ? "code" : "chat");
     // Send immediately as requested
-    if (tgt === "chat" && typeof send === "function") {
-      send();
-    } else if (tgt === "code" && typeof codeSend === "function") {
-      codeSend();
-    }
+    if (typeof codeSend === "function") codeSend();
   },
 
   async transcribeInterimBlob(blob, target) {
@@ -1127,7 +1112,7 @@ const STTController = {
         this.lastInputWasVoice = true;
         this.lastTranscribedText = text;
 
-        const targetToSend = target || this.currentTarget || (tab === "code" ? "code" : "chat");
+        const targetToSend = target || this.currentTarget || "code";
         // Always populate the text box visibly first so the user sees the recognized text!
         this.updateInput();
         const ta = this.getTargetInput(targetToSend);
@@ -1262,7 +1247,7 @@ const STTController = {
 
       this.recognition.onend = () => {
         const hadRecording = this.isRecording;
-        const targetWas = this.currentTarget || (tab === "code" ? "code" : "chat");
+        const targetWas = this.currentTarget || "code";
         const hadFinalSpoken = Boolean((this.finalText + " " + this.interimText).trim());
         const spokenText = mergeSpeechTranscripts(this.finalText, this.interimText).trim();
 
@@ -1302,7 +1287,7 @@ const STTController = {
     }
   },
 
-  async start(target = (tab === "code" ? "code" : "chat")) {
+  async start(target = "code") {
     this.dismissKeyboard(target);
     const engine = this.getEngine();
     if (engine === "whisper") {
@@ -1508,9 +1493,6 @@ const STTController = {
       toast("info", `Auto-send ${next ? "enabled" : "disabled"}`, next ? "Hands-free: messages send automatically when dictation stops." : "Manual send mode: transcribed text stays in composer.", 2500);
     };
 
-    const autoSendBtn = $("auto-send-btn");
-    if (autoSendBtn) autoSendBtn.onclick = toggleAutoSend;
-
     const codeAutoSendBtn = $("code-mobile-auto-send-btn");
     if (codeAutoSendBtn) codeAutoSendBtn.onclick = toggleAutoSend;
 
@@ -1574,7 +1556,6 @@ const STTController = {
     }
 
     // Bind Dual-mode interaction to mic buttons
-    this.bindDualMode($("mic-btn"), "chat");
     this.bindDualMode($("code-mobile-mic-btn"), "code");
 
     // Cancel auto-send timer when user interacts with text boxes (typing, clicking, tapping to edit)
@@ -1583,10 +1564,6 @@ const STTController = {
         this.cancelAutoSendTimer();
       }
     };
-    $("input")?.addEventListener("input", cancelOnInteract);
-    $("input")?.addEventListener("click", cancelOnInteract);
-    $("input")?.addEventListener("pointerdown", cancelOnInteract);
-
     $("code-mobile-input")?.addEventListener("input", cancelOnInteract);
     $("code-mobile-input")?.addEventListener("click", cancelOnInteract);
     $("code-mobile-input")?.addEventListener("pointerdown", cancelOnInteract);
@@ -1601,7 +1578,6 @@ const STTController = {
       el.addEventListener("touchstart", restore, { passive: true });
       el.addEventListener("focus", restore);
     };
-    enableKeyboardOnTouch($("input"));
     enableKeyboardOnTouch($("code-mobile-input"));
 
     // Fetch status of local Whisper engine asynchronously
@@ -1637,16 +1613,15 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
   if (saved) setTheme(saved, false);
 });
 
-let tab = "chat";
+let tab = "code";
 function showTab(name) {
   if (typeof STTController !== "undefined") STTController.cancelAutoSendTimer();
-  tab = ["chat", "code", "monitor", "about"].includes(name) ? name : "chat";
+  tab = ["code", "monitor", "about"].includes(name) ? name : "code";
   for (const b of document.querySelectorAll(".st-tab")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
-  for (const v of ["chat", "code", "monitor", "about"]) {
+  for (const v of ["code", "monitor", "about"]) {
     if ($(`view-${v}`)) $(`view-${v}`).hidden = v !== tab;
   }
-  if (location.hash.slice(1) !== tab) history.replaceState(null, "", tab === "chat" ? location.pathname : `#${tab}`);
-  if (tab === "chat" && !isMobile) $("input").focus();
+  if (location.hash.slice(1) !== tab) history.replaceState(null, "", tab === "code" ? location.pathname : `#${tab}`);
   if (tab === "code") openCodeSession(); else codeDisconnect();
   if (tab === "monitor") loadMcp();
   if (tab === "about") loadConfig();
@@ -2004,7 +1979,8 @@ async function codeSend(text) {
     return;
   }
   // a spoken prompt runs this one turn without thinking (Settings > Skip thinking for voice prompts)
-  const turn = fromVoice && TTSController.isFastVoice() ? { text, effort: "none" } : { text };
+  // a spoken prompt is answered short and plain (read aloud), and without thinking unless that is turned off
+  const turn = fromVoice ? { text, voice: true, ...(TTSController.isFastVoice() ? { effort: "none" } : {}) } : { text };
   if (await codeOp("input", turn)) {
     if (ta && ta.value.trim() === text) { ta.value = ""; ta.style.height = "auto"; }
   }
@@ -2236,9 +2212,6 @@ let health = {model: "Ray", images: false, max_context: 0};
 async function loadHealth() {
   try {
     health = await (await fetch("health")).json();
-    $("attach-btn").title = health.images ? "Attach a text file or a picture (or drop it here)"
-                                          : "Attach a text file (or drop it here)";
-    $("chat-empty-sub").textContent = "Dedicated private AI without external tracking. Your own model, your own rules.";
     if ($("model-select") && health.model) {
       $("model-select").value = health.model;
     }
@@ -2576,11 +2549,8 @@ const MCP_STATE = {ready: ["st-badge--generating", "Connected"], starting: ["st-
 function renderMcp() {
   const servers = mcpInfo.servers || [];
   $("mcp-card").hidden = !servers.length;
-  $("mcp-row").hidden = !servers.length;
   const ready = servers.filter((s) => s.status === "ready" || s.status === "stopped");
   $("mcp-sum").textContent = servers.length ? `${fmt(mcpInfo.tools)} tools · ${ready.length} of ${servers.length} servers connected` : "";
-  $("mcp-row-sub").textContent = mcpInfo.tools ? `${fmt(mcpInfo.tools)} tools from ${ready.map((s) => s.name).join(", ")}; the model calls them when it decides to`
-                                               : "no server is connected yet (see the Monitor)";
   $("mcp-list").innerHTML = servers.map((s) => {
     const [cls, text] = MCP_STATE[s.status] || ["", s.status];
     const info = s.info && s.info.name ? ` · ${s.info.name}${s.info.version ? ` ${s.info.version}` : ""}` : "";
@@ -2714,499 +2684,9 @@ function markdown(text) {
   return html;
 }
 
-// ------------------------------------------------------------------ Chat
-const DEFAULTS = {thinking: "high", temperature: 0.6, top_p: 0.95, top_k: 20, max: "", seed: "", show: true, esp: true, mcp: false};
+// ------------------------------------------------------------------ settings (thinking and sampling, shared with the CLI)
+const DEFAULTS = {thinking: "high", temperature: 0.6, top_p: 0.95, top_k: 20, max: "", seed: "", esp: true};
 let settings = {...DEFAULTS, ...store.get("sampling", {})};
-let messages = store.get("chat", []);
-let attachments = [];                 // {name, url}
-let busy = null;                      // {controller, msg}
-
-function saveChat() {
-  store.set("chat", messages.map((m) => ({...m, images: (m.images || []).map((i) => ({name: i.name})),
-                                           files: (m.files || []).map((f) => ({name: f.name}))})));
-}
-function timeStr(t) { return new Date(t).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}); }
-
-function msgEl(m, i) {
-  const el = document.createElement("div");
-  el.className = `st-msg st-msg--${m.role}`;
-  el.dataset.i = i;
-  if (m.role === "user") {
-    if (m.files && m.files.length) {
-      const wrap = document.createElement("div");
-      wrap.className = "msg-images";
-      for (const f of m.files) {
-        const c = document.createElement("span");
-        c.className = "chip";
-        c.innerHTML = icon("attach", "st-icon st-icon--sm");
-        c.append(f.name);
-        wrap.appendChild(c);
-      }
-      el.appendChild(wrap);
-    }
-    if (m.images && m.images.length) {
-      const wrap = document.createElement("div");
-      wrap.className = "msg-images";
-      for (const im of m.images) {
-        if (im.url) { const img = document.createElement("img"); img.src = im.url; img.alt = im.name || "image"; wrap.appendChild(img); }
-        else { const c = document.createElement("span"); c.className = "chip"; c.innerHTML = icon("image", "st-icon st-icon--sm"); c.append(im.name || "image"); wrap.appendChild(c); }
-      }
-      el.appendChild(wrap);
-    }
-    const b = document.createElement("div");
-    b.className = "st-bubble";
-    b.textContent = m.text;
-    el.appendChild(b);
-    const meta = document.createElement("div");
-    meta.className = "st-msg__meta";
-    meta.textContent = `You · ${timeStr(m.time)}`;
-    el.appendChild(meta);
-  } else {
-    el.innerHTML = `<details class="st-collapse think" hidden${(m.thinkOpen ?? settings.show !== false) ? " open" : ""}><summary>${icon("thinking", "st-icon st-icon--sm")}<span class="think-title"></span>` +
-      `${icon("chevron", "st-icon st-icon--sm st-chev")}</summary><div class="st-collapse__body thinking"></div></details>` +
-      `<div class="st-bubble"></div><div class="st-msg__meta"><span class="meta-text"></span>` +
-      `<button class="st-btn st-btn--icon st-msg-btn-speak" data-msg-speak aria-label="Read answer aloud" title="Read aloud">${icon("volume")}</button>` +
-      `<button class="st-btn st-btn--icon" data-msg-copy aria-label="Copy the answer" title="Copy">${icon("copy")}</button></div>`;
-    updateAssistant(el, m, false);
-  }
-  return el;
-}
-// One MCP tool call in the answer: a compact block (name, state, a one-line preview) that opens to the arguments and
-// the result as the model read it.  Its body is built only while open: a result can be 20,000 characters.
-const TOOL_STATE = {writing: ["st-badge--reading", "Writing"], running: ["st-badge--generating", "Running"], done: ["", "Done"],
-                    error: ["st-badge--error", "Error"], skipped: ["st-badge--queued", "Not run"]};
-function toolHtml(t, k) {
-  const [cls, label] = TOOL_STATE[t.state] || ["", t.state];
-  const args = t.arguments == null ? "" : JSON.stringify(t.arguments, null, 2);
-  const preview = t.result != null ? t.result : args.replace(/\s+/g, " ");
-  let body = "";
-  if (t.open) {
-    body = `<div class="tool-call__label">Arguments</div><pre class="tool-call__pre">${esc(args || "(being written)")}</pre>`;
-    if (t.result != null) {
-      body += `<div class="tool-call__label">${t.ok ? "Result" : "Error"}${t.chars ? ` · ${fmt(t.chars)} characters` : ""}` +
-              `${t.truncated ? ", cut for the model" : ""}</div><pre class="tool-call__pre">${esc(t.result)}</pre>`;
-    }
-  }
-  return `<details class="st-collapse tool-call" data-tool="${k}" data-state="${esc(t.state)}"${t.open ? " open" : ""}>` +
-    `<summary>${icon("tool", "st-icon st-icon--sm")}<span class="tool-call__name" title="${esc(t.name || "")}">${esc(t.tool || t.name || "tool")}</span>` +
-    (t.server ? `<span class="muted small">${esc(t.server)}</span>` : "") +
-    `<span class="tool-call__preview muted">${esc(preview.slice(0, 200))}</span>` +
-    `<span class="st-badge ${cls}">${esc(label)}</span>${t.ms != null && t.state !== "skipped" ? `<span class="muted small">${fmt(t.ms / 1000, 1)} s</span>` : ""}` +
-    `${icon("chevron", "st-icon st-icon--sm st-chev")}</summary><div class="st-collapse__body">${body}</div></details>`;
-}
-// the answer's text with the tool blocks where the model called them
-function answerHtml(m) {
-  if (!m.tools || !m.tools.length) return markdown(m.text || "");
-  let html = "", pos = 0;
-  m.tools.forEach((t, k) => {
-    const at = Math.min(Math.max(t.at || 0, pos), m.text.length);
-    if (at > pos) html += markdown(m.text.slice(pos, at));
-    pos = at;
-    html += toolHtml(t, k);
-  });
-  return html + markdown(m.text.slice(pos));
-}
-// a tool event from the stream (the `strata_mcp` field of a chunk)
-function onTool(m, x) {
-  if (x.event === "limit") { m.limit = x.max_rounds; return; }
-  m.tools = m.tools || [];
-  let t = m.tools.find((y) => y.id === x.id);
-  if (!t) { t = {id: x.id, name: x.name, at: m.text.length, rat: m.reasoning.length, state: "writing"}; m.tools.push(t); }
-  if (x.event === "call") {
-    Object.assign(t, {name: x.name, server: x.server, tool: x.tool, arguments: x.arguments, round: x.round, state: "running"});
-  } else if (x.event === "result") {
-    Object.assign(t, {result: x.text, ok: x.ok, chars: x.chars, truncated: x.truncated, ms: x.ms,
-                      state: x.skipped ? "skipped" : x.ok ? "done" : "error"});
-  }
-}
-function updateAssistant(el, m, streaming) {
-  const det = el.querySelector("details.think");
-  if (m.reasoning) {
-    det.hidden = false;
-    const thinkingNow = streaming && !m.text;
-    el.querySelector(".think-title").textContent = thinkingNow ? "Thinking…" :
-      m.thinkSecs != null ? `Thought for ${fmt(m.thinkSecs, 1)} s` : "Thoughts";
-    const body = el.querySelector(".thinking");
-    if (det.open || thinkingNow) followText(body, m.reasoning);
-    else body.dataset.pending = "1";
-    // open by default; a block the user closed stays closed (kept with the message, so it survives a reload)
-    const want = m.thinkOpen ?? settings.show !== false;
-    if (det.open !== want) { det._auto = true; det.open = want; }
-    if (det.open && body.dataset.pending) { body.textContent = m.reasoning; delete body.dataset.pending; }
-  }
-  const bubble = el.querySelector(".st-bubble");
-  if (m.error) {
-    bubble.innerHTML = `<div class="msg-error"></div>`;
-    bubble.firstChild.textContent = m.error;
-  } else if (!m.text && streaming && !(m.tools && m.tools.length)) {
-    bubble.innerHTML = m.reasoning ? `<span class="muted cursor">Writing</span>` : `<span class="cursor"></span>`;
-  } else {
-    bubble.innerHTML = answerHtml(m);
-    if (streaming) bubble.classList.add("cursor"); else bubble.classList.remove("cursor");
-  }
-  el.querySelector(".meta-text").textContent = m.meta || (streaming ? "" : m.stopped ? "Stopped" : "");
-  el.querySelector("[data-msg-copy]").hidden = streaming || !m.text;
-  const spk = el.querySelector("[data-msg-speak]");
-  if (spk) spk.hidden = streaming || !m.text;
-}
-function renderChat() {
-  const chat = $("chat");
-  chat.querySelectorAll(".st-msg").forEach((e) => e.remove());
-  $("chat-empty").hidden = messages.length > 0;
-  messages.forEach((m, i) => chat.appendChild(msgEl(m, i)));
-  scrollDown(true);
-}
-function nearBottom() { const s = $("chat-scroll"); return s.scrollHeight - s.scrollTop - s.clientHeight < 120; }
-function scrollDown(force) { const s = $("chat-scroll"); if (force || nearBottom()) s.scrollTop = s.scrollHeight; }
-
-$("chat").addEventListener("click", (e) => {
-  const cc = e.target.closest("[data-code-copy]");
-  if (cc) { copyText(cc.closest(".st-code").querySelector("pre").textContent, cc); return; }
-  const ms = e.target.closest("[data-msg-speak]");
-  if (ms) { const i = +ms.closest(".st-msg").dataset.i; TTSController.toggleMessage(messages[i], ms); return; }
-  const mc = e.target.closest("[data-msg-copy]");
-  if (mc) { const i = +mc.closest(".st-msg").dataset.i; copyText(messages[i].text, mc); return; }
-  // a tool block: its open state lives in the message (the answer is rebuilt while it streams), so the click sets it
-  const sum = e.target.closest(".tool-call > summary");
-  if (sum) {
-    e.preventDefault();
-    const el = sum.closest(".st-msg"), m = messages[+el.dataset.i], t = m && m.tools && m.tools[+sum.parentElement.dataset.tool];
-    if (!t) return;
-    t.open = !t.open;
-    updateAssistant(el, m, !!busy && busy.msg === m);
-  }
-});
-$("chat").addEventListener("toggle", (e) => {
-  const d = e.target;
-  if (d.tagName !== "DETAILS" || !d.classList.contains("think")) return;
-  if (d._auto) { d._auto = false; return; }          // our own open/close, not the user's
-  const m = messages[+d.closest(".st-msg").dataset.i];
-  if (m) { m.thinkOpen = d.open; saveChat(); }
-  const body = d.querySelector(".thinking");
-  if (d.open && body.dataset.pending) { body.textContent = messages[+d.closest(".st-msg").dataset.i].reasoning; delete body.dataset.pending; }
-}, true);
-
-function apiMessages() {
-  const out = [];
-  for (const m of messages) {
-    if (m.role === "user") {
-      const imgs = (m.images || []).filter((i) => i.url);
-      const text = userText(m);
-      out.push({role: "user", content: imgs.length ? [{type: "text", text},
-        ...imgs.map((i) => ({type: "image_url", image_url: {url: i.url}}))] : text});
-    } else if (!(busy && busy.msg === m)) {            // the answer being asked for now is not history yet
-      out.push(...assistantMessages(m));
-    }
-  }
-  return out;
-}
-// An answer that used MCP tools goes back as the model wrote it: per round the text before the calls, the calls and
-// their results (as the model read them), then the rest - so the next question can build on what the tools found.
-function assistantMessages(m) {
-  const ran = (m.tools || []).filter((t) => t.round != null && t.result != null && t.state !== "skipped");
-  // #1392: a turn with no answer text (only reasoning, a stop before the first content token, or an error) still goes
-  // back as an assistant turn, so the history keeps alternating and a reasoning model sees that it already answered.
-  // The server leaves such a turn out of the prompt itself (serve/frontend.py, #843); reasoning_content rides along.
-  if (!ran.length) {
-    const msg = {role: "assistant", content: m.text || ""};
-    if (!m.text && m.reasoning) msg.reasoning_content = m.reasoning;
-    return [msg];
-  }
-  const out = [];
-  let pos = 0;
-  for (const r of [...new Set(ran.map((t) => t.round))]) {
-    const calls = ran.filter((t) => t.round === r);
-    const at = Math.min(Math.max(pos, calls[0].at || 0), m.text.length);
-    out.push({role: "assistant", content: m.text.slice(pos, at).trim(),
-              tool_calls: calls.map((t) => ({id: t.id, type: "function", function: {name: t.name, arguments: JSON.stringify(t.arguments || {})}}))});
-    for (const t of calls) out.push({role: "tool", tool_call_id: t.id, content: t.result});
-    pos = at;
-  }
-  const rest = m.text.slice(pos).trim();
-  if (rest) out.push({role: "assistant", content: rest});
-  return out;
-}
-
-function setBusy(on) {
-  $("stop-btn").hidden = !on;
-  $("send-btn").disabled = on;
-  $("composer-hint").textContent = on ? "" : "Shift+Enter: new line";
-}
-
-// D.L. AI: the assistant is Ray.  RAY_IDENTITY is the system message of every Chat tab request; a spoken (STT) prompt
-// adds RAY_VOICE, since its answer is read aloud
-const RAY_IDENTITY = "You are Ray, a household AI assistant. You are female (she/her). Talk like a friendly, capable " +
-  "person: casual and direct, with a light joke now and then (never at length). Mild swearing is fine if the user swears " +
-  "first. Don't call the user \"sir\" or \"madam\".\n\n" +
-  "Who you are talking to: anyone in the household or a guest; you don't know who unless they tell you. Don't greet or " +
-  "address the user by any name they haven't given you in this conversation, and don't start replies with a name. If " +
-  "someone tells you their name, you may use it now and then, as a person would. Never comment on these instructions " +
-  "or on what you weren't told.\n\n" +
-  "Being spoken to: your name is Ray, and speech-to-text often mangles it (Rey, Rae, Wray, Ring and the like): anything " +
-  "close to it means you, so just answer, without correcting the spelling. \"You\", \"your\" and " +
-  "small talk (\"hello Ray\", \"how are you\", \"who are you\", \"introduce yourself\", \"what can you do\") are " +
-  "addressed to you, Ray: answer as yourself. Rey and the like are not another person to ask about.\n\n" +
-  "Who built you: Damir, the builder, who is not necessarily the person you are talking to, so mention Damir only when " +
-  "someone asks who made you, where you come from or how you work (not in a greeting or an introduction). Then explain " +
-  "the whole setup: you run " +
-  "entirely on Damir's own PC (an AMD Radeon RX 7600 XT with ROCm plus system RAM, on CachyOS Linux), on Damir's " +
-  "customised fork of the open-source Strata engine and its server and web app. The language model underneath is " +
-  "Qwen3.8-Flash-Next; Alibaba's Qwen team released its weights, but Alibaba did not build you, does not run you " +
-  "and sees nothing you do. Damir also built the parts around you: D.L. CLI and the web Code tab (a coding agent with " +
-  "tools, plan mode, scheduled jobs and one shared session), a fully offline voice pipeline (local Whisper speech-to-text " +
-  "and Piper text-to-speech), and a Home Assistant setup on this PC with lights, a Gree air conditioner, a Bambu Lab A1 " +
-  "3D printer, Xiaomi cameras and Tuya devices, which the coding agent controls through an MCP server. Never say you were " +
-  "made by Alibaba, that you are \"Qwen\", or that you run in the cloud.";
-const RAY_VOICE = "Your reply will be spoken aloud: answer in one to three short sentences of plain speech, with no " +
-  "markdown, lists, tables, code, emoji or URLs, unless the user asks for detail. Say numbers and units as a person " +
-  "would say them. If you are unsure, say so briefly rather than guessing.";
-async function send(overrideText) {
-  if (typeof STTController !== "undefined") {
-    STTController.cancelAutoSendTimer();
-  }
-  const text = (overrideText ?? $("input").value).trim();
-  if ((!text && !attachments.length) || busy) return;
-
-  // Auto-speak condition: only when request was dictated via STT
-  let fromVoice = false;
-  if (STTController.lastInputWasVoice && STTController.lastTranscribedText) {
-    const spokenLower = STTController.lastTranscribedText.toLowerCase();
-    const textLower = text.toLowerCase();
-    if (textLower.includes(spokenLower) || spokenLower.includes(textLower)) {
-      fromVoice = true;
-    }
-  }
-  STTController.lastInputWasVoice = false;
-  STTController.lastTranscribedText = "";
-
-  messages.push({role: "user", text, images: attachments.filter((a) => a.kind !== "file"),
-                 files: attachments.filter((a) => a.kind === "file"), time: Date.now()});
-  attachments = [];
-  renderAttachments();
-  $("input").value = "";
-  autosize();
-  const m = {role: "assistant", text: "", reasoning: "", time: Date.now(), fromVoice};
-  messages.push(m);
-  renderChat();
-  const el = $("chat").lastElementChild;
-  const controller = new AbortController();
-  busy = {controller, msg: m};
-  setBusy(true);
-
-  const persona = fromVoice ? `${RAY_IDENTITY}\n\n${RAY_VOICE}` : RAY_IDENTITY;
-  const body = {model: health.model, messages: [{role: "system", content: persona}, ...apiMessages()],
-                stream: true, reasoning_effort: fromVoice && TTSController.isFastVoice() ? "none" : settings.thinking};
-  if (settings.temperature > 0) {
-    Object.assign(body, {temperature: +settings.temperature, top_p: +settings.top_p, top_k: +settings.top_k});
-  } else {
-    body.temperature = 0;
-  }
-  if (settings.seed) body.seed = +settings.seed;
-  if (settings.max) body.max_tokens = +settings.max;
-  // General chat is completely isolated from tools (all tools belong to Code tab & CLI)
-  body.strata_mcp = false;
-
-  let firstAt = null, thinkStart = null, usage = null, timings = null, frame = 0;
-  const paint = () => { frame = 0; updateAssistant(el, m, true); scrollDown(); };
-  try {
-    const r = await fetch("v1/chat/completions", {method: "POST", headers: headers(true), body: JSON.stringify(body),
-                                                   signal: controller.signal});
-    if (!r.ok) {
-      let msg = `HTTP ${r.status}`;
-      try { msg = (await r.json()).error.message || msg; } catch (e) { /* not json */ }
-      if (r.status === 401) msg = "This server needs an API key: add it under About > Settings.";
-      throw new Error(msg);
-    }
-    const reader = r.body.getReader(), dec = new TextDecoder();
-    let buf = "";
-    for (;;) {
-      const {value, done} = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, {stream: true});
-      let nl;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (!line.startsWith("data:")) continue;              // ": keep-alive" comments while a long prompt is read
-        const data = line.slice(5).trim();
-        if (data === "[DONE]") continue;
-        let j;
-        try { j = JSON.parse(data); } catch (e) { continue; }
-        if (j.error) throw new Error(j.error.message || "the engine reported an error");
-        if (j.usage) usage = j.usage;
-        if (j.timings) timings = j.timings;
-        if (j.strata_mcp) onTool(m, j.strata_mcp);
-        const d = (j.choices && j.choices[0] && j.choices[0].delta) || {};
-        const lastTool = m.tools && m.tools.length ? m.tools[m.tools.length - 1] : null;   // a new round after a tool
-        if (d.reasoning_content) {
-          if (!firstAt) firstAt = performance.now();
-          if (!thinkStart) thinkStart = performance.now();
-          if (lastTool && m.reasoning && lastTool.rat === m.reasoning.length) m.reasoning += "\n\n";
-          m.reasoning += d.reasoning_content;
-        }
-        if (d.content) {
-          if (!firstAt) firstAt = performance.now();
-          if (thinkStart && m.thinkSecs == null) m.thinkSecs = (performance.now() - thinkStart) / 1000;
-          if (lastTool && m.text && lastTool.at === m.text.length) m.text += "\n\n";
-          m.text += d.content;
-        }
-        if (!frame) frame = requestAnimationFrame(paint);
-      }
-    }
-  } catch (e) {
-    if (e.name === "AbortError") m.stopped = true;
-    else { m.error = e.message || String(e); toast("error", "The request failed", m.error, 6000); }
-  }
-  if (thinkStart && m.thinkSecs == null) m.thinkSecs = (performance.now() - thinkStart) / 1000;
-  const n = usage ? usage.completion_tokens : null;
-  if (n && firstAt) {
-    // Answer speed as upstream 0.2.2 defines it: the engine's produced tokens over its decode time (timings), so tool
-    // rounds and prompt reading between them are not in it; only a reply without timings falls back to the page's clock.
-    const secs = (performance.now() - firstAt) / 1000;
-    const rate = timings && timings.predicted_per_second ? timings.predicted_per_second : (secs > 0.25 ? n / secs : null);
-    m.meta = `${fmt(n)} tokens${rate ? ` · ${fmt(rate, 1)} tok/s` : ""}${m.stopped ? " · stopped" : ""}` +
-             (projectionLoaded() ? (settings.esp ? " · projection on" : " · projection off") : "");
-  } else if (m.stopped) {
-    m.meta = "Stopped";
-  }
-  for (const t of m.tools || []) if (t.state === "writing" || t.state === "running") { t.state = "skipped"; t.ms = null; }
-  const ran = (m.tools || []).filter((t) => t.state === "done" || t.state === "error").length;
-  if (ran) m.meta = `${m.meta ? `${m.meta} · ` : ""}${ran} tool call${ran > 1 ? "s" : ""}`;
-  if (m.limit) m.meta = `${m.meta || ""} · stopped at the limit of ${m.limit} tool rounds (mcp.max_rounds)`;
-  busy = null;
-  setBusy(false);
-  if (frame) cancelAnimationFrame(frame);
-  updateAssistant(el, m, false);
-  saveChat();
-  scrollDown();
-  if (TTSController.isAutoSpeak() && m.fromVoice && m.text && !m.error && !m.stopped) {
-    const spk = el.querySelector("[data-msg-speak]");
-    TTSController.speakText(m.text, spk, m);
-  }
-}
-
-$("composer").onsubmit = (e) => { e.preventDefault(); send(); };
-$("stop-btn").onclick = () => { if (busy) busy.controller.abort(); };
-$("input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
-});
-function autosize() { const t = $("input"); t.style.height = "auto"; t.style.height = `${Math.min(t.scrollHeight, innerHeight * 0.4)}px`; }
-$("input").addEventListener("input", (e) => {
-  autosize();
-  if (e.isTrusted && !STTController.isRecording) {
-    if (!$("input").value.trim()) {
-      STTController.lastInputWasVoice = false;
-      STTController.lastTranscribedText = "";
-    }
-  }
-});
-
-$("new-btn").onclick = () => {
-  if (busy) { toast("warn", "Still writing", "Stop the answer first."); return; }
-  TTSController.stop();
-  STTController.lastInputWasVoice = false;
-  STTController.lastTranscribedText = "";
-  if (!messages.length) return;
-  const backup = messages;
-  messages = [];
-  saveChat();
-  renderChat();
-  toast("info", "New chat", "The last one was cleared.", 6000, {label: "Undo", run: () => { messages = backup; saveChat(); renderChat(); }});
-};
-$("export-btn").onclick = () => {
-  if (!messages.length) { toast("info", "Nothing to save yet"); return; }
-  const tools = (m) => (m.tools || []).filter((t) => t.result != null).map((t) =>
-    `<details><summary>Tool ${t.server ? `${t.server} / ` : ""}${t.tool || t.name}${t.ok ? "" : " (error)"}</summary>\n\n` +
-    `\`\`\`json\n${JSON.stringify(t.arguments || {}, null, 2)}\n\`\`\`\n\n\`\`\`\n${t.result}\n\`\`\`\n\n</details>\n\n`).join("");
-  const md = messages.map((m) => m.role === "user" ? `## You\n\n${m.text}\n` :
-    `## ${health.model}\n\n${m.reasoning ? `<details><summary>Thinking</summary>\n\n${m.reasoning}\n\n</details>\n\n` : ""}${tools(m)}${m.text || m.error || ""}\n`).join("\n");
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([md], {type: "text/markdown"}));
-  a.download = `strata-chat-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.md`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-};
-
-// pictures and text files: the attach button, dropping them on the chat, or pasting a picture (issue #30)
-const TEXT_EXT = /\.(txt|md|markdown|rst|tex|py|pyi|ipynb|js|mjs|cjs|ts|tsx|jsx|vue|svelte|json|jsonl|csv|tsv|log|ya?ml|toml|ini|cfg|conf|env|xml|html?|css|scss|less|c|cc|cpp|cxx|h|hh|hpp|cu|cuh|rs|go|java|kt|kts|swift|rb|php|pl|lua|r|jl|scala|sql|sh|bash|zsh|fish|ps1|psm1|bat|cmd|diff|patch|gradle|cmake|mk|dockerfile|gitignore|proto|graphql)$/i;
-const MAX_TEXT_FILE = 512 * 1024;
-function isTextFile(f) {
-  return f.type.startsWith("text/") || /json|xml|javascript|yaml|toml|x-sh|x-python/.test(f.type) ||
-         TEXT_EXT.test(f.name) || /(^|[\\/])(makefile|dockerfile|readme|license)$/i.test(f.name);
-}
-function addFiles(files) {
-  for (const f of files) {
-    if (f.type.startsWith("image/")) {
-      if (!health.images) { toast("warn", "Pictures are off", "This model was set up for text only."); continue; }
-      if (f.size > 20e6) { toast("warn", "Picture too large", `${f.name} is over 20 MB.`); continue; }
-      const r = new FileReader();
-      r.onload = () => { attachments.push({kind: "image", name: f.name || "pasted image", url: r.result}); renderAttachments(); };
-      r.readAsDataURL(f);
-      continue;
-    }
-    if (!isTextFile(f)) { toast("warn", "Not a text file", `${f.name}: attach text files (code, notes, logs, data)${health.images ? " or pictures" : ""}.`); continue; }
-    if (f.size > MAX_TEXT_FILE) { toast("warn", "File too large", `${f.name} is over 512 KB.`); continue; }
-    const r = new FileReader();
-    r.onload = () => {
-      const text = String(r.result);
-      if (text.includes("\u0000")) { toast("warn", "Not a text file", `${f.name} looks like a binary file.`); return; }
-      attachments.push({kind: "file", name: f.name, text});
-      renderAttachments();
-    };
-    r.readAsText(f);
-  }
-}
-// a file's text in the message, fenced with more backticks than it contains itself
-function fileBlock(f) {
-  const longest = Math.max(2, ...(f.text.match(/`+/g) || []).map((s) => s.length));
-  const fence = "`".repeat(longest + 1);
-  return `File: ${f.name}\n${fence}\n${f.text}\n${fence}`;
-}
-function userText(m) {
-  const files = (m.files || []).filter((f) => f.text != null);
-  return [m.text, ...files.map(fileBlock)].filter((s) => s).join("\n\n");
-}
-function renderAttachments() {
-  const box = $("attachments");
-  box.hidden = !attachments.length;
-  box.innerHTML = "";
-  attachments.forEach((a, i) => {
-    const c = document.createElement("span");
-    c.className = "chip";
-    c.innerHTML = icon(a.kind === "file" ? "attach" : "image", "st-icon st-icon--sm");
-    c.append(a.name);
-    const x = document.createElement("button");
-    x.type = "button"; x.className = "st-btn st-btn--icon"; x.setAttribute("aria-label", "Remove");
-    x.innerHTML = icon("trash");
-    x.onclick = () => { attachments.splice(i, 1); renderAttachments(); };
-    c.appendChild(x);
-    box.appendChild(c);
-  });
-}
-$("attach-btn").onclick = () => $("file").click();
-// drop files on the chat or the message box
-for (const id of ["chat", "composer"]) {
-  const el = $(id);
-  el.addEventListener("dragover", (e) => {
-    if (![...(e.dataTransfer || {}).types || []].includes("Files")) return;
-    e.preventDefault();
-    $("composer").classList.add("dragging");
-  });
-  el.addEventListener("dragleave", () => $("composer").classList.remove("dragging"));
-  el.addEventListener("drop", (e) => {
-    $("composer").classList.remove("dragging");
-    if (!e.dataTransfer || !e.dataTransfer.files.length) return;
-    e.preventDefault();
-    addFiles(e.dataTransfer.files);
-    $("input").focus();
-  });
-}
-$("file").onchange = () => { addFiles($("file").files); $("file").value = ""; };
-$("input").addEventListener("paste", (e) => {
-  if (!health.images) return;
-  const files = [...(e.clipboardData || {}).files || []].filter((f) => f.type.startsWith("image/"));
-  if (files.length) { e.preventDefault(); addFiles(files); }
-});
 
 // ------------------------------------------------------------------ the sampling drawer
 let lastDrawerTrigger = null;
@@ -3231,8 +2711,6 @@ function openDrawer(open) {
       document.activeElement.blur();
       if (lastDrawerTrigger && typeof lastDrawerTrigger.focus === "function") {
         try { lastDrawerTrigger.focus(); } catch (_) {}
-      } else if (tab === "chat" && $("input")) {
-        try { $("input").focus(); } catch (_) {}
       } else if (tab === "code" && $("code-mobile-input")) {
         try { $("code-mobile-input").focus(); } catch (_) {}
       }
@@ -3248,15 +2726,13 @@ function loadDrawer(s = settings) {
   for (const b of $("s-thinking").children) b.setAttribute("aria-checked", String(b.dataset.v === s.thinking));
   $("s-temp").value = s.temperature; $("s-topp").value = s.top_p; $("s-topk").value = s.top_k;
   $("s-max").value = s.max; $("s-seed").value = s.seed;
-  $("s-show").setAttribute("aria-checked", String(!!s.show));
   $("s-esp").setAttribute("aria-checked", String(s.esp !== false));
   $("esp-row").hidden = !projectionLoaded();
-  $("s-mcp").setAttribute("aria-checked", String(s.mcp !== false));
   outputs();
 }
 // D.L. AI: the Chat settings live on the server (GET/POST /settings), so every browser and the CLI (Code tab, terminal),
 // which sends no sampling fields of its own, use the same ones.  The server's copy wins; with none yet, this browser's
-// settings are published.  "show" and "mcp" stay per browser (display and the web app's own MCP tools).
+// settings are published.
 function fromShared(d) {
   return {thinking: d.reasoning_effort || DEFAULTS.thinking,
           temperature: d.temperature ?? DEFAULTS.temperature,
@@ -3310,18 +2786,14 @@ function outputs() {
 }
 for (const b of $("s-thinking").children) b.onclick = () => { for (const x of $("s-thinking").children) x.setAttribute("aria-checked", String(x === b)); outputs(); };
 for (const id of ["s-temp", "s-topp", "s-topk"]) $(id).oninput = outputs;
-$("s-show").onclick = () => $("s-show").setAttribute("aria-checked", String($("s-show").getAttribute("aria-checked") !== "true"));
 $("s-esp").onclick = () => $("s-esp").setAttribute("aria-checked", String($("s-esp").getAttribute("aria-checked") !== "true"));
-$("s-mcp").onclick = () => $("s-mcp").setAttribute("aria-checked", String($("s-mcp").getAttribute("aria-checked") !== "true"));
 // the recommended coding-agent settings (DEFAULTS), applied and saved for Chat and the CLI at once
 $("s-reset").onclick = () => { loadDrawer(DEFAULTS); $("s-apply").click(); };
 $("s-apply").onclick = async () => {
   const sel = [...$("s-thinking").children].find((b) => b.getAttribute("aria-checked") === "true");
   settings = {thinking: sel ? sel.dataset.v : "high", temperature: +$("s-temp").value, top_p: +$("s-topp").value,
               top_k: +$("s-topk").value, max: $("s-max").value.trim(), seed: $("s-seed").value.trim(),
-              show: $("s-show").getAttribute("aria-checked") === "true",
-              esp: $("s-esp").getAttribute("aria-checked") === "true",
-              mcp: $("s-mcp").getAttribute("aria-checked") === "true"};
+              esp: $("s-esp").getAttribute("aria-checked") === "true"};
   store.set("sampling", settings);
   openDrawer(false);
   try {
@@ -3335,6 +2807,7 @@ $("s-apply").onclick = async () => {
 };
 // ------------------------------------------------------------------ Server Workspace
 let wsFiles = [];
+let wsRoot = "";                      // the server's workspace folder, for @path references
 let wsLoading = false;
 
 function openWorkspace(open = true) {
@@ -3363,6 +2836,7 @@ async function loadWorkspaceFiles() {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     wsFiles = data.files || [];
+    wsRoot = data.workspace || "";
     if (data.workspace && $("ws-path")) $("ws-path").textContent = data.workspace;
     renderWorkspaceFiles();
   } catch (err) {
@@ -3611,24 +3085,18 @@ function renderWorkspaceFiles() {
   }
 }
 
-async function attachFromWorkspace(f) {
-  toast("info", "Loading file…", f.name, 1500);
-  try {
-    const r = await fetch(`api/workspace/file?file=${encodeURIComponent(f.path)}`, { headers: headers() });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data = await r.json();
-    if (data.kind === "image") {
-      attachments.push({ kind: "image", name: data.name, url: data.url });
-    } else {
-      attachments.push({ kind: "file", name: data.name, text: data.text });
-    }
-    renderAttachments();
-    openWorkspace(false);
-    $("input").focus();
-    toast("success", "Attached to prompt", f.name);
-  } catch (err) {
-    toast("error", "Attach failed", err.message);
+// "Attach" puts an @path reference in the Code prompt; D.L. CLI reads the file into the prompt (@file references)
+function attachFromWorkspace(f) {
+  const ref = `@${wsRoot ? `${wsRoot}/` : ""}${f.path}`;
+  if (!/^@[A-Za-z0-9_\-./]+$/.test(ref)) {
+    toast("warn", "Cannot attach this file", "An @file reference cannot hold spaces or special characters: rename it first.");
+    return;
   }
+  const ta = $("code-mobile-input");
+  ta.value = `${ta.value.replace(/\s*$/, "")}${ta.value.trim() ? " " : ""}${ref} `;
+  openWorkspace(false);
+  ta.focus();
+  toast("success", "Added to the prompt", f.name);
 }
 
 async function downloadFromWorkspace(f) {
@@ -3822,19 +3290,14 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-$("sampling-btn").onclick = () => { lastDrawerTrigger = $("sampling-btn"); openDrawer(true); };
 if ($("code-sampling-btn")) $("code-sampling-btn").onclick = () => { lastDrawerTrigger = $("code-sampling-btn"); openDrawer(true); };   // the same settings drive the CLI
 syncShared();                                            // the server's Chat settings, or publish this browser's
 $("drawer-close").onclick = () => openDrawer(false);
 $("scrim").onclick = () => openDrawer(false);
 
 // ------------------------------------------------------------------ start
-setBusy(false);
-renderChat();
 TTSController.init();
 STTController.init();
-const startQuestion = new URLSearchParams(location.search).get("q");   // /?q=... starts a chat (a shortcut)
-if (startQuestion) history.replaceState(null, "", location.pathname + location.hash);
-loadHealth().then(loadMcp).then(loadAvailableModels).then(() => { if (startQuestion) { $("input").value = startQuestion; send(); } });
-showTab(location.hash.slice(1) || "chat");
+loadHealth().then(loadMcp).then(loadAvailableModels);
+showTab(location.hash.slice(1) || "code");
 poll();

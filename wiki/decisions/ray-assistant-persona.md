@@ -78,6 +78,22 @@ hands-free (STT → model → TTS).
   Ray and answered without tools, and says not to talk about the rule (one run recited it: "Whoever's using this
   machine"). Chat's `RAY_IDENTITY` has the same rules. Benchmark and the prompt trim: [Ray Persona Bench](../artifacts/ray-persona-bench-2026-10-23.md).
 
+- **The Chat tab was removed** (2026-10-23, the user: "the basic chat is no longer needed"). The Code tab is the start
+  tab; `#chat` and the old `/?q=` shortcut now just open Code. Removed: the Chat view and its code in
+  `serve/web/app.js` (send, render, attachments, `RAY_IDENTITY`/`RAY_VOICE`, its saved history is no longer read), its
+  styles in `serve/web/app.css`, and the Chat-only drawer rows ("Show thinking", "Use tools from MCP servers").
+  `components.css` (the design system) was left as it is. Speech-to-text now targets the Code prompt only. The
+  workspace dialog's "Attach" adds an `@/absolute/path` reference to the Code prompt (D.L. CLI reads @file references;
+  a path with spaces is refused with a toast).
+  - Ray's household persona moved into the coding agent's `RAY_ABOUT` in `tools/dl_cli.py` (female, casual, light
+    jokes, mild swearing only if the user swears, no sir/madam; credit adds the voice pipeline and the Home Assistant
+    setup), so the terminal CLI has it too.
+  - The spoken-answer rules are `VOICE_NOTE` in `tools/dl_cli.py`, added after the text of a spoken prompt only: the
+    web app sends `voice: true` with the `input` op, `serve/server.py` passes it through, and `tools/dl_sessiond.py`
+    appends the note to that user message. The system prompt stays the same, so the cached prefix is kept. Test:
+    `test_a_spoken_turn_gets_the_voice_note` in `tools/test_dl_sessiond.py`.
+  - The server-side MCP servers on the Monitor (`serve/mcp.py`) stay for API clients that ask for them.
+
 ## Verification
 
 - Browser pane, 2026-10-22 (after the revision): a typed prompt's request starts with one system message holding the

@@ -21,9 +21,7 @@
 <header class="st-header">
   <span class="st-header__brand">Ray</span>
   <nav class="st-tabs" role="tablist" aria-label="Views">
-    <button class="st-tab" role="tab" id="tab-btn-chat" aria-controls="view-chat" aria-selected="true" data-tab="chat" title="Chat" aria-label="Chat">
-      <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-chat"/></svg><span class="st-tab__label">Chat</span></button>
-    <button class="st-tab" role="tab" id="tab-btn-code" aria-controls="view-code" aria-selected="false" data-tab="code" title="Code" aria-label="Code">
+    <button class="st-tab" role="tab" id="tab-btn-code" aria-controls="view-code" aria-selected="true" data-tab="code" title="Code" aria-label="Code">
       <svg class="st-icon st-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="16 18 22 12 16 6"></polyline>
         <polyline points="8 6 2 12 8 18"></polyline>
@@ -48,53 +46,8 @@
 </header>
 
 <main>
-  <!-- ============================ Chat ============================ -->
-  <section class="view view--chat" id="view-chat" role="tabpanel" aria-labelledby="tab-btn-chat">
-    <div class="chat-scroll" id="chat-scroll">
-      <div class="chat" id="chat">
-        <div class="chat-empty" id="chat-empty">
-          <div class="chat-empty__title">Ray</div>
-          <div class="chat-empty__sub" id="chat-empty-sub">Dedicated private AI without external tracking. Your own model, your own rules.</div>
-        </div>
-      </div>
-    </div>
-    <div class="composer-wrap">
-      <form class="st-composer" id="composer">
-        <div class="attachments" id="attachments" hidden></div>
-        <textarea id="input" rows="2" placeholder="Ask anything&hellip;" aria-label="Message"></textarea>
-        <div class="st-composer__bar">
-          <button type="button" class="st-btn st-btn--icon" id="attach-btn" title="Attach a text file (or drop it here)" aria-label="Attach a file" hidden style="display:none;">
-            <svg class="st-icon"><use href="web/sprite.svg#i-attach"/></svg></button>
-          <input type="file" id="file" multiple hidden>
-          <button type="button" class="st-btn st-btn--icon" id="workspace-btn" title="Server Workspace" aria-label="Server Workspace">
-            <svg class="st-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <path opacity="0.25" d="M3 6C3 4.895 3.895 4 5 4H9.172C9.702 4 10.211 4.21 10.586 4.586L12.414 6.414C12.789 6.789 13.298 7 13.828 7H19C20.105 7 21 7.895 21 9V18C21 19.105 20.105 20 19 20H5C3.895 20 3 19.105 3 18V6Z" fill="currentColor"></path>
-              <path d="M3 6C3 4.895 3.895 4 5 4H9.172C9.702 4 10.211 4.21 10.586 4.586L12.414 6.414C12.789 6.789 13.298 7 13.828 7H19C20.105 7 21 7.895 21 9V18C21 19.105 20.105 20 19 20H5C3.895 20 3 19.105 3 18V6Z"></path>
-            </svg>
-          </button>
-          <button type="button" class="st-btn st-btn--icon" id="new-btn" title="New chat" aria-label="New chat">
-            <svg class="st-icon"><use href="web/sprite.svg#i-new-chat"/></svg></button>
-          <button type="button" class="st-btn st-btn--icon" id="export-btn" title="Save this chat as Markdown" aria-label="Save this chat">
-            <svg class="st-icon"><use href="web/sprite.svg#i-download"/></svg></button>
-          <button type="button" class="st-btn st-btn--icon" id="sampling-btn" title="Sampling and thinking" aria-label="Sampling and thinking">
-            <svg class="st-icon"><use href="web/sprite.svg#i-settings"/></svg></button>
-          <span class="spacer"></span>
-          <span class="composer-hint" id="composer-hint"></span>
-          <button type="button" class="st-btn st-btn--secondary" id="stop-btn" hidden>
-            <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-stop"/></svg>Stop</button>
-          <button type="button" class="st-btn st-btn--icon composer-action-btn" id="auto-send-btn" title="Auto-send after speaking (Hands-free voice mode)" aria-label="Auto-send after speaking" aria-pressed="false">
-            <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-auto-send"/></svg></button>
-          <button type="button" class="st-btn st-btn--icon composer-action-btn" id="mic-btn" title="Voice typing (Click to speak, hold to talk)" aria-label="Voice typing">
-            <svg class="st-icon"><use href="web/sprite.svg#i-mic"/></svg></button>
-          <button type="submit" class="st-btn st-btn--primary st-btn--send" id="send-btn" aria-label="Send">
-            <svg class="st-icon"><use href="web/sprite.svg#i-send"/></svg></button>
-        </div>
-      </form>
-    </div>
-  </section>
-
   <!-- ============================ Code ============================ -->
-  <section class="view view--code" id="view-code" role="tabpanel" aria-labelledby="tab-btn-code" hidden>
+  <section class="view view--code" id="view-code" role="tabpanel" aria-labelledby="tab-btn-code">
     <div class="code-terminal-wrap">
       <div class="code-terminal-bar">
         <div class="code-terminal-info">
@@ -109,10 +62,10 @@
               <path d="M3 6C3 4.895 3.895 4 5 4H9.172C9.702 4 10.211 4.21 10.586 4.586L12.414 6.414C12.789 6.789 13.298 7 13.828 7H19C20.105 7 21 7.895 21 9V18C21 19.105 20.105 20 19 20H5C3.895 20 3 19.105 3 18V6Z"></path>
             </svg>
           </button>
-          <button type="button" class="st-btn st-btn--icon code-action-btn" id="code-export-btn" title="Save this chat as Markdown" aria-label="Save this chat as Markdown">
+          <button type="button" class="st-btn st-btn--icon code-action-btn" id="code-export-btn" title="Save this conversation as Markdown" aria-label="Save this conversation as Markdown">
             <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-download"/></svg>
           </button>
-          <button type="button" class="st-btn st-btn--icon code-action-btn" id="code-sampling-btn" title="Sampling and thinking (shared with Chat)" aria-label="Sampling and thinking">
+          <button type="button" class="st-btn st-btn--icon code-action-btn" id="code-sampling-btn" title="Sampling and thinking (saved for the CLI)" aria-label="Sampling and thinking">
             <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-settings"/></svg>
           </button>
           <button type="button" class="st-btn st-btn--icon code-action-btn" id="code-speak-btn" title="Read latest reply aloud" aria-label="Read latest reply aloud">
@@ -242,7 +195,7 @@
         <div class="req-head"><span class="card-title">MCP servers</span><span class="muted small" id="mcp-sum"></span></div>
         <div class="mcp-list" id="mcp-list"></div>
         <p class="muted small mcp-note">Their tools run on this PC with your rights, when the model decides to call them
-          (in this page's chat only; switch it off in Sampling).</p>
+          (for API requests that ask for them; the CLI has its own MCP servers).</p>
       </div>
     </div>
   </section>
@@ -271,7 +224,7 @@
         </div>
         <div class="toggle-row"><span>Dark theme</span>
           <button class="st-toggle" id="dark-toggle" role="switch" aria-checked="false" aria-label="Dark theme"></button></div>
-        <p class="muted small">Chats, settings and the key are kept in this browser only.</p>
+        <p class="muted small">Display settings and the key are kept in this browser only.</p>
       </div>
       <div class="st-card" id="tts-settings-card">
         <div class="req-head">
@@ -312,7 +265,7 @@
         </div>
 
         <div class="toggle-row">
-          <span>Skip thinking for voice prompts<br><span class="muted small">Spoken (STT) prompts in Chat and Code answer right away; typed ones use the Thinking setting</span></span>
+          <span>Skip thinking for voice prompts<br><span class="muted small">Spoken (STT) prompts answer right away; typed ones use the Thinking setting</span></span>
           <button class="st-toggle" id="tts-fast-voice-toggle" role="switch" aria-checked="true" aria-label="Skip thinking for voice prompts"></button>
         </div>
 
@@ -407,19 +360,14 @@
       <label class="st-label" for="s-seed">Seed <output>empty = random</output></label>
       <input class="st-input" id="s-seed" type="number" min="1" step="1" placeholder="Random">
     </div>
-    <div class="toggle-row"><span>Show thinking<br><span class="muted small">expanded while it streams</span></span>
-      <button class="st-toggle" id="s-show" role="switch" aria-checked="true" aria-label="Show thinking"></button></div>
-    <div class="toggle-row" id="mcp-row" hidden><span>Use tools from MCP servers<br><span class="muted small"
-      id="mcp-row-sub">the model may call them while it answers</span></span>
-      <button class="st-toggle" id="s-mcp" role="switch" aria-checked="true" aria-label="Use tools from MCP servers"></button></div>
     <div class="toggle-row" id="esp-row" hidden><span>Experimental speed projection<br><span class="muted small">the
-      engine's control vector; off = the stock model. Switching reads the chat again once</span></span>
+      engine's control vector; off = the stock model. Switching reads the conversation again once</span></span>
       <button class="st-toggle" id="s-esp" role="switch" aria-checked="true" aria-label="Experimental speed projection"></button></div>
     <p class="muted small" id="s-shared-note">Saved on the server: the CLI (Code tab and terminal) uses these settings,
       and other apps get them for anything they don't set themselves.</p>
     <div class="drawer-actions">
       <button class="st-btn st-btn--secondary" id="s-reset" type="button"
-        title="Thinking high, temperature 0.6, top-p 0.95, top-k 20, max tokens auto, no seed - saved for Chat and the CLI">Reset to defaults</button>
+        title="Thinking high, temperature 0.6, top-p 0.95, top-k 20, max tokens auto, no seed - saved for the CLI">Reset to defaults</button>
       <button class="st-btn st-btn--primary" id="s-apply" type="button">Apply</button>
     </div>
   </div>
@@ -516,6 +464,6 @@
 <div class="scrim" id="scrim" hidden></div>
 <div class="st-toasts" id="toasts" aria-live="polite"></div>
 <script src="web/site-config.js?v=20261020-logout1"></script>
-<script src="web/app.js?v=20261023-ray9"></script>
+<script src="web/app.js?v=20261023-nochat1"></script>
 </body>
 </html>

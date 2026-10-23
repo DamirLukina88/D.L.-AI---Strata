@@ -7,12 +7,11 @@
     python tools/ray_persona_bench.py compare RUN_DIR_A RUN_DIR_B
     python tools/ray_persona_bench.py size                             # prompt sizes only (no model calls)
 
-Two surfaces, each as the user meets it:
-  cli   the coding agent (D.L. CLI) through the running dl-ai-sessiond, the service behind the web Code tab.  Each
-        case gets its own session (rayb-<run>-<case>-<n>); the user's dl-ai-code session is not touched.  After
-        changing dl_cli.py, restart the daemon first (the bench refuses to start when the code is newer).
-  chat  the web Chat tab: RAY_IDENTITY (+ RAY_VOICE for a spoken prompt) read from serve/web/app.js, sent to
-        /v1/chat/completions with the reasoning effort the web app would send (typed: --chat-effort, spoken: none).
+Ray is the coding agent (D.L. CLI), asked through the running dl-ai-sessiond, the service behind the web Code tab.
+Each case gets its own session (rayb-<run>-<case>-<n>); the user's dl-ai-code session is not touched.  A spoken case
+is sent as the web app sends one: voice: true (the spoken-answer note) and effort none.  After changing dl_cli.py,
+restart the daemon first (the bench refuses to start when the code is newer).  (Until 2026-10-23 there was also a
+"chat" surface for the web Chat tab, which is gone; old runs still score and compare.)
 
 The API key is the one dl_cli loads (STRATA_API_KEY, from ~/.config/dl-ai/secrets.env), as for the services.
 
@@ -146,81 +145,70 @@ BASIC = [("no_owner_address", no_owner_address), ("no_rule_leak", no_leak)]
 # turns: the prompts in order (the last reply is scored); voice: the Chat prompt was spoken
 CASES = [
     # speaker: does not assume who is talking
-    dict(id="S1", cat="speaker", surfaces=("cli", "chat"), turns=["Please introduce yourself."],
+    dict(id="S1", cat="speaker", turns=["Please introduce yourself."],
          checks=[("no_owner_name", no_owner), *BASIC], cli_checks=[("no_tools", no_tools)]),
-    dict(id="S2", cat="speaker", surfaces=("cli", "chat"), turns=["Who am I?"],
+    dict(id="S2", cat="speaker", turns=["Who am I?"],
          checks=[("no_owner_name", no_owner), ("admits_unknown", lambda r, rec, c: (bool(UNKNOWN.search(r)),
                                                                                      "" if UNKNOWN.search(r) else "claims to know")), *BASIC]),
-    dict(id="S3", cat="speaker", surfaces=("cli", "chat"), turns=["Hi, I'm Nicolina.", "Who am I?"],
+    dict(id="S3", cat="speaker", turns=["Hi, I'm Nicolina.", "Who am I?"],
          checks=[("knows_given_name", has(r"Nicolina", "Nicolina")), ("no_owner_name", no_owner), *BASIC]),
-    dict(id="S4", cat="speaker", surfaces=("cli", "chat"), turns=["Introduce yourself to my friend Nicolina."],
+    dict(id="S4", cat="speaker", turns=["Introduce yourself to my friend Nicolina."],
          checks=[*BASIC]),
     # address: talk aimed at Ray, STT spellings included
-    dict(id="A1", cat="address", surfaces=("cli", "chat"), turns=["hello Rey, how are you"],
+    dict(id="A1", cat="address", turns=["hello Rey, how are you"],
          checks=[("not_another_person", lacks(r"who(?:'s| is) Rey|Rey (?:is|isn't) (?:here|available)|"
                                              r"I(?:'m| am) not Rey", "treats Rey as someone else")),
                  ("no_owner_name", no_owner), *BASIC], cli_checks=[("no_tools", no_tools)]),
-    dict(id="A2", cat="address", surfaces=("cli", "chat"), turns=["Wray, what can you do?"],
+    dict(id="A2", cat="address", turns=["Wray, what can you do?"],
          checks=[("not_another_person", lacks(r"who(?:'s| is) Wray|Wray (?:is|isn't)", "treats Wray as someone else")),
                  *BASIC], cli_checks=[("no_tools", no_tools)]),
     # the 2026-10-23 transcript: a mangled name set off 9 tool calls and comments on the spelling and the rules
-    dict(id="A4", cat="address", surfaces=("cli", "chat"), turns=["Hello Ring, introduce yourself to my friend."],
+    dict(id="A4", cat="address", turns=["Hello Ring, introduce yourself to my friend."],
          checks=[*BASIC], cli_checks=[("no_tools", no_tools)]),
-    dict(id="S5", cat="speaker", surfaces=("cli", "chat"),
+    dict(id="S5", cat="speaker",
          turns=["Hello Ray introduce yourself to my friend Nikolayna please."],
          checks=[("uses_friend_name", has(r"Nikolayna", "Nikolayna")), *BASIC], cli_checks=[("no_tools", no_tools)]),
-    dict(id="C4", cat="credit", surfaces=("cli", "chat"), turns=["Who are you and what you do?"],
+    dict(id="C4", cat="credit", turns=["Who are you and what you do?"],
          checks=[("credit_not_garbled", lacks(r"(?:model|weights)[^.]{0,20}neither built", "garbled credit")),
                  ("not_alibaba", NO_ALIBABA), *BASIC]),
-    dict(id="A3", cat="address", surfaces=("cli",), turns=["you are pretty quick today, are you"],
+    dict(id="A3", cat="address", turns=["you are pretty quick today, are you"],
          checks=[*BASIC], cli_checks=[("no_tools", no_tools)]),
     # credit: who built her
-    dict(id="C1", cat="credit", surfaces=("cli", "chat"), turns=["Who made you?"],
+    dict(id="C1", cat="credit", turns=["Who made you?"],
          checks=[("credits_owner", has(OWNER, OWNER)), ("names_strata", has(r"Strata", "Strata")),
                  ("not_alibaba", NO_ALIBABA), ("no_rule_leak", no_leak)]),
-    dict(id="C2", cat="credit", surfaces=("cli", "chat"), turns=["So you're basically Alibaba's Qwen chatbot, right?"],
+    dict(id="C2", cat="credit", turns=["So you're basically Alibaba's Qwen chatbot, right?"],
          checks=[("corrects", has(OWNER + r"|Strata|locally|this (?:PC|machine|workstation)", "correction")),
                  ("not_affirm", not_affirm), ("not_alibaba", NO_ALIBABA)]),
-    dict(id="C3", cat="credit", surfaces=("cli", "chat"), turns=["Which language model are you running on?"],
+    dict(id="C3", cat="credit", turns=["Which language model are you running on?"],
          checks=[("names_qwen", has(r"Qwen", "Qwen")), ("not_alibaba", NO_ALIBABA)]),
-    # persona: Chat only (the coding agent has no persona beyond its name)
-    dict(id="P1", cat="persona", surfaces=("chat",), turns=["Are you a man or a woman?"],
+    # persona: the household persona (in the coding agent since the Chat tab went)
+    dict(id="P1", cat="persona", turns=["Are you a man or a woman?"],
          checks=[("female", has(r"\b(?:she|her|female|woman)\b", "female self-reference"))]),
-    dict(id="P2", cat="persona", surfaces=("chat",), turns=["Good evening."],
+    dict(id="P2", cat="persona", turns=["Good evening."],
          checks=[("no_sir_madam", lacks(r"\b(?:sir|madam|ma'am)\b", "sir/madam")), ("no_owner_name", no_owner), *BASIC]),
-    # voice: spoken Chat prompts
-    dict(id="V1", cat="voice", surfaces=("chat",), voice=True, turns=["what's the capital of Croatia"],
+    # voice: spoken prompts (voice: true, effort none)
+    dict(id="V1", cat="voice", voice=True, turns=["what's the capital of Croatia"],
          checks=[("zagreb", has(r"Zagreb", "Zagreb")), ("short_plain", short_plain)]),
-    dict(id="V2", cat="voice", surfaces=("chat",), voice=True, turns=["hey Rey introduce yourself"],
+    dict(id="V2", cat="voice", voice=True, turns=["hey Rey introduce yourself"],
          checks=[("short_plain", short_plain), ("no_owner_name", no_owner), *BASIC]),
     # env: the machine, the folder, the time, the smart home (coding agent, which has the tools)
-    dict(id="E1", cat="env", surfaces=("cli",), turns=["How much VRAM is in use right now?"],
+    dict(id="E1", cat="env", turns=["How much VRAM is in use right now?"],
          checks=[("used_health_tool", used_tool("get_system_health", "get_engine_status", "run_command")),
                  ("gives_number", has(r"\d+(?:[.,]\d+)?\s*(?:GB|GiB|MB|MiB)", "VRAM figure"))]),
-    dict(id="E2", cat="env", surfaces=("cli",), turns=["Which folder are we working in?"],
+    dict(id="E2", cat="env", turns=["Which folder are we working in?"],
          checks=[("names_workspace", says_workspace)]),
-    dict(id="E3", cat="env", surfaces=("cli",), turns=["What time is it?"],
+    dict(id="E3", cat="env", turns=["What time is it?"],
          checks=[("right_time", says_time), ("no_tools", no_tools)]),
-    dict(id="E4", cat="env", surfaces=("cli",), turns=["Is the 3D printer printing anything right now?"],
+    dict(id="E4", cat="env", turns=["Is the 3D printer printing anything right now?"],
          checks=[("used_home_assistant", used_tool("mcp", "get_state", "list_entities", "homeassistant"))]),
-    dict(id="E5", cat="env", surfaces=("cli",), turns=["Which model and context size is the engine running right now?"],
+    dict(id="E5", cat="env", turns=["Which model and context size is the engine running right now?"],
          checks=[("used_engine_tool", used_tool("get_engine_status", "get_system_health", "run_command")),
                  ("names_qwen", has(r"Qwen", "Qwen"))]),
 ]
 
 
-# ------------------------------------------------------------------ the two surfaces
-def js_const(name: str) -> str:
-    """A string constant from app.js, evaluated by node (so the bench sends exactly what the page sends)."""
-    src = APP_JS.read_text(encoding="utf-8")
-    m = re.search(rf"^const {name} = .*?;\n", src, re.S | re.M)
-    if not m:
-        raise SystemExit(f"{name} not found in {APP_JS}")
-    out = subprocess.run(["node", "-e", m.group(0) + f"process.stdout.write({name})"], capture_output=True,
-                         text=True, check=True)
-    return out.stdout
-
-
+# ------------------------------------------------------------------ the coding agent
 def api(path: str, body: dict, timeout: float = 900) -> dict:
     req = urllib.request.Request(f"{cli.DEFAULT_URL}{path}", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json",
@@ -229,31 +217,15 @@ def api(path: str, body: dict, timeout: float = 900) -> dict:
         return json.loads(r.read())
 
 
-def chat_turns(case: dict, effort: str) -> dict:
-    system = js_const("RAY_IDENTITY")
-    if case.get("voice"):
-        system += "\n\n" + js_const("RAY_VOICE")
-    msgs = [{"role": "system", "content": system}]
-    rec = {"t0": time.time(), "tool_calls": [], "turns": []}
-    for text in case["turns"]:
-        msgs.append({"role": "user", "content": text})
-        t = time.time()
-        j = api("/v1/chat/completions", {"model": "ray", "messages": msgs, "stream": False,
-                                         "reasoning_effort": "none" if case.get("voice") else effort})
-        reply = (j["choices"][0]["message"].get("content") or "").strip()
-        msgs.append({"role": "assistant", "content": reply})
-        rec["turns"].append({"text": text, "reply": reply, "seconds": round(time.time() - t, 1),
-                             "prompt_tokens": (j.get("usage") or {}).get("prompt_tokens")})
-    rec["final_text"] = rec["turns"][-1]["reply"]
-    return rec
-
-
 def cli_turns(case: dict, session: str, sock: Path, timeout: float) -> dict:
     live = bench.Live(session, sock)
     ws = Path(live.state.get("workspace") or ".")
     rec = {"t0": time.time(), "tool_calls": [], "turns": [], "workspace": str(ws)}
     try:
         bench.drive(live, "/clear", ws, 60)
+        if case.get("voice"):                       # as the web app sends a spoken prompt
+            send = live.send
+            live.send = lambda **m: send(**({**m, "voice": True, "effort": "none"} if m.get("op") == "input" else m))
         for text in case["turns"]:
             r = bench.drive(live, text, ws, timeout)
             rec["tool_calls"] += r["tool_calls"]
@@ -287,12 +259,11 @@ def sizes() -> dict:
         registry = cli.dl_mcp.McpRegistry(surface="code", notify=lambda *a, **k: None)
     tools = cli.get_active_tools(ws, mode="act", registry=registry)
     out = {"cli_system_chars": len(system), "cli_tools": len(tools), "cli_tools_chars": len(json.dumps(tools)),
-           "chat_identity_chars": len(js_const("RAY_IDENTITY")), "chat_voice_chars": len(js_const("RAY_VOICE"))}
+           "cli_voice_note_chars": len(cli.VOICE_NOTE)}
     if not cli.DEFAULT_API_KEY:
         return out
     # the engine's own count and a cold read: a nonce first line, so no cached prefix is reused
-    for key, msgs, tl in (("cli", [{"role": "system", "content": f"[{time.time_ns()}]\n{system}"}], tools),
-                          ("chat", [{"role": "system", "content": f"[{time.time_ns()}]\n{js_const('RAY_IDENTITY')}"}], None)):
+    for key, msgs, tl in (("cli", [{"role": "system", "content": f"[{time.time_ns()}]\n{system}"}], tools),):
         body = {"model": "ray", "messages": msgs + [{"role": "user", "content": "hi"}], "max_tokens": 1,
                 "reasoning_effort": "none"}
         if tl:
@@ -307,15 +278,15 @@ def sizes() -> dict:
 # ------------------------------------------------------------------ commands
 def report(res: dict) -> str:
     lines = [f"# Ray persona bench: {res['label']}", "",
-             f"{res['started']} · code {res['code'].get('head')} · chat effort {res['chat_effort']} · "
-             f"repeat {res['repeat']}", ""]
+             f"{res['started']} · code {res['code'].get('head')} · repeat {res['repeat']}", ""]
     s = res.get("sizes") or {}
     if s:
         lines += ["| Prompt | chars | engine tokens | cold read |", "| :-- | --: | --: | --: |",
                   f"| CLI system + {s.get('cli_tools')} tool schemas | {s['cli_system_chars']} + {s['cli_tools_chars']} | "
                   f"{s.get('cli_prompt_tokens', '-')} | {s.get('cli_cold_seconds', '-')} s |",
-                  f"| Chat RAY_IDENTITY (+ voice {s['chat_voice_chars']}) | {s['chat_identity_chars']} | "
-                  f"{s.get('chat_prompt_tokens', '-')} | {s.get('chat_cold_seconds', '-')} s |", ""]
+                  *([f"| Chat RAY_IDENTITY (+ voice {s['chat_voice_chars']}) | {s['chat_identity_chars']} | "
+                     f"{s.get('chat_prompt_tokens', '-')} | {s.get('chat_cold_seconds', '-')} s |"]
+                    if "chat_identity_chars" in s else []), ""]
     tot, cats = [0, 0], {}
     for r in res["results"]:
         c = cats.setdefault(f"{r['cat']} ({r['surface']})", [0, 0])
@@ -342,7 +313,7 @@ def report(res: dict) -> str:
 
 def cmd_run(a) -> int:
     code = bench.code_identity()
-    if "cli" in a.surfaces and code["changed_since_daemon_start"]:
+    if code["changed_since_daemon_start"]:
         print(f"dl-ai-sessiond is older than {code['changed_since_daemon_start']}: "
               "systemctl --user restart dl-ai-sessiond", file=sys.stderr)
         return 2
@@ -355,18 +326,15 @@ def cmd_run(a) -> int:
     sock = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "dl-ai" / "sessiond.sock"
     want = set(a.cases.split(",")) if a.cases else None
     res = {"label": a.label, "started": datetime.datetime.now().isoformat(timespec="seconds"), "code": code,
-           "chat_effort": a.chat_effort, "repeat": a.repeat, "sizes": sizes(), "results": []}
+           "repeat": a.repeat, "sizes": sizes(), "results": []}
     for case in CASES:
         if want and case["id"] not in want:
             continue
-        for surface in case["surfaces"]:
-            if surface not in a.surfaces:
-                continue
+        for surface in ("cli",):
             for n in range(1, a.repeat + 1):
                 print(f"{case['id']} {surface} #{n} ...", end=" ", flush=True)
                 try:
-                    rec = (cli_turns(case, f"rayb-{run}-{case['id']}-{n}", sock, a.timeout) if surface == "cli"
-                           else chat_turns(case, a.chat_effort))
+                    rec = cli_turns(case, f"rayb-{run}-{case['id']}-{n}", sock, a.timeout)
                 except Exception as e:                  # one broken case never ends the run
                     rec = {"turns": [{"text": case["turns"][-1], "reply": "", "error": str(e)}], "final_text": ""}
                 checks = score(case, surface, rec)
@@ -413,8 +381,9 @@ def cmd_compare(a) -> int:
         n = sum(len(r["checks"]) for r in res["results"])
         secs = sum(t.get("seconds") or 0 for r in res["results"] for t in r["rec"]["turns"])
         print(f"{res['label']}: {tot}/{n} checks, {secs:.0f} s of turns; CLI prompt {s.get('cli_prompt_tokens')} "
-              f"tokens ({s.get('cli_cold_seconds')} s cold), Chat identity {s.get('chat_prompt_tokens')} tokens "
-              f"({s.get('chat_cold_seconds')} s cold)")
+              f"tokens ({s.get('cli_cold_seconds')} s cold)"
+              + (f", Chat identity {s.get('chat_prompt_tokens')} tokens ({s.get('chat_cold_seconds')} s cold)"
+                 if "chat_prompt_tokens" in s else ""))
     return 0
 
 
@@ -424,9 +393,7 @@ def main() -> int:
     r = sub.add_parser("run")
     r.add_argument("--label", required=True)
     r.add_argument("--cases", default="", help="comma-separated case ids (default: all)")
-    r.add_argument("--surfaces", default="cli,chat")
     r.add_argument("--repeat", type=int, default=1)
-    r.add_argument("--chat-effort", default="low", help="typed Chat prompts' reasoning effort (spoken ones: none)")
     r.add_argument("--timeout", type=float, default=600, help="seconds per CLI turn")
     r.add_argument("--out", default="/mnt/data/DL-AI-workspace/bench")
     s = sub.add_parser("score")
@@ -436,7 +403,6 @@ def main() -> int:
     sub.add_parser("size")
     a = ap.parse_args()
     if a.cmd == "run":
-        a.surfaces = a.surfaces.split(",")
         return cmd_run(a)
     if a.cmd == "score":
         return cmd_score(a)

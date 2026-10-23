@@ -233,6 +233,29 @@ class TurnEffort(unittest.TestCase):
         self.assertEqual(seen, ["none", "high"])
         self.assertEqual(s.effort, "high")
 
+    def test_a_spoken_turn_gets_the_voice_note(self):
+        """voice: true (the web Code tab's microphone) adds the spoken-answer note to that prompt only."""
+        sys.path.insert(0, str(HERE))
+        import dl_sessiond
+        seen = []
+        orig = dl_sessiond.cli.execute_agent_loop
+        dl_sessiond.cli.execute_agent_loop = lambda **kw: (seen.append(kw["messages"][-1]["content"]),
+                                                           kw["workspace"])[1]
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                s = dl_sessiond.Session("t", Path(tmp))
+                s.save = lambda: None
+                for voice in (True, False):
+                    s.submit("hello Ray", voice=voice)
+                    for _ in range(200):
+                        if not s.busy:
+                            break
+                        time.sleep(0.01)
+        finally:
+            dl_sessiond.cli.execute_agent_loop = orig
+        self.assertIn(dl_sessiond.cli.VOICE_NOTE, seen[0])
+        self.assertNotIn("Spoken prompt", seen[1])
+
 
 if __name__ == "__main__":
     unittest.main()

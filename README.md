@@ -14,7 +14,7 @@ reach from anywhere:
 - **Offline voice:** local Whisper speech-to-text and Piper text-to-speech, with no audio leaving the PC
 - **Home Assistant MCP server:** the coding agent switches lights and climate and reads printers and cameras
   (a Gree air conditioner, a Bambu Lab A1 3D printer, Xiaomi cameras, Tuya plugs and sensors)
-- a chat, a live monitor of the GPU, RAM and engine, and a file workspace on the server
+- a live monitor of the GPU, RAM and engine, and a file workspace on the server
 - remote access through a Cloudflare Tunnel over QUIC, behind a Cloudflare Access login
 
 The inference engine is Strata, unchanged except for configuration and hardware kernel ports. Upstream
@@ -61,15 +61,17 @@ from coding traces with `tools/make_profile_mix.py`.
 ## What it adds to Strata
 
 ### 1. Ray, the Assistant
-The web app's Chat tab is Ray:
-- **Who she is:** a casual, direct household assistant with a light sense of humour. She never calls you "sir" or
-  "madam". Every Chat request starts with a short identity note: who built what, the hardware she runs on, and that
-  the model weights come from Alibaba's Qwen team, who neither run her nor see anything she does. Without it, the
-  model credits everything to Alibaba.
-- **Talk to her:** a spoken prompt adds voice rules (one to three plain sentences, no markdown, numbers said as words)
-  and is read back in the female Piper HFC voice. A typed prompt gets a normal written answer.
+The coding agent is Ray, in the web app's Code tab and in the terminal (the separate Chat tab was removed on
+2026-10-23):
+- **Who she is:** a casual, direct household assistant and coding agent with a light sense of humour. She never calls
+  you "sir" or "madam", and she doesn't assume who is talking: anyone in the house or a guest may be. Her identity note
+  says who built what, the hardware she runs on, and that the model weights come from Alibaba's Qwen team, who neither
+  run her nor see anything she does. Without it, the model credits everything to Alibaba.
+- **Talk to her:** a spoken prompt adds voice rules to that turn (one to three plain sentences, no markdown, numbers
+  said as words) and is read back in the female Piper HFC voice (*Automatically read new answers aloud*, on by
+  default). A typed prompt gets a normal written answer.
 - **Fast spoken answers:** with *Settings > Speech > Skip thinking for voice prompts* (on by default), a spoken prompt
-  is answered without thinking first, in Chat and in the Code tab. Typed prompts keep your Thinking setting.
+  is answered without thinking first. Typed prompts keep your Thinking setting.
 
 ### 2. Unified Shared CLI & Autonomous Coding Agent
 The coding agent runs in a persistent background daemon (`tools/dl_sessiond.py`). Both the web app's **Code** tab
@@ -110,7 +112,7 @@ Listen to responses hands-free without third-party audio streaming:
 - **Mobile Keep-Alive & Controls:** Android Screen WakeLock and MediaSession notification drawer controls (play, pause, stop).
 
 ### 5. Home Assistant Smart Home MCP Server
-A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) exposes your smart home to the coding agent (the Code tab and the terminal CLI; the Chat tab has no tools). It runs here with lights on Tuya smart plugs, a Gree air conditioner, a Bambu Lab A1 3D printer and two Xiaomi cameras:
+A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) exposes your smart home to the coding agent (the Code tab and the terminal CLI). It runs here with lights on Tuya smart plugs, a Gree air conditioner, a Bambu Lab A1 3D printer and two Xiaomi cameras:
 - Direct entity control: lights, switches, media players, climate units (Gree AC), covers, and smart plugs.
 - Rooms: entities carry their Home Assistant area, so "turn off the living room lights" finds every light there, plug-powered ones included.
 - Live camera snapshots: captures and saves camera feeds to the workspace for multimodal inspection.
@@ -181,8 +183,8 @@ A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) ex
 ## Using it
 
 - **Browser:** open the app (`http://127.0.0.1:8080` locally, or your tunnel hostname).
-  - **Code:** shared coding agent with mobile cards and terminal views.
-  - **Chat:** Ray, with voice typing, read-aloud TTS, and attachments.
+  - **Code:** Ray, the shared coding agent, with voice typing, read-aloud TTS, and workspace files (*Attach* adds an
+    `@path` reference to the prompt).
   - **Monitor:** real-time GPU, VRAM, RAM, and KV cache monitoring.
 - **Terminal:** run `python3 tools/dl_cli.py --attach` to join the shared session, and `/detach` to leave it
   running.
@@ -194,7 +196,7 @@ A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) ex
   | `/yolo` | turn approvals off and enable infinite continuation |
   | `/continue` | continue execution of multi-turn assistant plans |
   | `/planfile <path>\|off` | attach a plan file the agent works from and ticks (`PLAN.md`) |
-  | `/effort none\|low\|medium\|high\|default` | this session's reasoning effort (default: the web app's Chat settings) |
+  | `/effort none\|low\|medium\|high\|default` | this session's reasoning effort (default: the web app's Thinking setting) |
   | `/cd <path>` | change the project folder |
   | `/status`, `/health` | engine status, hardware health |
   | `/mcp <server>` | inspect and execute tools on connected MCP servers |
