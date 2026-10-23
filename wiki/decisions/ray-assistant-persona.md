@@ -60,15 +60,11 @@ hands-free (STT → model → TTS).
     prompt adds `RAY_VOICE` (one to three spoken sentences, no markdown).
   - The D.L. CLI identity prompts (act and plan mode) carry the same credit line; their coding manner is unchanged.
 
-- **Thinking off for spoken prompts** (2026-10-22): Settings > Speech > "Skip thinking for voice prompts"
-  (`#tts-fast-voice-toggle`, `TTSController.isFastVoice()`, browser key `voice_no_thinking`, **on by default**, per
-  browser). When on, a spoken (STT) prompt is sent with thinking off; typed prompts are unchanged.
-  - Chat tab: `send()` sets `reasoning_effort: "none"`.
-  - Code tab: `codeSend()` adds `effort: "none"` to the `input` op; `serve/server.py` passes `effort` through to
-    `tools/dl_sessiond.py`, where `submit(..., effort=)` runs that one turn at it. The session's `/effort` level is left
-    as it was. Test: `TurnEffort` in `tools/test_dl_sessiond.py`.
-  - Checked in the browser pane with requests intercepted: spoken Chat → none, typed Chat → the Thinking setting, spoken
-    Code → none, typed Code → no effort (session level); with the toggle off, spoken prompts send no override.
+- **Thinking off for spoken prompts handled by default auto thinking** (2026-10-22, updated 2026-10-23):
+  The legacy manual toggle "Skip thinking for voice prompts" was removed on 2026-10-23 because `/effort auto` is now the
+  default session level. Spoken prompts (`voice: true`) are routed through `dl_effort.pick()`, which automatically sets
+  `none` for small talk, wake words, and home automation commands so they respond immediately, while complex or coding
+  questions spoken via STT receive appropriate thinking levels without manual toggling.
 
 - **Gotcha: the model took the owner's name for the speaker's** (2026-10-23). The coding agent greeted everyone as
   Damir ("Hello Damir — I'm Ray") because its prompt said "The user: <name>, <email>" (from

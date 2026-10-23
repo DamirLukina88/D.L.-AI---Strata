@@ -992,6 +992,7 @@ main { flex: 1; min-height: 0; min-width: 0; max-width: 100vw; overflow-x: hidde
 .cs-mode--mcp { background: var(--st-info-tint); color: var(--st-info-text); text-transform: lowercase; }
 .cs-mode--progress { background: var(--st-surface-2); color: var(--st-accent); }
 .cs-mode--blocked { background: var(--st-danger-tint); color: var(--st-danger); }
+.cs-mode--effort { background: var(--st-surface-2); color: var(--st-ink-dim); text-transform: uppercase; }
 .cs-approval-mail { font-family: var(--st-font-mono, monospace); font-size: 12px; white-space: pre-wrap; word-break: break-word;
   margin: 6px 0 0; max-height: 40vh; overflow: auto; }
 .cs-approval-foreign { color: var(--st-danger); font-weight: 700; }

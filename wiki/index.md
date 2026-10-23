@@ -25,7 +25,7 @@ Every page in this wiki is listed below. The list is generated; do not edit betw
 ## Decisions
 
 - [Approval Gate for Destructive Agent Actions](decisions/destructive-action-approval-gate.md) — D.L. CLI asks before destructive commands or writes outside the workspace; /yolo disables per session; content never restricted
-- [Auto Thinking Level (/effort auto)](decisions/auto-thinking-level.md) — Opt-in /effort auto: rules pick none/low/medium/high per turn, raise to high on failures; measured level costs
+- [Auto Thinking Level (/effort auto)](decisions/auto-thinking-level.md) — Default /effort auto: rules pick none/low/med/high per turn, raise on failures, GUI switch in Sampling drawer, replaces manual voice toggle
 - [Claude Code CLI Integration on Strata](decisions/claude-code-cli-integration.md) — How Claude Code CLI routes to local Strata with fit_max_tokens while isolating Claude Desktop.
 - [CLI Chat Markdown Export Feature](decisions/cli-chat-markdown-export.md) — Parity export feature for saving CLI conversations as structured Markdown via /save slash command and Web Code toolbar button.
 - [CLI Graphical Styling & Thinking Defaults](decisions/cli-graphical-styling-and-thinking-defaults.md) — Harmonization of CLI terminal interfaces and Web Code view with Strata dark and orange aesthetic, and default thinking effort configuration.

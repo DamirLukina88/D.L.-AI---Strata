@@ -96,6 +96,7 @@
             <button type="button" class="code-mobile-chip" data-cmd="/act" data-run>/act</button>
             <button type="button" class="code-mobile-chip" data-cmd="/status" data-run>/status</button>
             <button type="button" class="code-mobile-chip" data-cmd="/health" data-run>/health</button>
+            <button type="button" class="code-mobile-chip" data-cmd="/effort" data-run>/effort</button>
             <button type="button" class="code-mobile-chip" data-cmd="/diff" data-run>/diff</button>
             <button type="button" class="code-mobile-chip" data-cmd="/wiki">/wiki</button>
             <button type="button" class="code-mobile-chip" data-cmd="/mcp" data-run>/mcp</button>
@@ -264,10 +265,6 @@
           <button class="st-toggle" id="tts-auto-toggle" role="switch" aria-checked="true" aria-label="Auto read answers"></button>
         </div>
 
-        <div class="toggle-row">
-          <span>Skip thinking for voice prompts<br><span class="muted small">Spoken (STT) prompts answer right away; typed ones use the Thinking setting</span></span>
-          <button class="st-toggle" id="tts-fast-voice-toggle" role="switch" aria-checked="true" aria-label="Skip thinking for voice prompts"></button>
-        </div>
 
         <div class="drawer-actions" style="margin-top:14px;">
           <button class="st-btn st-btn--secondary" id="tts-test-btn" type="button">
@@ -335,7 +332,7 @@
     <div class="st-field">
       <div class="st-label" id="label-thinking">Thinking <output id="o-thinking"></output></div>
       <div class="seg" id="s-thinking" role="radiogroup" aria-labelledby="label-thinking">
-        <button type="button" role="radio" data-v="none">Off</button><button type="button" role="radio" data-v="low">Low</button>
+        <button type="button" role="radio" data-v="auto">Auto</button><button type="button" role="radio" data-v="none">Off</button><button type="button" role="radio" data-v="low">Low</button>
         <button type="button" role="radio" data-v="medium">Medium</button><button type="button" role="radio" data-v="high">High</button>
       </div>
     </div>

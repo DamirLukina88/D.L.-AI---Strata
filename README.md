@@ -79,8 +79,7 @@ The coding agent is Ray, in the web app's Code tab and in the terminal (the sepa
   correcting the spelling, and greetings and small talk get an answer without tool calls. A spoken prompt gets a note
   to answer in plain speech (no tables, code blocks, emoji or URLs, numbers said as words) at full length, and the
   answer is read back in the female Piper HFC voice. A typed prompt gets a normal written answer.
-- **Fast spoken answers:** with *Settings > Speech > Skip thinking for voice prompts* (on by default), a spoken prompt
-  is answered without thinking first. Typed prompts keep your Thinking setting.
+- **Fast spoken answers:** with default automatic thinking (`/effort auto`), greetings, wake words, and household commands answer right away with thinking off, while deep questions and coding turns get appropriate reasoning automatically.
 - **Checked with a benchmark:** `tools/ray_persona_bench.py` asks her 22 fixed questions (who is talking, being
   addressed, who made her, persona, spoken answers, and the machine, folder, time and smart home through her tools)
   and scores the answers ([results and method](wiki/artifacts/ray-persona-bench-2026-10-23.md)).
@@ -93,7 +92,7 @@ and seamlessly inspect or continue it from your terminal:
 - **Approvals for destructive actions:** recursive deletes, `sudo`, disk tools, git history rewriting, and writes outside workspace require explicit Approve/Deny.
 - **YOLO Mode & Infinite Continuation:** `/yolo` disables approval prompts per session and enables infinite autonomous auto-continuation past `DL_MAX_TURNS` for complex workflows.
 - **Plan Mode:** `/plan` investigates read-only and presents an *Execute this plan?* prompt to transition cleanly into act mode.
-- **Automatic Thinking Level (`/effort auto`):** opt-in per-turn thinking selector (`tools/dl_effort.py`) that picks `none` for greetings, wake words and smart-home/clock commands, `low` for short factual questions, `medium` for conceptual explanations, and `high` for code, files, errors, plan mode, or follow-up complaints—and escalates mid-turn to `high` if any tool call errors, repeats, or hits a retry guard ([decision](wiki/decisions/auto-thinking-level.md)).
+- **Automatic Thinking Level (`/effort auto`):** default per-turn thinking selector (`tools/dl_effort.py`) that picks `none` for greetings, wake words and smart-home/clock commands, `low` for short factual questions, `medium` for conceptual explanations, and `high` for code, files, errors, plan mode, or follow-up complaints—and escalates mid-turn to `high` if any tool call errors, repeats, or hits a retry guard ([decision](wiki/decisions/auto-thinking-level.md)). Configurable via the Settings/Sampling drawer or `/effort auto|none|low|medium|high|default`.
 - **Conversational Continues:** naturally typing *"continue"*, *"keep going"*, or *"go on"* routes directly to turn continuation.
 
 **Keeps its task on long runs** (added 2026-10-20, after a 6-hour run lost its task to context trimming):

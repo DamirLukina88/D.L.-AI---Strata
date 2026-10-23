@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 
-CODE_HINTS = ("```", "traceback", "error:", "exception", "exit code")
+CODE_HINTS = ("```", "traceback", "error:", "exception", "exit code", "exited with code")
 CODING_VERBS = (
     "fix", "fixing", "fixes", "fixed", "debug", "debugging", "refactor", "refactoring",
     "implement", "implementing", "build", "building",

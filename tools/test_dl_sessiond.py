@@ -294,6 +294,18 @@ class TurnEffort(unittest.TestCase):
                 loaded.mcp.close()
                 s.mcp.close()
 
+    def test_effort_auto_is_default_and_default_command_sets_it(self):
+        sys.path.insert(0, str(HERE))
+        import dl_sessiond
+        with tempfile.TemporaryDirectory() as tmp:
+            s = dl_sessiond.Session("default_test", Path(tmp))
+            self.assertEqual(s.effort, "auto")
+            s._command("/effort high")
+            self.assertEqual(s.effort, "high")
+            s._command("/effort default")
+            self.assertEqual(s.effort, "auto")
+            s.mcp.close()
+
     def test_effort_bogus_warns(self):
         sys.path.insert(0, str(HERE))
         import dl_sessiond
@@ -304,7 +316,7 @@ class TurnEffort(unittest.TestCase):
             s.notice = lambda text, level="info": notices.append((text, level))
             s._command("/effort bogus")
             self.assertTrue(any("Usage: /effort" in n[0] and n[1] == "warn" for n in notices))
-            self.assertIsNone(s.effort)
+            self.assertEqual(s.effort, "auto")
             s.mcp.close()
 
     def test_a_spoken_turn_gets_the_voice_note(self):

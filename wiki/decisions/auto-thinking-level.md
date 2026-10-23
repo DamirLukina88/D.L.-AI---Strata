@@ -1,7 +1,7 @@
 ---
 title: "Auto Thinking Level (/effort auto)"
 type: decision
-description: "Opt-in /effort auto: rules pick none/low/medium/high per turn, raise to high on failures; measured level costs"
+description: "Default /effort auto: rules pick none/low/med/high per turn, raise on failures, GUI switch in Sampling drawer, replaces manual voice toggle"
 status: active
 tags: [effort, thinking, dl-sessiond, ray]
 created: 2026-10-23
@@ -13,7 +13,7 @@ last_verified: 2026-10-23
 
 ## Summary
 
-2026-10-23: Implemented opt-in `/effort auto` thinking level selection and mid-turn escalation in `tools/dl_effort.py`, `tools/dl_sessiond.py`, and `tools/dl_cli.py` (`tools/test_dl_effort.py`, `tools/test_dl_sessiond.py`, `tools/test_dl_auto_raise.py`).
+2026-10-23: Implemented `/effort auto` thinking level selection and mid-turn escalation in `tools/dl_effort.py`, `tools/dl_sessiond.py`, and `tools/dl_cli.py` (`tools/test_dl_effort.py`, `tools/test_dl_sessiond.py`, `tools/test_dl_auto_raise.py`). Made `auto` the default session effort level and added an "Auto" switch option in the Web UI Sampling and Thinking drawer (`#s-thinking`). Removed the legacy manual "Skip thinking for voice prompts" switch because `/effort auto` automatically assigns `none` to spoken greetings, small talk, and home automation commands while allowing complex voice requests to think.
 
 In `/effort auto`, the thinking level is chosen per turn without an extra model call or classifier:
 1. **Per-turn rules** (`dl_effort.pick(prompt, voice=False, mode="act", last_reply="")`):
@@ -27,17 +27,19 @@ In `/effort auto`, the thinking level is chosen per turn without an extra model 
    - question of at most 20 words with no code words -> `low "short question"`
    - anything else -> `high "default"`
    Spoken prompts (`voice=True`) raise word limits slightly (+6 words for small talk, home commands, and questions; +15 words for explanations).
-   A turn's own explicit level (e.g. voice toggle sending `none`) still overrides session auto. The server never receives `"auto"`: the daemon always sends a concrete level (`none`, `low`, `medium`, `high`).
+   The server never receives `"auto"`: the daemon always sends a concrete level (`none`, `low`, `medium`, `high`).
 2. **Mid-turn escalation** in `execute_agent_loop`:
    When `effort_auto` is set, `seen` tracks tool calls `(fn_name, json.dumps(args, sort_keys=True))`. After each tool result, `dl_effort.raise_reason` checks for:
    - result starting with `"Error"` -> `"tool error"`
    - `[Command exited with code N]` with `N != 0` -> `"command failed"`
    - repeated identical tool call -> `"repeated tool call"`
    Additionally, the loop-guard ("thinking loop"), text-tool-call retry ("tool call sent as text"), and finish-check send-back ("sent back by the finish checks") trigger mid-turn escalation. The first time any failure occurs and only if `effort != "high"`, effort is escalated to `"high"`, `session_context["effort"] = "high"`, and `Auto thinking: raised to high (<reason>)` is emitted. Effort is never lowered mid-turn.
-3. **Why no separate classifier or model call:**
+3. **Default Level & GUI Switch:**
+   `Session.effort` defaults to `"auto"`. The Sampling drawer in the Web UI (`#drawer`) includes segmented control options: `Auto` (default), `Off`, `Low`, `Medium`, and `High`. Selecting a level applies it to the active CLI session daemon via `/effort <level>`. The Code tab header scaffold displays the active effort badge (`AUTO`).
+4. **Why no separate classifier or model call:**
    Strata runs one engine on one GPU, serving one request at a time. A second pre-call to classify difficulty would serialize latency and take one of four conversation-cache slots, risking evicting the session's prompt cache. Re-reading the session's system prompt and tools from cold costs ~9.8 s for 2,295 tokens on this hardware. Furthermore, LiteLLM's benchmark showed keyword/length heuristic scorers alone predict difficulty no better than chance (AUC 0.524 pooled, 0.420 on chat prompts), while objective runtime failure events provide definitive escalation signals.
-4. **Status & Measurement:**
-   Rule logic, daemon session persistence, and mid-turn escalation are unit-tested without a model (`tools/test_dl_effort.py` [14 tests], `tools/test_dl_sessiond.py` [12 tests], `tools/test_dl_auto_raise.py` [6 tests]), and verified live on `dl-ai-sessiond.service` across the 4 canonical prompts (`"hello Ray"` -> `none (small talk)`, `"what's 15% of 80?"` -> `low (short question)`, `"explain what ROCm is"` -> `medium (explanation)`, `"fix the failing test in tools/x"` -> `high (coding task)`). Systematic empirical evaluation across a response matrix (comparing fixed levels, rules, and escalation across hundreds of voice, chat, and coding prompts) is pending user approval for multi-hour GPU benchmark runs. See [Automatic thinking level selection.md](../../reports/Automatic%20thinking%20level%20selection.md).
+5. **Status & Measurement:**
+   Rule logic, daemon session persistence, and mid-turn escalation are unit-tested without a model (`tools/test_dl_effort.py` [14 tests], `tools/test_dl_sessiond.py` [13 tests], `tools/test_dl_auto_raise.py` [6 tests]), and verified live on `dl-ai-sessiond.service` across the canonical prompts. Systematic empirical evaluation across a response matrix (comparing fixed levels, rules, and escalation across hundreds of voice, chat, and coding prompts) is pending user approval for multi-hour GPU benchmark runs. See [Automatic thinking level selection.md](../../reports/Automatic%20thinking%20level%20selection.md).
 
 ## Sources
 

@@ -76,7 +76,7 @@ class Session:
         self.workspace = workspace
         self.mode = "act"
         self.yolo = False
-        self.effort: str | None = None            # /effort: this session's thinking level; None = the Chat settings
+        self.effort: str | None = "auto"          # /effort: this session's thinking level; default auto
         self.last_auto: tuple[str, str] | None = None
         self.messages: list[dict] = [{"role": "system", "content": cli.build_dl_system_prompt(workspace, "act")}]
         self.events: list[dict] = []
@@ -223,7 +223,7 @@ class Session:
         ws = Path(data.get("workspace") or default_ws)
         s = cls(name, ws if ws.is_dir() else default_ws)
         s.mode = data.get("mode") if data.get("mode") in ("act", "plan") else "act"
-        s.effort = data.get("effort") if data.get("effort") in SESSION_EFFORTS else None
+        s.effort = data.get("effort") if data.get("effort") in SESSION_EFFORTS else "auto"
         pf = data.get("plan_file")
         s.plan_file = pf if isinstance(pf, str) and Path(pf).is_file() else None
         s.yolo = data.get("yolo") is True             # YOLO stays on until it is turned off, also after restarts
@@ -434,16 +434,19 @@ class Session:
             return arg or cli.CONTINUE_PROMPT
         if cmd == "/effort":
             if arg in ("", "show"):
-                if self.effort == "auto" and getattr(self, "last_auto", None):
-                    lev, reas = self.last_auto
-                    self.notice(f"Thinking level: auto (last: {lev}, {reas})")
+                if self.effort == "auto":
+                    if getattr(self, "last_auto", None):
+                        lev, reas = self.last_auto
+                        self.notice(f"Thinking level: auto (last: {lev}, {reas})")
+                    else:
+                        self.notice("Thinking level: auto (default)")
                 else:
                     self.notice(f"Thinking level: {self.effort or 'the Chat settings (' + cli.chat_settings_summary() + ')'}")
                 return None
             if arg not in SESSION_EFFORTS and arg != "default":
                 self.notice(f"Usage: /effort {'|'.join(SESSION_EFFORTS)}|default", "warn")
                 return None
-            self.effort = None if arg == "default" else arg
+            self.effort = "auto" if arg == "default" else arg
             if self.effort != "auto":
                 self.last_auto = None
             self.notice(f"Thinking level for this session: {self.effort or 'the Chat settings'}")
@@ -805,6 +808,7 @@ class JobRunner:
         main = self.main()
         ws = Path(job.get("workspace") or main.workspace)
         s = Session("dl-ai-schedule", ws if ws.is_dir() else main.workspace)
+        s.effort = None                                # scheduled jobs keep effort None (the server's shared settings)
         calls: list[str] = []
         asked = []
         own_emit = s.emit

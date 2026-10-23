@@ -323,8 +323,6 @@ const TTSController = {
   getCodeMode() { return store.get("tts_code_mode", "skip"); },
   // on unless turned off: a spoken prompt is answered aloud (typed ones never are)
   isAutoSpeak() { return store.get("tts_auto_speak", true) !== false; },
-  // spoken prompts (Chat and Code) are sent with thinking off; on unless turned off in Settings
-  isFastVoice() { return store.get("voice_no_thinking", true) !== false; },
 
   clean(rawText) {
     return cleanForSpeech(rawText, this.getCodeMode());
@@ -606,16 +604,6 @@ const TTSController = {
         autoToggle.setAttribute("aria-checked", String(next));
         store.set("tts_auto_speak", next);
         toast("info", `Auto-speak ${next ? "enabled" : "disabled"}`, next ? "Voice prompts (dictated via STT) will be read aloud automatically." : "Tap the speaker icon on any message to listen.", 2500);
-      };
-    }
-    const fastToggle = $("tts-fast-voice-toggle");
-    if (fastToggle) {
-      fastToggle.setAttribute("aria-checked", String(this.isFastVoice()));
-      fastToggle.onclick = () => {
-        const next = fastToggle.getAttribute("aria-checked") !== "true";
-        fastToggle.setAttribute("aria-checked", String(next));
-        store.set("voice_no_thinking", next);
-        toast("info", `Thinking for voice prompts ${next ? "off" : "on"}`, next ? "Spoken prompts answer right away." : "Spoken prompts use the Thinking setting.", 2500);
       };
     }
     const testBtn = $("tts-test-btn");
@@ -1776,7 +1764,9 @@ function codeSetState(st) {
   const meta = $("code-scaffold-meta");
   if (meta) {
     const mode = (code.state.mode || "act").toUpperCase();
+    const eff = code.state.effort ? ` <span class="cs-mode cs-mode--effort" title="Thinking level: ${esc(code.state.effort)}">${esc(code.state.effort.toUpperCase())}</span>` : "";
     meta.innerHTML = `<span class="cs-mode cs-mode--${esc(code.state.mode || "act")}">${mode}</span>` +
+      eff +
       (code.state.yolo ? ` <span class="cs-mode cs-mode--yolo">YOLO</span>` : "") +
       codePlanChip(code.state.plan) +
       (code.state.mcp || []).map((m) => ` <span class="cs-mode cs-mode--mcp" title="${esc(m.description)} (${esc(m.why || "on")})">${esc(m.name)}</span>`).join("") +
@@ -1978,9 +1968,8 @@ async function codeSend(text) {
     }
     return;
   }
-  // a spoken prompt runs this one turn without thinking (Settings > Skip thinking for voice prompts)
-  // a spoken prompt is answered short and plain (read aloud), and without thinking unless that is turned off
-  const turn = fromVoice ? { text, voice: true, ...(TTSController.isFastVoice() ? { effort: "none" } : {}) } : { text };
+  // spoken prompt: answered in plain speech (voice: true); thinking level is selected automatically (/effort auto)
+  const turn = fromVoice ? { text, voice: true } : { text };
   if (await codeOp("input", turn)) {
     if (ta && ta.value.trim() === text) { ta.value = ""; ta.style.height = "auto"; }
   }
@@ -2685,7 +2674,7 @@ function markdown(text) {
 }
 
 // ------------------------------------------------------------------ settings (thinking and sampling, shared with the CLI)
-const DEFAULTS = {thinking: "high", temperature: 0.6, top_p: 0.95, top_k: 20, max: "", seed: "", esp: true};
+const DEFAULTS = {thinking: "auto", temperature: 0.6, top_p: 0.95, top_k: 20, max: "", seed: "", esp: true};
 let settings = {...DEFAULTS, ...store.get("sampling", {})};
 
 // ------------------------------------------------------------------ the sampling drawer
@@ -2723,7 +2712,8 @@ function openDrawer(open) {
   }
 }
 function loadDrawer(s = settings) {
-  for (const b of $("s-thinking").children) b.setAttribute("aria-checked", String(b.dataset.v === s.thinking));
+  const eff = (code.state && code.state.effort) || s.thinking || "auto";
+  for (const b of $("s-thinking").children) b.setAttribute("aria-checked", String(b.dataset.v === eff));
   $("s-temp").value = s.temperature; $("s-topp").value = s.top_p; $("s-topk").value = s.top_k;
   $("s-max").value = s.max; $("s-seed").value = s.seed;
   $("s-esp").setAttribute("aria-checked", String(s.esp !== false));
@@ -2734,7 +2724,8 @@ function loadDrawer(s = settings) {
 // which sends no sampling fields of its own, use the same ones.  The server's copy wins; with none yet, this browser's
 // settings are published.
 function fromShared(d) {
-  return {thinking: d.reasoning_effort || DEFAULTS.thinking,
+  const stored = store.get("sampling", {});
+  return {thinking: stored.thinking || (d.reasoning_effort === "high" ? "auto" : d.reasoning_effort) || DEFAULTS.thinking,
           temperature: d.temperature ?? DEFAULTS.temperature,
           top_p: d.top_p ?? settings.top_p, top_k: d.top_k ?? settings.top_k,
           max: d.max_tokens ? String(d.max_tokens) : "", seed: d.seed != null ? String(d.seed) : "",
@@ -2754,7 +2745,7 @@ async function syncShared() {
   } catch (e) { /* offline: keep this browser's copy */ }
 }
 function sharedDefaults(s) {
-  const d = {reasoning_effort: s.thinking, temperature: +s.temperature};
+  const d = {reasoning_effort: (s.thinking && s.thinking !== "auto") ? s.thinking : "high", temperature: +s.temperature};
   if (+s.temperature > 0) Object.assign(d, {top_p: +s.top_p, top_k: +s.top_k});
   if (s.seed) d.seed = +s.seed;
   if (s.max) d.max_tokens = +s.max;
@@ -2781,7 +2772,7 @@ function outputs() {
   $("o-topp").textContent = (+$("s-topp").value).toFixed(2);
   $("o-topk").textContent = $("s-topk").value;
   const sel = [...$("s-thinking").children].find((b) => b.getAttribute("aria-checked") === "true");
-  $("o-thinking").textContent = sel ? {none: "answers right away", low: "short", medium: "medium", high: "thorough (default)"}[sel.dataset.v] : "";
+  $("o-thinking").textContent = sel ? {auto: "auto per turn (default)", none: "answers right away", low: "short", medium: "medium", high: "thorough"}[sel.dataset.v] : "";
   for (const id of ["s-topp", "s-topk"]) $(id).disabled = t === 0;
 }
 for (const b of $("s-thinking").children) b.onclick = () => { for (const x of $("s-thinking").children) x.setAttribute("aria-checked", String(x === b)); outputs(); };
@@ -2791,7 +2782,8 @@ $("s-esp").onclick = () => $("s-esp").setAttribute("aria-checked", String($("s-e
 $("s-reset").onclick = () => { loadDrawer(DEFAULTS); $("s-apply").click(); };
 $("s-apply").onclick = async () => {
   const sel = [...$("s-thinking").children].find((b) => b.getAttribute("aria-checked") === "true");
-  settings = {thinking: sel ? sel.dataset.v : "high", temperature: +$("s-temp").value, top_p: +$("s-topp").value,
+  const thinking = sel ? sel.dataset.v : "auto";
+  settings = {thinking, temperature: +$("s-temp").value, top_p: +$("s-topp").value,
               top_k: +$("s-topk").value, max: $("s-max").value.trim(), seed: $("s-seed").value.trim(),
               esp: $("s-esp").getAttribute("aria-checked") === "true"};
   store.set("sampling", settings);
@@ -2802,8 +2794,11 @@ $("s-apply").onclick = async () => {
     toast("error", "Saved here, but not on the server", `The CLI keeps the previous settings: ${e.message}`, 6000);
     return;
   }
+  try {
+    await codeOp("input", { text: `/effort ${thinking}` });
+  } catch (_) {}
   toast("success", "Sampling saved", (settings.temperature === 0 ? "Greedy: the same question gives the same answer. " : "") +
-        "The CLI uses them from its next request.");
+        `Thinking set to ${thinking}.`);
 };
 // ------------------------------------------------------------------ Server Workspace
 let wsFiles = [];
