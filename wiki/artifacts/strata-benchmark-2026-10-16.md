@@ -80,3 +80,4 @@ last_verified: 2026-10-16
 - Raw results: `bench/results/2026-10-16-community-unknown-qwen3-8-flash-next-coder-iq1-m/results.json`
 - Community summary: `bench/results/2026-10-16-community-unknown-qwen3-8-flash-next-coder-iq1-m/README.md`
 - Baseline report: `wiki/artifacts/v0-1-43-optimization-benchmark-report.md`
+- Subsequent baseline: [Strata v0.1.44.1 Benchmark Report (2026-10-23 Baseline)](strata-benchmark-2026-10-23-baseline.md)

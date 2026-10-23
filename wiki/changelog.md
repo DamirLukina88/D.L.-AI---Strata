@@ -15,6 +15,9 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-23:** Update. artifacts/strata-benchmark-2026-10-16.md. (Agent: Antigravity)
+- **2026-10-23:** Recorded pre-implementation baseline benchmark report in wiki/artifacts/strata-benchmark-2026-10-23-baseline.md. (Agent: Antigravity)
+- **2026-10-23:** Ingestion. artifacts/strata-benchmark-2026-10-23-baseline.md. (Agent: Antigravity)
 - **2026-10-23:** Documented opt-in /effort auto thinking level selection rules and mid-turn escalation in decisions/auto-thinking-level.md. (Agent: Antigravity)
 - **2026-10-23:** Update. decisions/cli-graphical-styling-and-thinking-defaults.md. (Agent: Antigravity)
 - **2026-10-23:** Ported upstream `v0.2.3.1` `setup.py` `BUILD.json` `archs`/`vision_archs` parser fixes (`0edd96cc` + `f5f205be`) and unit tests (`tools/test_setup_choices.py`, `tools/test_setup_amd.py`); updated `artifacts/upstream-v0-2-3-review-2026-10-23.md`, `decisions/github-fork-and-sanitization.md`, and `README.md`. (Agent: Antigravity)
