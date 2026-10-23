@@ -239,7 +239,7 @@ class TurnEffort(unittest.TestCase):
         seen = []
         orig = dl_sessiond.cli.execute_agent_loop
         dl_sessiond.cli.execute_agent_loop = lambda **kw: (
-            seen.append((kw["session_context"]["effort"], kw["session_context"].get("auto_effort"))),
+            seen.append((kw["session_context"]["effort"], kw["session_context"].get("effort_auto"))),
             kw["workspace"],
         )[1]
         try:
@@ -249,17 +249,22 @@ class TurnEffort(unittest.TestCase):
                 s._command("/effort auto")
                 self.assertEqual(s.effort, "auto")
                 for prompt, turn_eff in [
-                    ("Hey Ray!", None),
-                    ("What is the capital of Japan?", None),
-                    ("Explain how a B-tree works", None),
-                    ("Refactor tools/dl_cli.py and run unit tests", None),
-                    ("Refactor tools/dl_cli.py", "none"),  # explicit per-turn override (e.g. voice_no_thinking)
+                    ("hello Ray", None),
+                    ("what's 15% of 80?", None),
+                    ("explain what ROCm is", None),
+                    ("fix the failing test in tools/x", None),
+                    ("fix the failing test in tools/x", "none"),  # explicit per-turn override (e.g. voice_no_thinking)
                 ]:
                     s.submit(prompt, effort=turn_eff)
                     for _ in range(200):
                         if not s.busy:
                             break
                         time.sleep(0.01)
+                self.assertEqual(s.last_auto, ("high", "coding task"))
+                notices = []
+                s.notice = lambda text, level="info": notices.append(text)
+                s._command("/effort show")
+                self.assertEqual(notices, ["Thinking level: auto (last: high, coding task)"])
         finally:
             dl_sessiond.cli.execute_agent_loop = orig
         self.assertEqual(
@@ -273,6 +278,34 @@ class TurnEffort(unittest.TestCase):
             ],
         )
         self.assertEqual(s.effort, "auto")
+
+    def test_effort_auto_survives_save_and_load(self):
+        from unittest import mock
+        sys.path.insert(0, str(HERE))
+        import dl_sessiond
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            with mock.patch.object(dl_sessiond, "STATE_DIR", d):
+                s = dl_sessiond.Session("save_test", d)
+                s._command("/effort auto")
+                s.save()
+                loaded = dl_sessiond.Session.load("save_test", d)
+                self.assertEqual(loaded.effort, "auto")
+                loaded.mcp.close()
+                s.mcp.close()
+
+    def test_effort_bogus_warns(self):
+        sys.path.insert(0, str(HERE))
+        import dl_sessiond
+        with tempfile.TemporaryDirectory() as tmp:
+            s = dl_sessiond.Session("t", Path(tmp))
+            s.save = lambda: None
+            notices = []
+            s.notice = lambda text, level="info": notices.append((text, level))
+            s._command("/effort bogus")
+            self.assertTrue(any("Usage: /effort" in n[0] and n[1] == "warn" for n in notices))
+            self.assertIsNone(s.effort)
+            s.mcp.close()
 
     def test_a_spoken_turn_gets_the_voice_note(self):
         """voice: true (the web Code tab's microphone) adds the spoken-answer note to that prompt only."""

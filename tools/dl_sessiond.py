@@ -52,7 +52,8 @@ APPROVAL_TIMEOUT = 30 * 60        # an unanswered approval is a "no"
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 NAME_OK = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
-EFFORTS = ("none", "low", "medium", "high", "auto")
+EFFORTS = ("none", "low", "medium", "high")
+SESSION_EFFORTS = EFFORTS + ("auto",)
 EXECUTE_PLAN = ("Proceed with executing the plan now. Perform the necessary tool calls (edits, writes, tests, "
                 "commands) to implement the agreed plan.")
 EXECUTE_PLAN_FILE = ("Execute the approved plan in {plan} now, step by step, with the tool calls it needs (edits, "
@@ -76,6 +77,7 @@ class Session:
         self.mode = "act"
         self.yolo = False
         self.effort: str | None = None            # /effort: this session's thinking level; None = the Chat settings
+        self.last_auto: tuple[str, str] | None = None
         self.messages: list[dict] = [{"role": "system", "content": cli.build_dl_system_prompt(workspace, "act")}]
         self.events: list[dict] = []
         self._open_block: dict | None = None    # the thinking/text block still growing; transcribed once complete
@@ -221,7 +223,7 @@ class Session:
         ws = Path(data.get("workspace") or default_ws)
         s = cls(name, ws if ws.is_dir() else default_ws)
         s.mode = data.get("mode") if data.get("mode") in ("act", "plan") else "act"
-        s.effort = data.get("effort") if data.get("effort") in EFFORTS else None
+        s.effort = data.get("effort") if data.get("effort") in SESSION_EFFORTS else None
         pf = data.get("plan_file")
         s.plan_file = pf if isinstance(pf, str) and Path(pf).is_file() else None
         s.yolo = data.get("yolo") is True             # YOLO stays on until it is turned off, also after restarts
@@ -333,22 +335,24 @@ class Session:
         # what built-ins (schedule, deepl, proton) need to know about this turn; the user asked "now"
         dl_mcp.CALL.ctx = {"workspace": self.workspace, "yolo": self.yolo, "request_time": time.time(),
                            "registry": self.mcp, "job": getattr(self, "job_id", None)}
-        raw_effort = effort or self.effort                 # a turn's own level (a spoken prompt: none) wins
-        auto_effort = raw_effort == "auto"
-        if auto_effort:
-            resolved_effort, reason = dl_effort.resolve_turn(
-                prompt, voice=voice, mode=self.mode, plan_file=self.plan_file, messages=self.messages
-            )
-            self.notice(f"Thinking level (auto): {resolved_effort} ({reason})")
+        turn_effort = effort or self.effort                 # a turn's own level (a spoken prompt: none) wins
+        effort_auto = not effort and self.effort == "auto"
+        if effort_auto:
+            last_reply = next((m.get("content") or "" for m in reversed(self.messages)
+                               if m.get("role") == "assistant" and isinstance(m.get("content"), str)), "")
+            level, reason = dl_effort.pick(prompt, voice=voice, mode=self.mode, last_reply=last_reply)
+            self.last_auto = (level, reason)
+            self.notice(f"Auto thinking: {level} ({reason})")
+            resolved_effort = level
         else:
-            resolved_effort = raw_effort
+            resolved_effort = turn_effort
         self.messages.append({"role": "user",
                               "content": cli.with_now(cli.resolve_file_references(prompt, self.workspace))
                               + (f"\n\n{cli.VOICE_NOTE}" if voice else "")})   # spoken: the answer is read aloud
         ctx = {"workspace": self.workspace, "messages": self.messages, "mode": self.mode, "yolo": self.yolo,
                "plan_file": self.plan_file,
                "effort": resolved_effort,
-               "auto_effort": auto_effort,
+               "effort_auto": effort_auto,
                "emit": self.emit, "cancel": self.cancel, "approve": self.approve, "mcp": self.mcp, "user_text": prompt,
                "session": self}
         new_ws = cli.execute_agent_loop(messages=self.messages, url=cli.DEFAULT_URL, api_key=cli.DEFAULT_API_KEY,
@@ -430,12 +434,18 @@ class Session:
             return arg or cli.CONTINUE_PROMPT
         if cmd == "/effort":
             if arg in ("", "show"):
-                self.notice(f"Thinking level: {self.effort or 'the Chat settings (' + cli.chat_settings_summary() + ')'}")
+                if self.effort == "auto" and getattr(self, "last_auto", None):
+                    lev, reas = self.last_auto
+                    self.notice(f"Thinking level: auto (last: {lev}, {reas})")
+                else:
+                    self.notice(f"Thinking level: {self.effort or 'the Chat settings (' + cli.chat_settings_summary() + ')'}")
                 return None
-            if arg not in EFFORTS and arg != "default":
-                self.notice(f"Usage: /effort {'|'.join(EFFORTS)}|default", "warn")
+            if arg not in SESSION_EFFORTS and arg != "default":
+                self.notice(f"Usage: /effort {'|'.join(SESSION_EFFORTS)}|default", "warn")
                 return None
             self.effort = None if arg == "default" else arg
+            if self.effort != "auto":
+                self.last_auto = None
             self.notice(f"Thinking level for this session: {self.effort or 'the Chat settings'}")
             self.emit_state()
             return None

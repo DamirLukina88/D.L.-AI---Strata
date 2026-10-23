@@ -1,194 +1,179 @@
-#!/usr/bin/env python3
-"""Unit tests for tools/dl_effort.py and mid-turn escalation in tools/dl_cli.py."""
-
+"""tools/test_dl_effort.py - Unit tests for tools/dl_effort.py rules and raise reasons."""
 from __future__ import annotations
 
-import json
-import sys
-import tempfile
 import unittest
-from pathlib import Path
-from unittest import mock
-
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
-
-import dl_cli
 import dl_effort
 
 
-class ResolveTurnTests(unittest.TestCase):
-    def test_greetings_and_wake_words_map_to_none(self):
+class TestDlEffortPick(unittest.TestCase):
+    def test_plan_mode(self):
+        self.assertEqual(dl_effort.pick("hello Ray", mode="plan"), ("high", "plan mode"))
+        self.assertEqual(dl_effort.pick("turn off the light", mode="plan"), ("high", "plan mode"))
+
+    def test_code_or_error(self):
+        cases = [
+            "Check @tools/dl_cli.py",
+            "Here is the diff: @patch.diff",
+            "Look at this code:\n```python\nprint(1)\n```",
+            "Traceback (most recent call last):\n  File 'x.py', line 1",
+            "Failed with Error: file not found",
+            "Caught an unhandled Exception in worker",
+            "The process returned exit code 1",
+        ]
+        for p in cases:
+            self.assertEqual(dl_effort.pick(p), ("high", "code or error"), f"Failed on {p!r}")
+
+    def test_coding_verbs(self):
+        verbs = [
+            "fix the failing test in tools/x",
+            "debug why sessiond hangs",
+            "refactor execute_agent_loop in dl_cli",
+            "implement the auto effort selector",
+            "build the ROCm HIP engine",
+            "write a script to benchmark the model",
+            "write a function to parse yaml",
+            "write a test for dl_effort",
+            "optimize prompt ingestion speed",
+            "review the recent git diff",
+            "migrate to the new config schema",
+            "design the session architecture",
+            "plan the next release milestones",
+            "why does this loop stall?",
+            "why doesn't the model stop thinking?",
+        ]
+        for p in verbs:
+            self.assertEqual(dl_effort.pick(p), ("high", "coding task"), f"Failed on {p!r}")
+
+    def test_followup_complaint(self):
+        complaints = [
+            "that's wrong",
+            "thats wrong",
+            "didn't work",
+            "didnt work",
+            "doesn't work",
+            "still broken",
+            "why?",
+        ]
+        for p in complaints:
+            self.assertEqual(
+                dl_effort.pick(p, last_reply="Here is your answer."),
+                ("high", "follow-up on a failed answer"),
+                f"Failed on {p!r}",
+            )
+        # Without last_reply, "why?" is a short question, not a follow-up
+        self.assertEqual(dl_effort.pick("why?", last_reply=""), ("low", "short question"))
+        # Ordinary "why is ..." questions after a reply stay short question / explanation, not complaint
+        self.assertEqual(dl_effort.pick("why is the sky blue?", last_reply="Here is your answer."), ("low", "short question"))
+        self.assertEqual(dl_effort.pick("explain why ROCm is used", last_reply="Here is your answer."), ("medium", "explanation"))
+
+    def test_small_talk_and_ray_variants(self):
         cases = [
             "hi",
-            "Hello!",
-            "Hey Ray",
-            "hi rey",
-            "Good morning Rae",
-            "wray?",
-            "Ring, are you there?",
-            "how are you doing today?",
-            "thanks a lot!",
-            "okay got it",
-            "stop",
-            "never mind",
+            "hello Ray",
+            "hello Rey",
+            "hi Rae",
+            "hey Wray",
+            "Rey",
+            "thanks",
+            "thank you very much",
+            "how are you",
+            "introduce yourself",
+            "what can you do",
+            "good morning Ray",
         ]
-        for text in cases:
-            level, reason = dl_effort.resolve_turn(text)
-            self.assertEqual(level, "none", f"Expected 'none' for {text!r}, got {level!r} ({reason})")
+        for p in cases:
+            self.assertEqual(dl_effort.pick(p), ("none", "small talk"), f"Failed on {p!r}")
 
-    def test_smart_home_and_clock_commands_map_to_none(self):
+    def test_home_commands(self):
         cases = [
-            "Turn off the living room lights",
-            "turn on bedroom lamp",
-            "set the temperature to 22 degrees",
-            "dim the lights in the kitchen",
-            "what time is it?",
-            "what is today's date?",
-            "set a timer for 10 minutes",
-            "pause the music",
+            "turn on the light",
+            "turn off the living room lights",
+            "turn off the ac",
+            "switch on bedroom lamp",
+            "dim the kitchen lights",
+            "set the ac to 22 degrees",
+            "open the printer camera",
+            "close the smart plug",
         ]
-        for text in cases:
-            level, reason = dl_effort.resolve_turn(text)
-            self.assertEqual(level, "none", f"Expected 'none' for {text!r}, got {level!r} ({reason})")
+        for p in cases:
+            self.assertEqual(dl_effort.pick(p), ("none", "home command"), f"Failed on {p!r}")
 
-    def test_short_factual_queries_map_to_low(self):
+    def test_explanations(self):
         cases = [
-            "What is the capital of Australia?",
-            "Who wrote Crime and Punishment?",
-            "How many bytes are in a mebibyte?",
-            "Convert 100 kilometers to miles",
-            "Where is MountKilimanjaro located?",
+            "explain what ROCm is",
+            "summarize the French Revolution",
+            "compare apples and oranges",
+            "translate this text to German: good morning",
+            "what is quantum entanglement",
         ]
-        for text in cases:
-            level, reason = dl_effort.resolve_turn(text)
-            self.assertEqual(level, "low", f"Expected 'low' for {text!r}, got {level!r} ({reason})")
+        for p in cases:
+            self.assertEqual(dl_effort.pick(p), ("medium", "explanation"), f"Failed on {p!r}")
 
-    def test_conceptual_explanations_map_to_medium(self):
+    def test_short_questions(self):
         cases = [
-            "Explain how speculative decoding works in transformer inference",
-            "What is the difference between TCP and UDP?",
-            "Compare radix sort and quicksort pros and cons",
-            "Summarize the trade-offs between Q4_0 and INT8 KV caches",
+            "what's 15% of 80?",
+            "who was the first president of the United States?",
+            "when was the Eiffel Tower built?",
+            "where is Mount Everest located?",
+            "how tall is Mount Kilimanjaro?",
+            "is water wet?",
+            "can dogs see in color?",
         ]
-        for text in cases:
-            level, reason = dl_effort.resolve_turn(text)
-            self.assertEqual(level, "medium", f"Expected 'medium' for {text!r}, got {level!r} ({reason})")
+        for p in cases:
+            self.assertEqual(dl_effort.pick(p), ("low", "short question"), f"Failed on {p!r}")
 
-    def test_code_files_errors_and_engineering_tasks_map_to_high(self):
-        cases = [
-            "Check serve/server.py and fix the timeout bug",
-            "Look at @tools/dl_cli.py and refactor execute_agent_loop",
-            "```python\ndef foo():\n    return 1/0\n```\nWhy does this fail?",
-            "Traceback (most recent call last):\n  File \"test.py\", line 1\nValueError: bad value",
-            "Implement automatic thinking level selection and write unit tests",
-            "Run git status and check the repo for uncommitted changes",
-            "Benchmark the new kernel on RX 7600 XT",
-            "analize the wiki, the repo, and the code to understand the project",
-        ]
-        for text in cases:
-            level, reason = dl_effort.resolve_turn(text)
-            self.assertEqual(level, "high", f"Expected 'high' for {text!r}, got {level!r} ({reason})")
+    def test_voice_word_limits(self):
+        # 14 words greeting: fails small talk normally (limit 12), passes with voice=True (limit 18)
+        p14 = "hello Ray how are you doing on this very wonderful and sunny day my friend"
+        self.assertEqual(dl_effort.pick(p14, voice=False), ("high", "default"))
+        self.assertEqual(dl_effort.pick(p14, voice=True), ("none", "small talk"))
 
-    def test_plan_mode_and_plan_file_always_map_to_high(self):
-        level, reason = dl_effort.resolve_turn("hi", mode="plan")
-        self.assertEqual((level, reason), ("high", "plan mode"))
-        level, reason = dl_effort.resolve_turn("what is 2+2?", plan_file="PLAN.md")
-        self.assertEqual((level, reason), ("high", "plan mode"))
+        # 22 words home command: fails normally (limit 20), passes with voice=True (limit 26)
+        p22 = "please turn on the living room lights and switch the kitchen lamp on because it is getting dark in here tonight"
+        self.assertEqual(dl_effort.pick(p22, voice=False), ("high", "default"))
+        self.assertEqual(dl_effort.pick(p22, voice=True), ("none", "home command"))
 
-    def test_explicit_cues_override_heuristics(self):
-        level, _ = dl_effort.resolve_turn("What is the capital of France? Think step by step.")
-        self.assertEqual(level, "high")
-        level, _ = dl_effort.resolve_turn("Explain quantum computing /no_think")
-        self.assertEqual(level, "none")
-
-    def test_followup_complaints_escalate_to_high_when_prior_turn_exists(self):
-        prior = [
-            {"role": "system", "content": "sys"},
-            {"role": "user", "content": "fix the bug"},
-            {"role": "assistant", "content": "Done."},
-        ]
-        for complaint in ("Why?", "try again", "still broken", "that didn't work", "no, that's wrong"):
-            level, reason = dl_effort.resolve_turn(complaint, messages=prior)
-            self.assertEqual(level, "high", f"Expected 'high' for follow-up {complaint!r}, got {level!r}")
-            self.assertEqual(reason, "follow-up correction")
+    def test_fallback(self):
+        # Long prose or unclassified requests fall back to high default
+        fallback = "write a poem about autumn leaves gently falling in the crisp October morning air"
+        self.assertEqual(dl_effort.pick(fallback), ("high", "default"))
+        # Code words in explanations/questions fall back to high default
+        self.assertEqual(dl_effort.pick("explain C++ templates"), ("high", "default"))
+        self.assertEqual(dl_effort.pick("what is a python function?"), ("high", "default"))
+        # Salutations before commands/questions route to the command/question rule, not small talk
+        self.assertEqual(dl_effort.pick("Ray, what's 15% of 80?"), ("low", "short question"))
+        self.assertEqual(dl_effort.pick("Hey Ray, explain what ROCm is"), ("medium", "explanation"))
+        self.assertEqual(dl_effort.pick("Hi Ray, turn on the living room lights"), ("none", "home command"))
 
 
-class MidTurnEscalationTests(unittest.TestCase):
-    def test_check_tool_result_failure_detects_all_failure_signals(self):
-        seen: set[tuple[str, str]] = set()
-        # Clean first call -> None
-        r1 = dl_effort.check_tool_result_failure("view_file", {"Path": "a.py"}, '{"Path": "a.py"}', "line 1", seen)
+class TestDlEffortRaiseReason(unittest.TestCase):
+    def test_tool_error(self):
+        seen = set()
+        r = dl_effort.raise_reason("view_file", {"Path": "missing.py"}, "Error: file not found", seen)
+        self.assertEqual(r, "tool error")
+
+    def test_command_exit_codes(self):
+        seen = set()
+        # Exit 0 -> None
+        r0 = dl_effort.raise_reason("run_command", {"CommandLine": "true"}, "ok\n[Command exited with code 0]", seen)
+        self.assertIsNone(r0)
+        # Exit 2 -> command failed
+        r2 = dl_effort.raise_reason("run_command", {"CommandLine": "ls bad"}, "fail\n[Command exited with code 2]", seen)
+        self.assertEqual(r2, "command failed")
+
+    def test_repeated_tool_call(self):
+        seen = set()
+        # First call -> None (added to seen)
+        r1 = dl_effort.raise_reason("view_file", {"Path": "a.txt"}, "contents of a", seen)
         self.assertIsNone(r1)
-        # Repeated identical call -> escalates
-        r2 = dl_effort.check_tool_result_failure("view_file", {"Path": "a.py"}, '{"Path": "a.py"}', "line 1", seen)
-        self.assertEqual(r2, "repeated identical tool call")
-        # Malformed JSON args -> escalates
-        r3 = dl_effort.check_tool_result_failure("view_file", {"_raw": "{bad"}, "{bad", "ok", set())
-        self.assertEqual(r3, "malformed tool arguments")
-        # Tool Error prefix -> escalates
-        r4 = dl_effort.check_tool_result_failure("view_file", {"Path": "b.py"}, '{"Path": "b.py"}', "Error: File not found", set())
-        self.assertEqual(r4, "tool execution error")
-        # Non-zero exit code -> escalates
-        r5 = dl_effort.check_tool_result_failure(
-            "run_command", {"CommandLine": "false"}, '{"CommandLine": "false"}', "out\n[Command exited with code 1]", set()
-        )
-        self.assertEqual(r5, "non-zero command exit")
-        # Zero exit code -> None
-        r6 = dl_effort.check_tool_result_failure(
-            "run_command", {"CommandLine": "true"}, '{"CommandLine": "true"}', "out\n[Command exited with code 0]", set()
-        )
-        self.assertIsNone(r6)
+        # Same call repeated -> repeated tool call
+        r2 = dl_effort.raise_reason("view_file", {"Path": "a.txt"}, "contents of a", seen)
+        self.assertEqual(r2, "repeated tool call")
 
-    def test_execute_agent_loop_escalates_to_high_on_tool_failure_when_auto_effort(self):
-        efforts_sent = []
-        replies = [
-            {
-                "content": "",
-                "reasoning": "",
-                "tool_calls": [
-                    {
-                        "id": "call_1",
-                        "function": {"name": "view_file", "arguments": json.dumps({"TargetFile": "missing_file.py"})},
-                    }
-                ],
-                "finish_reason": "tool_calls",
-                "tokens": 10,
-                "prompt_tokens": 50,
-            },
-            {
-                "content": "I checked and the file does not exist.",
-                "reasoning": "Now thinking at high effort.",
-                "tool_calls": [],
-                "finish_reason": "stop",
-                "tokens": 15,
-                "prompt_tokens": 80,
-            },
-        ]
-
-        def fake_chat_turn(messages, url, api_key, tools, emit=None, cancel=None, measured=None, effort=None, on_compact=None):
-            efforts_sent.append(effort)
-            return replies.pop(0)
-
-        events = []
-        with tempfile.TemporaryDirectory() as tmp:
-            ws = Path(tmp)
-            msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "What is in missing_file?"}]
-            ctx = {
-                "workspace": ws,
-                "messages": msgs,
-                "mode": "act",
-                "effort": "low",
-                "auto_effort": True,
-                "emit": events.append,
-                "user_text": "What is in missing_file?",
-            }
-            with mock.patch.object(dl_cli, "chat_turn_in_context", side_effect=fake_chat_turn):
-                dl_cli.execute_agent_loop(msgs, "http://127.0.0.1:8080", "", ws, session_context=ctx)
-
-        self.assertEqual(efforts_sent, ["low", "high"])
-        self.assertEqual(ctx["effort"], "high")
-        self.assertTrue(any(e.get("type") == "notice" and "escalated to high" in e.get("text", "") for e in events))
+    def test_clean_result(self):
+        seen = set()
+        r = dl_effort.raise_reason("view_file", {"Path": "clean.txt"}, "clean output", seen)
+        self.assertIsNone(r)
 
 
 if __name__ == "__main__":

@@ -37,10 +37,11 @@ The customized Strata platform (featuring the authenticated Claude Code Web Term
   as before. The Ray persona in `serve/web/app.js` names the user (Damir) and this PC's hardware, on purpose.
 
 - 2026-10-23: Pushed the upstream 0.2.3/0.2.2 fixes port (`aece46db`, `2ccf57ec`, `c40a03e6`, `828a2559`, `8bf178fe`,
-  `9471faa5`), `/effort auto` (`tools/dl_effort.py`, `tools/dl_sessiond.py`, `tools/dl_cli.py`, `tools/test_dl_effort.py`),
-  `README.md` updates, and wiki pages (`upstream-v0-2-3-review-2026-10-23.md`, `auto-thinking-level.md`,
-  `rx-7600-xt-cachyos-deployment.md`) to `origin/main` (fast-forward, no force) after `scan_secrets_in_text` verified 0
-  findings across all staged files.
+  `9471faa5`), `0.2.3.1` `setup.py` `BUILD.json` `archs`/`vision_archs` fixes (`0edd96cc`, `f5f205be`), `/effort auto`
+  (`tools/dl_effort.py`, `tools/dl_sessiond.py`, `tools/dl_cli.py`, `tools/test_dl_effort.py`, `tools/test_dl_sessiond.py`,
+  `tools/test_dl_auto_raise.py`), `README.md` updates, and wiki pages (`upstream-v0-2-3-review-2026-10-23.md`,
+  `auto-thinking-level.md`, `cli-graphical-styling-and-thinking-defaults.md`, `rx-7600-xt-cachyos-deployment.md`)
+  to `origin/main` (fast-forward, no force) after `scan_secrets_in_text` verified 0 findings across all staged files.
 
 ## Decisions & Configuration
 

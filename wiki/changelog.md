@@ -15,6 +15,9 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-23:** Documented opt-in /effort auto thinking level selection rules and mid-turn escalation in decisions/auto-thinking-level.md. (Agent: Antigravity)
+- **2026-10-23:** Update. decisions/cli-graphical-styling-and-thinking-defaults.md. (Agent: Antigravity)
+- **2026-10-23:** Ported upstream `v0.2.3.1` `setup.py` `BUILD.json` `archs`/`vision_archs` parser fixes (`0edd96cc` + `f5f205be`) and unit tests (`tools/test_setup_choices.py`, `tools/test_setup_amd.py`); updated `artifacts/upstream-v0-2-3-review-2026-10-23.md`, `decisions/github-fork-and-sanitization.md`, and `README.md`. (Agent: Antigravity)
 - **2026-10-23:** Updated `README.md` and `decisions/github-fork-and-sanitization.md` and pushed the 2026-10-23 commits to `origin/main`. (Agent: Antigravity)
 - **2026-10-23:** Completed RX 7600 XT (`gfx1102`) same-day A/B benchmarks for `STRATA_HC_Q8=1` and `STRATA_SPEC_ADAPT_EVERY=2`; enabled `"STRATA_HC_Q8": "1"` in `strata-coder-iq1_m.json` (+4.4% agent decode, +8.4% cold code decode, 334.4 tok/s 16K prefill) and recorded results in `artifacts/upstream-v0-2-3-review-2026-10-23.md` and `decisions/rx-7600-xt-cachyos-deployment.md`. (Agent: Antigravity)
 - **2026-10-23:** Ported 6 upstream 0.2.3/0.2.2 fixes (`aece46db`, `2ccf57ec`, `c40a03e6`, `828a2559`, `8bf178fe` log, `9471faa5`), rebuilt `engine/strata` (`0.1.44.1+0.2.3-fixes`) and `engine/strata-vision`, and implemented `/effort auto` (`tools/dl_effort.py`, `tools/dl_sessiond.py`, `tools/dl_cli.py`). Added `artifacts/upstream-v0-2-3-review-2026-10-23.md` and updated `decisions/auto-thinking-level.md`. (Agent: Antigravity)

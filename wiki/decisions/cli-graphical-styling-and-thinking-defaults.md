@@ -19,7 +19,7 @@ Harmonized all CLI terminal interfaces (D.L. CLI, Claude Code, DeepSeek) and the
 ### 1. D.L. CLI Thinking Level Default: `medium`
 - **Context:** D.L. CLI streams reasoning via the OpenAI completions endpoint `v1/chat/completions` using `reasoning_content`.
 - **Decision:** Default `--think` level changed from `low` to `medium` across `tools/dl_cli.py` (`stream_chat_turn`, `execute_agent_loop`, `interactive_loop`, and argument parsing).
-- **Rationale:** `medium` provides sufficient reasoning depth for multi-file architecture, planning, and syntax audits while respecting the 32 GB RAM hardware budget without KV cache thrashing.
+- **Rationale:** `medium` provides sufficient reasoning depth for multi-file architecture, planning, and syntax audits while respecting the 32 GB RAM hardware budget without KV cache thrashing. (See also [Auto Thinking Level (/effort auto)](auto-thinking-level.md) for per-turn automatic selection and failure escalation).
 
 ### 2. Rounded Unicode Card Terminal Styling
 - Replaced retro 90s ASCII block art and harsh cyan `===` double-lines across all 3 CLIs with clean rounded Unicode cards (`╭─╮`, `│`, `╰─╯`) width-padded to 79 columns.
