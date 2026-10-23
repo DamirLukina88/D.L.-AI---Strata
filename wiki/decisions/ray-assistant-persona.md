@@ -92,6 +92,10 @@ hands-free (STT → model → TTS).
     web app sends `voice: true` with the `input` op, `serve/server.py` passes it through, and `tools/dl_sessiond.py`
     appends the note to that user message. The system prompt stays the same, so the cached prefix is kept. Test:
     `test_a_spoken_turn_gets_the_voice_note` in `tools/test_dl_sessiond.py`.
+  - Same day: the note's "one to three short sentences" made spoken Code answers far shorter than before (an
+    introduction: 215 characters). The note now asks for a full answer in plain speech (no tables, code blocks, emoji
+    or URLs); the same introduction was 1,325 characters. Older messages of a session still carry the old note until
+    `/clear`.
   - The server-side MCP servers on the Monitor (`serve/mcp.py`) stay for API clients that ask for them.
 
 ## Verification

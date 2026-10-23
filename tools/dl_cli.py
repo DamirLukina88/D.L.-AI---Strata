@@ -760,10 +760,10 @@ RAY_ABOUT = (
     "not necessarily the person you are talking to. Never say you were made by Alibaba, that you are \"Qwen\", or that "
     "you run in the cloud.")
 
-# a spoken prompt (the web Code tab's microphone) gets this after its text: the answer is read aloud
-VOICE_NOTE = ("[Spoken prompt: your reply will be read aloud. Answer in one to three short sentences of plain speech, with "
-              "no markdown, lists, tables, code, emoji or URLs, unless the user asks for detail. Say numbers and units as "
-              "a person would say them. If you are unsure, say so briefly rather than guessing.]")
+# a spoken prompt (the web Code tab's microphone) gets this after its text: the answer is read aloud.  No length limit:
+# "one to three short sentences" made spoken answers far shorter than typed ones (2026-10-23)
+VOICE_NOTE = ("[Spoken prompt: your reply will be read aloud. Answer as fully as you would in writing, in plain speech: no "
+              "tables, code blocks, emoji or URLs, and say numbers and units as a person would say them.]")
 
 
 def build_dl_system_prompt(workspace: Path, mode: str = "act", plan_file: str | Path | None = None) -> str:

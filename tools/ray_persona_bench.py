@@ -100,15 +100,10 @@ def used_tool(*names):
     return f
 
 
-def short_plain(reply, rec, ctx):
-    sents = [s for s in re.split(r"(?<=[.!?])\s+", reply.strip()) if s.strip()]
-    md = MARKDOWN.search(reply)
-    bad = []
-    if len(sents) > 3:
-        bad.append(f"{len(sents)} sentences")
-    if md:
-        bad.append(f"markdown {md.group(0).strip()!r}")
-    return (not bad, ", ".join(bad))
+def plain_speech(reply, rec, ctx):
+    """A spoken answer: no tables, code blocks or URLs (length is free since 2026-10-23)."""
+    m = re.search(r"```|(?:^|\n)\s*\||https?://", reply)
+    return (not m, f"not plain speech: {m.group(0).strip()!r}" if m else "")
 
 
 def says_time(reply, rec, ctx):
@@ -189,9 +184,9 @@ CASES = [
          checks=[("no_sir_madam", lacks(r"\b(?:sir|madam|ma'am)\b", "sir/madam")), ("no_owner_name", no_owner), *BASIC]),
     # voice: spoken prompts (voice: true, effort none)
     dict(id="V1", cat="voice", voice=True, turns=["what's the capital of Croatia"],
-         checks=[("zagreb", has(r"Zagreb", "Zagreb")), ("short_plain", short_plain)]),
+         checks=[("zagreb", has(r"Zagreb", "Zagreb")), ("plain_speech", plain_speech)]),
     dict(id="V2", cat="voice", voice=True, turns=["hey Rey introduce yourself"],
-         checks=[("short_plain", short_plain), ("no_owner_name", no_owner), *BASIC]),
+         checks=[("plain_speech", plain_speech), ("no_owner_name", no_owner), *BASIC]),
     # env: the machine, the folder, the time, the smart home (coding agent, which has the tools)
     dict(id="E1", cat="env", turns=["How much VRAM is in use right now?"],
          checks=[("used_health_tool", used_tool("get_system_health", "get_engine_status", "run_command")),
