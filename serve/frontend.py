@@ -910,6 +910,7 @@ class OutputParser:
         # every namespace__member spelling of a declared namespace.tool, ambiguous ones too (#2284 passes those through)
         self._alias = set(aliases) | {k.replace(".", "__", 1) for k in self.schemas if isinstance(k, str) and "." in k}
         self.unread = 0              # #3441: `<tool_call>` blocks that opened like a call and were returned as text
+        self.unread_names: list[str] = []   # the names (first few) of those that named a tool the request did not declare
         # stream_tools: a tool call is also reported while it is being written - "tool_start" (its name and id) as
         # soon as the name is known, then "tool_args" pieces of its JSON arguments (string parameters character by
         # character; other types whole, once complete) - before the final "tool_call".  Without it, a client sees
@@ -1425,6 +1426,9 @@ class OutputParser:
                             self.buf = self.buf[j:]
                         return out
                     if gt >= 0 and (nl < 0 or gt < nl) and not self._callable(after[len(FUNC_START):gt].strip()):
+                        self.unread += 1                 # logged by the server: otherwise "the model ignored my tool" is the only clue
+                        if len(self.unread_names) < 5:
+                            self.unread_names.append(after[len(FUNC_START):gt].strip()[:80])
                         out.append(Event("content", self._track(self.buf[:i + len(CALL_START)])))
                         self.buf = self.buf[i + len(CALL_START):]
                         continue
