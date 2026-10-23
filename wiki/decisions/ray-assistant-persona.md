@@ -33,6 +33,15 @@ hands-free (STT → model → TTS).
     FEMALE1 slot and the `en-US` FEMALE1 slot were swapped (hfc_female ↔ lessac-medium) so all 20 voices stay listed.
     `DefaultVoice` there is also hfc_female. Backups: `*.bak-20261022-ray`.
   - `~/.local/bin/piper-speechd` still falls back to lessac: that is the crash-safe fallback, not Ray's voice.
+  - Without Piper (a phone, Edge, macOS) "Auto" used to take the first Natural/Neural voice, often male (Edge lists
+    "Microsoft Andrew Online (Natural)" early). Since 2026-10-23 every fallback step takes a female voice of its kind
+    first (`RAY_FEMALE_VOICE` in `serve/web/app.js`: Ava, Jenny, Aria, Google US English, Samantha, Android `-x-sfg`
+    and more). Checked in the browser pane with fake voice lists: Edge → Ava, Chrome → Google US English, Android →
+    `en-us-x-sfg-local`, desktop Piper → hfc_female.
+  - A voice saved in a browser still wins over Auto, and "Test voice" saves the selected one: sampling a male voice
+    keeps it. Pick "Auto" in Settings to go back.
+- **Auto-read on by default** (2026-10-23): "Automatically read new answers aloud" (`tts_auto_speak`) is on unless
+  turned off. It reads only answers to spoken (STT) prompts; a saved "off" is kept.
 - **Persona, revised the same day** (`RAY_IDENTITY` and `RAY_VOICE` in `serve/web/app.js`): the model kept saying it was
   made by Alibaba / Qwen, so Ray now carries who built what.
   - Tone: casual and direct, friendly person rather than butler; light humour; mild swearing only if the user swears

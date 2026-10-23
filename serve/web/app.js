@@ -258,6 +258,10 @@ function chunkText(text, maxLen = 180) {
   return chunks.filter(c => c.length > 0);
 }
 
+// female voices by name, for browsers without Piper: Piper's own, Edge/Windows, Chrome desktop, Apple, Android
+const RAY_FEMALE_VOICE = new RegExp("female|hfc_female|amy|kristin|lessac|ljspeech|kathleen|aria|jenny|ava\\b|emma|" +
+  "michelle|ana\\b|sonia|libby|maisie|natasha|clara|zira|hazel|susan|samantha|karen|moira|tessa|serena|victoria|allison|" +
+  "google us english|google uk english female|-x-(?:sfg|tpc|iob|iog)", "i");
 const TTSController = {
   queue: [],
   currentIndex: 0,
@@ -290,16 +294,20 @@ const TTSController = {
                   voices.find((v) => /piper|lessac|ryan/i.test(v.name || v.voiceURI));
     if (piper) return piper;
 
+    // Ray is female: without Piper (a phone, Edge, macOS) each step below takes a female voice of its kind first, since
+    // the first "Natural" voice is often male (Edge lists "Microsoft Andrew Online (Natural)" early)
+    const female = (list) => list.find((v) => RAY_FEMALE_VOICE.test(v.name || v.voiceURI)) || list[0];
+
     // 2. High priority: Native neural / natural voices (Edge Natural / Chrome OS Neural / Apple Siri)
-    const natural = voices.find((v) => /natural|neural|online/i.test(v.name || v.voiceURI));
+    const natural = female(voices.filter((v) => /natural|neural|online/i.test(v.name || v.voiceURI)));
     if (natural) return natural;
 
     // 3. English non-eSpeak local voice
-    const enNonEspeak = voices.find((v) => /^en/i.test(v.lang) && !/espeak/i.test(v.name || v.voiceURI));
+    const enNonEspeak = female(voices.filter((v) => /^en/i.test(v.lang) && !/espeak/i.test(v.name || v.voiceURI)));
     if (enNonEspeak) return enNonEspeak;
 
     // 4. Any non-eSpeak local voice
-    const anyNonEspeak = voices.find((v) => !/espeak/i.test(v.name || v.voiceURI));
+    const anyNonEspeak = female(voices.filter((v) => !/espeak/i.test(v.name || v.voiceURI)));
     if (anyNonEspeak) return anyNonEspeak;
 
     // 5. System default or first available
@@ -309,7 +317,8 @@ const TTSController = {
   getRate() { return +store.get("tts_rate", 1.0); },
   getPitch() { return +store.get("tts_pitch", 1.0); },
   getCodeMode() { return store.get("tts_code_mode", "skip"); },
-  isAutoSpeak() { return !!store.get("tts_auto_speak", false); },
+  // on unless turned off: a spoken prompt is answered aloud (typed ones never are)
+  isAutoSpeak() { return store.get("tts_auto_speak", true) !== false; },
   // spoken prompts (Chat and Code) are sent with thinking off; on unless turned off in Settings
   isFastVoice() { return store.get("voice_no_thinking", true) !== false; },
 
