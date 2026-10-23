@@ -176,5 +176,23 @@ class TestDlEffortRaiseReason(unittest.TestCase):
         self.assertIsNone(r)
 
 
+class TestDlEffortBudget(unittest.TestCase):
+    def test_default_tiers(self):
+        self.assertEqual(dl_effort.budget_for("none"), 0)
+        self.assertEqual(dl_effort.budget_for("low"), 1024)
+        self.assertEqual(dl_effort.budget_for("medium"), 2048)
+        self.assertEqual(dl_effort.budget_for("high"), 4096)
+
+    def test_unknown_level_defaults_to_high(self):
+        self.assertEqual(dl_effort.budget_for("unknown"), 4096)
+        self.assertEqual(dl_effort.budget_for(""), 4096)
+
+    def test_custom_caps(self):
+        custom = {"none": 0, "low": 512, "medium": 1024, "high": 8192}
+        self.assertEqual(dl_effort.budget_for("low", custom), 512)
+        self.assertEqual(dl_effort.budget_for("high", custom), 8192)
+        self.assertEqual(dl_effort.budget_for("other", custom), 4096)
+
+
 if __name__ == "__main__":
     unittest.main()

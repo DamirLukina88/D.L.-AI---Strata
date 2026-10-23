@@ -1542,7 +1542,7 @@ def thinking_loops(text: str) -> str | None:
 
 
 def stream_chat_turn(messages: list[dict], url: str, api_key: str, tools: list[dict] | None = None,
-                     emit=None, cancel=None, effort: str | None = None):
+                     emit=None, cancel=None, effort: str | None = None, budget: int = 0):
     """One streamed model reply.  `emit(event)` replaces terminal printing (the session daemon); `cancel` is a
     threading.Event that stops the stream early.  No sampling fields are sent: the server fills in the web app's
     Chat settings (reasoning effort, temperature, top_p, top_k, seed, max tokens, speed projection), so the CLI
@@ -1557,6 +1557,8 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str, tools: list[d
     }
     if effort:                     # a session's own thinking level (/effort); the server's Chat settings otherwise
         payload["reasoning_effort"] = effort
+    if budget and budget > 0:
+        payload["reasoning_budget_tokens"] = budget
     req = urllib.request.Request(
         endpoint,
         data=json.dumps(payload).encode("utf-8"),
@@ -1941,7 +1943,7 @@ def fit_context(messages: list[dict], tools: list[dict] | None, url: str, api_ke
 
 def chat_turn_in_context(messages: list[dict], url: str, api_key: str, tools: list[dict], emit=None, cancel=None,
                          measured: tuple[int, int] | None = None, effort: str | None = None,
-                         on_compact=None) -> dict:
+                         budget: int = 0, on_compact=None) -> dict:
     """stream_chat_turn after fit_context; if Strata still refuses the prompt as too long, compact to what it
     reported and try once more.  on_compact(messages) runs after a compaction, before the request: the prompt
     prefix is new then anyway, so it is the moment to refresh the memory section and the trim note."""
@@ -1949,7 +1951,7 @@ def chat_turn_in_context(messages: list[dict], url: str, api_key: str, tools: li
         on_compact(messages)
     try:
         return stream_chat_turn(messages=messages, url=url, api_key=api_key, tools=tools, emit=emit, cancel=cancel,
-                                effort=effort)
+                                effort=effort, budget=budget)
     except RuntimeError as e:
         m = re.search(r"exceeds the context window: prompt \((\d+) tokens\)", str(e))
         if not m:
@@ -1957,7 +1959,7 @@ def chat_turn_in_context(messages: list[dict], url: str, api_key: str, tools: li
         if fit_context(messages, tools, url, api_key, emit=emit, over=int(m.group(1))) and on_compact:
             on_compact(messages)
         return stream_chat_turn(messages=messages, url=url, api_key=api_key, tools=tools, emit=emit, cancel=cancel,
-                                effort=effort)
+                                effort=effort, budget=budget)
 
 
 LOOP_RETRIES = 3                    # per request
@@ -1976,13 +1978,13 @@ TURN_CAP_NOTE = ("[D.L. CLI] You have used all {n} tool rounds for this request,
 
 
 def turn_cap_wrap_up(messages: list[dict], url: str, api_key: str, tools: list[dict], limit: int,
-                     emit=None, cancel=None, effort: str | None = None) -> str:
+                     emit=None, cancel=None, effort: str | None = None, budget: int = 0) -> str:
     """The loop hit its cap: one last call, asked for a status instead of a tool call, so the turn never ends
     silently on a tool result.  The tools stay in the request (same prompt prefix, so the cache still hits); a tool
     call in the reply is not run."""
     messages.append({"role": "user", "content": TURN_CAP_NOTE.format(n=limit)})
     try:
-        res = chat_turn_in_context(messages, url, api_key, tools, emit=emit, cancel=cancel, effort=effort)
+        res = chat_turn_in_context(messages, url, api_key, tools, emit=emit, cancel=cancel, effort=effort, budget=budget)
         text = (res.get("content") or "").strip()
     except RuntimeError:
         res, text = {}, ""
@@ -2496,14 +2498,17 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
     cancel = (session_context or {}).get("cancel")
     effort = (session_context or {}).get("effort")
     effort_auto = bool((session_context or {}).get("effort_auto"))
+    budget = int((session_context or {}).get("reasoning_budget_tokens") or 0)
     seen: set[tuple[str, str]] = set()
 
     def _auto_raise(reason: str | None) -> None:
-        nonlocal effort
+        nonlocal effort, budget
         if effort_auto and reason and effort != "high":
             effort = "high"
+            budget = dl_effort.budget_for("high") if dl_effort is not None else 4096
             if session_context is not None:
                 session_context["effort"] = "high"
+                session_context["reasoning_budget_tokens"] = budget
             _note(emit, f"Auto thinking: raised to high ({reason})")
 
     registry = (session_context or {}).get("mcp")
@@ -2555,7 +2560,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
         turn += 1
         total_rounds += 1
         res = chat_turn_in_context(messages, url, api_key, active_tools, emit=emit, cancel=cancel,
-                                   measured=measured, effort=effort, on_compact=refresh_memory)
+                                   measured=measured, effort=effort, budget=budget, on_compact=refresh_memory)
         if res.get("prompt_tokens"):           # messages is now exactly what was sent (after any compaction)
             measured = (len(messages), res["prompt_tokens"])
         total_tokens += res["tokens"]
@@ -2706,7 +2711,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
         yolo_rollover()
     else:                                   # the cap ended the loop, not the model: ask it for a status
         if not (cancel is not None and cancel.is_set()):
-            turn_cap_wrap_up(messages, url, api_key, active_tools, max_turns, emit=emit, cancel=cancel, effort=effort)
+            turn_cap_wrap_up(messages, url, api_key, active_tools, max_turns, emit=emit, cancel=cancel, effort=effort, budget=budget)
 
     if registry is not None and registry.active:
         registry.tick()

@@ -239,7 +239,11 @@ class TurnEffort(unittest.TestCase):
         seen = []
         orig = dl_sessiond.cli.execute_agent_loop
         dl_sessiond.cli.execute_agent_loop = lambda **kw: (
-            seen.append((kw["session_context"]["effort"], kw["session_context"].get("effort_auto"))),
+            seen.append((
+                kw["session_context"]["effort"],
+                kw["session_context"].get("effort_auto"),
+                kw["session_context"].get("reasoning_budget_tokens"),
+            )),
             kw["workspace"],
         )[1]
         try:
@@ -270,11 +274,11 @@ class TurnEffort(unittest.TestCase):
         self.assertEqual(
             seen,
             [
-                ("none", True),
-                ("low", True),
-                ("medium", True),
-                ("high", True),
-                ("none", False),
+                ("none", True, 0),
+                ("low", True, 1024),
+                ("medium", True, 2048),
+                ("high", True, 4096),
+                ("none", False, 0),
             ],
         )
         self.assertEqual(s.effort, "auto")

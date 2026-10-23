@@ -341,11 +341,14 @@ class Session:
             last_reply = next((m.get("content") or "" for m in reversed(self.messages)
                                if m.get("role") == "assistant" and isinstance(m.get("content"), str)), "")
             level, reason = dl_effort.pick(prompt, voice=voice, mode=self.mode, last_reply=last_reply)
+            budget = dl_effort.budget_for(level)
             self.last_auto = (level, reason)
-            self.notice(f"Auto thinking: {level} ({reason})")
+            self.notice(f"Auto thinking: {level} ({reason}{f', cap: {budget}' if budget else ''})")
             resolved_effort = level
+            resolved_budget = budget
         else:
             resolved_effort = turn_effort
+            resolved_budget = 0
         self.messages.append({"role": "user",
                               "content": cli.with_now(cli.resolve_file_references(prompt, self.workspace))
                               + (f"\n\n{cli.VOICE_NOTE}" if voice else "")})   # spoken: the answer is read aloud
@@ -353,6 +356,7 @@ class Session:
                "plan_file": self.plan_file,
                "effort": resolved_effort,
                "effort_auto": effort_auto,
+               "reasoning_budget_tokens": resolved_budget,
                "emit": self.emit, "cancel": self.cancel, "approve": self.approve, "mcp": self.mcp, "user_text": prompt,
                "session": self}
         new_ws = cli.execute_agent_loop(messages=self.messages, url=cli.DEFAULT_URL, api_key=cli.DEFAULT_API_KEY,

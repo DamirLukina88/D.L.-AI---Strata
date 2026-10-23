@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-23:** Implemented Phases 1-3 of Adaptive Reasoning Evolution: tiered budget capping, empirical response matrix bench, and CPU semantic router. (Agent: Antigravity)
 - **2026-10-23:** Update. artifacts/strata-benchmark-2026-10-16.md. (Agent: Antigravity)
 - **2026-10-23:** Recorded pre-implementation baseline benchmark report in wiki/artifacts/strata-benchmark-2026-10-23-baseline.md. (Agent: Antigravity)
 - **2026-10-23:** Ingestion. artifacts/strata-benchmark-2026-10-23-baseline.md. (Agent: Antigravity)

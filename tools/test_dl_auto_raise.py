@@ -338,6 +338,84 @@ class TestDlAutoRaise(unittest.TestCase):
         self.assertEqual(ctx["effort"], "high")
         self.assertTrue(any("Auto thinking: raised to high (sent back by the finish checks)" in n for n in notices))
 
+    def test_auto_raise_updates_reasoning_budget_tokens_and_payload(self):
+        call_count = 0
+        budgets_seen = []
+        efforts_seen = []
+
+        def mock_chat_turn(messages, url, api_key, tools, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            budgets_seen.append(kwargs.get("budget"))
+            efforts_seen.append(kwargs.get("effort"))
+            if call_count == 1:
+                return {
+                    "content": "Running command",
+                    "reasoning": "",
+                    "tokens": 10,
+                    "prompt_tokens": 50,
+                    "finish_reason": "tool_calls",
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "run_command", "arguments": json.dumps({"CommandLine": "bad_cmd"})}
+                    }]
+                }
+            return {
+                "content": "Done",
+                "reasoning": "",
+                "tokens": 10,
+                "prompt_tokens": 80,
+                "finish_reason": "stop",
+                "tool_calls": []
+            }
+
+        def mock_dispatch(fn, args, ws, **kw):
+            return "Command failed\n[Command exited with code 1]"
+
+        messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "run cmd"}]
+        ctx = {
+            "workspace": self.ws,
+            "messages": messages,
+            "mode": "act",
+            "effort": "low",
+            "effort_auto": True,
+            "reasoning_budget_tokens": 1024,
+            "emit": lambda ev: None,
+        }
+        with patch.object(cli, "chat_turn_in_context", side_effect=mock_chat_turn), \
+             patch.object(cli, "dispatch_dl_tool", side_effect=mock_dispatch):
+            cli.execute_agent_loop(messages, "http://127.0.0.1:8080", "key", self.ws, max_turns=5, session_context=ctx)
+
+        self.assertEqual(efforts_seen, ["low", "high"])
+        self.assertEqual(budgets_seen, [1024, 4096])
+        self.assertEqual(ctx["effort"], "high")
+        self.assertEqual(ctx["reasoning_budget_tokens"], 4096)
+
+    def test_stream_chat_turn_payload_includes_reasoning_budget_tokens(self):
+        payloads = []
+
+        class DummyResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+            def __iter__(self):
+                return iter([b'data: {"choices": [{"delta": {"content": "hi"}}]}\n\n', b'data: [DONE]\n\n'])
+
+        def mock_urlopen(req, timeout=None):
+            payloads.append(json.loads(req.data.decode("utf-8")))
+            return DummyResponse()
+
+        with patch("urllib.request.urlopen", side_effect=mock_urlopen):
+            cli.stream_chat_turn([{"role": "user", "content": "hi"}], "http://127.0.0.1:8080", "key", tools=[], effort="low", budget=1024, emit=lambda ev: None)
+            cli.stream_chat_turn([{"role": "user", "content": "hi"}], "http://127.0.0.1:8080", "key", tools=[], effort="none", budget=0, emit=lambda ev: None)
+
+        self.assertEqual(payloads[0]["reasoning_effort"], "low")
+        self.assertEqual(payloads[0]["reasoning_budget_tokens"], 1024)
+        self.assertEqual(payloads[1]["reasoning_effort"], "none")
+        self.assertNotIn("reasoning_budget_tokens", payloads[1])
+
 
 if __name__ == "__main__":
     unittest.main()

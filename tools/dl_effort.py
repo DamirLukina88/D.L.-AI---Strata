@@ -2,7 +2,16 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+
+try:
+    from tools import dl_effort_scorer
+except ImportError:
+    try:
+        import dl_effort_scorer
+    except ImportError:
+        dl_effort_scorer = None
 
 CODE_HINTS = ("```", "traceback", "error:", "exception", "exit code", "exited with code")
 CODING_VERBS = (
@@ -32,6 +41,19 @@ CODE_WORDS = (
 AT_FILE_RE = re.compile(r"(?:^|\s)@[\w./-]+")
 EXIT_CODE_RE = re.compile(r"\[Command exited with code (-?\d+)\]")
 
+BUDGET_TIERS: dict[str, int] = {
+    "none": 0,
+    "low": 1024,
+    "medium": 2048,
+    "high": 4096,
+}
+
+
+def budget_for(level: str, custom_caps: dict[str, int] | None = None) -> int:
+    """Return maximum thinking tokens allocated for this effort level (0: no budget / uncapped)."""
+    caps = custom_caps if custom_caps is not None else BUDGET_TIERS
+    return caps.get(level, 4096)
+
 
 def _has_any(text: str, phrases: tuple[str, ...]) -> bool:
     for p in phrases:
@@ -41,8 +63,13 @@ def _has_any(text: str, phrases: tuple[str, ...]) -> bool:
     return False
 
 
-def pick(prompt: str, *, voice: bool = False, mode: str = "act", last_reply: str = "") -> tuple[str, str]:
-    """Pick (level, reason) for a prompt with rules. Matching is case-insensitive on raw prompt."""
+def _semantic_enabled() -> bool:
+    v = os.environ.get("DL_SEMANTIC_ROUTER", "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def pick(prompt: str, *, voice: bool = False, mode: str = "act", last_reply: str = "", semantic: bool | None = None) -> tuple[str, str]:
+    """Pick (level, reason) for a prompt with rules and optional semantic routing. Matching is case-insensitive on raw prompt."""
     if mode == "plan":
         return "high", "plan mode"
 
@@ -79,6 +106,16 @@ def pick(prompt: str, *, voice: bool = False, mode: str = "act", last_reply: str
         return "medium", "explanation"
     if words <= 20 + v_slack and not has_code and is_question:
         return "low", "short question"
+
+    use_semantic = _semantic_enabled() if semantic is None else semantic
+    if use_semantic and dl_effort_scorer is not None:
+        try:
+            s_lvl, s_conf = dl_effort_scorer.predict(raw)
+            if s_conf >= 0.70 and s_lvl in ("none", "low", "medium"):
+                return s_lvl, f"semantic {s_lvl}"
+        except Exception:
+            pass
+
     return "high", "default"
 
 
