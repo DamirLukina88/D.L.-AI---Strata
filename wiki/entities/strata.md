@@ -102,6 +102,8 @@ The environment integrates high-throughput MoE execution (16 GB VRAM + 32 GB RAM
 - [Native Browser TTS Implementation Plan](../artifacts/native-browser-tts-implementation-plan.md)
 - [Native Browser STT Implementation Report](../artifacts/native-browser-stt-implementation-report.md)
 - [Native Browser STT Implementation Plan](../artifacts/native-browser-stt-implementation-plan.md)
+- [Ray Struggle Diary and Modular Harness Implementation Plan](../artifacts/ray-struggle-diary-and-modular-harness-plan.md)
+- [Harness² Research and Feasibility Analysis for Ray](../artifacts/harness2-research-and-tradeoffs-analysis.md)
 
 ## Sources
 
