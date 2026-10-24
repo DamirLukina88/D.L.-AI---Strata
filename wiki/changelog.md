@@ -15,6 +15,8 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-24:** Artifact Backup. Saved Ray TTS PipeWire and truncation fix report to wiki/artifacts/ray-tts-pipewire-and-truncation-fix-report.md. (Agent: Antigravity)
+- **2026-10-24:** Ingestion. artifacts/ray-tts-pipewire-and-truncation-fix-report.md. (Agent: Antigravity)
 - **2026-10-24:** Update. decisions/desktop-piper-voice-switching-and-stt-auto-speak.md. (Agent: Antigravity)
 - **2026-10-24:** Resolved Ray TTS interruptions and sentence truncation: replaced ALSA aplay with PipeWire native pw-play in piper-speechd, eliminated 12s pause/resume watchdog heartbeat, yielded on utterance transition, and protected abbreviations and decimals from chunk splitting. (Agent: Antigravity)
 - **2026-10-24:** Ingestion. decisions/revert-struggle-diary-and-modular-harness.md. (Agent: Antigravity)

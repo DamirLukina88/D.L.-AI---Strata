@@ -80,6 +80,7 @@ This decision documents two critical speech subsystem fixes: (1) resolving Speec
 ## Related
 
 - [Ray: Assistant Name, Female Voice and Persona](ray-assistant-persona.md): the default voice is now HFC female.
+- [Ray TTS PipeWire Audio Backend and Truncation Fix Report](../artifacts/ray-tts-pipewire-and-truncation-fix-report.md)
 
 ## Sources
 
