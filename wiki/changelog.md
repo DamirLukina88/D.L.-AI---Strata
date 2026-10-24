@@ -15,6 +15,8 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-24:** Update. decisions/model-selection-and-hardware-budget.md. (Agent: Antigravity)
+- **2026-10-24:** Ingestion. artifacts/upstream-v0-2-4-review-2026-10-24.md. (Agent: Antigravity)
 - **2026-10-24:** Update. decisions/sensitive-file-guard-and-prefix-mode-in-dl-cli.md. (Agent: Antigravity)
 - **2026-10-24:** Ingestion. decisions/multimodal-media-pipeline-bridge.md. (Agent: Antigravity)
 - **2026-10-24:** Artifact Backup: saved Adaptive Reasoning Evolution Plan to wiki/artifacts/adaptive-reasoning-evolution-plan.md. (Agent: Antigravity)
