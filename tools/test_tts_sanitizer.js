@@ -53,8 +53,8 @@ function cleanForSpeech(rawText, codeMode = "skip") {
   // 10. Strip horizontal rules (---, ***, ___)
   text = text.replace(/^[-*_]{3,}\s*$/gm, "");
 
-  // 11. Strip HTML tags
-  text = text.replace(/<[^>]+>/g, " ");
+  // 11. Strip HTML tags (only tags starting with a-z or /)
+  text = text.replace(/<[a-zA-Z\/][^>]*>/g, " ");
 
   // 12. Normalize LaTeX / Math formulas ($x^2$, $$formula$$)
   text = text.replace(/\$\$([^$]+)\$\$/g, "$1");
@@ -77,18 +77,20 @@ function cleanForSpeech(rawText, codeMode = "skip") {
   return text;
 }
 
-function chunkText(text, maxLen = 180) {
+function chunkText(text, maxLen = 240) {
   if (!text) return [];
   const clean = text.trim();
   if (clean.length <= maxLen) return [clean];
 
+  // Protect common abbreviations, decimals, and versions from improper splitting
+  const safe = clean.replace(/\b(e\.g\.|i\.e\.|vs\.|dr\.|mr\.|mrs\.|ms\.)/gi, (m) => m.replace(/\./g, "\u2024"))
+                    .replace(/(\d+)\.(\d+)/g, "$1\u2024$2");
+
   const chunks = [];
-  // Split by natural sentence boundaries (. ! ? ; or newlines)
-  // Lookahead/lookbehind preserves punctuation on the sentence
-  const rawSentences = clean.split(/(?<=[.!?;\n])\s+/);
+  const rawSentences = safe.split(/(?<=[.!?;\n])\s+/);
 
   for (const raw of rawSentences) {
-    const s = raw.trim();
+    const s = raw.replace(/\u2024/g, ".").trim();
     if (!s) continue;
 
     if (s.length <= maxLen) {
@@ -214,6 +216,26 @@ console.log("Running TTS Text Sanitizer & Chunker Test Suite...");
   console.log("✓ Test 8 Passed: Smart quotes, en-dash, and ellipsis normalized");
 }
 
+// Test 9: Decimal numbers and abbreviations preserved from premature splitting
+{
+  const input = "The server is running on 23.7 GB of RAM, version 1.2 of the protocol, e.g. on port 8080. Everything is operational.";
+  const chunks = chunkText(input, 240);
+  assert.strictEqual(chunks.length, 1);
+  assert.ok(chunks[0].includes("23.7 GB"));
+  assert.ok(chunks[0].includes("e.g. on port 8080"));
+  console.log("✓ Test 9 Passed: Decimals and abbreviations kept intact in natural chunk");
+}
+
+// Test 10: Math inequalities preserved while HTML tags are cleanly stripped
+{
+  const input = "<div>Notice: if count < 10 and max > 50, then check <path/to/file>.</div>";
+  const cleaned = cleanForSpeech(input);
+  assert.ok(cleaned.includes("count < 10 and max > 50"), "Math inequality should not be stripped as HTML tag");
+  assert.ok(!cleaned.includes("<div>"), "HTML opening tag stripped");
+  assert.ok(!cleaned.includes("</div>"), "HTML closing tag stripped");
+  console.log("✓ Test 10 Passed: Math inequalities preserved while HTML tags stripped");
+}
+
 console.log("\n=======================================================");
-console.log("ALL 8 TTS SANITIZER & CHUNKER UNIT TESTS PASSED (100%)!");
+console.log("ALL 10 TTS SANITIZER & CHUNKER UNIT TESTS PASSED (100%)!");
 console.log("=======================================================\n");

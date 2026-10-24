@@ -150,8 +150,8 @@ function cleanForSpeech(rawText, codeMode = "skip") {
   // 10. Strip horizontal rules (---, ***, ___)
   text = text.replace(/^[-*_]{3,}\s*$/gm, "");
 
-  // 11. Strip HTML tags
-  text = text.replace(/<[^>]+>/g, " ");
+  // 11. Strip HTML tags (only tags starting with a-z or /)
+  text = text.replace(/<[a-zA-Z\/][^>]*>/g, " ");
 
   // 12. Currency, percentages, temperatures, and numbers with units (before LaTeX/math stripping)
   text = text.replace(/\$(\d+(?:\.\d+)?)/g, (_, num) => `${num} dollars`);
@@ -206,16 +206,20 @@ function cleanForSpeech(rawText, codeMode = "skip") {
   return text;
 }
 
-function chunkText(text, maxLen = 180) {
+function chunkText(text, maxLen = 240) {
   if (!text) return [];
   const clean = text.trim();
   if (clean.length <= maxLen) return [clean];
 
+  // Protect common abbreviations, decimals, and versions from improper splitting
+  const safe = clean.replace(/\b(e\.g\.|i\.e\.|vs\.|dr\.|mr\.|mrs\.|ms\.)/gi, (m) => m.replace(/\./g, "\u2024"))
+                    .replace(/(\d+)\.(\d+)/g, "$1\u2024$2");
+
   const chunks = [];
-  const rawSentences = clean.split(/(?<=[.!?;\n])\s+/);
+  const rawSentences = safe.split(/(?<=[.!?;\n])\s+/);
 
   for (const raw of rawSentences) {
-    const s = raw.trim();
+    const s = raw.replace(/\u2024/g, ".").trim();
     if (!s) continue;
 
     if (s.length <= maxLen) {
@@ -329,22 +333,31 @@ const TTSController = {
   },
 
   chunk(text) {
-    return chunkText(text, 140);
+    return chunkText(text, 240);
   },
 
   startWatchdog() {
     this.stopWatchdog();
-    // Android/iOS TTS engines glitch and cancel playback when pause()/resume() is invoked.
-    // Silent WebAudio buffer keep-alive already keeps the mobile audio pipeline active.
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    if (isMobile) return;
-
+    // Do not run pause/resume heartbeats during active playback; on desktop Linux and mobile,
+    // pulsing pause/resume causes Speech Dispatcher or the audio HAL to abort or cancel playback.
+    // Instead, this hang watchdog only intervenes if an individual chunk stalls with zero progress for >20s.
+    let lastIndex = this.currentIndex;
+    let stuckCount = 0;
     this.watchdogTimer = setInterval(() => {
-      if (window.speechSynthesis && window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
-        window.speechSynthesis.pause();
-        window.speechSynthesis.resume();
+      if (!this.speaking || window.speechSynthesis?.paused) return;
+      if (this.currentIndex === lastIndex) {
+        stuckCount++;
+        if (stuckCount >= 4) { // 4 ticks of 5s = 20s stuck on the same chunk
+          console.warn("TTS watchdog: chunk stalled for 20s, advancing to next chunk");
+          stuckCount = 0;
+          this.currentIndex++;
+          this.speakNext();
+        }
+      } else {
+        lastIndex = this.currentIndex;
+        stuckCount = 0;
       }
-    }, 12000);
+    }, 5000);
   },
 
   stopWatchdog() {
@@ -516,10 +529,16 @@ const TTSController = {
 
     u.onend = () => {
       this.currentIndex++;
-      this.speakNext();
+      // Yield briefly so browser audio driver cleanly settles before queueing the next utterance
+      setTimeout(() => {
+        if (this.speaking) this.speakNext();
+      }, 25);
     };
 
     u.onerror = (e) => {
+      // If user clicked stop or cancelled explicitly, do not log or continue
+      if (!this.speaking) return;
+
       if (e.error !== "canceled" && e.error !== "interrupted") {
         console.warn("SpeechSynthesis error:", e);
       }
@@ -532,10 +551,12 @@ const TTSController = {
           return;
         }
       }
-      // Gracefully advance to next chunk rather than dropping the remaining text
+      // Advance to next chunk rather than dropping the remaining text
       this.currentIndex++;
-      if (this.currentIndex < this.queue.length && e.error !== "canceled" && e.error !== "interrupted") {
-        this.speakNext();
+      if (this.currentIndex < this.queue.length) {
+        setTimeout(() => {
+          if (this.speaking) this.speakNext();
+        }, 35);
       } else {
         this.stop();
       }
