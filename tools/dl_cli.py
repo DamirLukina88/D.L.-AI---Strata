@@ -877,7 +877,15 @@ def is_sensitive_file(p: Path) -> bool:
     return any(part.lower() in SENSITIVE_DIRS for part in p.parts)
 
 
+IMAGE_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff", ".tif", ".avif",
+    ".ppm", ".pgm", ".pbm", ".pnm", ".ico", ".tga"
+}
+
+
 def resolve_file_references(prompt: str, workspace: Path) -> str:
+    """Inlines text file references into markdown code blocks. Image references are safely
+    preserved as [Image: path] tags rather than dumping raw binary bytes into the prompt."""
     pattern = r"@([a-zA-Z0-9_\-\.\/]+)"
     matches = list(re.finditer(pattern, prompt))
     if not matches:
@@ -894,6 +902,13 @@ def resolve_file_references(prompt: str, workspace: Path) -> str:
             if is_sensitive_file(p):
                 sys.stderr.write(f"{C_RED}Blocked sensitive file injection: @{fpath_str} (credentials/private key guarded){C_RESET}\n")
                 continue
+            if p.suffix.lower() in IMAGE_EXTENSIONS:
+                rel_path = p.relative_to(workspace) if p.is_relative_to(workspace) else p
+                replacement = f"[Image: {rel_path}]"
+                start, end = m.start() + offset, m.end() + offset
+                new_prompt = new_prompt[:start] + replacement + new_prompt[end:]
+                offset += len(replacement) - (end - start)
+                continue
             try:
                 content = p.read_text(encoding="utf-8", errors="replace")
                 ext = p.suffix.lstrip(".") or "text"
@@ -905,6 +920,65 @@ def resolve_file_references(prompt: str, workspace: Path) -> str:
             except Exception as e:
                 sys.stderr.write(f"{C_YELLOW}Warning: Could not read @{fpath_str}: {e}{C_RESET}\n")
     return new_prompt
+
+
+def resolve_prompt_and_images(prompt: str, workspace: Path) -> tuple[str, list[str]]:
+    """Resolves @file references, inlining text files and extracting valid image paths.
+    Returns (cleaned_prompt_text, list_of_image_file_urls)."""
+    pattern = r"@([a-zA-Z0-9_\-\.\/]+)"
+    matches = list(re.finditer(pattern, prompt))
+    if not matches:
+        return prompt, []
+
+    offset = 0
+    new_prompt = prompt
+    images: list[str] = []
+    for m in matches:
+        fpath_str = m.group(1)
+        p = (workspace / fpath_str).resolve()
+        if not p.is_file():
+            p = Path(fpath_str).resolve()
+        if p.is_file():
+            if is_sensitive_file(p):
+                sys.stderr.write(f"{C_RED}Blocked sensitive file injection: @{fpath_str} (credentials/private key guarded){C_RESET}\n")
+                continue
+            if p.suffix.lower() in IMAGE_EXTENSIONS:
+                rel_path = p.relative_to(workspace) if p.is_relative_to(workspace) else p
+                replacement = f"[Image: {rel_path}]"
+                start, end = m.start() + offset, m.end() + offset
+                new_prompt = new_prompt[:start] + replacement + new_prompt[end:]
+                offset += len(replacement) - (end - start)
+                images.append(f"file://{p.resolve()}")
+                continue
+            try:
+                content = p.read_text(encoding="utf-8", errors="replace")
+                ext = p.suffix.lstrip(".") or "text"
+                rel_path = p.relative_to(workspace) if p.is_relative_to(workspace) else p
+                replacement = f"\n\n```file:{rel_path}\n{content}\n```\n"
+                start, end = m.start() + offset, m.end() + offset
+                new_prompt = new_prompt[:start] + replacement + new_prompt[end:]
+                offset += len(replacement) - (end - start)
+            except Exception as e:
+                sys.stderr.write(f"{C_YELLOW}Warning: Could not read @{fpath_str}: {e}{C_RESET}\n")
+    return new_prompt, images
+
+
+def build_user_message_content(prompt: str, workspace: Path, voice: bool = False) -> str | list[dict]:
+    """Builds user message content. If attached images exist, produces an OpenAI-compatible multimodal
+    parts list (text + image_url blocks) for strata-vision; otherwise returns a formatted text string."""
+    resolved_prompt, images = resolve_prompt_and_images(prompt, workspace)
+    clean_user_text = re.sub(r"\[Image:[^\]]*\]", "", resolved_prompt).strip()
+    if images and not clean_user_text:
+        resolved_prompt = f"{resolved_prompt.strip()}\nDescribe this image and identify its key elements."
+
+    base_text = with_now(resolved_prompt) + (f"\n\n{VOICE_NOTE}" if voice else "")
+    if not images:
+        return base_text
+
+    parts: list[dict] = [{"type": "text", "text": base_text}]
+    for img_url in images:
+        parts.append({"type": "image_url", "image_url": {"url": img_url}})
+    return parts
 
 
 # Tool implementations
@@ -1803,7 +1877,15 @@ def _units(messages: list[dict], start: int, stop: int) -> list[tuple[int, int]]
 def is_cli_note(m: dict) -> bool:
     """A user-role message D.L. CLI wrote itself (trim note, text-tool-call note, turn cap, done check), not the
     user's words.  Every such note starts with "[D.L. CLI"; the user's own messages start with with_now's "[Now:"."""
-    return m.get("role") == "user" and str(m.get("content") or "").startswith("[D.L. CLI")
+    if m.get("role") != "user":
+        return False
+    c = m.get("content")
+    if isinstance(c, str):
+        return c.startswith("[D.L. CLI")
+    if isinstance(c, list):
+        text = next((p.get("text", "") for p in c if isinstance(p, dict) and p.get("type") == "text"), "")
+        return text.startswith("[D.L. CLI")
+    return False
 
 
 PROTECT_SHARE = 0.25            # at most this part of the trim target goes to keeping older user messages
@@ -2371,10 +2453,18 @@ def browser_nudge(state: dict, ws: Path, emit=None) -> str | None:
     return BROWSER_LIVE_NOTE.format(page=rel, n=len(errs), errors="\n".join(f"- {e}" for e in errs))
 
 
+def _user_message_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text")
+    return str(content or "")
+
+
 def _latest_task(messages: list[dict]) -> str:
     real = [m for m in messages if m.get("role") == "user" and not is_cli_note(m)
-            and isinstance(m.get("content"), str)]
-    return "\n\n".join(NOW_PREFIX.sub("", m["content"]).strip()[:3000] for m in real[-2:])
+            and (isinstance(m.get("content"), str) or isinstance(m.get("content"), list))]
+    return "\n\n".join(NOW_PREFIX.sub("", _user_message_text(m.get("content"))).strip()[:3000] for m in real[-2:])
 
 
 def review_changes(messages: list[dict], changes: RequestChanges, final: str, plan_section: str, url: str,
@@ -2552,7 +2642,16 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
         nudge = browser_nudge(finish, current_ws, emit)     # a long run gets the real browser's errors too
         if nudge:
             if messages and messages[-1].get("role") == "user":
-                messages[-1]["content"] = f"{messages[-1]['content']}\n\n{nudge}"
+                c = messages[-1].get("content")
+                if isinstance(c, list):
+                    for part in c:
+                        if isinstance(part, dict) and part.get("type") == "text":
+                            part["text"] = f"{part.get('text', '')}\n\n{nudge}"
+                            break
+                    else:
+                        c.append({"type": "text", "text": nudge})
+                else:
+                    messages[-1]["content"] = f"{messages[-1].get('content', '')}\n\n{nudge}"
             else:
                 messages.append({"role": "user", "content": nudge})
 
@@ -2770,7 +2869,17 @@ def format_messages_to_markdown(messages: list[dict], model_name: str = "Qwen3.8
     for m in messages:
         role = m.get("role")
         if role == "user":
-            content = NOW_PREFIX.sub("", m.get("content", "")).strip()
+            raw_content = m.get("content", "")
+            if isinstance(raw_content, list):
+                texts = [p.get("text", "") for p in raw_content if isinstance(p, dict) and p.get("type") == "text"]
+                imgs = [p.get("image_url", {}).get("url") if isinstance(p.get("image_url"), dict) else p.get("image_url")
+                        for p in raw_content if isinstance(p, dict) and p.get("type") == "image_url"]
+                img_desc = " ".join(f"[Image: {img}]" for img in imgs if img)
+                text_part = " ".join(texts)
+                combined = f"{img_desc}\n{text_part}".strip() if img_desc and img_desc not in text_part else text_part
+                content = NOW_PREFIX.sub("", combined).strip()
+            else:
+                content = NOW_PREFIX.sub("", str(raw_content or "")).strip()
             if content:
                 sections.append(f"## You\n\n{content}\n")
         elif role == "assistant":
@@ -3258,9 +3367,8 @@ def interactive_loop(workspace: Path, url: str, api_key: str, initial_mode: str 
                     print(f"\n{out}\n")
                 continue
 
-            # File context injection
-            resolved_prompt = resolve_file_references(prompt, workspace)
-            messages.append({"role": "user", "content": with_now(resolved_prompt)})
+            # File context injection (text inlining and multimodal images)
+            messages.append({"role": "user", "content": build_user_message_content(prompt, workspace)})
 
             # DeepSeek-style Prefix Mode: seed assistant turn with prefix (e.g. ```) to suppress preamble chatter
             if prefix_mode and custom_prefix:
@@ -3321,10 +3429,9 @@ def main():
     mode = "plan" if args.plan else "act"
 
     if args.prompt:
-        resolved = resolve_file_references(args.prompt, ws)
         messages = [
             {"role": "system", "content": build_dl_system_prompt(ws, mode=mode)},
-            {"role": "user", "content": with_now(resolved)}
+            {"role": "user", "content": build_user_message_content(args.prompt, ws)}
         ]
         try:
             execute_agent_loop(messages, args.url, args.api_key, ws, mode=mode)

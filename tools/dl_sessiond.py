@@ -350,8 +350,7 @@ class Session:
             resolved_effort = turn_effort
             resolved_budget = 0
         self.messages.append({"role": "user",
-                              "content": cli.with_now(cli.resolve_file_references(prompt, self.workspace))
-                              + (f"\n\n{cli.VOICE_NOTE}" if voice else "")})   # spoken: the answer is read aloud
+                              "content": cli.build_user_message_content(prompt, self.workspace, voice=voice)})
         ctx = {"workspace": self.workspace, "messages": self.messages, "mode": self.mode, "yolo": self.yolo,
                "plan_file": self.plan_file,
                "effort": resolved_effort,
