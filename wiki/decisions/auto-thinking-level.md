@@ -45,6 +45,11 @@ In `/effort auto`, the thinking level is chosen per turn without an extra model 
 6. **Status & Measurement:**
    All 46 unit tests across 5 test suites (`tools/test_dl_effort.py` [17 tests], `tools/test_dl_sessiond.py` [13 tests], `tools/test_dl_auto_raise.py` [8 tests], `tools/test_bench_effort_matrix.py` [3 tests], `tools/test_dl_effort_scorer.py` [5 tests]) pass cleanly. Live daemon verification confirmed prompt routing and notice delivery (`cap: 2048`).
 
+## Related
+
+- [Adaptive Reasoning Evolution Plan](../artifacts/adaptive-reasoning-evolution-plan.md)
+- [Strata v0.1.44.1 Benchmark Report (2026-10-23 Baseline)](../artifacts/strata-benchmark-2026-10-23-baseline.md)
+
 ## Sources
 
 1. User, chat, 2026-10-23.

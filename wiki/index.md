@@ -63,6 +63,7 @@ Every page in this wiki is listed below. The list is generated; do not edit betw
 
 ## Artifacts
 
+- [Adaptive Reasoning Evolution Plan](artifacts/adaptive-reasoning-evolution-plan.md) — Implementation plan for tiered reasoning budget caps, empirical evaluation matrix, and CPU semantic router.
 - [Antigravity Change Requests, 5-12 Oct 2026](artifacts/antigravity-change-requests-2026-10.md) — The user's 92 change requests to Antigravity for Strata/D.L. AI, newest first; the last three were left unfinished
 - [Async Queue Debugging Benchmark Plan (not built)](artifacts/async-queue-debugging-benchmark-plan.md) — Planned harder D.L. CLI benchmark (17 Oct): a multi-file async pipeline bug whose root cause is in channel.py; not built as of 2026-10-20
 - [Claude Code On-Demand Strata Walkthrough](artifacts/claude-code-on-demand-walkthrough.md) — Walkthrough of integrating Claude Code CLI with local Strata on-demand lifecycle and signal traps.

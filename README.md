@@ -93,6 +93,8 @@ and seamlessly inspect or continue it from your terminal:
 - **YOLO Mode & Infinite Continuation:** `/yolo` disables approval prompts per session and enables infinite autonomous auto-continuation past `DL_MAX_TURNS` for complex workflows.
 - **Plan Mode:** `/plan` investigates read-only and presents an *Execute this plan?* prompt to transition cleanly into act mode.
 - **Automatic Thinking Level (`/effort auto`):** default per-turn thinking selector (`tools/dl_effort.py`) that picks `none` for greetings, wake words and smart-home/clock commands, `low` for short factual questions, `medium` for conceptual explanations, and `high` for code, files, errors, plan mode, or follow-up complaints—and escalates mid-turn to `high` if any tool call errors, repeats, or hits a retry guard ([decision](wiki/decisions/auto-thinking-level.md)). Configurable via the Settings/Sampling drawer or `/effort auto|none|low|medium|high|default`.
+- **Dynamic Reasoning Budget Capping:** tiered token caps (`none: 0`, `low: 1024`, `medium: 2048`, `high: 4096`) passed in `reasoning_budget_tokens` eliminate runaway loops without clipping solutions. On mid-turn escalation, the budget automatically raises to 4,096 tokens alongside effort to `high`.
+- **Empirical Response Matrix & CPU Semantic Router:** a 75-item evaluation suite (`tools/bench_effort_matrix.py`) across Voice, Chat, and Coding cohorts and a zero-dependency CPU difficulty router (`tools/dl_effort_scorer.py`, 0.09 ms latency, deterministic CRC32 feature hashing, cosine $k$-NN, safety upward bias).
 - **Conversational Continues:** naturally typing *"continue"*, *"keep going"*, or *"go on"* routes directly to turn continuation.
 
 **Keeps its task on long runs** (added 2026-10-20, after a 6-hour run lost its task to context trimming):
@@ -112,7 +114,7 @@ Dictate prompts privately with 100% offline speech recognition:
 - **Real-Time Interim Speech:** progressive interim speech population renders in the composer while walking or talking.
 - **Dual-Mode Voice Typing:** click to toggle recording, or hold-to-talk with visual recording pulse.
 - **Instant Auto-Send (0ms Delay):** hands-free auto-send populates the text field and submits immediately upon speech pause.
-- **Answers without the wait:** spoken prompts skip the model's thinking by default (see Ray, above).
+- **Fast spoken responses:** spoken prompts use `/effort auto` by default, answering greetings and home commands instantly while giving complex queries full reasoning room.
 - **Mobile Keyboard Suppression:** taps on voice triggers call `navigator.virtualKeyboard.hide()` and set `inputmode="none"`, preventing smartphone on-screen keyboards from obscuring the screen.
 - **Browser Speech Fallback:** Web Speech API fallback available when local Whisper is uninstalled.
 
