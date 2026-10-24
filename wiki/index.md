@@ -41,6 +41,7 @@ Every page in this wiki is listed below. The list is generated; do not edit betw
 - [Lazy Loading and GUI Force Restart](decisions/lazy-loading-and-gui-force-restart.md) — Implementation of JIT model loading on request, GUI force restart button, and model selection
 - [Local Whisper Speech-to-Text (STT) Integration](decisions/local-whisper-speech-to-text.md) — Implements 100% offline, local Whisper STT via whisper.cpp and MediaRecorder for Desktop Brave and all browsers
 - [Model Selection and Hardware Budgeting](decisions/model-selection-and-hardware-budget.md) — Hardware requirements and sizing heuristics for Strata deployments
+- [Multimodal Media Pipeline Bridge](decisions/multimodal-media-pipeline-bridge.md) — Routes attached images, video keyframes, rendered PDF pages, audio Whisper transcriptions, and blocks raw binaries in D.L. CLI and session daemon
 - [Pruned Core 6 Tools and 8-Hour JIT Keep-Alive for Local LLM](decisions/pruned-core-6-tools-and-8h-keepalive.md) — Reduced LLM prefill tokens by ~65% and set model idle unload to 8 hours to eliminate cold disk reloading.
 - [Public Secret Leak and Rotation (2026-10-13)](decisions/secret-leak-rotation-2026-10.md) — Strata, Exa, Context7 and client-IP keys were pushed to the public fork; rotated, moved to secrets.env, history scrubbed
 - [Ray: Assistant Name, Female Voice and Persona](decisions/ray-assistant-persona.md) — D.L. AI is now Ray; Piper HFC female voice; casual persona crediting Damir's stack on every Chat request

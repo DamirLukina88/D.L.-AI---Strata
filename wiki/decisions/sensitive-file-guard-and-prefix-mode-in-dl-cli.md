@@ -13,7 +13,7 @@ last_verified: 2026-10-11
 
 ## Summary
 
-Adopted DeepSeek-style sensitive file detection (blocking .env, .pem, id_rsa, .git-credentials) in D.L. CLI file references. Added /prefix interactive command to seed assistant turns with code blocks, eliminating preamble banter.
+Adopted DeepSeek-style sensitive file detection (blocking .env, .pem, id_rsa, .git-credentials) in D.L. CLI file references. Added /prefix interactive command to seed assistant turns with code blocks, eliminating preamble banter. See also [Multimodal Media Pipeline Bridge](multimodal-media-pipeline-bridge.md) for media and binary guarding.
 
 ## Sources
 
