@@ -57,6 +57,13 @@ Home Assistant Core is installed on dedicated storage (`/mnt/data/homeassistant`
    - Entities: `climate.living_room_ac`, `switch.c66cb625_panel_light`, `switch.c66cb625_quiet_mode`, `switch.c66cb625_fresh_air`, `switch.c66cb625_xtra_fan`.
    - Assigned to area: `Living Room`.
 
+7. **Smart Outlet Power/Energy Units & Live Monitoring (2026-10-24)**:
+   - Problem: Tuya smart plugs had cumulative energy sensors (`sensor.*_total_energy`) with missing or empty units (`""` or `null`) and missing `device_class: energy`. Their active power sensors (`sensor.*_power`), current (`sensor.*_current`), and voltage (`sensor.*_voltage`) were disabled by integration (`disabled_by: "integration"`).
+   - Solution:
+     * Added `/mnt/data/homeassistant/config/customize.yaml` included in `configuration.yaml` defining `unit_of_measurement: "kWh"`, `device_class: energy`, and `state_class: total_increasing` for `sensor.v13_charger_total_energy`, `sensor.printer_light_total_energy`, `sensor.monitor_light_total_energy`, `sensor.a1_a_total_energy`, and `sensor.a1_b_total_energy`.
+     * Executed `tools/ha_enable_power_sensors.py` via WebSocket API (`config/entity_registry/update`): enabled 7 power sensors with native `kW` display conversion, enabled 7 current sensors (`A`), and 7 voltage sensors (`V`).
+     * Enhanced `tools/homeassistant_mcp.py`: added `_device_to_entities` sibling index to `AreaDeviceRegistry`. When querying power outlets (`device_class: outlet` or `switch.*_socket`), `list_entities` and `get_state` automatically enrich the outlet entity with live `power` (e.g. `0.251 kW`) and `total_energy` (e.g. `0.008 kWh`). Sanitized `unit` attribute extraction so empty string units are excluded.
+
 ## Gotchas
 
 1. **Xiaomi Camera Streaming (`chuangmi.camera.039c04`)**:
@@ -79,14 +86,17 @@ Home Assistant Core is installed on dedicated storage (`/mnt/data/homeassistant`
 
 ## Verification
 
-- Automated test suite: `python3 -m unittest tools/test_homeassistant_mcp.py -v` (5 tests passing: handshake, error handling, tool dispatch, area registry & filtering, mock REST endpoints).
+- Automated test suite: `python3 -m unittest tools/test_homeassistant_mcp.py -v` (6 tests passing: handshake, error handling, tool dispatch, area registry & filtering, outlet power enrichment & units, mock REST endpoints).
 - Live HA MCP execution: Verified `list_entities(domain='light', area='Living Room')` returns all 4 living room lights, and `list_entities(domain='light', area='Office')` returns all 6 office lights.
+- Live Outlet & Power query: `list_entities(domain='switch', search='socket')` returns all 11 sockets, with power-metering outlets displaying live power readings (`power: "0.251 kW"`, `power: "0.0157 kW"`, etc.).
+- Live Sensor query: `list_entities(domain='sensor', search='energy')` returns all 6 total energy sensors with `unit: "kWh"` and `device_class: "energy"`.
 - Live Climate query: `list_entities(domain='climate', area='Living Room')` returns `climate.living_room_ac` (`state: auto`, `current_temperature: 23°C`, `target_temperature: 25°C`).
 - Non-light smart outlets preserved: `switch.pc_socket`, `switch.v11_charger_socket_1`, `switch.v13_charger_socket_1`, `switch.a1_a_socket_1`, and `switch.a1_b_socket_1` remain classified as outlets under `Office`.
 - Syntax & config validation: Passed `/mnt/data/homeassistant/venv/bin/hass --script check_config -c /mnt/data/homeassistant/config`.
 
 ## Related
 
+- [Home Assistant Sensor Units & Smart Outlet Live Power Walkthrough](../artifacts/ha-sensor-units-and-outlet-power-walkthrough.md)
 - [Home Assistant Core and Strata MCP Integration Plan](../artifacts/homeassistant-strata-core-plan.md)
 - [Home Assistant Server and Session Tools Walkthrough](../artifacts/homeassistant-and-session-tools-walkthrough.md)
 - [D.L. CLI On-Demand MCP Loading Plan](../artifacts/dl-cli-on-demand-mcp-plan.md)

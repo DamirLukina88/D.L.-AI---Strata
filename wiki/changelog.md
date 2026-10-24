@@ -15,6 +15,10 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-24:** Ingestion. artifacts/ha-sensor-units-and-outlet-power-walkthrough.md. (Agent: Antigravity)
+- **2026-10-24:** Home Assistant Sensor Units & Smart Outlet Live Power: configured `customize.yaml` for `sensor.*_total_energy` (`unit_of_measurement: kWh`, `device_class: energy`); enabled 7 disabled power sensors (`kW`), 7 current sensors (`A`), and 7 voltage sensors (`V`) via `tools/ha_enable_power_sensors.py`; enhanced `tools/homeassistant_mcp.py` to index device siblings and enrich power outlets (`switch.*_socket`) with real-time `power` (`kW`) and `total_energy` (`kWh`); verified with 6 unit tests in `tools/test_homeassistant_mcp.py` and live HA state inspection. (Agent: Antigravity)
+
+- **2026-10-24:** Update. decisions/home-assistant-strata-mcp.md. (Agent: Antigravity)
 - **2026-10-24:** Artifact Backup. Saved Ray TTS PipeWire and truncation fix report to wiki/artifacts/ray-tts-pipewire-and-truncation-fix-report.md. (Agent: Antigravity)
 - **2026-10-24:** Ingestion. artifacts/ray-tts-pipewire-and-truncation-fix-report.md. (Agent: Antigravity)
 - **2026-10-24:** Update. decisions/desktop-piper-voice-switching-and-stt-auto-speak.md. (Agent: Antigravity)

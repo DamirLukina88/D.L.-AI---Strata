@@ -351,6 +351,101 @@ class TestHomeAssistantMcp(unittest.TestCase):
             self.assertEqual(state["area"], "Office")
             self.assertEqual(state["device_name"], "Desk Lamp Device")
 
+    def test_outlet_power_enrichment_and_units(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            storage_path = Path(tmpdir)
+            (storage_path / "core.area_registry").write_text(
+                json.dumps({"data": {"areas": [{"id": "office", "name": "Office"}]}}),
+                encoding="utf-8",
+            )
+            (storage_path / "core.device_registry").write_text(
+                json.dumps({
+                    "data": {
+                        "devices": [
+                            {"id": "plug_dev", "name": "Printer Smart Plug", "area_id": "office"}
+                        ]
+                    }
+                }),
+                encoding="utf-8",
+            )
+            (storage_path / "core.entity_registry").write_text(
+                json.dumps({
+                    "data": {
+                        "entities": [
+                            {"entity_id": "switch.printer_socket", "device_id": "plug_dev", "area_id": None},
+                            {"entity_id": "sensor.printer_power", "device_id": "plug_dev", "area_id": None},
+                            {"entity_id": "sensor.printer_total_energy", "device_id": "plug_dev", "area_id": None},
+                        ]
+                    }
+                }),
+                encoding="utf-8",
+            )
+
+            client = M.HomeAssistantClient(
+                base_url=f"http://127.0.0.1:{self.port}",
+                token="test-valid-token",
+                storage_dir=storage_path,
+            )
+
+            # Mock states directly on client
+            client.get_states = lambda: [
+                {
+                    "entity_id": "switch.printer_socket",
+                    "state": "on",
+                    "attributes": {"friendly_name": "Printer Socket", "device_class": "outlet"},
+                },
+                {
+                    "entity_id": "sensor.printer_power",
+                    "state": "0.150",
+                    "attributes": {"friendly_name": "Printer Power", "unit_of_measurement": "kW", "device_class": "power"},
+                },
+                {
+                    "entity_id": "sensor.printer_total_energy",
+                    "state": "4.21",
+                    "attributes": {"friendly_name": "Printer Energy", "unit_of_measurement": "kWh", "device_class": "energy"},
+                },
+            ]
+
+            out = io.BytesIO()
+            server = M.HomeAssistantMcpServer(client, out)
+
+            # Test list_entities on switch domain enriches outlet with power
+            res = server.handle({
+                "jsonrpc": "2.0",
+                "id": 30,
+                "method": "tools/call",
+                "params": {"name": "list_entities", "arguments": {"domain": "switch"}},
+            })
+            self.assertFalse(res["result"]["isError"])
+            data = json.loads(res["result"]["content"][0]["text"])
+            self.assertEqual(data["count"], 1)
+            plug_item = data["entities"][0]
+            self.assertEqual(plug_item["entity_id"], "switch.printer_socket")
+            self.assertEqual(plug_item["device_class"], "outlet")
+            self.assertEqual(plug_item["power"], "0.150 kW")
+
+            # Test get_state on switch enriches with power and total_energy
+            client.get_state = lambda eid: {
+                "entity_id": "switch.printer_socket",
+                "state": "on",
+                "attributes": {"friendly_name": "Printer Socket", "device_class": "outlet"},
+            } if eid == "switch.printer_socket" else {
+                "entity_id": eid,
+                "state": "0.150" if "power" in eid else "4.21",
+                "attributes": {"unit_of_measurement": "kW" if "power" in eid else "kWh"},
+            }
+
+            res = server.handle({
+                "jsonrpc": "2.0",
+                "id": 31,
+                "method": "tools/call",
+                "params": {"name": "get_state", "arguments": {"entity_id": "switch.printer_socket"}},
+            })
+            self.assertFalse(res["result"]["isError"])
+            plug_state = json.loads(res["result"]["content"][0]["text"])
+            self.assertEqual(plug_state["power"], "0.150 kW")
+            self.assertEqual(plug_state["total_energy"], "4.21 kWh")
+
 
 if __name__ == "__main__":
     unittest.main()

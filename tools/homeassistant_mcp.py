@@ -56,6 +56,7 @@ class AreaDeviceRegistry:
         self._areas: dict[str, str] = {}  # area_id -> area_name
         self._devices: dict[str, dict[str, Any]] = {}  # device_id -> {name, area_id}
         self._entities: dict[str, dict[str, Any]] = {}  # entity_id -> {device_id, area_id, name}
+        self._device_to_entities: dict[str, list[str]] = {}  # device_id -> [entity_ids]
         self._lock = threading.Lock()
 
     def refresh(self, force: bool = False) -> None:
@@ -102,10 +103,28 @@ class AreaDeviceRegistry:
                             for e in data
                             if "entity_id" in e
                         }
+                        dev_map: dict[str, list[str]] = {}
+                        for e in data:
+                            eid = e.get("entity_id")
+                            did = e.get("device_id")
+                            if eid and did:
+                                dev_map.setdefault(did, []).append(eid)
+                        self._device_to_entities = dev_map
 
                 self._last_loaded = time.time()
             except Exception as e:  # noqa: BLE001
                 log(f"Warning: failed to load Home Assistant registries: {e}")
+
+    def get_device_siblings(self, entity_id: str) -> list[str]:
+        """Returns other entity IDs belonging to the same device as entity_id."""
+        self.refresh()
+        ent = self._entities.get(entity_id)
+        if not ent:
+            return []
+        dev_id = ent.get("device_id")
+        if not dev_id:
+            return []
+        return [eid for eid in self._device_to_entities.get(dev_id, []) if eid != entity_id]
 
     def get_info(self, entity_id: str) -> tuple[str | None, str | None]:
         """Returns (area_name, device_name) for an entity_id."""
@@ -486,6 +505,7 @@ class HomeAssistantMcpServer:
         include_attributes: bool = False,
     ) -> str:
         states = self.client.get_states()
+        states_by_eid = {s.get("entity_id", ""): s for s in states if "entity_id" in s}
         filtered = []
 
         domain_lower = domain.lower().strip() if domain else None
@@ -539,10 +559,22 @@ class HomeAssistantMcpServer:
                     item["area"] = area_name
                 if dev_name:
                     item["device_name"] = dev_name
-                if "unit_of_measurement" in attrs:
-                    item["unit"] = attrs["unit_of_measurement"]
+                unit = attrs.get("unit_of_measurement")
+                if unit:
+                    item["unit"] = unit
                 if "device_class" in attrs:
                     item["device_class"] = attrs["device_class"]
+
+                # Enrich power outlets with live power draw if available on same device
+                if attrs.get("device_class") == "outlet" or eid.startswith("switch."):
+                    for sib_id in self.client.registry.get_device_siblings(eid):
+                        if sib_id.endswith("_power") and sib_id in states_by_eid:
+                            sib_state = states_by_eid[sib_id]
+                            sib_val = sib_state.get("state")
+                            sib_unit = (sib_state.get("attributes") or {}).get("unit_of_measurement") or "kW"
+                            if sib_val and sib_val not in ("unavailable", "unknown"):
+                                item["power"] = f"{sib_val} {sib_unit}"
+                                break
                 filtered.append(item)
 
         total_matching = len(filtered)
@@ -563,6 +595,20 @@ class HomeAssistantMcpServer:
                 state["area"] = area_name
             if dev_name and "device_name" not in state:
                 state["device_name"] = dev_name
+            attrs = state.get("attributes") or {}
+            if attrs.get("device_class") == "outlet" or entity_id.startswith("switch."):
+                for sib_id in self.client.registry.get_device_siblings(entity_id):
+                    if sib_id.endswith("_power") or sib_id.endswith("_total_energy"):
+                        try:
+                            sib_state = self.client.get_state(sib_id)
+                            if isinstance(sib_state, dict):
+                                k = "power" if sib_id.endswith("_power") else "total_energy"
+                                val = sib_state.get("state")
+                                unit = (sib_state.get("attributes") or {}).get("unit_of_measurement") or ""
+                                if val and val not in ("unavailable", "unknown"):
+                                    state[k] = f"{val} {unit}".strip()
+                        except Exception:
+                            pass
         return json.dumps(state, indent=2, ensure_ascii=False)
 
     def tool_call_service(
