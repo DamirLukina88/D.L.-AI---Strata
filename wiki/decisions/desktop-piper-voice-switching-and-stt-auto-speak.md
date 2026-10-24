@@ -62,6 +62,15 @@ This decision documents two critical speech subsystem fixes: (1) resolving Speec
   3. Translates speech-friendly symbols into words (`%` $\rightarrow$ "percent", `&` $\rightarrow$ "and", `+` $\rightarrow$ "plus", `$` $\rightarrow$ "dollars", `°C` $\rightarrow$ "degrees Celsius").
   4. Converts parentheses to gentle commas so speech intones naturally without vocalizing "parenthesis".
 
+### 7. Resolving PipeWire Audio Hangs & Sentence Truncation (2026-10-24)
+- **PipeWire ALSA Plugin Hang Gotcha**: On modern Linux (CachyOS/Arch with PipeWire), ALSA calls route through `pipewire-alsa`. When `piper-speechd` piped output directly into `aplay -q -`, the ALSA emulation layer failed to signal buffer draining at EOF on stdin pipes, causing `aplay` to hang indefinitely. This blocked Speech Dispatcher from sending the completion event, stalled subsequent sentences, and left audio handles frozen.
+- **Watchdog Pause/Resume Interruption Gotcha**: `TTSController` ran a periodic 12-second `pause()` and `resume()` heartbeat loop intended as a legacy Chromium 15-second freeze workaround. On Linux and mobile, pulsing `pause()` sent IPC to `TtsPlatformImplLinux`, causing Speech Dispatcher or `aplay` to abort with error `"interrupted"`. `TTSController`'s error handler treated `"interrupted"` as a fatal stop command and cancelled all remaining queued sentences.
+- **Premature Chunk Fragmentation**: A low 140-character chunk limit split normal sentences with clauses into fragmented snippets, causing unnatural pauses and resetting prosody. Regex splitting on `[.!?]` also broke after abbreviations (`e.g.`, `i.e.`, `vs.`) and decimal numbers (`23.7 GB`).
+- **Solutions**:
+  1. Updated `~/.local/bin/piper-speechd` to prioritize PipeWire native `pw-play -` (and fallback `paplay`), guarded against empty/whitespace chunks, and used `printf '%s\n'`.
+  2. Replaced the 12s `pause()`/`resume()` heartbeat in `serve/web/app.js` with a 20s stall detector, prevented `"interrupted"` errors from aborting the active queue, and added a 25ms yield on `onend` to allow audio channels to settle cleanly.
+  3. Increased natural sentence chunking target to 240 characters and protected common abbreviations, versions, and decimal numbers.
+
 ## Verification
 
 - Automated test suite in `tools/test_stt_controller.js` covers 50 test cases (including 5 dedicated TTS filter test cases for emojis, compound emojis, units/currencies, speech symbols, and punctuation stripping).

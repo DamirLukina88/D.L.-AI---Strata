@@ -15,6 +15,8 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-24:** Update. decisions/desktop-piper-voice-switching-and-stt-auto-speak.md. (Agent: Antigravity)
+- **2026-10-24:** Resolved Ray TTS interruptions and sentence truncation: replaced ALSA aplay with PipeWire native pw-play in piper-speechd, eliminated 12s pause/resume watchdog heartbeat, yielded on utterance transition, and protected abbreviations and decimals from chunk splitting. (Agent: Antigravity)
 - **2026-10-24:** Ingestion. decisions/revert-struggle-diary-and-modular-harness.md. (Agent: Antigravity)
 - **2026-10-24:** Performance & Engine Recovery. Restarted engine with full 20.15 GiB resident RAM allocation (0 file reads, recovered 22-27 tok/s) and trimmed harness guidance by 77% (+553 chars vs +2,409 chars) to minimize prompt overhead. (Agent: Antigravity)
 - **2026-10-24:** Ingestion. artifacts/harness2-research-and-tradeoffs-analysis.md. (Agent: Antigravity)
