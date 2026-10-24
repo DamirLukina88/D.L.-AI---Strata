@@ -1,1 +1,0 @@
-- If a file path, device or entity ID, parameter or what the user wants is unclear, look it up (list the folder, list the entities) or ask the user. Never guess a name and try it.

@@ -37,7 +37,6 @@ import dl_cli as cli  # noqa: E402
 import dl_effort  # noqa: E402
 import dl_mcp  # noqa: E402
 import dl_schedule  # noqa: E402
-import dl_diary  # noqa: E402
 from dl_auditing import format_health_card, get_system_health  # noqa: E402
 
 RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "dl-ai"
@@ -352,15 +351,13 @@ class Session:
             resolved_budget = 0
         self.messages.append({"role": "user",
                               "content": cli.build_user_message_content(prompt, self.workspace, voice=voice)})
-        day = time.strftime("%Y-%m-%d")
-        t_path = str(TRANSCRIPT_DIR / self.name / f"{day}.jsonl")
         ctx = {"workspace": self.workspace, "messages": self.messages, "mode": self.mode, "yolo": self.yolo,
                "plan_file": self.plan_file,
                "effort": resolved_effort,
                "effort_auto": effort_auto,
                "reasoning_budget_tokens": resolved_budget,
                "emit": self.emit, "cancel": self.cancel, "approve": self.approve, "mcp": self.mcp, "user_text": prompt,
-               "session": self, "session_id": self.name, "transcript_path": t_path}
+               "session": self}
         new_ws = cli.execute_agent_loop(messages=self.messages, url=cli.DEFAULT_URL, api_key=cli.DEFAULT_API_KEY,
                                         workspace=self.workspace, mode=self.mode,
                                         session_context=ctx)
@@ -501,12 +498,6 @@ class Session:
         if cmd in ("/status", "/model"):
             out = cli.check_status(cli.DEFAULT_URL, cli.DEFAULT_API_KEY)
             self.output("Strata engine", out)
-            self._transcript(text, out)
-            return None
-        if cmd in ("/diary", "/incidents"):
-            n = int(arg) if arg.isdigit() else 5
-            out = dl_diary.format_recent_markdown(n=n) if dl_diary else "Diary not available"
-            self.output("Struggle Diary", out)
             self._transcript(text, out)
             return None
         if cmd in ("/health", "/sys"):
@@ -651,7 +642,6 @@ Workspace
 
 Session
 /status /health   Engine status (also /model), hardware health (also /sys)
-/diary [N]        Recent Struggle Diary friction/failure incidents
 /continue         Go on after the agent stopped at its tool-round limit (DL_MAX_TURNS)
 /save [file]      Save the chat as Markdown in the workspace (also /export)
 /save full [file] The same with the whole run since /clear from the transcript, thinking included

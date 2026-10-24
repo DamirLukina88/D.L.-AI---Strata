@@ -45,6 +45,7 @@ Every page in this wiki is listed below. The list is generated; do not edit betw
 - [Pruned Core 6 Tools and 8-Hour JIT Keep-Alive for Local LLM](decisions/pruned-core-6-tools-and-8h-keepalive.md) — Reduced LLM prefill tokens by ~65% and set model idle unload to 8 hours to eliminate cold disk reloading.
 - [Public Secret Leak and Rotation (2026-10-13)](decisions/secret-leak-rotation-2026-10.md) — Strata, Exa, Context7 and client-IP keys were pushed to the public fork; rotated, moved to secrets.env, history scrubbed
 - [Ray: Assistant Name, Female Voice and Persona](decisions/ray-assistant-persona.md) — D.L. AI is now Ray; Piper HFC female voice; casual persona crediting Damir's stack on every Chat request
+- [Revert of Struggle Diary and Modular Harness](decisions/revert-struggle-diary-and-modular-harness.md) — Reverted struggle diary telemetry and modular harness files due to prompt bloat, latency overhead, and RAM eviction on reload
 - [RX 7600 XT CachyOS Deployment](decisions/rx-7600-xt-cachyos-deployment.md) — Deployment configuration for the RX 7600 XT on CachyOS, and how to start and stop it (strata.sh)
 - [Scheduled Jobs in D.L. AI](decisions/dl-ai-scheduled-jobs.md) — The session daemon runs prompts or one exact pre-approved action at a time or on repeat; model warm-up, retries, catch-up, notices
 - [Sensitive File Guardrail and Prefix Mode in D.L. CLI](decisions/sensitive-file-guard-and-prefix-mode-in-dl-cli.md) — Prevents credential leaks via @file injection and suppresses conversational chatter using assistant seed prefixes.

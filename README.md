@@ -11,7 +11,6 @@ reach from anywhere:
 - **Ray**, the assistant: you talk to her and she answers out loud, with a female neural voice and her own casual
   personality. She knows she runs on the home server, not in someone's cloud, and you can reach her from your phone.
 - **D.L. CLI**, a coding agent with one shared session you can use from the terminal and from the browser
-- **Struggle Diary & Modular Harness:** autonomous local friction logging (`~/.local/state/dl-ai/diary/`) and modular harness files (`harness/`) with on-demand skills for human + frontier model (Claude Opus / Antigravity) iterative refinement
 - **Offline voice:** local Whisper speech-to-text and Piper text-to-speech, with no audio leaving the PC
 - **Home Assistant MCP server:** the coding agent switches lights and climate and reads printers and cameras
   (a Gree air conditioner, a Bambu Lab A1 3D printer, Xiaomi cameras, Tuya plugs and sensors)
@@ -149,7 +148,6 @@ A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) ex
 | `smart_test_runner` | runs the tests that cover what changed |
 | `switch_workspace` | changes the project folder |
 | `save_chat` | exports the current CLI chat history to structured Markdown |
-| `read_skill` | loads a specialist procedural playbook from `harness/skills/` on demand |
 | `get_system_health`, `get_engine_status` | autonomous machine telemetry and engine diagnostics |
 | `clear_conversation` | resets conversation state cleanly |
 | `list_entities`, `get_state`, `call_service`, `toggle`, `render_template`, `get_history`, `get_camera_snapshot` | Home Assistant smart home control suite |
@@ -215,7 +213,6 @@ A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) ex
   | `/effort none\|low\|medium\|high\|auto\|default` | this session's reasoning effort (`auto` picks per turn and escalates on tool failures; `default`: the web app's Thinking setting) |
   | `/cd <path>` | change the project folder |
   | `/status`, `/health` | engine status, hardware health |
-  | `/diary [N]` | view Ray's struggle diary and recent friction incidents |
   | `/mcp <server>` | inspect and execute tools on connected MCP servers |
   | `/speak` | read the latest assistant message aloud |
   | `/exa <query>`, `/context7 <library>` | web search, library docs |

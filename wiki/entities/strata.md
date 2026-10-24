@@ -104,6 +104,7 @@ The environment integrates high-throughput MoE execution (16 GB VRAM + 32 GB RAM
 - [Native Browser STT Implementation Plan](../artifacts/native-browser-stt-implementation-plan.md)
 - [Ray Struggle Diary and Modular Harness Implementation Plan](../artifacts/ray-struggle-diary-and-modular-harness-plan.md)
 - [Harness² Research and Feasibility Analysis for Ray](../artifacts/harness2-research-and-tradeoffs-analysis.md)
+- [Revert of Struggle Diary and Modular Harness](../decisions/revert-struggle-diary-and-modular-harness.md)
 
 ## Sources
 

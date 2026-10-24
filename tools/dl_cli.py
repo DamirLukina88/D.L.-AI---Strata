@@ -87,22 +87,6 @@ except ImportError:
     except ImportError:
         dl_effort = None
 
-try:
-    from tools import dl_diary
-except ImportError:
-    try:
-        import dl_diary
-    except ImportError:
-        dl_diary = None
-
-try:
-    from tools import dl_harness
-except ImportError:
-    try:
-        import dl_harness
-    except ImportError:
-        dl_harness = None
-
 # ANSI colors & formatting (Strata Dark & Orange Aesthetic)
 C_RESET = "\033[0m"
 C_BOLD = "\033[1m"
@@ -425,23 +409,6 @@ DL_TOOLS = [
                 "properties": {}
             }
         }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_skill",
-            "description": "Load a specialist procedural playbook from the Ray skills library into context.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "skill_name": {
-                        "type": "string",
-                        "description": "Name of the skill playbook (e.g. 'ha_area_move', 'proton_mail_report')."
-                    }
-                },
-                "required": ["skill_name"]
-            }
-        }
     }
 ]
 
@@ -594,7 +561,6 @@ DL_PLAN_TOOLS = [
     next(t for t in DL_TOOLS if t["function"]["name"] == "get_system_health"),
     next(t for t in DL_TOOLS if t["function"]["name"] == "get_engine_status"),
     next(t for t in DL_TOOLS if t["function"]["name"] == "clear_conversation"),
-    next(t for t in DL_TOOLS if t["function"]["name"] == "read_skill"),
 ]
 
 
@@ -827,12 +793,6 @@ Project knowledge base is connected at: {wiki_root}
   3. Search before creating new pages to update existing knowledge rather than duplicating.
 </local_wiki>"""
 
-    modular_block = ""
-    if dl_harness is not None:
-        modular_guidance = dl_harness.build_modular_guidelines(mode=mode)
-        if modular_guidance:
-            modular_block = f"\n\n{modular_guidance}"
-
     if mode == "plan":
         return f"""<identity>
 You are Ray in PLAN MODE, an autonomous software engineering architect working with whoever is using you.
@@ -865,7 +825,7 @@ Active Workspaces:
   4. Verification & Testing Strategy
 - End with the finished plan. The CLI then asks the user whether to execute it, and on yes switches to Act Mode and runs it.
 - Your final message is saved as PLAN.md in the project when the user approves it, and the work is checked against it. Make it complete on its own (no "as discussed above") and end it with a "## Progress" checklist: one "- [ ] <item>" line per step and per check or sub-part, in order, small enough that a line gets ticked every few tool calls.
-</plan_mode_guidelines>{modular_block}"""
+</plan_mode_guidelines>"""
 
     return f"""<identity>
 You are Ray, a powerful autonomous software engineering agent working with whoever is using you.
@@ -893,7 +853,7 @@ Active Workspaces:
   * Web & Documentation: {web_docs_tools_hint()}
 - When starting work on a project with a wiki, search relevant decisions and preferences first.
 - Keep explanations concise, clear, and focused on the results.
-</guidelines>{modular_block}"""
+</guidelines>"""
 
 
 SENSITIVE_FILE_NAMES = {
@@ -1741,16 +1701,6 @@ def dispatch_dl_tool(name: str, args: dict, workspace: Path, mode: str = "act", 
         return tool_save_chat(args, workspace, session_context=session_context)
     elif name in ("clear_conversation", "reset_conversation"):
         return tool_clear_conversation(args, workspace, session_context=session_context)
-    elif name == "read_skill":
-        skill_name = str(args.get("skill_name") or "").strip()
-        if not skill_name:
-            return "Error: 'skill_name' argument is required."
-        content = dl_harness.load_skill(skill_name) if dl_harness else None
-        if content is None:
-            available = dl_harness.list_skills() if dl_harness else []
-            avail_str = ", ".join(f"'{s}'" for s in available) or "none"
-            return f"Error: Skill '{skill_name}' not found. Available skills: {avail_str}."
-        return f"[Skill Loaded: {skill_name}]\n{content}"
     elif name == "git_diff_audit":
         return tool_git_diff_audit(args, workspace)
     elif name == "smart_test_runner":
@@ -2808,30 +2758,6 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
     loop_retries = 0
     total_rounds = 0                        # model calls in this request, across YOLO's auto-continues
 
-    session_id = (session_context or {}).get("session_id") or "cli"
-    transcript_path = (session_context or {}).get("transcript_path")
-    user_prompt = (session_context or {}).get("user_text") or ""
-    if not user_prompt and messages:
-        for m in reversed(messages):
-            if m.get("role") == "user":
-                c = m.get("content")
-                if isinstance(c, str):
-                    user_prompt = c
-                    break
-                elif isinstance(c, list):
-                    for part in c:
-                        if isinstance(part, dict) and part.get("type") == "text":
-                            user_prompt = part.get("text", "")
-                            break
-                    if user_prompt:
-                        break
-    tracker = dl_diary.FrictionTracker(
-        prompt=user_prompt,
-        workspace=str(current_ws),
-        session_id=session_id,
-        transcript_path=transcript_path
-    ) if dl_diary is not None else None
-
     def yolo_rollover() -> None:
         # YOLO: a stretch that reached the cap starts a new one instead of ending the request.  Every path that goes
         # on to the next round calls this; on 2026-10-20 a text tool call on round 40 skipped it and ended a CONTRA
@@ -2884,8 +2810,6 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
         # The thinking went round in circles: drop it (it is only noise) and ask for the next action instead.
         if res["finish_reason"] == "loop" and loop_retries < LOOP_RETRIES:
             loop_retries += 1
-            if tracker is not None:
-                tracker.record_shrink_alarm("loop_guard", "Thinking repeated in circles")
             messages.pop()
             messages.append({"role": "user", "content": LOOP_NOTE.format(sentence=(res.get("loop_sentence") or "")[:200])})
             _note(emit, f"Loop guard: the thinking kept repeating itself; stopped it and asked for the next action "
@@ -2906,8 +2830,6 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
         if (not res["tool_calls"] and text_call_retries < TEXT_CALL_RETRIES
                 and TEXT_TOOL_CALL.search(res["content"] or "")):
             text_call_retries += 1
-            if tracker is not None:
-                tracker.record_pseudo_tool_call(res["content"] or "")
             messages.append({"role": "user", "content": TEXT_CALL_NOTE})
             note = "The model wrote a tool call as text, so nothing ran; asked it to send a real tool call."
             if emit:
@@ -2923,8 +2845,6 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             back = finish_checks(finish, messages, res["content"] or "", mode, current_ws, session_context, url,
                                  api_key, emit=emit, cancel=cancel, effort=effort)
             if back:
-                if tracker is not None:
-                    tracker.record_check_intervention("finish_checks", back)
                 messages.append({"role": "user", "content": back})
                 _auto_raise("sent back by the finish checks")
                 yolo_rollover()                 # a send-back must not run into the cap and end a YOLO run
@@ -2972,15 +2892,10 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
 
             if not bad_args:
                 finish["changes"].before_tool(fn_name, args)
-            else:
-                if tracker is not None:
-                    tracker.record_bad_arguments(fn_name, raw_args or "", bad_args)
             before = scan_workspace(current_ws) if alarm and not bad_args and fn_name in WRITE_TOOLS else None
             result_str = bad_args or dispatch_dl_tool(fn_name, args, current_ws, mode=mode,
                                                       session_context=session_context)
             result_str = cap_tool_result(result_str)    # 2026-10-20 22:12: a 106k debug print ended a CONTRA run
-            if tracker is not None and not bad_args:
-                tracker.record_tool_dispatch(fn_name, args, result_str)
             if before is not None:                  # did it empty, delete or halve a file?
                 after = scan_workspace(current_ws)
                 hits = shrunk_files(before, after) if after is not None else []
@@ -2988,8 +2903,6 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                     result_str = f"{result_str}\n\n{shrink_note(hits, cps)}"
                     _note(emit, f"Shrink alarm: {fn_name} " + "; ".join(h[1] for h in hits[:3])
                                 + (f"; and {len(hits) - 3} more" if len(hits) > 3 else ""), "warn")
-                    if tracker is not None:
-                        tracker.record_shrink_alarm(fn_name, "; ".join(h[1] for h in hits[:3]))
 
             # Check if directory was switched
             if session_context and session_context.get("workspace"):
@@ -3034,10 +2947,6 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
 
     if registry is not None and registry.active:
         registry.tick()
-    if tracker is not None:
-        rep = tracker.finalize(total_turns=total_rounds or turn, total_tokens=total_tokens)
-        if rep:
-            dl_diary.log_incident(rep)
     return current_ws
 
 
@@ -3249,17 +3158,10 @@ def interactive_loop(workspace: Path, url: str, api_key: str, initial_mode: str 
                 print(f"  /yolo                 Toggle approvals for destructive commands (on by default)")
                 print(f"  /mcp [on|off NAME]    Tools and MCP servers (Home Assistant, Google, Exa): list or toggle")
                 print(f"  /schedule             Scheduled jobs (they run in the session daemon: set them up in the Code tab or --attach)")
-                print(f"  /diary [N]            View Ray's Struggle & Incident Diary (recent friction/failures)")
                 print(f"  !<shell command>      Execute bash command directly in workspace")
                 print(f"  @filename             Inject file content into your prompt")
                 print(f"  /help                 This list")
                 print(f"  /exit, /quit          Leave D.L. CLI\n")
-                continue
-            elif prompt == "/diary" or prompt.startswith("/diary "):
-                _, _, arg = prompt.partition(" ")
-                n = int(arg.strip()) if arg.strip().isdigit() else 5
-                out = dl_diary.format_recent_markdown(n=n) if dl_diary else "Diary module is not available."
-                print(f"\n{out}\n")
                 continue
             elif prompt == "/schedule" or prompt.startswith("/schedule "):
                 try:

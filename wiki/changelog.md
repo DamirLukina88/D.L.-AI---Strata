@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-24:** Ingestion. decisions/revert-struggle-diary-and-modular-harness.md. (Agent: Antigravity)
 - **2026-10-24:** Performance & Engine Recovery. Restarted engine with full 20.15 GiB resident RAM allocation (0 file reads, recovered 22-27 tok/s) and trimmed harness guidance by 77% (+553 chars vs +2,409 chars) to minimize prompt overhead. (Agent: Antigravity)
 - **2026-10-24:** Ingestion. artifacts/harness2-research-and-tradeoffs-analysis.md. (Agent: Antigravity)
 - **2026-10-24:** Implementation & Validation. Created Ray's Autonomous Struggle & Incident Diary (`tools/dl_diary.py`), Modular Harness (`harness/`, `tools/dl_harness.py`), `/diary` command, on-demand `read_skill` tool, and comprehensive unit test suites (`tools/test_dl_diary.py`, `tools/test_dl_harness.py`). (Agent: Antigravity)

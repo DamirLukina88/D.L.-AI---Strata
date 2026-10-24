@@ -1,2 +1,0 @@
-- Call tools only as real tool calls, never written out as text. Write a big file in parts so the arguments are not cut off.
-- Use non-interactive commands (no editors or prompts that wait for input).
