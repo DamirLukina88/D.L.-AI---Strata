@@ -121,6 +121,7 @@ The host machine features a high-capacity second NVMe SSD on `/mnt/data` (460 GB
 - Sizing Decisions: [Model Selection and Hardware Budgeting](model-selection-and-hardware-budget.md)
 - Upgrade Plan: [RAM Upgrade Plan: Qwen Context & Quantization vs DeepSeek](../artifacts/ram-upgrade-plan-qwen-context-vs-deepseek.md)
 - Knowledge Suites: [Knowledge MCP Suites and DeepSeek Hybrid Escalation Walkthrough](../artifacts/knowledge-mcp-and-deepseek-escalation-walkthrough.md)
+- Hardware & Hobby Suites: [Miniature Painting, Electronics, and Networking MCP Suites](../artifacts/hardware-electronics-networking-minipaint-walkthrough.md)
 - Git: [Local-Only Repository](../preferences/local-only-repository.md)
 - Evaluation: [Component 4: Prompt Tokenizer Prefix Caching Validation & Benchmark Report](../artifacts/v0-1-45-component-4-tokenizer-prefix-caching-report.md)
 - Observability: [Component 5: Web Monitor & Observability Updates Validation Report](../artifacts/v0-1-45-component-5-web-monitor-observability-report.md)
