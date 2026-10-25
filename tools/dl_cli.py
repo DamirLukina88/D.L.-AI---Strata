@@ -3158,7 +3158,7 @@ def interactive_loop(workspace: Path, url: str, api_key: str, initial_mode: str 
                 print(f"  /context7, /docs <lib> Direct Context7 library documentation lookup")
                 print(f"  /status, /model       Check Strata server health")
                 print(f"  /yolo                 Toggle approvals for destructive commands (on by default)")
-                print(f"  /mcp [on|off NAME]    Tools & MCP servers (Home Assistant, Exa, Context7, DeepSeek, Knowledge suites): list or toggle")
+                print(f"  /mcp [on|off NAME]    Tools & MCP servers (Home Assistant, Weather, Exa, DeepSeek, Knowledge suites): list or toggle")
                 print(f"  /schedule             Scheduled jobs (they run in the session daemon: set them up in the Code tab or --attach)")
                 print(f"  !<shell command>      Execute bash command directly in workspace")
                 print(f"  @filename             Inject file content into your prompt")

@@ -632,7 +632,8 @@ Tools and jobs
                   Proton Mail, Gmail, Drive, Docs, schedule, DeepSeek cloud reasoning, Europe PMC,
                   arXiv preprints, Wikipedia, OSV vulnerabilities, PubChem, IETF RFC, OpenAlex,
                   OpenStreetMap, ClinicalTrials.gov, Open Targets, Reactome, Modern Web, 3D printing
-                  (Klipper & Bambu/Prusa filaments), CAD & materials, Game patterns, Croatian & EU laws
+                  (Klipper & Bambu/Prusa filaments), CAD & materials, Game patterns, Croatian & EU laws,
+                  live weather (Open-Meteo)
                   (list, turn on/off; they also start when needed)
 /schedule ...     Scheduled jobs: /schedule [--email] <when> <task>; list; off|on|run|rm N; stop (the running job)
                   when: 2026-10-16 09:00, tomorrow 07:00, fri 09:00, in 2h, daily 08:00, mon-fri 07:30, every 2h
