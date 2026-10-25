@@ -62,6 +62,9 @@ def get_status() -> str:
     
     return f"""## SolidCraft CAD Engine Status
 - **Ray's CAD Workspace:** `{ws}`
+- **Official Git Repository:** [https://github.com/tangency-labs/solidcraft](https://github.com/tangency-labs/solidcraft)
+- **Official Documentation Portal:** [https://docs.solidcraft.io](https://docs.solidcraft.io)
+- **MCP Agent Protocol Spec:** [docs/mcp.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/mcp.md)
 - **SolidCraft CLI (`solidcraft-cli`):** {'Installed (/usr/bin/solidcraft-cli)' if cli_found else 'Not found'}
 - **SolidCraft GUI (`solidcraft`):** {'Installed (/usr/bin/solidcraft)' if gui_bin_found else 'Not found'}
 - **Live GUI Viewport (port 7878):** {'Connected & Active' if gui_online else 'Not running (Headless execution mode active)'}
@@ -355,6 +358,46 @@ def create_parametric_part(part_type: str, name: str = "", parameters: dict = No
     else:
         return f"Unknown part type '{part_type}'. Available parametric types: 'enclosure', 'bracket', 'flange', 'standoff'."
 
+def get_command_reference(category: str = "") -> str:
+    """Return official SolidCraft Git repository documentation references and parameter cheat sheet."""
+    cat = (category or "").lower().strip()
+    
+    header = """## Official SolidCraft Git Repository & Documentation References
+- **Official Repository:** [https://github.com/tangency-labs/solidcraft](https://github.com/tangency-labs/solidcraft)
+- **Official Docs:** [https://docs.solidcraft.io](https://docs.solidcraft.io)
+- **MCP Agent Protocol Spec:** [docs/mcp.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/mcp.md)
+- **Desktop Control Channel (127.0.0.1:7878):** [docs/control-protocol.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/control-protocol.md)
+- **Engine Capabilities & Matrix:** [docs/capabilities.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/capabilities.md)
+- **Feature Patterns (Rectangular/Circular):** [docs/feature-patterns.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/feature-patterns.md)
+- **Metric/UNC Thread Catalogue:** [docs/thread-catalogue.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/thread-catalogue.md)
+- **GPU Rendering & Snapshots:** [docs/render-jobs.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/render-jobs.md)
+"""
+    
+    table = """### Authoritative SolidCraft Parameter Schemas & Tools:
+1. **`parameters.add`:** `name`: str, `expression`: str/formula, `unit?: "mm"|"deg"|""`
+2. **`parameters.change`:** `name`: str, `expression`: str (or `changes: {name: expr, ...}`)
+3. **`solid.box`:** `length`: expr, `width`: expr, `height`: expr, `center?: [x,y,z]` or `corner?: [x,y,z]`, `operation?: "new"|"join"|"cut"|"intersect"`
+4. **`solid.cylinder`:** `radius` or `diameter`: expr, `height`: expr, `base?: [x,y,z]`, `axis?: [0,0,1]`, `operation?: "new"|"join"|"cut"`
+5. **`solid.sphere`:** `radius` or `diameter`: expr, `center?: [x,y,z]`
+6. **`solid.extrude`:** `distance`: expr, `direction?: "one_sided"|"symmetric"|"two_sided"`, `operation?: "new"|"join"|"cut"`, `profiles?: [indices]`
+7. **`solid.revolve`:** `axis: "X"|"Y"|"Z"|[point, dir]`, `angle?: expr` (default "360 deg")
+8. **`solid.fillet`:** `edges: [[x,y,z], ...]`, `radius: expr` (snaps to nearest edge midpoint)
+9. **`solid.chamfer`:** `edges: [[x,y,z], ...]`, `distance: expr`
+10. **`solid.shell`:** `faces: [[x,y,z], ...]`, `thickness: expr` (removes face and hollows out body)
+11. **`solid.hole`:** `position: [x,y,z]` or `sketch+points`, `diameter: expr` or `clearance: "M3"|"M4"|"M5"|"M6"`, `type?: "simple"|"counterbore"|"countersink"`, `depth?: expr`
+12. **`solid.pattern.rectangular`:** `features: [names]` or `bodies: [names]`, `dir1: [x,y,z]`, `count1: int`, `spacing1: expr`, `dir2`, `count2`, `spacing2`
+13. **`solid.pattern.circular`:** `features: [names]`, `axis: "Z"|"X"|"Y"`, `count: int`, `angle?: expr` (default "360 deg")
+14. **`solid.mirror`:** `features: [names]`, `plane: "XY"|"XZ"|"YZ"`
+15. **`solid.combine`:** `target: body`, `tools: [bodies]`, `operation: "join"|"cut"|"intersect"`
+16. **`sketch.create`:** `plane: "XY"|"XZ"|"YZ"|{face: [x,y,z]}`, `offset?: expr`
+17. **`sketch.rectangle.two_point`:** `p0: [x,y]`, `p1: [x,y]`
+18. **`sketch.rectangle.center`:** `center: "origin"|[x,y]`, `corner: [x,y]`
+19. **`sketch.circle.center`:** `center: "origin"|[x,y]`, `radius|diameter: expr`
+20. **`sketch.dimension`:** `entities: [ids]`, `type: "horizontal"|"vertical"|"diameter"|"radius"|"length"`, `value: expr`
+21. **`sketch.finish`:** `{}`"""
+
+    return f"{header}\n{table}"
+
 def launch_gui(filename: str = None) -> str:
     """Launch SolidCraft GUI in the background with port 7878 control enabled."""
     if is_gui_listening(7878):
@@ -472,6 +515,16 @@ def main():
                             "filename": {"type": "string", "description": "Optional .solidcraft or .step file to open in the viewport"}
                         }
                     }
+                },
+                {
+                    "name": "solidcraft_command_reference",
+                    "description": "Authoritative list of SolidCraft parameters, commands, tools, and official GitHub documentation references (docs/mcp.md, capabilities, feature patterns).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "category": {"type": "string", "description": "Optional category: 'solid', 'sketch', 'parameters', 'pattern'"}
+                        }
+                    }
                 }
             ]
             res = {"jsonrpc": "2.0", "id": mid, "result": {"tools": tools}}
@@ -482,6 +535,8 @@ def main():
             
             if name == "solidcraft_status":
                 text = get_status()
+            elif name == "solidcraft_command_reference":
+                text = get_command_reference(category=args.get("category", ""))
             elif name == "solidcraft_create_part":
                 text = create_parametric_part(
                     part_type=args.get("part_type", "enclosure"),

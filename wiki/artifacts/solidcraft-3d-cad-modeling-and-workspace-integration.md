@@ -17,7 +17,22 @@ This update equips Ray (Rei) with a specialized on-demand SolidCraft MCP server 
 
 ---
 
-## 1. Capabilities & Architecture
+## 1. Official Git Repository Documentation Mapping
+
+All tools, commands, and parameter schemas in Ray's SolidCraft integration correspond directly to the upstream open-source SolidCraft repository:
+- **Repository:** [https://github.com/tangency-labs/solidcraft](https://github.com/tangency-labs/solidcraft)
+- **Documentation Portal:** [https://docs.solidcraft.io](https://docs.solidcraft.io)
+- **MCP Agent Protocol & CLI Engine:** [docs/mcp.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/mcp.md) (covers JSON-RPC 2.0 stdio, `execute`, `batch`, `eval`, `snapshot`, `render`, `allow-any-path`).
+- **Desktop Control Channel Protocol:** [docs/control-protocol.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/control-protocol.md) (handshake on `127.0.0.1:7878` or `127.0.0.1:27878` with session token).
+- **Core Modeling Capabilities:** [docs/capabilities.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/capabilities.md) & [docs/features.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/features.md).
+- **Feature Patterns:** [docs/feature-patterns.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/feature-patterns.md) (rectangular, circular, path patterns).
+- **Metric / UNC Thread Catalogue:** [docs/thread-catalogue.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/thread-catalogue.md).
+- **GPU Viewport Rendering & Raytracing:** [docs/render-jobs.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/render-jobs.md).
+- **Analytical Oracle Benchmark (75 Validated Parts):** [docs/oracle.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/oracle.md).
+
+---
+
+## 2. Capabilities & Architecture
 
 1. **Workspace Hygiene & Persistence (`get_rei_workspace`):**
    - Automatically resolves Ray's working directory from `STRATA_WORKSPACE_DIR` or `/mnt/data/DL-AI-workspace`.

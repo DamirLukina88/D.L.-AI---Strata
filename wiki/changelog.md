@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-25:** Docs: reference official SolidCraft git repository documentation in skill, MCP server, and wiki artifact. (Agent: Antigravity)
 - **2026-10-25:** Artifact Backup. SolidCraft CAD MCP server integrated for Ray with direct workspace saving, README updated. (Agent: Antigravity)
 - **2026-10-25:** Ingestion. artifacts/solidcraft-3d-cad-modeling-and-workspace-integration.md. (Agent: Antigravity)
 - **2026-10-25:** Artifact Backup. Full audit and verification walkthrough saved, README updated. (Agent: Antigravity)
