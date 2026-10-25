@@ -65,6 +65,38 @@ All tools, commands, and parameter schemas in Ray's SolidCraft integration corre
 
 ---
 
+## 3. Case Study: 6-Sided Red Gaming Die (D6) Generation
+
+Directly from user visual specification (`image.png` in Ray's workspace), a complete parametric red six-sided die with rounded fillet corners and spherical indented pips was modeled, evaluated, and verified:
+
+- **Model Files:**
+  - Native Project: [`/mnt/data/DL-AI-workspace/gaming_die_20mm.solidcraft`](file:///mnt/data/DL-AI-workspace/gaming_die_20mm.solidcraft) (608 KB)
+  - STEP Exchange: [`/mnt/data/DL-AI-workspace/gaming_die_20mm.step`](file:///mnt/data/DL-AI-workspace/gaming_die_20mm.step) (225 KB)
+  - 3D Mesh: [`/mnt/data/DL-AI-workspace/gaming_die_20mm.stl`](file:///mnt/data/DL-AI-workspace/gaming_die_20mm.stl) (990 KB)
+  - High-Res Render: [`/mnt/data/DL-AI-workspace/gaming_die_20mm_render.png`](file:///mnt/data/DL-AI-workspace/gaming_die_20mm_render.png) (851 KB)
+  - Declarative Recipe: [`/mnt/data/DL-AI-workspace/gaming_die_20mm_script.json`](file:///mnt/data/DL-AI-workspace/gaming_die_20mm_script.json)
+- **Geometry & Topology:**
+  - Cube Dimensions: $20.0 \times 20.0 \times 20.0\text{ mm}$ centered at origin $[-10, +10]$.
+  - Fillets: Radius $2.5\text{ mm}$ across all 12 cube edges, generating rounded gaming die corners.
+  - Spherical Indented Pips: 21 spherical cuts ($R = 1.6\text{ mm}$, depth $0.5\text{ mm}$, spacing $4.8\text{ mm}$ from center).
+  - Standard Opposite-Sum-7 Configuration:
+    - Top face (+Z): 5 pips
+    - Bottom face (-Z): 2 pips
+    - Front-left face (-Y): 3 pips
+    - Back-right face (+Y): 4 pips
+    - Front-right face (+X): 6 pips
+    - Back-left face (-X): 1 pip
+- **Physical Metrics (evaluated via `solidcraft-cli eval`):**
+  - Manifold Bodies: 1 (0 geometric or topological errors across all 25 timeline operations)
+  - Total Volume: $7,675.30\text{ mm}^3$
+  - Surface Area: $2,151.86\text{ mm}^2$
+  - Faces: 47 (6 planar faces, 12 fillet cylindrical surfaces, 29 spherical facets)
+  - Edges: 69, Vertices: 45
+  - Mass: $9.90\text{ g}$ (at standard polymer resin density $1.29\text{ g/cm}^3$)
+  - Center of Mass: $[-0.007, -0.001, -0.004]\text{ mm}$ (physically balanced)
+
+---
+
 ## 3. Related Artifacts
 
 - [full-workstation-audit-and-verification-2026-10-25.md](full-workstation-audit-and-verification-2026-10-25.md)
