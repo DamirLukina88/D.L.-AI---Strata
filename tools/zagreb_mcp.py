@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""zagreb_mcp.py - Zagreb civic services, ZET public transit, 24/7 pharmacies, waste management, and live air quality."""
+"""zagreb_mcp.py - Zagreb civic services, ZET public transit (zet.skoljka.org), 24/7 pharmacies, waste management, live air quality, and BAJS / Nextbike live stations."""
 import sys
 import json
+import re
+import html
 import urllib.request
 
 ZET_TRAM_LINES = {
@@ -69,13 +71,35 @@ DISTRICT_SCHEDULES = {
     "crnomerec": "Miješani komunalni otpad: Utorak i Petak. Papir: Četvrtkom (svaka 2 tjedna). Plastika: Ponedjeljkom (svaka 2 tjedna). Biootpad: Srijedom."
 }
 
+def get_zet_live_news() -> str:
+    """Fetch live service alerts and disruptions from zet.skoljka.org/news."""
+    url = "https://zet.skoljka.org/news"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Strata-Zagreb-MCP/1.0"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            items = data.get("items", [])
+            lines = ["\n### Najnovije servisne informacije i izmjene (zet.skoljka.org):"]
+            for it in items[:4]:
+                title = it.get("title", "")
+                summary = re.sub(r"<[^>]+>", " ", it.get("summaryHtml", ""))
+                summary = html.unescape(summary).strip()
+                summary = re.sub(r"\s+", " ", summary)
+                lines.append(f"- **{title}**\n  {summary[:200]}...")
+            return "\n".join(lines)
+    except Exception as e:
+        return f"\n*(Live vijesti s zet.skoljka.org trenutno nedostupne: {e})*"
+
 def get_zet_transit(query: str = "") -> str:
     q = query.strip().lower()
-    if not q:
+    live_news = get_zet_live_news()
+    
+    if not q or "vijest" in q or "izmjen" in q or "radov" in q or "servis" in q:
         lines = ["## ZET Tramvajska Mreža (Zagreb)", "### Dnevne i Noćne Linije:"]
-        for num, desc in ZET_TRAM_LINES.items():
-            lines.append(f"- **Linija {num}:** {desc}")
-        lines.append("\n**Savjet:** Za detalje pojedine linije pretražite po broju (npr. `linija 11` ili `nocne`).")
+        for num in ["1", "2", "4", "6", "11", "12", "14", "17", "31", "34"]:
+            lines.append(f"- **Linija {num}:** {ZET_TRAM_LINES[num]}")
+        lines.append("- *(Pretražite po broju linije npr. `linija 11` za sve ostale)*\n")
+        lines.append(live_news)
         return "\n".join(lines)
     
     if "noc" in q:
@@ -90,8 +114,50 @@ def get_zet_transit(query: str = "") -> str:
             matches.append(f"- **Linija {num}:** {desc}")
     
     if matches:
-        return f"## Rezultati pretrage ZET linija za '{query}':\n" + "\n".join(matches)
-    return f"Nije pronađena ZET linija za pojam '{query}'. Dostupne linije: 1-17 (dnevne) i 31-34 (noćne)."
+        return f"## Rezultati pretrage ZET linija za '{query}':\n" + "\n".join(matches) + "\n" + live_news
+    return f"Nije pronađena ZET linija za pojam '{query}'. Dostupne linije: 1-17 (dnevne) i 31-34 (noćne).\n{live_news}"
+
+def get_bajs_bikes(query: str = "") -> str:
+    """Fetch real-time bike availability and free racks across all 200 BAJS / Nextbike stations in Zagreb."""
+    url = "https://api.nextbike.net/maps/nextbike-live.json?city=1172"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Strata-Zagreb-MCP/1.0"})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            places = data["countries"][0]["cities"][0]["places"]
+            total_bikes = sum(p.get("bikes", 0) for p in places)
+            
+            q = query.strip().lower()
+            matches = []
+            for p in places:
+                name = p.get("name", "")
+                if not q or q in name.lower():
+                    matches.append(p)
+            
+            lines = [
+                f"## BAJS Zagreb (Nextbike) Stanje Bicikala uživo",
+                f"- **Ukupno registriranih postaja u Zagrebu:** {len(places)}",
+                f"- **Ukupno raspoloživih bicikala u sustavu:** {total_bikes}\n"
+            ]
+            
+            if q:
+                lines.append(f"### Pronađene postaje za pojam '{query}' ({len(matches)} postaja):")
+            else:
+                lines.append("### Istaknute postaje u središtu grada:")
+                # select a few core central stations if no filter
+                central_keywords = ["trg bana", "glavni kolodvor", "kvaternik", "crnomerec", "trešnjev", "velesajam", "savski most"]
+                matches = [p for p in places if any(k in p.get("name", "").lower() for k in central_keywords)]
+            
+            for p in matches[:15]:
+                name = p.get("name", "")
+                bikes = p.get("bikes", 0)
+                racks = p.get("free_racks", 0)
+                lines.append(f"- **{name}:** {bikes} bicikala slobodno | {racks} slobodnih stalaka")
+            
+            lines.append("\n*Podaci se osvježavaju u stvarnom vremenu izravno iz službenog Nextbike GBFS sustava za Grad Zagreb.*")
+            return "\n".join(lines)
+    except Exception as e:
+        return f"Greška pri dohvaćanju stanja BAJS bicikala: {e}"
 
 def get_pharmacies() -> str:
     lines = ["## Dežurne ljekarne u Zagrebu (0-24 h):"]
@@ -138,7 +204,6 @@ def get_air_quality() -> str:
             o3 = c.get("ozone")
             no2 = c.get("nitrogen_dioxide")
             
-            # AQI categories (European AQI)
             if aqi <= 20:
                 qual = "Izvrsna (Dobra)"
                 health = "Kvaliteta zraka je idealna za boravak na otvorenom i sportske aktivnosti."
@@ -180,15 +245,24 @@ def main():
             continue
         m, mid = req.get("method"), req.get("id")
         if m == "initialize":
-            res = {"jsonrpc": "2.0", "id": mid, "result": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "zagreb-mcp", "version": "1.0.0"}}}
+            res = {"jsonrpc": "2.0", "id": mid, "result": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "zagreb-mcp", "version": "1.1.0"}}}
         elif m == "tools/list":
             tools = [
                 {
                     "name": "zet_transit",
-                    "description": "Zagrebački električni tramvaj (ZET): look up tram lines (1-17 daytime, 31-34 night), route terminals, and night line hours.",
+                    "description": "Zagrebački električni tramvaj (ZET): look up tram lines (1-17 daytime, 31-34 night), terminals, and live disruption alerts from zet.skoljka.org.",
                     "inputSchema": {
                         "type": "object",
-                        "properties": {"query": {"type": "string", "description": "Tram line number (e.g. '11', '31') or search query (e.g. 'nocne', 'Dubrava')."}},
+                        "properties": {"query": {"type": "string", "description": "Tram line number (e.g. '11', '31'), search query (e.g. 'Dubrava'), or 'vijesti' for live disruption news."}},
+                        "required": []
+                    }
+                },
+                {
+                    "name": "zagreb_bajs_bikes",
+                    "description": "BAJS Zagreb (Nextbike) live bicycle rental availability: real-time bike counts and free racks across all 200 stations in Zagreb.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string", "description": "Station or location name (e.g. 'Trg', 'Kolodvor', 'Trešnjevka', 'Maksimir', 'Velesajam'). Omit for central hub stations."}},
                         "required": []
                     }
                 },
@@ -219,6 +293,8 @@ def main():
             args = params.get("arguments", {})
             if name == "zet_transit":
                 ans = get_zet_transit(args.get("query", ""))
+            elif name == "zagreb_bajs_bikes":
+                ans = get_bajs_bikes(args.get("query", ""))
             elif name == "zagreb_pharmacies":
                 ans = get_pharmacies()
             elif name == "cistoca_waste_schedule":

@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-25:** Integrated zet.skoljka.org live disruption alerts and official Nextbike BAJS live bike availability into zagreb MCP server. (Agent: Antigravity)
 - **2026-10-25:** Artifact Backup. Backed up zagreb-and-croatia-live-mcp-walkthrough.md. (Agent: Antigravity)
 - **2026-10-25:** Ingestion. artifacts/zagreb-and-croatia-live-mcp-walkthrough.md. (Agent: Antigravity)
 - **2026-10-25:** Expanded Ray on-demand MCP suite to 34 servers (photovideo, drones, minipaint, electronics, networking); updated documentation and /help /mcp. (Agent: Antigravity)

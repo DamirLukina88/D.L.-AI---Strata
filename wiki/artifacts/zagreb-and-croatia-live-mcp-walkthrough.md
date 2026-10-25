@@ -17,7 +17,8 @@ This update completes the creation and deployment of two specialized on-demand M
 
 ### Newly Implemented Suites
 1. **`zagreb` ([`tools/zagreb_mcp.py`](file:///home/damirl/Desktop/Strata/tools/zagreb_mcp.py)):**
-   - **ZET Tram & Public Transit (`zet_transit`):** Complete route catalog for daytime lines (1–17) and night lines (31–34 with operational hours 23:30–04:30), terminals, and search queries.
+   - **ZET Tram & Public Transit (`zet_transit`):** Complete route catalog for daytime lines (1–17) and night lines (31–34 with operational hours 23:30–04:30), terminals, and live service disruption notices fetched from **`zet.skoljka.org/news`**.
+   - **BAJS Zagreb Live Bike Rentals (`zagreb_bajs_bikes`):** Real-time bicycle and free rack availability across all 200 BAJS / Nextbike stations in Zagreb fetched directly from Nextbike's official GBFS feed (`api.nextbike.net/maps/nextbike-live.json?city=1172`). *(Note: `zagreb-insights-explorer.lovable.app` was audited and found to be a static Lovable mock with frozen December 2025 data; the official Nextbike GBFS API was integrated instead for genuine live telemetry).*
    - **24/7 On-Duty Pharmacies (`zagreb_pharmacies`):** Exact locations, addresses, and contact numbers for open 24-hour pharmacies in Zagreb (Centar Trg bana Jelačića, Črnomerec Ilica, Dubrava Grižanska, Siget Av. V. Holjevca, Trešnjevka Ozaljska) plus OHBP emergency hospital hotlines.
    - **Čistoća Waste Collection Schedule (`cistoca_waste_schedule`):** District pickup schedules (Donji Grad, Trešnjevka, Maksimir, Novi Zagreb, Dubrava, Črnomerec), ZG vrećice guidelines, bio-waste rules, and free bulky waste (*glomazni otpad*) quotas.
    - **Live Air Quality (`zagreb_air_quality`):** Real-time European AQI, PM2.5, PM10, $O_3$, and $NO_2$ metrics from official measuring stations via Open-Meteo Air Quality API with health guidance.
@@ -33,5 +34,5 @@ This update completes the creation and deployment of two specialized on-demand M
 
 - User requests: 2026-10-25.
 - Central catalog: `~/.config/dl-ai/mcp.json`.
-- Live feeds: Hrvatski autoklub (HAK), Državni hidrometeorološki zavod (DHMZ), Open-Meteo Air Quality, NOAA Aviation Weather.
+- Live feeds: ZET live news (`zet.skoljka.org/news`), Nextbike live API (`api.nextbike.net`), Hrvatski autoklub (HAK), Državni hidrometeorološki zavod (DHMZ), Open-Meteo Air Quality, NOAA Aviation Weather.
 - Local tools: `tools/zagreb_mcp.py`, `tools/croatia_live_mcp.py`.

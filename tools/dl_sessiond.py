@@ -637,7 +637,7 @@ Tools and jobs
                   electronics (LCSC/JLCPCB parts, SMD resistor calc), networking & LAN (SFP optics, cabling),
                   photography & videography (exposure calc, log profiles, storyboarding),
                   drones & regulations (DJI specs, CCAA & EASA Croatian rules, AMC Portal),
-                  Zagreb civic & transit (ZET, 24/7 pharmacies, waste schedules, air quality),
+                  Zagreb civic & transit (ZET & zet.skoljka.org, BAJS bike rentals across 200 stations, 24/7 pharmacies, waste schedules, air quality),
                   Croatia live data (HAK road conditions, DHMZ observations, fuel prices, METAR)
                   (list, turn on/off; they also start when needed)
 /schedule ...     Scheduled jobs: /schedule [--email] <when> <task>; list; off|on|run|rm N; stop (the running job)
