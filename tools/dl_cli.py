@@ -314,14 +314,14 @@ DL_TOOLS = [
         "type": "function",
         "function": {
             "name": "local_wiki",
-            "description": "Interact with the project knowledge base in wiki/. Search decisions, constraints, preferences, architecture; read pages; or create new pages.",
+            "description": "Interact with the project knowledge base in wiki/. Search decisions, constraints, preferences, architecture; read pages; create new pages; or initialize a wiki in the workspace.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["search", "read_page", "new_page", "lint", "digest", "env_list"],
-                        "description": "Action to perform on the local wiki."
+                        "enum": ["search", "read_page", "new_page", "init", "lint", "digest", "env_list", "log"],
+                        "description": "Action to perform on the local wiki: 'init' to initialize wiki in workspace, 'search' to find pages, 'read_page' to read a page, 'new_page' to create a page, 'lint' to validate, 'digest' for overview, 'env_list' for secret keys, 'log' to append to changelog."
                     },
                     "query": {
                         "type": "string",
@@ -439,11 +439,7 @@ def resolve_wiki_root(workspace: Path) -> Path | None:
 
 
 def get_active_tools(workspace: Path, mode: str = "act", registry=None) -> list[dict]:
-    wroot = resolve_wiki_root(workspace)
     base_tools = DL_PLAN_TOOLS if mode == "plan" else DL_ACT_TOOLS
-    if not wroot:
-        # Wiki skill is inactive by default in this workspace
-        base_tools = [t for t in base_tools if t["function"]["name"] != "local_wiki"]
     if registry is not None and registry.active:
         # the small `mcp` switch, plus the tools of the MCP servers that are on right now; built-ins the catalogue
         # loads on demand (Exa, Context7) leave the always-on list
@@ -1173,7 +1169,7 @@ def tool_switch_workspace(args: dict, workspace: Path, session_context: dict | N
             messages[0]["content"] = build_dl_system_prompt(new_path, mode=mode)
         sync_current_chat_state(messages, new_path)
 
-    wiki_status = f"Local Wiki active ({wroot})" if wroot else "Local Wiki inactive (run /wiki or call local_wiki to initialize in this directory)"
+    wiki_status = f"Local Wiki active ({wroot})" if wroot else "Local Wiki inactive (call local_wiki(action='init') to initialize in this directory)"
     return f"Working directory successfully switched to: {new_path}\n{wiki_status}"
 
 
@@ -1455,8 +1451,10 @@ def tool_local_wiki(args: dict, workspace: Path, mode: str = "act", session_cont
 
     wiki_root = resolve_wiki_root(workspace)
 
-    # If wiki is not active in this project folder, initialize it in the active workspace when invoked
-    if not wiki_root and action != "init":
+    # If wiki is not active in this project folder:
+    # 1. new_page automatically initializes the wiki first
+    # 2. search/read_page/digest/lint/env_list report that the wiki is inactive and can be initialized with action='init'
+    if not wiki_root and action == "new_page":
         target_root = (workspace / "wiki").resolve()
         init_cmd = ["python3", str(wiki_script), "init", "--root", str(target_root)]
         try:
@@ -1469,6 +1467,10 @@ def tool_local_wiki(args: dict, workspace: Path, mode: str = "act", session_cont
                 sync_current_chat_state(messages, workspace)
         except subprocess.CalledProcessError as e:
             return f"Error initializing Local Wiki in {target_root}: {e.stderr or e.stdout}"
+
+    if not wiki_root and action in ("search", "read_page", "digest", "lint", "env_list"):
+        return (f"Local Wiki is inactive in this workspace ({workspace}) because no wiki/ folder exists. "
+                "Call local_wiki(action='init') to initialize it, or local_wiki(action='new_page', ...) to create the first page.")
 
     if action == "read_page":
         ppath_str = args.get("page_path") or args.get("query")
@@ -1551,6 +1553,13 @@ def tool_local_wiki(args: dict, workspace: Path, mode: str = "act", session_cont
     try:
         res = subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, timeout=30)
         out = (res.stdout or "") + (f"\nStderr: {res.stderr}" if res.stderr else "")
+        if action == "init" and res.returncode == 0:
+            target_wiki = Path(target if 'target' in locals() else (workspace / "wiki")).resolve()
+            if target_wiki.is_dir() and session_context is not None:
+                messages = session_context.get("messages")
+                if messages and len(messages) > 0 and messages[0].get("role") == "system":
+                    messages[0]["content"] = build_dl_system_prompt(workspace, mode=mode)
+                sync_current_chat_state(messages, workspace)
         return out.strip() or f"Action '{action}' completed."
     except Exception as e:
         return f"Error executing wiki command: {e}"
