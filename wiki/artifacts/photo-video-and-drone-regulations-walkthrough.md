@@ -32,4 +32,5 @@ This update completes the creation and registration of two specialized on-demand
 - User requests: 2026-10-25.
 - Central catalog: `~/.config/dl-ai/mcp.json`.
 - Tools: `tools/photovideo_mcp.py`, `tools/drones_mcp.py`.
+- Advanced color grading extension: [davinci-cst-ipc2152-wargaming-and-v026-sync-walkthrough.md](davinci-cst-ipc2152-wargaming-and-v026-sync-walkthrough.md).
 - Regulations: Croatian Civil Aviation Agency (CCAA / HACZ), Croatia Control (HKZP AMC Portal), EASA Easy Access Rules for UAS.

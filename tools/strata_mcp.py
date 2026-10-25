@@ -748,6 +748,8 @@ class Strata:
             if not amd and shutil.which("rocm-smi"):
                 amd = rocm_smi_gpus()
         hw["gpus"] = nv + amd
+        for g in hw["gpus"]:                            # each make numbers its cards from 0 (the engine drives one make): a stable id tells two cards apart
+            g.setdefault("id", f"{g.get('vendor') or 'gpu'}:{g.get('index')}")
         if WIN:
             hw["display_adapters"] = windows_video_controllers()
         hw["nvidia_smi"] = bool(shutil.which("nvidia-smi"))

@@ -15,6 +15,8 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-25:** Sync Strata v0.2.6 server fixes, add DaVinci CST grading, IPC-2152 PCB calculator, and Warhammer 40k/BGG rules. (Agent: Antigravity)
+- **2026-10-25:** Ingestion. artifacts/davinci-cst-ipc2152-wargaming-and-v026-sync-walkthrough.md. (Agent: Antigravity)
 - **2026-10-25:** Artifact Backup. Backed up ray-identity-and-project-telemetry-walkthrough.md. (Agent: Antigravity)
 - **2026-10-25:** Ingestion. artifacts/ray-identity-and-project-telemetry-walkthrough.md. (Agent: Antigravity)
 - **2026-10-25:** Integrated HNB exchange rates, Sunday shopping rules, audio engineering LUFS standards, and Zagreb 24/7 emergency services. (Agent: Antigravity)

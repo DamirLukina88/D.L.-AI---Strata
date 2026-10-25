@@ -157,6 +157,50 @@ def technique_guide(name: str) -> str:
             return v
     return f"Technique '{name}' not found. Available: slapchop, glazing, nmm, pin wash."
 
+FACTION_RECIPES = {
+    "ultramarines": "Prime: Macragge Blue spray. Base: Macragge Blue. Shade: Nuln Oil (recess only). Highlight 1: Calgar Blue. Highlight 2: Fenrisian Grey (sharp corners). Gold trim: Retributor Armour shaded with Reikland Fleshshade, highlighted with Liberator Gold.",
+    "blood angels": "Prime: Mephiston Red spray. Base: Mephiston Red. Shade: Agrax Earthshade (recess). Highlight 1: Evil Sunz Scarlet. Highlight 2: Wild Rider Red. Black trim: Abaddon Black with Eshin Grey edge.",
+    "dark angels": "Prime: Chaos Black. Base: Caliban Green. Shade: Nuln Oil. Highlight 1: Warpstone Glow. Highlight 2: Moot Green.",
+    "death guard": "Prime: Death Guard Green spray. Base: Death Guard Green. Shade: Agrax Earthshade all over. Layer: Ogryn Camo. Trim: Balthasar Gold with Nihilakh Oxide verdigris in recesses.",
+    "necrons": "Prime: Chaos Black. Base: Leadbelcher. Shade: Nuln Oil gloss. Drybrush: Runefang Steel / Stormhost Silver. Glow: Corax White base followed by Tesseract Glow over technical green.",
+    "black templars": "Prime: Chaos Black. Armor: Abaddon Black highlighted with Dark Reaper then Thunderhawk Blue. Tabards: Morghast Bone shaded with Seraphim Sepia, highlighted with Wraithbone."
+}
+
+def wargaming_and_boardgames_guide(topic: str = "") -> str:
+    t = topic.lower().strip()
+    for k, v in FACTION_RECIPES.items():
+        if k in t:
+            return f"## Wargaming Painting Recipe: {k.title()}\n{v}"
+            
+    return (
+        "## Wargaming Rules Mechanics & BoardGameGeek (BGG) Classification\n\n"
+        "### 1. Warhammer 40k & Kill Team Combat Resolution Rules:\n"
+        "- **To Hit:** Compare Weapon Skill (WS) for melee or Ballistic Skill (BS) for ranged on d6 (e.g. BS 3+ hits on 3, 4, 5, 6; natural 1 always fails).\n"
+        "- **To Wound Matrix (Strength vs Toughness):**\n"
+        "  • S >= 2x T: **2+** to wound\n"
+        "  • S > T: **3+** to wound\n"
+        "  • S = T: **4+** to wound\n"
+        "  • S < T: **5+** to wound\n"
+        "  • S <= 1/2x T: **6+** to wound\n"
+        "- **Armor Save Modification (AP):** Target armor save + |AP|. Example: 3+ save against AP-2 requires 5+ on d6. Natural 1 always fails.\n"
+        "- **Invulnerable Save (Invuln):** Unaffected by AP modifier. Defender chooses to use regular save or invulnerable save (whichever is better).\n"
+        "- **Feel No Pain (FNP):** Rolled per wound damage point suffered (e.g. FNP 5+ ignores wound on 5 or 6).\n\n"
+        "### 2. Standard Miniature Scale & Base Sizes:\n"
+        "- **Scale:** 28mm to 32mm Heroic (Warhammer 40k, Kill Team, Necromunda, Marvel Crisis Protocol).\n"
+        "- **25mm:** Classic infantry (Guard, Grots, Eldar Guardians).\n"
+        "- **32mm:** Modern Space Marines, Chaos Marines, Sisters of Battle.\n"
+        "- **40mm:** Terminators, Custodes, Space Marine Captains/Characters.\n"
+        "- **50mm - 60mm:** Heavy weapon squads, Dreadnoughts, Sentinels.\n\n"
+        "### 3. Core BoardGameGeek (BGG) Game Mechanics:\n"
+        "- **Worker Placement:** Players assign limited worker tokens to mutual action spaces (e.g. Agricola, Dune: Imperium, Everdell).\n"
+        "- **Deck / Bag Building:** Players start with basic hands and acquire stronger cards/tokens into personal draw decks (e.g. Dominion, Clank!, Orléans).\n"
+        "- **Engine Building:** Creating cascading resource generators where early actions amplify later turns (e.g. Wingspan, Terraforming Mars).\n"
+        "- **Area Majority / Influence:** Scoring points by having highest presence in disputed regions (e.g. El Grande, Blood Rage).\n"
+        "- **Action Drafting & Role Selection:** Choosing mutual role cards that dictate turn flow (e.g. Puerto Rico, 7 Wonders).\n\n"
+        "### 4. Faction Painting Recipes Available:\n"
+        "- Search by faction: `Ultramarines`, `Blood Angels`, `Dark Angels`, `Death Guard`, `Necrons`, `Black Templars`."
+    )
+
 def main():
     while True:
         line = sys.stdin.readline()
@@ -203,6 +247,17 @@ def main():
                         },
                         "required": ["technique"]
                     }
+                },
+                {
+                    "name": "wargaming_and_boardgames_guide",
+                    "description": "Warhammer 40k & Kill Team combat resolution rules (wound chart, AP saves, FNP), base sizes, faction color schemes (Ultramarines, Blood Angels, Death Guard), and BoardGameGeek (BGG) game mechanics.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "topic": {"type": "string", "description": "Faction name, game rule, or mechanic (e.g. 'wound chart', 'Ultramarines', 'base sizes', 'worker placement')"}
+                        },
+                        "required": []
+                    }
                 }
             ]
             res = {"jsonrpc": "2.0", "id": mid, "result": {"tools": tools}}
@@ -216,6 +271,8 @@ def main():
                 text = airbrush_guide(args.get("paint_type", "acrylic"))
             elif name == "technique_guide":
                 text = technique_guide(args.get("technique", ""))
+            elif name == "wargaming_and_boardgames_guide":
+                text = wargaming_and_boardgames_guide(args.get("topic", ""))
             else:
                 text = f"Unknown tool: {name}"
             res = {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": text}]}}

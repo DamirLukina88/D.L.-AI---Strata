@@ -51,6 +51,55 @@ def decode_smd_resistor(code: str) -> str:
         formatted = f"{val} Ω"
     return f"## SMD Resistor Code `{code}`\n- **Resistance Value:** **{formatted}** ({val} Ohms)"
 
+def calc_pcb_trace(current_a: float, copper_weight_oz: float = 1.0, temp_rise_c: float = 10.0, layer_type: str = "external") -> str:
+    """Calculate minimum PCB trace width via IPC-2152 / IPC-2221 standards and provide power decoupling rules."""
+    try:
+        current = max(0.01, float(current_a))
+        oz = max(0.5, float(copper_weight_oz))
+        temp_rise = max(1.0, float(temp_rise_c))
+        is_ext = layer_type.lower().strip() != "internal"
+        
+        # IPC-2221 / IPC-2152 empirical formula
+        k = 0.048 if is_ext else 0.024
+        b = 0.44
+        c = 0.725
+        area_mils2 = (current / (k * (temp_rise ** b))) ** (1.0 / c)
+        thickness_mils = oz * 1.378  # 1 oz copper = ~1.378 mils = ~35 um
+        width_mils = area_mils2 / thickness_mils
+        width_mm = width_mils * 0.0254
+        
+        # Resistance and voltage drop estimation per 10 cm (100 mm)
+        # Copper resistivity rho = 1.7e-8 ohm-meter
+        area_m2 = (width_mm * 1e-3) * (oz * 35e-6)
+        r_per_10cm = (1.7e-8 * 0.1) / area_m2
+        v_drop = current * r_per_10cm
+        power_loss_w = (current ** 2) * r_per_10cm
+        
+        layer_label = "External (Outer Layer)" if is_ext else "Internal (Inner Layer)"
+        
+        return (
+            f"## IPC-2152 PCB Trace Width & Power Sizing\n\n"
+            f"### Parameters:\n"
+            f"- **Target Current:** **{current:.2f} A**\n"
+            f"- **Copper Weight:** {oz} oz ({oz * 35:.0f} µm)\n"
+            f"- **Allowed Temperature Rise:** {temp_rise:.1f} °C\n"
+            f"- **Layer Placement:** {layer_label}\n\n"
+            f"### Recommended Minimum Trace Width:\n"
+            f"- **Width in Millimeters:** **{width_mm:.2f} mm**\n"
+            f"- **Width in Mils:** **{width_mils:.1f} mils**\n"
+            f"- *Estimated resistance per 100mm:* ~{r_per_10cm * 1000:.2f} mΩ\n"
+            f"- *Voltage drop over 100mm:* ~{v_drop * 1000:.2f} mV (Power dissipation: {power_loss_w * 1000:.1f} mW)\n\n"
+            f"### High-Speed Digital Power & Decoupling Best Practices:\n"
+            f"- **ESP32 & RP2040 Decoupling:**\n"
+            f"  • Place a **100 nF (0.1 µF) ceramic X7R** capacitor directly against every VDD pin (< 3 mm distance, short vias to ground plane).\n"
+            f"  • Place a **10 µF low-ESR ceramic bulk capacitor** at the 3.3V LDO regulator output.\n"
+            f"- **ESP32 RF Peak Current Spikes:**\n"
+            f"  • ESP32 Wi-Fi TX bursts pull transient peak currents up to **500 mA**. Size your 3.3V power traces to at least **0.5 mm (20 mils)** to prevent Brownout detector resets.\n"
+            f"- **Ground Plane (Return Path):** Keep an uninterrupted solid ground copper pour on Layer 2 directly under high-speed signals (SPI, I2C, UART) to eliminate ground bounce and EMI."
+        )
+    except Exception as e:
+        return f"PCB calculation error: {e}"
+
 def main():
     while True:
         line = sys.stdin.readline()
@@ -86,6 +135,20 @@ def main():
                         },
                         "required": ["code"]
                     }
+                },
+                {
+                    "name": "pcb_trace_and_power_calc",
+                    "description": "Calculate minimum PCB trace width (mm and mils) per IPC-2152 standards for current carrying capacity, copper weight (1oz/2oz), and decoupling capacitor rules for ESP32/RP2040.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "current_a": {"type": "number", "description": "Current in amperes (e.g. 1.0, 2.5)"},
+                            "copper_weight_oz": {"type": "number", "default": 1.0, "description": "Copper weight in oz (default 1.0 = 35um)"},
+                            "temp_rise_c": {"type": "number", "default": 10.0, "description": "Allowed temperature rise in °C (default 10.0)"},
+                            "layer_type": {"type": "string", "default": "external", "description": "'external' or 'internal' layer"}
+                        },
+                        "required": ["current_a"]
+                    }
                 }
             ]
             res = {"jsonrpc": "2.0", "id": mid, "result": {"tools": tools}}
@@ -97,6 +160,8 @@ def main():
                 text = lookup_component(args.get("query", ""))
             elif name == "smd_resistor_calc":
                 text = decode_smd_resistor(args.get("code", ""))
+            elif name == "pcb_trace_and_power_calc":
+                text = calc_pcb_trace(args.get("current_a", 1.0), args.get("copper_weight_oz", 1.0), args.get("temp_rise_c", 10.0), args.get("layer_type", "external"))
             else:
                 text = f"Unknown tool: {name}"
             res = {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": text}]}}

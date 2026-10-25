@@ -633,9 +633,9 @@ Tools and jobs
                   arXiv preprints, Wikipedia, OSV vulnerabilities, PubChem, IETF RFC, OpenAlex,
                   OpenStreetMap, ClinicalTrials.gov, Open Targets, Reactome, Modern Web, 3D printing
                   (Klipper & Bambu/Prusa filaments), CAD & materials, Game patterns, Croatian & EU laws,
-                  live weather, miniature painting & acrylics (3,340+ paint conversions, airbrushing),
-                  electronics (LCSC/JLCPCB parts, SMD resistor calc), networking & LAN (SFP optics, cabling),
-                  photography, videography & audio (exposure, log profiles, storyboarding, YouTube/Broadcast LUFS, mics),
+                  live weather, miniature painting & wargaming (3,340+ paints, airbrushing, Warhammer 40k rules/recipes, BGG mechanics),
+                  electronics (LCSC/JLCPCB parts, SMD resistor calc, IPC-2152 PCB trace & decoupling), networking & LAN,
+                  photography, video & audio (exposure, log profiles, DaVinci Resolve CST, storyboarding, YouTube/Broadcast LUFS, mics),
                   drones & regulations (DJI specs, CCAA & EASA Croatian rules, AMC Portal),
                   Zagreb civic & transit (ZET, BAJS live bikes, 24/7 pharmacies, Poison Control/vet ER, waste, air quality),
                   Croatia live data (HAK roads/borders, DHMZ weather, HNB currency rates, holidays & Sunday shopping, fuel, METAR),

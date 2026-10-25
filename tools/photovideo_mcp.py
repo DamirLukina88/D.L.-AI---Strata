@@ -154,6 +154,40 @@ def lookup_shot(shot_code: str) -> str:
             return f"## Storyboard Shot: {v['name']} (`{k.upper()}`)\n- **Dramatic Purpose & Blocking:** {v['purpose']}\n- **Framing Guide:** Maintain consistent eye-line and follow the 180-degree rule across cuts."
     return f"Shot type '{shot_code}' not found. Supported shot codes: {', '.join(SHOT_TYPES.keys())} (e.g. ELS, Wide, MCU, CU, OTS, Dutch)."
 
+def davinci_resolve_guide(camera_format: str = "") -> str:
+    return (
+        "## DaVinci Resolve CST (Color Space Transform) & Grading Workflow\n\n"
+        "### 1. Recommended Color Management: DaVinci Wide Gamut (DWG)\n"
+        "Working in **DaVinci Wide Gamut / Intermediate** provides 100% non-destructive grading with wider color volume than ARRI LogC3 or ACEScc.\n\n"
+        "### 2. Node Graph Sandwich Setup:\n"
+        "- **Node 1 [Input CST]:**\n"
+        "  • **Sony:** Input Color Space: `Sony S-Gamut3.Cine` | Input Gamma: `Sony S-Log3`\n"
+        "  • **Canon:** Input Color Space: `Canon Cinema Gamut` | Input Gamma: `Canon Log 3`\n"
+        "  • **DJI:** Input Color Space: `DJI D-Gamut` | Input Gamma: `DJI D-Log` (or Rec.709 for D-Log M)\n"
+        "  • **Output of Node 1:** Output Color Space: `DaVinci Wide Gamut` | Output Gamma: `DaVinci Intermediate`\n"
+        "- **Nodes 2 to 5 [Grading in DWG Space]:**\n"
+        "  • **Node 2 (Exposure):** Use Offset wheel in Primary Wheels (does not crush shadows or clip highlights in wide gamut).\n"
+        "  • **Node 3 (White Balance):** Temp / Tint and RGB parade alignment.\n"
+        "  • **Node 4 (Contrast & Pivot):** Custom S-curves or Contrast wheel with Pivot set to ~0.38 - 0.42.\n"
+        "  • **Node 5 (Look / Creative):** Split-toning, film emulation LUTs, Hue vs Sat curves.\n"
+        "- **Node 6 [Output CST]:**\n"
+        "  • Input Color Space: `DaVinci Wide Gamut` | Input Gamma: `DaVinci Intermediate`\n"
+        "  • Output Color Space: `Rec.709` | Output Gamma: `Gamma 2.4` (Standard web/master) or `Rec.709-A` (Apple QuickTime gamma bug fix)\n"
+        "  • Tone Mapping: `DaVinci` | Saturation Compression: `Enabled`\n\n"
+        "### 3. Essential Delivery & Export Settings (YouTube & Web):\n"
+        "- **Format:** MP4 or QuickTime (.mov)\n"
+        "- **Codec:** H.265 (HEVC) or Apple ProRes 422 HQ\n"
+        "- **Advanced Settings:** Color Space Tag: `Rec.709` | Gamma Tag: `Rec.709` (or `Rec.709-A`)\n"
+        "- **Audio Export:** 48,000 Hz, 24-bit Linear PCM (or AAC 320 kbps)\n\n"
+        "### 4. Critical Productivity Shortcuts:\n"
+        "- `Alt + S`: Append new Serial Node\n"
+        "- `Alt + P`: Create Parallel Node\n"
+        "- `Ctrl + D`: Bypass current Node\n"
+        "- `Shift + D`: Bypass all color grades and fusion effects\n"
+        "- `Shift + Up/Down`: Jump between clip timeline items\n"
+        "- `Ctrl + Shift + W`: Toggle split screen comparison"
+    )
+
 def main():
     while True:
         line = sys.stdin.readline()
@@ -214,6 +248,17 @@ def main():
                         },
                         "required": []
                     }
+                },
+                {
+                    "name": "davinci_resolve_guide",
+                    "description": "DaVinci Resolve Color Space Transform (CST) workflow (Sony S-Log3, Canon C-Log3, DJI D-Log to DaVinci Wide Gamut), node graph order, export presets, and shortcuts.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "camera_format": {"type": "string", "description": "Camera format (e.g. 'Sony', 'Canon', 'DJI')."}
+                        },
+                        "required": []
+                    }
                 }
             ]
             res = {"jsonrpc": "2.0", "id": mid, "result": {"tools": tools}}
@@ -229,6 +274,8 @@ def main():
                 text = lookup_shot(args.get("shot_type", ""))
             elif name == "audio_engineering_guide":
                 text = audio_guide(args.get("topic", ""))
+            elif name == "davinci_resolve_guide":
+                text = davinci_resolve_guide(args.get("camera_format", ""))
             else:
                 text = f"Unknown tool: {name}"
             res = {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": text}]}}
