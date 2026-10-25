@@ -628,9 +628,11 @@ HELP = """Modes
 /effort [level]   This session's thinking level: none, low, medium, high, auto, or default (the Chat settings)
 
 Tools and jobs
-/mcp [on|off N]   On-demand tools: Home Assistant (3D printers, cameras, plugs, sensors), web search (Exa),
-                  library docs (Context7), Fetch, DeepL, browser, Proton Mail, Gmail, Drive, Docs, schedule,
-                  DeepSeek cloud reasoning (ultra-high thinking, math/logic proofs), Europe PMC (scientific literature)
+/mcp [on|off N]   On-demand tools: Home Assistant, web search (Exa), Context7, Fetch, DeepL, browser,
+                  Proton Mail, Gmail, Drive, Docs, schedule, DeepSeek cloud reasoning, Europe PMC,
+                  arXiv preprints, Wikipedia, OSV vulnerabilities, PubChem, IETF RFC, OpenAlex,
+                  OpenStreetMap, ClinicalTrials.gov, Open Targets, Reactome, Modern Web, 3D printing
+                  (Klipper & Bambu/Prusa filaments), CAD & materials, Game patterns, Croatian & EU laws
                   (list, turn on/off; they also start when needed)
 /schedule ...     Scheduled jobs: /schedule [--email] <when> <task>; list; off|on|run|rm N; stop (the running job)
                   when: 2026-10-16 09:00, tomorrow 07:00, fri 09:00, in 2h, daily 08:00, mon-fri 07:30, every 2h
