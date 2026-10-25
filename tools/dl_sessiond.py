@@ -639,6 +639,7 @@ Tools and jobs
                   drones & regulations (DJI specs, CCAA & EASA Croatian rules, AMC Portal),
                   Zagreb civic & transit (ZET, BAJS live bikes, 24/7 pharmacies, Poison Control/vet ER, waste, air quality),
                   Croatia live data (HAK roads/borders, DHMZ weather, HNB currency rates, holidays & Sunday shopping, fuel, METAR),
+                  SolidCraft 3D CAD (parametric parts, STEP/STL export, GPU rendering into workspace),
                   Ray self-identity & project telemetry (GitHub repo status, commit changelog, host hardware, MCP catalog)
                   (list, turn on/off; they also start when needed)
 /schedule ...     Scheduled jobs: /schedule [--email] <when> <task>; list; off|on|run|rm N; stop (the running job)

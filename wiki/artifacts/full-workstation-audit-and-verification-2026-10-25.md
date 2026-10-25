@@ -46,6 +46,7 @@ This report documents the exhaustive verification and security audit conducted a
 
 ## 3. Related Artifacts
 
+- [solidcraft-3d-cad-modeling-and-workspace-integration.md](solidcraft-3d-cad-modeling-and-workspace-integration.md)
 - [davinci-cst-ipc2152-wargaming-and-v026-sync-walkthrough.md](davinci-cst-ipc2152-wargaming-and-v026-sync-walkthrough.md)
 - [ray-identity-and-project-telemetry-walkthrough.md](ray-identity-and-project-telemetry-walkthrough.md)
 - [zagreb-and-croatia-live-mcp-walkthrough.md](zagreb-and-croatia-live-mcp-walkthrough.md)
