@@ -52,6 +52,7 @@ Every page in this wiki is listed below. The list is generated; do not edit betw
 - [Shared CLI Session Daemon for Web and Terminal](decisions/shared-cli-session-daemon.md) — One D.L. CLI agent session in dl-ai-sessiond, used from the web Code tab and dl_cli.py --attach; replaced ttyd + tmux scraping
 - [Shared Workspace on Dedicated Storage](decisions/shared-workspace-d-disk.md) — Architecture, path mapping, and web integration for shared /mnt/data/DL-AI-workspace across Claude Code CLI and web app.
 - [Strata v0.1.43 Performance Switches and Memory Hygiene](decisions/strata-v0-1-43-performance-and-memory-optimizations.md) — Activation of adaptive tier memory overlap, resident RAM soft-commit, and Linux page cache release on exit
+- [Strata v0.2.5 Sync, Web Ergonomics, and Server Reliability](decisions/strata-v0-2-5-sync-and-ergonomics.md) — Selective synchronization of upstream Strata v0.2.5 ergonomics, dynamic startup timeouts, and clean shard deletion on RX 7600 XT
 - [Weather Reasoning Benchmark for CLI Thinking Levels](decisions/weather-reasoning-benchmark.md) — Standalone benchmark tools/weather_reasoning_bench.py evaluating CLI thinking levels with location inference, table quality, and Proton Mail.
 
 ## Preferences
@@ -103,6 +104,7 @@ Every page in this wiki is listed below. The list is generated; do not edit betw
 - [Strata / D.L. AI Design Language (visual spec)](artifacts/strata-design-language-spec.md) — Where the 913-line visual spec of the Strata web app lives and what it holds: tokens, components, layouts, porting notes, known gaps
 - [Strata AMD Deployment Plan](artifacts/strata-deployment-plan.md) — Tailored deployment plan for Strata on AMD RX 7600 XT (gfx1102) using CachyOS Linux
 - [Strata Full Project Audit Report (2026-10-16)](artifacts/strata-full-project-audit-2026-10-16.md) — Comprehensive read-only audit of the Strata / D.L. AI workstation covering C++/HIP engine, Python server, CLI, daemons, test suites, and security.
+- [Strata Performance Benchmark Report (2026-10-25 Post-v0.2.5 Sync)](artifacts/strata-benchmark-2026-10-25-v025-sync.md) — Performance benchmark of Strata Qwen3.8-Flash-Next-Coder-IQ1_M on AMD Radeon RX 7600 XT following the v0.2.5 sync and ergonomics implementation.
 - [Strata v0.1.41 Upgrade Walkthrough](artifacts/strata-v0-1-41-upgrade-walkthrough.md) — Walkthrough of upgrading the local Strata engine to v0.1.41 while preserving custom MCP tools.
 - [Strata v0.1.43 Integration and Optimization Walkthrough](artifacts/strata-v0-1-43-integration-and-optimization-walkthrough.md) — End-to-end integration walkthrough for upstream Strata v0.1.43, HIP recompile on ROCm, UI/CLI preservation, and benchmark optimization matrix
 - [Strata v0.1.43 Optimization and Benchmarking Matrix](artifacts/v0-1-43-optimization-benchmark-report.md) — Empirical benchmark evaluation of Adaptive Overlap, Route Tail Skip 7, and Route Resident margin sweeps on AMD RX 7600 XT
@@ -111,6 +113,7 @@ Every page in this wiki is listed below. The list is generated; do not edit betw
 - [Strata v0.1.44.1 Benchmark Report (2026-10-16)](artifacts/strata-benchmark-2026-10-16.md) — Empirical benchmark evaluation of Strata v0.1.44.1 with Qwen3.8-Flash-Next-Coder-IQ1_M on AMD Radeon RX 7600 XT (ROCm 7.2.4 HIP)
 - [Strata v0.1.44.1 Benchmark Report (2026-10-23 Baseline)](artifacts/strata-benchmark-2026-10-23-baseline.md) — Pre-implementation baseline benchmark of Strata v0.1.44.1 on AMD Radeon RX 7600 XT with Qwen3.8-Flash-Next-Coder-IQ1_M.
 - [Strata v0.1.45 Complete Upstream Evaluation & Benchmark Report](artifacts/v0-1-45-optimizations-and-tuning-report.md) — Master evaluation, hardware validation, and dual-tier benchmarks for Strata v0.1.45 features on AMD Radeon RX 7600 XT
+- [Strata v0.2.5 Web Ergonomics and Engine Reliability Sync Walkthrough](artifacts/strata-v0-2-5-sync-and-ergonomics-walkthrough.md) — Walkthrough documenting local safety backup, Web & Chat Ergonomics Suite, and Engine & Server Startup Reliability implementations from Strata v0.2.5
 - [Tetris Single-File Plan](artifacts/tetris-single-file-plan.md) — Architecture plan for a modern neon single-file Tetris game generated via Claude Code on Strata.
 - [Uncensored Model Evaluation and Refusal-Direction Projection](artifacts/uncensored-model-evaluation-and-refusal-projection-plan.md) — Hardware evaluation of community uncensored MoE models on 32 GB RAM / 16 GB VRAM and configuration of Strata native refusal-direction projection
 - [Unified CLI Architecture & Mobile Companion Feed Walkthrough](artifacts/unified-cli-and-mobile-companion-walkthrough.md) — Walkthrough of consolidating CLI, live slash command syncing, Exa & Context7 chips, and mobile feed ANSI sanitization.
@@ -124,6 +127,7 @@ Every page in this wiki is listed below. The list is generated; do not edit betw
 - [Upstream Strata v0.1.43 Integration Plan](artifacts/upstream-v0-1-43-integration-plan.md) — Architecture and merge resolution plan for integrating upstream Strata v0.1.43 while preserving custom dark aesthetic, CLI, and guardrails
 - [Upstream v0.1.42 Fixes Integration Plan](artifacts/upstream-v0-1-42-fixes-plan.md) — Plan and execution details for integrating upstream Strata v0.1.42 fixes into the custom local installation.
 - [Upstream v0.1.45 Enhancements: Evaluation and Dual-Tier Benchmark Plan](artifacts/upstream-v0-1-45-evaluation-and-benchmark-plan.md) — Evaluation, technical spec, validation protocol, and exhaustive dual-tier benchmarks for upstream v0.1.45 on RX 7600 XT
+- [Workstation RAM Upgrade Plan: Qwen3.8 Context & Quantization Scaling vs. DeepSeek V4.1](artifacts/ram-upgrade-plan-qwen-context-vs-deepseek.md) — Hardware analysis and execution plan for upgrading workstation RAM to scale Qwen3.8 Coder context window and quantization tier.
 
 ## Logs
 

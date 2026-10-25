@@ -5,7 +5,7 @@ description: "Record of every change the agent made to this wiki"
 status: active
 tags: [meta, changelog]
 created: 2026-10-05
-updated: 2026-10-24
+updated: 2026-10-25
 last_verified: 2026-10-05
 ---
 
@@ -15,6 +15,18 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-25:** Update. private/.env (DEEPSEEK_API_KEY). (Agent: Antigravity)
+- **2026-10-25:** Ingestion. artifacts/ram-upgrade-plan-qwen-context-vs-deepseek.md. (Agent: Antigravity)
+- **2026-10-25:** Update. entities/strata.md. (Agent: Antigravity)
+- **2026-10-25:** Ingestion. decisions/strata-v0-2-5-sync-and-ergonomics.md. (Agent: Antigravity)
+- **2026-10-25:** Benchmark & Ingestion. Ran `tools/strata_bench.py` post-v0.2.5 sync (479s, 0 failures). Chat decode 25.2 tok/s (+1.6%, peak 31.1), 4K prompt 302.2 tok/s, 16K prompt 323.5 tok/s, agent decode 27.3 tok/s (peak 34.6), cache hit 68.46%. Saved report to `wiki/artifacts/strata-benchmark-2026-10-25-v025-sync.md`. (Agent: Antigravity)
+
+- **2026-10-25:** Ingestion. artifacts/strata-benchmark-2026-10-25-v025-sync.md. (Agent: Antigravity)
+- **2026-10-25:** Update. decisions/rx-7600-xt-cachyos-deployment.md. (Agent: Antigravity)
+- **2026-10-25:** Ingestion. artifacts/strata-v0-2-5-sync-and-ergonomics-walkthrough.md. (Agent: Antigravity)
+- **2026-10-25:** Strata v0.2.5 Sync & Ergonomics: completed local safety backup to `~/.config/dl-ai/backup-20261025/` and git tag `backup/before-v025-sync-20261025`. Implemented CommonMark soft breaks (`#3818`), screenshot clipboard pasting (`Ctrl+V`, `#3748`), window drag & drop / PDF support (`#3838`), user bubble pre-wrap & copy feedback (`#3720`, `#3731`), decimal input helpers (`#3736`), dynamic model load timeout scaling up to 1800s (`#3949`, `#3459`), clean model shard deletion with `made_by_strata` (`#3716`), and ROCm `STRATA_PREFILL_WARM=1`. Verified with unit tests and live server health check. (Agent: Antigravity)
+
+- **2026-10-25:** Ingestion. artifacts/strata-v0-2-5-sync-and-ergonomics-walkthrough.md. (Agent: Antigravity)
 - **2026-10-24:** Ingestion. artifacts/ha-sensor-units-and-outlet-power-walkthrough.md. (Agent: Antigravity)
 - **2026-10-24:** Home Assistant Sensor Units & Smart Outlet Live Power: configured `customize.yaml` for `sensor.*_total_energy` (`unit_of_measurement: kWh`, `device_class: energy`); enabled 7 disabled power sensors (`kW`), 7 current sensors (`A`), and 7 voltage sensors (`V`) via `tools/ha_enable_power_sensors.py`; enhanced `tools/homeassistant_mcp.py` to index device siblings and enrich power outlets (`switch.*_socket`) with real-time `power` (`kW`) and `total_energy` (`kWh`); verified with 6 unit tests in `tools/test_homeassistant_mcp.py` and live HA state inspection. (Agent: Antigravity)
 

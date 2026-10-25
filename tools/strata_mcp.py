@@ -228,6 +228,14 @@ def end_group_leftovers(pgid) -> None:
             time.sleep(0.25)
 
 
+def _rmtree_ignore_missing(func, path, exc_info):
+    """shutil.rmtree error hook: a file that vanished while its folder was being removed is already gone."""
+    exc = exc_info[1] if isinstance(exc_info, tuple) else exc_info
+    if isinstance(exc, FileNotFoundError):
+        return
+    raise exc
+
+
 def wait_gone(pid, ident, seconds: float) -> bool:
     end = time.time() + seconds
     while time.time() < end:
@@ -548,6 +556,90 @@ class Strata:
             return ends[0]
         raise ToolError(f"no installed model {model!r}; installed: " +
                         ", ".join(c.stem[len("strata-"):] for c in have))
+
+    # ---- what a model owns on disk (Delete, and the per-model disk usage in Storage)
+    FILE_FLAGS = ("--native", "--ple-gguf", "--embd-gguf", "--native-dense-gguf")
+    DIR_FLAGS = ("--pack", "--mtp")
+
+    def model_paths(self, cfg: dict) -> tuple[list[Path], list[Path]]:
+        """(the GGUF files, the folders) a run config names: --native/--ple-gguf/... and --pack/--mtp, plus any other .gguf."""
+        a = [x for x in (cfg.get("args") or []) if isinstance(x, str)]
+        files = [Path(a[i + 1]) for i, x in enumerate(a[:-1]) if x in self.FILE_FLAGS and i + 1 < len(a)]
+        files += [Path(x) for x in a if x.lower().endswith(".gguf")]
+        dirs = [Path(a[i + 1]) for i, x in enumerate(a[:-1]) if x in self.DIR_FLAGS and i + 1 < len(a)]
+        seen, once = set(), []
+        for f in files:                                 # one file named by several flags is still one file
+            if norm(f) not in seen:
+                seen.add(norm(f))
+                once.append(f)
+        seen_d, once_d = set(), []
+        for d in dirs:
+            if norm(d) not in seen_d:
+                seen_d.add(norm(d))
+                once_d.append(d)
+        return once, once_d
+
+    @staticmethod
+    def path_bytes(p: Path) -> int:
+        if not p.exists():
+            return 0
+        if p.is_file():
+            return p.stat().st_size
+        try:
+            return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+        except OSError:
+            return 0
+
+    @staticmethod
+    def made_by_strata(p: Path, is_dir: bool) -> bool:
+        """A download or pack Strata wrote itself, even in a models folder the person picked or the app chose: a finished GGUF has its
+        .done mark beside it, a prepared pack has its conversion record. The person's own GGUF files have neither (#3716)."""
+        try:
+            if is_dir:
+                return any((p / n).is_file() for n in ("conversions.json", "experts.bin.src.json"))
+            return p.with_name(p.name + ".done").is_file()
+        except OSError:
+            return False
+
+    def removal_plan(self, config: Path) -> dict:
+        """What deleting this model removes and what it keeps. A file or folder another installed model's config still names
+        (the shared MTP draft, a shared PLE shard) is kept; so is anything outside Strata's own folders."""
+        cfg = self.read_config(config)
+        files, dirs = self.model_paths(cfg)
+        used_files, used_dirs = set(), set()
+        for other in self.configs():
+            if norm(other) == norm(config):
+                continue
+            f, d = self.model_paths(self.read_config(other))
+            used_files |= {norm(x) for x in f}
+            used_dirs |= {norm(x) for x in d}
+        remove, keep = [], []
+
+        def shared(p: Path, is_dir: bool) -> bool:
+            n = norm(p)
+            if n in used_files or n in used_dirs or (any(is_inside(u, n) for u in used_files | used_dirs) and is_dir):
+                return True
+            return any(is_inside(n, u) for u in used_dirs)
+
+        for p, is_dir in [(x, False) for x in files] + [(x, True) for x in dirs]:
+            if not p.exists():
+                continue
+            if not self.allowed(p) and not self.made_by_strata(p, is_dir):
+                keep.append({"path": str(p), "reason": "outside Strata's folders"})
+            elif shared(p, is_dir):
+                keep.append({"path": str(p), "reason": "another installed model still uses it"})
+            else:
+                b = self.path_bytes(p) if is_dir else p.stat().st_size
+                remove.append({"path": str(p), "bytes": b, "gb": round(b / 1e9, 2), "kind": "dir" if is_dir else "file"})
+        if config.exists():
+            remove.append({"path": str(config), "bytes": config.stat().st_size, "gb": 0.0, "kind": "config"})
+        tag = config.stem[len("strata-"):]
+        script = self.root / f"run-{tag}.{'bat' if WIN else 'sh'}"
+        if script.exists():
+            remove.append({"path": str(script), "bytes": script.stat().st_size, "gb": 0.0, "kind": "script"})
+        total_b = sum(x["bytes"] for x in remove)
+        return {"model": tag, "config": config.name, "remove": remove, "keep": keep,
+                "bytes": total_b, "gb": round(total_b / 1e9, 2)}
 
     def engine_info(self) -> dict:
         for d in ("engine",):
@@ -970,6 +1062,13 @@ def tool_defs(models: dict, families: dict, contexts: list) -> list:
                         "Read-only.",
          "inputSchema": {"type": "object", "additionalProperties": False, "properties": {}},
          "annotations": ro},
+        {"name": "strata_remove", "title": "Delete an installed model",
+         "description": "Delete an installed model's own files (its model GGUFs, its pack folder, its run config) and nothing "
+                        "another installed model still uses (a shared MTP draft or PLE file). Without confirm=true it only "
+                        "returns the plan (what would be removed and how big, what is kept). Stop the model first.",
+         "inputSchema": {"type": "object", "additionalProperties": False, "required": ["model"],
+                         "properties": {"model": installed_model, "confirm": {"type": "boolean"}}},
+         "annotations": {"readOnlyHint": False, "destructiveHint": True}},
         {"name": "strata_install", "title": "Install Strata",
          "description": "Install a Strata model on this PC by running Strata's setup non-interactively in the "
                         "background (Python packages, the engine, a 58-111 GB model download, preparation, start "
@@ -1200,6 +1299,38 @@ class Tools:
             if p.exists() and not p.is_dir():
                 raise ToolError(f"data_dir {raw!r} is a file")
         return p
+
+    # ---- strata_remove
+    def strata_remove(self, model=None, confirm=False) -> dict:
+        s = self.s
+        config = s.find_config(model)
+        plan = s.removal_plan(config)
+        if not confirm:
+            return {"summary": f"Plan: delete {plan['model']} ({plan['gb']:.1f} GB). Nothing was done yet.", "plan": plan}
+        with s.lock:
+            job = s.install_job()
+            if job and job["running"]:
+                raise ToolError("an install is running: wait for it to finish or stop it first")
+            failed = []
+            for item in sorted(plan["remove"], key=lambda x: (x["path"] == str(config), x["path"])):
+                p = Path(item["path"])
+                try:
+                    if p.is_dir() and not p.is_symlink():
+                        shutil.rmtree(p, onerror=_rmtree_ignore_missing)
+                    else:
+                        p.unlink(missing_ok=True)
+                except FileNotFoundError:
+                    pass
+                except OSError as e:
+                    if p.exists() or p.is_symlink():
+                        failed.append(f"{p.name}: {e}")
+            for p in {x.parent for x in [Path(i["path"]) for i in plan["remove"]] if x.suffix == ".gguf"}:
+                try:
+                    p.rmdir()
+                except OSError:
+                    pass
+        return {"summary": f"Deleted {plan['model']} ({plan['gb']:.1f} GB)" + (f"; could not remove {len(failed)} item(s)" if failed else ""),
+                "plan": plan, "failed": failed}
 
     def strata_install(self, family=None, model=None, context=None, vision=None, kv=None, gpu=None, gpus=None,
                        backend=None, low_ram=None, port=None, data_dir=None, confirm=False, cancel=False) -> dict:

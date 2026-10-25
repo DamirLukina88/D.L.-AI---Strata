@@ -320,7 +320,36 @@ def engine_frozen(base: tuple[float, int], now: tuple[float, int]) -> bool:
 
 VISION_READY_S = _timeout_env("STRATA_VISION_READY_S", 300.0)
 VISION_ENCODE_S = _timeout_env("STRATA_VISION_ENCODE_S", 300.0)
+MAX_START_WAIT = 1800.0     # seconds a start may wait for the model (#3949 #3459)
 ENGINE_READY_S = _timeout_env("STRATA_ENGINE_READY_S", 900.0)
+
+
+def calculate_start_wait(cfg: dict | None = None, model_path: str | None = None) -> float:
+    """How long the start waits for the model to be ready (#3949 #3459): 10 minutes baseline,
+    more for a big model (about 8 more seconds per GB above 40 GB, at most 30 minutes / 1800s).
+    A config's engine_ready_s or STRATA_ENGINE_READY_S environment variable overrides it."""
+    if cfg and cfg.get("engine_ready_s"):
+        try:
+            return min(MAX_START_WAIT, max(300.0, float(cfg["engine_ready_s"])))
+        except (ValueError, TypeError):
+            pass
+    env_s = _timeout_env("STRATA_ENGINE_READY_S", 0.0)
+    if env_s and env_s > 0:
+        return env_s
+    # Calculate disk size of model if possible
+    model_gb = 0.0
+    if model_path:
+        try:
+            p = Path(model_path)
+            if p.is_file():
+                model_gb = p.stat().st_size / 1e9
+            elif p.is_dir():
+                model_gb = sum(f.stat().st_size for f in p.glob("*") if f.is_file()) / 1e9
+        except (OSError, ValueError):
+            model_gb = 0.0
+    if model_gb > 40.0:
+        return min(MAX_START_WAIT, 600.0 + (model_gb - 40.0) * 8.0)
+    return float(ENGINE_READY_S or 900.0)
 
 
 # ------------------------------------------------------------------------------------------------ engines
@@ -836,7 +865,9 @@ class StrataEngine:
             tl.last = value
 
     def __init__(self, exe: str, args: list[str], cwd: str | None = None, log: str | None = None,
-                 env: dict | None = None, lazy: bool = False, cpus: list[int] | None = None, _attempt: int = 0):
+                 env: dict | None = None, lazy: bool = False, cpus: list[int] | None = None, _attempt: int = 0,
+                 cfg: dict | None = None):
+        self.cfg = cfg
         self.spawn = (exe, list(args), cwd, log, env, False, cpus)   # to start it again after it died (issue #27)
         self.session_save_reclaim = '--session-save-reclaim' in args
         paths = {k: v for k, v in zip(args, args[1:]) if k in ("--native", "--pack")}
@@ -891,7 +922,8 @@ class StrataEngine:
         # stays for _pump (one reader at a time)
         ready_q: queue.Queue = queue.Queue()
         threading.Thread(target=self._ready_pump, args=(self.proc, ready_q), daemon=True).start()
-        ready_deadline = None if ENGINE_READY_S is None else time.monotonic() + ENGINE_READY_S
+        start_wait_s = calculate_start_wait(getattr(self, "cfg", None), self.model_path)
+        ready_deadline = None if start_wait_s is None or start_wait_s <= 0 else time.monotonic() + start_wait_s
         timed_out = False
         while True:
             left = None if ready_deadline is None else ready_deadline - time.monotonic()
@@ -943,9 +975,9 @@ class StrataEngine:
                           f"ready yet: starting it again in {wait_s:.0f} s (try {_attempt + 2} of {START_RETRIES + 1})",
                           flush=True)
                 time.sleep(wait_s)
-                StrataEngine.__init__(self, exe, args, cwd, log, env, lazy, cpus, _attempt + 1)
+                StrataEngine.__init__(self, exe, args, cwd, log, env, lazy, cpus, _attempt + 1, cfg=getattr(self, "cfg", None))
                 return
-            why = (f"the engine did not report READY within {ENGINE_READY_S:.0f} s" if timed_out else
+            why = (f"the engine did not report READY within {start_wait_s:.0f} s" if timed_out else
                    "the engine exited before it was ready")
             # EngineDied, not bare RuntimeError: a request waiting on this load must end with a 503
             # through the request path's handler - a RuntimeError there left the turn with no answer (#1527)
@@ -3816,7 +3848,7 @@ class Service:
                 # Give Linux kernel and ROCm driver a moment to unpin/reclaim memory
                 time.sleep(2.0)
 
-            engine = StrataEngine(exe, engine_args(cfg), cwd=cfg.get("cwd"), log=cfg.get("log"), env=env, lazy=lazy)
+            engine = StrataEngine(exe, engine_args(cfg), cwd=cfg.get("cwd"), log=cfg.get("log"), env=env, lazy=lazy, cfg=cfg)
             self.engine = engine
             self.tok = tok
             self.model = target_id
@@ -7779,7 +7811,7 @@ def main() -> int:
             engine = start_replicas(cfg, groups, exe, effort_end or [], lazy)
         else:
             engine = StrataEngine(exe, engine_args(cfg) + (effort_end or []), cwd=cfg.get("cwd"), log=cfg.get("log"),
-                                  env=env, lazy=lazy)
+                                  env=env, lazy=lazy, cfg=cfg)
         engine.silence_s = silence                      # an attribute of its own: restart() keeps it
         warn_tight_ram(engine.info.get("arena_mib"))
         note = desktop_vram_note(cfg.get("backend"), engine.info.get("vram_free_mib"), engine.spawn[1],

@@ -1130,6 +1130,13 @@ main { flex: 1; min-height: 0; min-width: 0; max-width: 100vw; overflow-x: hidde
   transform: scale(0.98);
 }
 
+/* User message formatting & text breaks (#3720) */
+.st-bubble__text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+
 
 
 

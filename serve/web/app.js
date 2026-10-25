@@ -82,24 +82,57 @@ function toast(kind, title, text = "", ms = 3500, action = null) {
 }
 
 async function copyText(text, btn) {
+  let done = false;
   try {
-    await navigator.clipboard.writeText(text);
-  } catch (e) {                                   // http on another host: no async clipboard
-    const ta = document.createElement("textarea");
-    ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      done = true;
+    }
+  } catch (e) {
+    // fall through to legacy fallback
   }
-  if (btn) {
-    const use = btn.querySelector("use");
-    if (use) {
-      use.setAttribute("href", `${SPRITE}#i-check`);
-      setTimeout(() => use.setAttribute("href", `${SPRITE}#i-copy`), 1500);
-    } else {
-      const origText = btn.textContent;
-      btn.textContent = "Copied!";
-      setTimeout(() => { btn.textContent = origText; }, 1500);
+  if (!done) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;pointer-events:none";
+      document.body.appendChild(ta);
+      ta.select();
+      done = document.execCommand("copy");
+      ta.remove();
+    } catch (_) {
+      done = false;
     }
   }
-  toast("success", "Copied to clipboard", "", 1800);
+  if (done) {
+    if (btn) {
+      const use = btn.querySelector("use");
+      if (use) {
+        use.setAttribute("href", `${SPRITE}#i-check`);
+        setTimeout(() => use.setAttribute("href", `${SPRITE}#i-copy`), 1500);
+      } else {
+        const origText = btn.textContent;
+        btn.textContent = "Copied!";
+        setTimeout(() => { btn.textContent = origText; }, 1500);
+      }
+    }
+    toast("success", "Copied", "", 1800);
+  } else {
+    toast("warn", "Couldn’t copy", "Select the text and copy it manually.", 4000);
+  }
+  return done;
+}
+
+/** Robust decimal parser supporting commas, dots, and partial editing (#3736). */
+function parseDecimal(text) {
+  const t = String(text ?? "").trim().replace(",", ".");
+  if (!/^-?(\d+\.?\d*|\.\d+)$/.test(t) || t.endsWith(".")) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+function partialDecimal(text) {
+  return /^-?\d*[.,]?\d*$/.test(String(text ?? "").trim());
 }
 
 // ------------------------------------------------------------------ Text-to-Speech (TTS) Engine
@@ -2073,6 +2106,41 @@ if ($("code-mobile-input")) {
       }
     }
   });
+  // Screenshot and file pasting directly into chat/code input (#3748, #3838)
+  $("code-mobile-input").addEventListener("paste", async (e) => {
+    const dt = e.clipboardData;
+    if (!dt) return;
+    const files = [];
+    for (const f of Array.from(dt.files || [])) {
+      if (f.type.startsWith("image/") || /\.pdf$/i.test(f.name)) files.push(f);
+    }
+    // Screenshots on clipboard (Win+Shift+S / Spectacle) often arrive in items rather than files
+    if (!files.some(f => f.type.startsWith("image/"))) {
+      for (const item of Array.from(dt.items || [])) {
+        if (item.kind === "file" && item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) {
+            const ext = file.type.split("/")[1]?.replace("jpeg", "jpg").replace(/[+].*/, "") || "png";
+            const now = new Date();
+            const pad = (n) => String(n).padStart(2, "0");
+            const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+            const name = `pasted-image-${stamp}${files.length ? `-${files.length + 1}` : ""}.${ext}`;
+            files.push(new File([file], name, { type: file.type }));
+          }
+        }
+      }
+    }
+    if (files.length) {
+      e.preventDefault();
+      await uploadFilesToWorkspace(files);
+      const input = $("code-mobile-input");
+      const refs = files.map(f => `@${f.name}`).join(" ");
+      input.value = input.value ? `${input.value.trimEnd()} ${refs} ` : `${refs} `;
+      input.focus();
+      input.dispatchEvent(new Event("input"));
+      toast("success", "File attached", files.map(f => f.name).join(", "), 3000);
+    }
+  });
 }
 document.querySelectorAll(".code-mobile-chip").forEach((chip) => {
   chip.onclick = () => {
@@ -2646,7 +2714,19 @@ function codeBlock(lang, code) {
 function blocks(text) {
   const out = [], lines = text.split("\n");
   let para = [], list = null;
-  const flushPara = () => { if (para.length) out.push(`<p>${para.map(inline).join("<br>")}</p>`); para = []; };
+  const flushPara = () => {
+    if (!para.length) return;
+    // CommonMark / GFM soft breaks: single newlines become spaces; two spaces or backslash at line end produce hard breaks (#3818)
+    const parts = [];
+    for (let p = 0; p < para.length; p++) {
+      const line = para[p];
+      const hard = /( {2,}|\\)$/.test(line);
+      parts.push(inline(line.replace(/( {2,}|\\)$/, "")));
+      if (p < para.length - 1) parts.push(hard ? "<br>" : " ");
+    }
+    out.push(`<p>${parts.join("")}</p>`);
+    para = [];
+  };
   const flushList = () => { if (list) out.push(`<${list.tag}>${list.items.map((i) => `<li>${inline(i)}</li>`).join("")}</${list.tag}>`); list = null; };
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
@@ -3296,6 +3376,32 @@ if (wsDialog) {
     if (!isInDialog) openWorkspace(false);
   });
 }
+
+// Window-level drop handler: prevents accidental browser file navigation and ingests files (#3838)
+window.addEventListener("dragover", (e) => {
+  if (Array.from(e.dataTransfer?.types || []).includes("Files")) {
+    e.preventDefault();
+  }
+});
+window.addEventListener("drop", async (e) => {
+  if (Array.from(e.dataTransfer?.types || []).includes("Files")) {
+    if (wsDropzone && (e.target === wsDropzone || wsDropzone.contains(e.target))) return;
+    if (wsDialog && (e.target === wsDialog || wsDialog.contains(e.target))) return;
+    e.preventDefault();
+    const files = await extractFilesFromDataTransfer(e.dataTransfer);
+    if (files.length) {
+      await uploadFilesToWorkspace(files);
+      const input = $("code-mobile-input");
+      if (input) {
+        const refs = files.map(f => `@${f.name}`).join(" ");
+        input.value = input.value ? `${input.value.trimEnd()} ${refs} ` : `${refs} `;
+        input.focus();
+        input.dispatchEvent(new Event("input"));
+      }
+      toast("success", "Files added to workspace", files.map(f => f.name).join(", "), 3000);
+    }
+  }
+});
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {

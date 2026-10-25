@@ -5,8 +5,8 @@ description: "High-performance local AI workstation combining 125B MoE inference
 status: active
 tags: [strata, inference-engine, moe, local-ai, workstation, dl-cli, claude-code]
 created: 2026-10-05
-updated: 2026-10-13
-last_verified: 2026-10-11
+updated: 2026-10-25
+last_verified: 2026-10-25
 ---
 
 # Strata (D.L. AI Workstation)
@@ -18,6 +18,7 @@ Originally created as an open-source C++/HIP/CUDA inference engine to run 125-bi
 The environment integrates high-throughput MoE execution (16 GB VRAM + 32 GB RAM) with autonomous CLI coding agents (D.L. CLI, Claude Code CLI, DeepSeek CLI), an authenticated Web Code terminal (`ttyd` integration), automated auditing and diagnostic guardrails, real-time reasoning visualization, and dedicated NVMe project storage (`/mnt/data/DL-AI-workspace`).
 
 - 2026-10-13: Upstream v0.1.43.1 merged. The Code tab is now a client of the shared CLI session daemon (dl-ai-sessiond) instead of ttyd/tmux; the terminal joins the same session with dl_cli.py --attach. Browsers authenticate with the Cloudflare Access login. See [Shared CLI Session Daemon](../decisions/shared-cli-session-daemon.md).
+- 2026-10-25: Upstream v0.2.5 ergonomics and server reliability synced (soft breaks, Ctrl+V screenshot paste, PDF drag & drop, dynamic startup timeout scaling up to 1800s, clean shard deletion, ROCm STRATA_PREFILL_WARM=1). Benchmarked on RX 7600 XT: chat decode 25.2 tok/s (+1.6%, peak 31.1), 4K prompt 302.2 tok/s, 16K prompt 323.5 tok/s, agent decode 27.3 tok/s (peak 34.6), agent cache hit 68.46%, 0 failures. See [Strata v0.2.5 Sync, Web Ergonomics, and Server Reliability](../decisions/strata-v0-2-5-sync-and-ergonomics.md).
 
 ## Key Facts
 
@@ -115,3 +116,4 @@ The environment integrates high-throughput MoE execution (16 GB VRAM + 32 GB RAM
 5. `serve/server.py` — server endpoints and workspace storage APIs.
 6. `serve/web/` — web application and terminal integration.
 7. User, chat, 2026-10-13.
+8. Strata v0.2.5 sync walkthrough and benchmark report, 2026-10-25.
