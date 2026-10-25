@@ -72,6 +72,7 @@ Added `wargaming_and_boardgames_guide` to [`tools/minipaint_mcp.py`](file:///hom
 
 ## Sources
 
+- Comprehensive system audit: [full-workstation-audit-and-verification-2026-10-25.md](full-workstation-audit-and-verification-2026-10-25.md).
 - Upstream Strata v0.2.6 release & commits: `https://github.com/Niko1221/Strata`.
 - IPC-2152 Standard for Determining Current Carrying Capacity in Printed Board Design.
 - Blackmagic Design DaVinci Resolve Reference Manual (Color Management & CST).

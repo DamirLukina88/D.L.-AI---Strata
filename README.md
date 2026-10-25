@@ -26,7 +26,8 @@ after an A/B benchmark ([review](wiki/artifacts/upstream-v0-2-3-review-2026-10-2
 drag-and-drop, dynamic model load timeout scaling, safe shard removal guards, `require_messages(messages)` OpenAI-spec
 validation, 1-token health check speed guards, and stable GPU hardware telemetry IDs
 ([v0.2.5 walkthrough](wiki/artifacts/strata-v0-2-5-sync-and-ergonomics-walkthrough.md),
-[v0.2.6 & tools walkthrough](wiki/artifacts/davinci-cst-ipc2152-wargaming-and-v026-sync-walkthrough.md)).
+[v0.2.6 & tools walkthrough](wiki/artifacts/davinci-cst-ipc2152-wargaming-and-v026-sync-walkthrough.md),
+[system audit](wiki/artifacts/full-workstation-audit-and-verification-2026-10-25.md)).
 
 ## How fast is it?
 
