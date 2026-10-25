@@ -134,23 +134,18 @@ A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) ex
 - Interactive MCP tools explorer in the web GUI via `/mcp`.
 - Loads when it is needed, not by default: when your message mentions the smart home, or when the agent turns it on itself.
 
-### 6. Tools for the Agent
+### 6. Tools & On-Demand Knowledge Suites (28 MCP Servers)
 
-| Tool | What it does |
-| :--- | :--- |
-| `run_command` | runs a shell command (behind the approval gate) |
-| `view_file`, `write_to_file`, `replace_file_content` | read and edit files; writes go through a secret scan and a syntax check |
-| `exa_web_search` | web search with Exa |
-| `resolve_library_id`, `get_library_docs` | library documentation through Context7 |
-| `local_wiki` | the project's knowledge base in `wiki/` |
-| `system_health` | GPU, RAM and engine status |
-| `git_diff_audit` | reviews the current diff |
-| `smart_test_runner` | runs the tests that cover what changed |
-| `switch_workspace` | changes the project folder |
-| `save_chat` | exports the current CLI chat history to structured Markdown |
-| `get_system_health`, `get_engine_status` | autonomous machine telemetry and engine diagnostics |
-| `clear_conversation` | resets conversation state cleanly |
-| `list_entities`, `get_state`, `call_service`, `toggle`, `render_template`, `get_history`, `get_camera_snapshot` | Home Assistant smart home control suite |
+Ray features a zero-overhead, on-demand MCP router (`tools/dl_mcp.py`) that keeps tools dormant to save prompt context until matched by request triggers or explicitly toggled via `/mcp on <name>`:
+
+| Suite / Category | Servers & Tools | What It Covers |
+| :--- | :--- | :--- |
+| **Reasoning Escalation** | `deepseek` (`deepseek_reason`) | Gated DeepSeek cloud reasoning (ultra-high thinking effort) for heavy mathematics and frontier logic. Off by default for privacy; requires user confirmation. |
+| **Smart Home & Automation** | `homeassistant` (Bambu, Xiaomi, plugs, lights, AC), `schedule` | Smart home control, camera snapshots, scheduled jobs, recurring reminders. |
+| **Web & Productivity** | `exa`, `fetch`, `playwright`, `deepl`, `proton`, `gmail`, `drive`, `docs` | Web search, headless browser automation, translation, email, and Google Workspace. |
+| **Development & Standards** | `context7`, `modernweb`, `rfc`, `osv`, `devstandards` | Live library documentation, Modern Web Guidance (CSS/HTML5), IETF RFC protocol specs, OSV package vulnerabilities (CVEs), Game Programming Patterns, MDN. |
+| **Science & Biomedical** | `arxiv`, `openalex`, `europepmc`, `pubchem`, `clinicaltrials`, `opentargets`, `reactome` | arXiv preprints (AI/CS/Math), OpenAlex 250M+ scholarly works graph, Europe PMC open access papers, PubChem chemical formulas, ClinicalTrials.gov studies, Open Targets drug targets, Reactome biological pathways. |
+| **Hardware, 3D & Laws** | `print3d`, `cadmaterials`, `osm`, `laws`, `weather` | Klipper G-code & Bambu/Prusa filament presets, STEP AP242/IGES & AFLOW material properties, OpenStreetMap geocoding, Croatian (Zakon.hr/NN) & EU (EUR-Lex/CURIA) laws, Open-Meteo live weather. |
 
 ### 7. Workspace, JIT Model Loading & Remote Access
 - **Server File Workspace:** upload files by drag and drop, browse folder trees, stream and resume large downloads.

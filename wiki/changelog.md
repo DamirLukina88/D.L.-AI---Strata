@@ -15,6 +15,8 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-25:** Artifact Backup. Backed up knowledge-mcp-and-deepseek-escalation-walkthrough.md. (Agent: Antigravity)
+- **2026-10-25:** Ingestion. artifacts/knowledge-mcp-and-deepseek-escalation-walkthrough.md. (Agent: Antigravity)
 - **2026-10-25:** Update. private/.env (DEEPSEEK_API_KEY). (Agent: Antigravity)
 - **2026-10-25:** Ingestion. artifacts/ram-upgrade-plan-qwen-context-vs-deepseek.md. (Agent: Antigravity)
 - **2026-10-25:** Update. entities/strata.md. (Agent: Antigravity)
