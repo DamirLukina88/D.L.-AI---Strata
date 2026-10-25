@@ -159,6 +159,32 @@ def get_bajs_bikes(query: str = "") -> str:
     except Exception as e:
         return f"Greška pri dohvaćanju stanja BAJS bicikala: {e}"
 
+def get_emergency_services() -> str:
+    return (
+        "## Dežurne i Hitne Službe u Gradu Zagrebu (0-24 h)\n\n"
+        "### 1. Centar za kontrolu otrovanja (CKO):\n"
+        "- **Telefon (0-24h):** **+385 1 2348 342**\n"
+        "- **Lokacija:** Institut za medicinska istraživanja i medicinu rada (IMI) / KBC Zagreb\n"
+        "- **Usluga:** Hitni medicinski savjeti kod trovanja kemikalijama, lijekovima, kućanskim sredstvima, biljkama, gljivama i ugrizima.\n\n"
+        "### 2. Dežurna hitna pedijatrija (Hitni dječji prijem):\n"
+        "- **Klinika za dječje bolesti Zagreb (Klaićeva):** Ulica Vjekoslava Klaića 16 | Tel: **+385 1 4600 111**\n"
+        "- **KBC Zagreb - Rebro (Dječji hitni prijem):** Kišpatićeva 12 | Tel: **+385 1 2388 888**\n"
+        "- **KB Sestre milosrdnice (Vinogradska):** Vinogradska cesta 29 | Tel: **+385 1 3787 111**\n\n"
+        "### 3. Dežurni veterinar u Zagrebu (0-24 h):\n"
+        "- **Klinike Veterinarskog fakulteta Sveučilišta u Zagrebu:** Heinzelova 55\n"
+        "- **Hitni prijem za male životinje:** Tel: **+385 1 2390 111**\n"
+        "- **Usluga:** 24/7 hitna kirurška, internistička i intenzivna skrb za pse, mačke i kućne ljubimce.\n\n"
+        "### 4. Hitna stomatološka služba (Dežurni zubar noću, vikendom i blagdanom):\n"
+        "- **Dom zdravlja Zagreb - Centar:** Runjaninova 4 (radno vrijeme noću: 22:00 - 06:00, nedjeljom i blagdanom 0-24h)\n"
+        "- **Klinička bolnica Dubrava:** Avenija Gojka Šuška 6 (Maksilofacijalna kirurgija i akutne traume lica i čeljusti)\n\n"
+        "### 5. Opći hitni brojevi:\n"
+        "- **Jedinstveni europski broj za hitne službe:** 112\n"
+        "- **Hitna medicinska pomoć:** 194\n"
+        "- **Vatrogasci:** 193\n"
+        "- **Policija:** 192\n"
+        "- **HAK pomoć na cesti:** 1987"
+    )
+
 def get_pharmacies() -> str:
     lines = ["## Dežurne ljekarne u Zagrebu (0-24 h):"]
     for ph in PHARMACIES_24_7:
@@ -272,6 +298,11 @@ def main():
                     "inputSchema": {"type": "object", "properties": {}}
                 },
                 {
+                    "name": "zagreb_emergency",
+                    "description": "Zagreb 24/7 specialized emergency services: Poison Control Center (Centar za kontrolu otrovanja), emergency pediatric clinics (Klaićeva, Rebro), emergency 24/7 vet clinic (Veterinarski fakultet), and night emergency dentist (Runjaninova).",
+                    "inputSchema": {"type": "object", "properties": {}}
+                },
+                {
                     "name": "cistoca_waste_schedule",
                     "description": "Zagreb Čistoća waste collection schedule by city district, ZG bag system, and recycling yard rules.",
                     "inputSchema": {
@@ -297,6 +328,8 @@ def main():
                 ans = get_bajs_bikes(args.get("query", ""))
             elif name == "zagreb_pharmacies":
                 ans = get_pharmacies()
+            elif name == "zagreb_emergency":
+                ans = get_emergency_services()
             elif name == "cistoca_waste_schedule":
                 ans = get_waste_schedule(args.get("district", ""))
             elif name == "zagreb_air_quality":

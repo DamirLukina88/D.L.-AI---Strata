@@ -116,6 +116,123 @@ def get_fuel_and_aviation(airport_icao: str = "LDZA") -> str:
     
     return f"## Zrakoplovni i Cestovni Podaci RH\n\n{metar_text}\n{fuel_text}"
 
+def get_hnb_fx(currency: str = "", amount: float = 1.0) -> str:
+    """Fetch official exchange rates from Croatian National Bank (HNB) and convert amounts."""
+    url = "https://api.hnb.hr/tecajn-eur/v3"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Strata-Croatia-Live/1.0"})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            cur = currency.strip().upper()
+            if cur:
+                for row in data:
+                    if row.get("valuta") == cur:
+                        rate_str = row.get("srednji_tecaj", "1").replace(",", ".")
+                        rate = float(rate_str)
+                        converted = amount * rate
+                        inv = amount / rate if rate else 0
+                        return (
+                            f"## HNB Službeni Tečaj: EUR / {cur}\n"
+                            f"- **Datum primjene:** {row.get('datum_primjene')}\n"
+                            f"- **Srednji tečaj HNB-a:** 1 EUR = **{rate:.4f} {cur}**\n"
+                            f"- **Kupovni tečaj:** {row.get('kupovni_tecaj')} | **Prodajni tečaj:** {row.get('prodajni_tecaj')}\n\n"
+                            f"### Izračun iznosa:\n"
+                            f"- **{amount:.2f} EUR** = **{converted:.2f} {cur}**\n"
+                            f"- **{amount:.2f} {cur}** = **{inv:.2f} EUR**\n\n"
+                            f"*Izvor: Službena tečajna lista Hrvatske narodne banke (api.hnb.hr).*"
+                        )
+                return f"Valuta '{currency}' nije pronađena na HNB listi. Podržane valute: {', '.join(r.get('valuta') for r in data)}."
+            
+            lines = [
+                "## Službena Tečajna Lista Hrvatske Narodne Banke (HNB)",
+                f"**Datum primjene:** {data[0].get('datum_primjene')}\n"
+            ]
+            for r in data:
+                v = r.get("valuta")
+                lines.append(f"- **1 EUR = {r.get('srednji_tecaj')} {v}** (kupovni: {r.get('kupovni_tecaj')}, prodajni: {r.get('prodajni_tecaj')})")
+            lines.append("\n*Savjet: Za konverziju navedite valutu i iznos (npr. `currency='USD', amount=150`).*")
+            return "\n".join(lines)
+    except Exception as e:
+        return f"Greška pri dohvaćanju HNB tečaja: {e}"
+
+def get_holidays_and_sundays(query: str = "") -> str:
+    """Calculate Croatian public holidays and non-working Sunday shopping rules."""
+    import datetime
+    today = datetime.date.today()
+    year = today.year
+    
+    # Calculate Easter for current and next year
+    def calc_easter(y):
+        a = y % 19
+        b = y // 100
+        c = y % 100
+        d = b // 4
+        e = b % 4
+        f = (b + 8) // 25
+        g = (b - f + 1) // 3
+        h = (19 * a + b - d - g + 15) % 30
+        i = c // 4
+        k = c % 4
+        l = (32 + 2 * e + 2 * i - h - k) % 7
+        m = (a + 11 * h + 22 * l) // 451
+        month = (h + l - 7 * m + 114) // 31
+        day = ((h + l - 7 * m + 114) % 31) + 1
+        return datetime.date(y, month, day)
+    
+    easter = calc_easter(year)
+    easter_mon = easter + datetime.timedelta(days=1)
+    corpus = easter + datetime.timedelta(days=60)
+    
+    holidays = [
+        (datetime.date(year, 1, 1), "Nova godina"),
+        (datetime.date(year, 1, 6), "Sveta tri kralja (Bogojavljenje)"),
+        (easter, "Uskrs"),
+        (easter_mon, "Uskrsni ponedjeljak"),
+        (datetime.date(year, 5, 1), "Praznik rada"),
+        (datetime.date(year, 5, 30), "Dan državnosti"),
+        (corpus, "Tijelovo"),
+        (datetime.date(year, 6, 22), "Dan antifašističke borbe"),
+        (datetime.date(year, 8, 5), "Dan pobjede i domovinske zahvalnosti i Dan hrvatskih branitelja"),
+        (datetime.date(year, 8, 15), "Velika Gospa"),
+        (datetime.date(year, 11, 1), "Svi sveti"),
+        (datetime.date(year, 11, 18), "Dan sjećanja na žrtve Domovinskog rata i Dan sjećanja na žrtvu Vukovara i Škabrnje"),
+        (datetime.date(year, 12, 25), "Božić"),
+        (datetime.date(year, 12, 26), "Sveti Stjepan")
+    ]
+    holidays.sort(key=lambda x: x[0])
+    
+    # Next upcoming Sunday
+    days_ahead = 6 - today.weekday()
+    if days_ahead <= 0:
+        days_ahead += 7
+    next_sunday = today + datetime.timedelta(days=days_ahead)
+    
+    # Upcoming holidays
+    upcoming_holidays = [h for h in holidays if h[0] >= today]
+    
+    lines = [
+        "## Neradni Dani, Državni Praznici i Radne Nedjelje u RH\n",
+        f"**Danas je:** {today.strftime('%d.%m.%Y.')} ({['Ponedjeljak', 'Utorak', 'Srijeda', 'Četvrtak', 'Petak', 'Subota', 'Nedjelja'][today.weekday()]})",
+        f"**Sljedeća nedjelja:** {next_sunday.strftime('%d.%m.%Y.')}\n",
+        "### 1. Pravila za Rad Nedjeljom (Zakon o trgovini):",
+        "- **Pravilo 16 radnih nedjelja:** Trgovci i trgovački centri u Republici Hrvatskoj smiju samostalno odabrati samo **16 radnih nedjelja godišnje** (od ukupno 52).",
+        "- Sve ostale nedjelje i svi državni blagdani su zakonski **neradni dani** za trgovine, pekare i trgovačke centre.",
+        "- **Iznimke koje rade svake nedjelje:** Benzinske postaje, kolodvori, zračne luke, bolnički kiosci i dežurne ljekarne.\n",
+        "### 2. Trgovački centri u Zagrebu (Raspored nedjelja):",
+        "- **Arena Centar:** Radne nedjelje koncentrirane u jesen i predbožićno razdoblje (listopad, studeni, prosinac).",
+        "- **City Center one (West & East):** Rade po unaprijed objavljenom rotirajućem rasporedu.",
+        "- **Avenue Mall & Z Centar:** Radne nedjelje raspoređene prvenstveno krajem godine.\n",
+        "### 3. Predstojeći Državni Praznici i Neradni Dani u RH:"
+    ]
+    
+    for dt, name in upcoming_holidays[:6]:
+        weekday_name = ['Pon', 'Uto', 'Sri', 'Čet', 'Pet', 'Sub', 'Ned'][dt.weekday()]
+        diff = (dt - today).days
+        diff_str = "danas!" if diff == 0 else f"za {diff} dana"
+        lines.append(f"- **{dt.strftime('%d.%m.%Y.')} ({weekday_name}):** {name} — *{diff_str}*")
+        
+    return "\n".join(lines)
+
 def main():
     while True:
         line = sys.stdin.readline()
@@ -156,6 +273,23 @@ def main():
                         "properties": {"airport_icao": {"type": "string", "description": "ICAO airport code (default 'LDZA' for Zagreb Pleso, or 'LDZL' for Lučko)."}},
                         "required": []
                     }
+                },
+                {
+                    "name": "hnb_exchange_rates",
+                    "description": "Official exchange rates from the Croatian National Bank (Hrvatska narodna banka - HNB) for EUR against USD, BAM, CHF, GBP, RSD and major world currencies, with currency conversion.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "currency": {"type": "string", "description": "Currency code to look up/convert (e.g. 'USD', 'BAM', 'CHF', 'GBP'). Leave empty for full table."},
+                            "amount": {"type": "number", "default": 1.0, "description": "Amount to convert (default 1.0)"}
+                        },
+                        "required": []
+                    }
+                },
+                {
+                    "name": "croatia_holidays_and_sundays",
+                    "description": "Croatian public holidays (državni praznici) and non-working Sunday shopping rules (Zakon o trgovini 16 working Sundays rule) for Zagreb malls and stores.",
+                    "inputSchema": {"type": "object", "properties": {}}
                 }
             ]
             res = {"jsonrpc": "2.0", "id": mid, "result": {"tools": tools}}
@@ -169,6 +303,10 @@ def main():
                 ans = get_dhmz_weather(args.get("city", "Zagreb"))
             elif name == "croatia_fuel_and_aviation":
                 ans = get_fuel_and_aviation(args.get("airport_icao", "LDZA"))
+            elif name == "hnb_exchange_rates":
+                ans = get_hnb_fx(args.get("currency", ""), float(args.get("amount", 1.0)))
+            elif name == "croatia_holidays_and_sundays":
+                ans = get_holidays_and_sundays(args.get("query", ""))
             else:
                 ans = f"Nepoznat tool: {name}"
             res = {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": ans}]}}

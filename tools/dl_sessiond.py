@@ -635,10 +635,10 @@ Tools and jobs
                   (Klipper & Bambu/Prusa filaments), CAD & materials, Game patterns, Croatian & EU laws,
                   live weather, miniature painting & acrylics (3,340+ paint conversions, airbrushing),
                   electronics (LCSC/JLCPCB parts, SMD resistor calc), networking & LAN (SFP optics, cabling),
-                  photography & videography (exposure calc, log profiles, storyboarding),
+                  photography, videography & audio (exposure, log profiles, storyboarding, YouTube/Broadcast LUFS, mics),
                   drones & regulations (DJI specs, CCAA & EASA Croatian rules, AMC Portal),
-                  Zagreb civic & transit (ZET & zet.skoljka.org, BAJS bike rentals across 200 stations, 24/7 pharmacies, waste schedules, air quality),
-                  Croatia live data (HAK road conditions, DHMZ observations, fuel prices, METAR)
+                  Zagreb civic & transit (ZET, BAJS live bikes, 24/7 pharmacies, Poison Control/vet ER, waste, air quality),
+                  Croatia live data (HAK roads/borders, DHMZ weather, HNB currency rates, holidays & Sunday shopping, fuel, METAR)
                   (list, turn on/off; they also start when needed)
 /schedule ...     Scheduled jobs: /schedule [--email] <when> <task>; list; off|on|run|rm N; stop (the running job)
                   when: 2026-10-16 09:00, tomorrow 07:00, fri 09:00, in 2h, daily 08:00, mon-fri 07:30, every 2h

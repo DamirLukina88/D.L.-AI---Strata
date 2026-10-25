@@ -46,6 +46,70 @@ SHOT_TYPES = {
     "dutch": {"name": "Dutch Angle / Canted Frame", "purpose": "Tilted camera axis (15°-45°) conveying disorientation, psychological tension, unease, or danger."}
 }
 
+AUDIO_STANDARDS = {
+    "youtube": {
+        "platform": "YouTube",
+        "target_lufs": "-14 LUFS (±1 LUFS)",
+        "true_peak": "-1.0 dBFS (prevents inter-sample distortion after lossy Opus/AAC compression)",
+        "notes": "YouTube automatically attenuates audio louder than -14 LUFS, but does NOT boost quieter audio."
+    },
+    "broadcast": {
+        "platform": "European Broadcast / TV (EBU R128 / HRT)",
+        "target_lufs": "-23 LUFS (±0.5 LUFS)",
+        "true_peak": "-1.0 dBFS",
+        "notes": "Standard for European television broadcast and film festival screeners."
+    },
+    "spotify": {
+        "platform": "Spotify / Streaming Music",
+        "target_lufs": "-14 LUFS",
+        "true_peak": "-1.0 dBFS (-2.0 dBFS for loud masters)",
+        "notes": "Standard music streaming normalization."
+    },
+    "podcasts": {
+        "platform": "Podcasts / Dialogue / Spoken Word (Apple / Spotify)",
+        "target_lufs": "-16 LUFS (stereo) / -19 LUFS (mono)",
+        "true_peak": "-1.0 dBFS",
+        "notes": "Optimal conversational dynamic range for headphones and car audio."
+    }
+}
+
+MIC_PATTERNS = {
+    "shotgun": {
+        "pattern": "Supercardioid / Lobar Interference Tube (e.g. Sennheiser MKH416, Deity S-Mic 2, Rode NTG)",
+        "best_for": "Boom mic boomed from 45° overhead pointing at actor's chest. High side rejection.",
+        "gotcha": "Avoid in small untreated rooms with bare concrete/drywall; acoustic reflections cause severe comb filtering in the phase tube."
+    },
+    "lavalier": {
+        "pattern": "Omnidirectional condenser (e.g. Rode Wireless PRO, DJI Mic 2, Sanken COS-11D)",
+        "best_for": "Clip-on bodypack placed 15-20 cm (6-8 in) below mouth at mid-sternum. Natural head-turn consistency.",
+        "gotcha": "Requires moleskin / vampire clip against clothing rustle, and high-density fur 'deadcat' outdoors against wind buffet."
+    },
+    "cardioid": {
+        "pattern": "Cardioid (e.g. Shure SM7B, Rode Procaster)",
+        "best_for": "Studio voiceover, untreated podcast booths, desk recording. Complete rear null at 180°.",
+        "gotcha": "Pronounced proximity effect; maintain consistent 5-10 cm mouth distance."
+    }
+}
+
+def audio_guide(topic: str = "") -> str:
+    t = topic.lower().strip()
+    lines = ["## Audio Engineering & Loudness Standards for Video"]
+    
+    # Check loudness
+    lines.append("\n### 1. Platform Loudness Target Standards (LUFS):")
+    for k, v in AUDIO_STANDARDS.items():
+        lines.append(f"- **{v['platform']}:** Target: **{v['target_lufs']}** | True Peak: **{v['true_peak']}**\n  *{v['notes']}*")
+    
+    lines.append("\n### 2. Microphone Selection & Polar Patterns:")
+    for k, v in MIC_PATTERNS.items():
+        lines.append(f"- **{k.title()} ({v['pattern']}):**\n  • Best for: {v['best_for']}\n  • Warning: {v['gotcha']}")
+        
+    lines.append("\n### 3. Bit Depth & Sample Rates for Video:")
+    lines.append("- **Standard Delivery:** **48 kHz / 24-bit PCM** (Cinema and broadcast universal standard; 44.1 kHz is for legacy CD music).")
+    lines.append("- **32-Bit Float Recording:** Dual-ADC architecture providing ~1528 dB dynamic range. Physically impossible to clip digital preamp on actor screams or sudden explosions; normalizes instantly in post without distortion.")
+    
+    return "\n".join(lines)
+
 def calculate_exposure(shutter_speed: str, aperture: float, iso: int, target_fps: int = 24) -> str:
     try:
         # Standard 180-degree shutter rule for video
@@ -139,6 +203,17 @@ def main():
                         },
                         "required": ["shot_type"]
                     }
+                },
+                {
+                    "name": "audio_engineering_guide",
+                    "description": "Audio engineering for video: platform loudness standards (YouTube -14 LUFS, Broadcast -23 LUFS, Podcasts -16 LUFS, True Peak), microphone polar patterns (shotgun, lavalier, cardioid), and 32-bit float audio.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "topic": {"type": "string", "description": "Specific audio topic: 'lufs', 'youtube', 'broadcast', 'microphones', '32bit float' (omit for full guide)"}
+                        },
+                        "required": []
+                    }
                 }
             ]
             res = {"jsonrpc": "2.0", "id": mid, "result": {"tools": tools}}
@@ -152,6 +227,8 @@ def main():
                 text = lookup_log(args.get("profile", ""))
             elif name == "storyboard_shot_guide":
                 text = lookup_shot(args.get("shot_type", ""))
+            elif name == "audio_engineering_guide":
+                text = audio_guide(args.get("topic", ""))
             else:
                 text = f"Unknown tool: {name}"
             res = {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": text}]}}
