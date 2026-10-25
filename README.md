@@ -145,7 +145,7 @@ Ray features a zero-overhead, on-demand MCP router (`tools/dl_mcp.py`) that keep
 | **Web & Productivity** | `exa`, `fetch`, `playwright`, `deepl`, `proton`, `gmail`, `drive`, `docs` | Web search, headless browser automation, translation, email, and Google Workspace. |
 | **Development & Standards** | `context7`, `modernweb`, `rfc`, `osv`, `devstandards` | Live library documentation, Modern Web Guidance (CSS/HTML5), IETF RFC protocol specs, OSV package vulnerabilities (CVEs), Game Programming Patterns, MDN. |
 | **Science & Biomedical** | `arxiv`, `openalex`, `europepmc`, `pubchem`, `clinicaltrials`, `opentargets`, `reactome` | arXiv preprints (AI/CS/Math), OpenAlex 250M+ scholarly works graph, Europe PMC open access papers, PubChem chemical formulas, ClinicalTrials.gov studies, Open Targets drug targets, Reactome biological pathways. |
-| **Hardware, 3D & Laws** | `print3d`, `cadmaterials`, `osm`, `laws`, `weather` | Klipper G-code & Bambu/Prusa filament presets, STEP AP242/IGES & AFLOW material properties, OpenStreetMap geocoding, Croatian (Zakon.hr/NN) & EU (EUR-Lex/CURIA) laws, Open-Meteo live weather. |
+| **Hardware, 3D & Laws** | `print3d`, `cadmaterials`, `osm`, `laws`, `weather`, `minipaint` | Klipper G-code & Bambu/Prusa filament presets, STEP AP242/IGES & AFLOW material properties, OpenStreetMap geocoding, Croatian (Zakon.hr/NN) & EU (EUR-Lex/CURIA) laws, Open-Meteo live weather, miniature painting & acrylics (3,340+ paint conversions across Citadel, Vallejo, AK, Army Painter, airbrush thinning ratios, NMM/slapchop techniques). |
 
 ### 7. Workspace, JIT Model Loading & Remote Access
 - **Server File Workspace:** upload files by drag and drop, browse folder trees, stream and resume large downloads.
