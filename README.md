@@ -134,12 +134,13 @@ A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) ex
 - Interactive MCP tools explorer in the web GUI via `/mcp`.
 - Loads when it is needed, not by default: when your message mentions the smart home, or when the agent turns it on itself.
 
-### 6. Tools & On-Demand Knowledge Suites (36 MCP Servers)
+### 6. Tools & On-Demand Knowledge Suites (37 MCP Servers)
 
 Ray features a zero-overhead, on-demand MCP router (`tools/dl_mcp.py`) that keeps tools dormant to save prompt context until matched by request triggers or explicitly toggled via `/mcp on <name>`:
 
 | Suite / Category | Servers & Tools | What It Covers |
 | :--- | :--- | :--- |
+| **Self-Identity & Project** | `ray_identity` | Ray's (Rei's) self-awareness, origin repository ([DamirLukina88/D.L.-AI---Strata](https://github.com/DamirLukina88/D.L.-AI---Strata)), host hardware architecture (CachyOS, RX 7600 XT, Ryzen 3600), Qwen3.8-Flash-Next Coder MoE specs, live git repository status, commit changelog, and active MCP catalog. |
 | **Reasoning Escalation** | `deepseek` (`deepseek_reason`) | Gated DeepSeek cloud reasoning (ultra-high thinking effort) for heavy mathematics and frontier logic. Off by default for privacy; requires user confirmation. |
 | **Smart Home & Automation** | `homeassistant` (Bambu, Xiaomi, plugs, lights, AC), `schedule` | Smart home control, camera snapshots, scheduled jobs, recurring reminders. |
 | **Web & Productivity** | `exa`, `fetch`, `playwright`, `deepl`, `proton`, `gmail`, `drive`, `docs` | Web search, headless browser automation, translation, email, and Google Workspace. |

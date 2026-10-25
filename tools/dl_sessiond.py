@@ -638,7 +638,8 @@ Tools and jobs
                   photography, videography & audio (exposure, log profiles, storyboarding, YouTube/Broadcast LUFS, mics),
                   drones & regulations (DJI specs, CCAA & EASA Croatian rules, AMC Portal),
                   Zagreb civic & transit (ZET, BAJS live bikes, 24/7 pharmacies, Poison Control/vet ER, waste, air quality),
-                  Croatia live data (HAK roads/borders, DHMZ weather, HNB currency rates, holidays & Sunday shopping, fuel, METAR)
+                  Croatia live data (HAK roads/borders, DHMZ weather, HNB currency rates, holidays & Sunday shopping, fuel, METAR),
+                  Ray self-identity & project telemetry (GitHub repo status, commit changelog, host hardware, MCP catalog)
                   (list, turn on/off; they also start when needed)
 /schedule ...     Scheduled jobs: /schedule [--email] <when> <task>; list; off|on|run|rm N; stop (the running job)
                   when: 2026-10-16 09:00, tomorrow 07:00, fri 09:00, in 2h, daily 08:00, mon-fri 07:30, every 2h
