@@ -320,8 +320,8 @@ DL_TOOLS = [
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["search", "read_page", "new_page", "init", "lint", "digest", "env_list", "log"],
-                        "description": "Action to perform on the local wiki: 'init' to initialize wiki in workspace, 'search' to find pages, 'read_page' to read a page, 'new_page' to create a page, 'lint' to validate, 'digest' for overview, 'env_list' for secret keys, 'log' to append to changelog."
+                        "enum": ["search", "read_page", "new_page", "init", "lint", "digest", "env_list", "log", "backup", "remember"],
+                        "description": "Action to perform on the local wiki: 'init' to initialize wiki in workspace, 'search' to find pages, 'read_page' to read a page, 'new_page' to create a page, 'backup' to save session artifacts, 'remember' to save a preference/decision, 'lint' to validate, 'digest' for overview, 'env_list' for secret keys, 'log' to append to changelog."
                     },
                     "query": {
                         "type": "string",
@@ -1437,13 +1437,184 @@ if dl_mcp is not None:
         pass
 
 
+def perform_wiki_lint(workspace: Path, auto_fix: bool = True) -> str:
+    wscript = find_wiki_script(workspace)
+    if not wscript:
+        return "Error: local-wiki script (wiki.py) not found on system."
+    wroot = resolve_wiki_root(workspace)
+    if not wroot:
+        return f"Local Wiki is inactive in this workspace ({workspace}). Call /wiki init to initialize."
+    cmd = ["python3", str(wscript), "lint"]
+    if auto_fix:
+        cmd.append("--write-index")
+    cmd.extend(["--root", str(wroot)])
+    try:
+        res = subprocess.run(cmd, cwd=workspace, capture_output=True, text=True, timeout=30)
+        out = (res.stdout or "").strip()
+        if res.stderr:
+            out += ("\n" + res.stderr.strip())
+        return out or "0 error(s), 0 warning(s) checked."
+    except Exception as e:
+        return f"Error executing wiki lint: {e}"
+
+
+def perform_wiki_backup(workspace: Path, messages: list[dict] | None = None, note: str = "") -> str:
+    wscript = find_wiki_script(workspace)
+    if not wscript:
+        return "Error: local-wiki script (wiki.py) not found on system."
+    wroot = resolve_wiki_root(workspace)
+    if not wroot:
+        target_wiki = (workspace / "wiki").resolve()
+        try:
+            subprocess.run(["python3", str(wscript), "init", "--root", str(target_wiki)], cwd=workspace, check=True, capture_output=True)
+            wroot = target_wiki
+        except Exception as e:
+            return f"Error initializing wiki for backup: {e}"
+
+    artifacts_dir = wroot / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    now_dt = datetime.datetime.now()
+    now_str = now_dt.strftime("%Y-%m-%d-%H-%M")
+    date_str = now_dt.strftime("%Y-%m-%d")
+
+    recent_work = []
+    if messages:
+        for m in messages:
+            role = m.get("role")
+            content = m.get("content")
+            if isinstance(content, str) and content.strip():
+                if role == "user" and not content.startswith("/"):
+                    recent_work.append(f"- **Request:** {content[:150].strip()}")
+                elif role == "assistant" and len(content) > 30:
+                    summary = content.splitlines()[0][:150].strip()
+                    if summary and not summary.startswith("<"):
+                        recent_work.append(f"- **Outcome:** {summary}")
+
+    plan_path = workspace / "PLAN.md"
+    plan_text = ""
+    if plan_path.is_file():
+        try:
+            p_content = plan_path.read_text(encoding="utf-8", errors="replace")[:4000]
+            plan_text = f"\n\n### Implementation Plan (PLAN.md)\n\n```markdown\n{p_content}\n```"
+        except Exception:
+            pass
+
+    work_summary = "\n".join(recent_work[-10:]) if recent_work else "- General workspace development and verification session."
+    if note:
+        work_summary = f"- **Note:** {note}\n" + work_summary
+
+    artifact_slug = f"session-backup-{now_str}"
+    artifact_file = artifacts_dir / f"{artifact_slug}.md"
+
+    content = f"""---
+title: "Session Backup {now_str}"
+type: artifact
+description: "Snapshot of session goals, modified files, and verified outcomes on {date_str}."
+status: active
+tags: [session, backup, artifacts, dl-cli]
+created: {date_str}
+updated: {date_str}
+last_verified: {date_str}
+---
+
+# Session Backup {now_str}
+
+## Summary
+
+Snapshot of session progress, goals achieved, and verified state recorded by `/wiki-backup`.
+
+---
+
+## 1. Accomplishments & History
+
+{work_summary}{plan_text}
+
+---
+
+## 2. Related Pages
+
+- [About This Wiki](../README.md)
+- [Wiki Index](../index.md)
+
+---
+
+## Sources
+
+1. D.L. CLI session backup, {date_str}.
+"""
+    try:
+        artifact_file.write_text(content, encoding="utf-8")
+        subprocess.run(["python3", str(wscript), "lint", "--write-index", "--root", str(wroot)], cwd=workspace, capture_output=True)
+        subprocess.run(["python3", str(wscript), "log", f"Artifact Backup. Backed up session snapshot {artifact_slug}", "--root", str(wroot)], cwd=workspace, capture_output=True)
+        return f"Saved → [{artifact_file.name}](wiki/artifacts/{artifact_file.name})"
+    except Exception as e:
+        return f"Error creating session backup: {e}"
+
+
+def perform_wiki_remember(workspace: Path, fact: str, messages: list[dict] | None = None) -> str:
+    wscript = find_wiki_script(workspace)
+    if not wscript:
+        return "Error: local-wiki script (wiki.py) not found on system."
+    wroot = resolve_wiki_root(workspace)
+    if not wroot:
+        target_wiki = (workspace / "wiki").resolve()
+        try:
+            subprocess.run(["python3", str(wscript), "init", "--root", str(target_wiki)], cwd=workspace, check=True, capture_output=True)
+            wroot = target_wiki
+        except Exception as e:
+            return f"Error initializing wiki: {e}"
+
+    fact_clean = (fact or "").strip()
+    if not fact_clean and messages:
+        for m in reversed(messages):
+            if m.get("role") == "assistant" and isinstance(m.get("content"), str) and len(m.get("content")) > 10:
+                fact_clean = m["content"].splitlines()[0].strip()
+                break
+
+    if not fact_clean:
+        return "Error: Please specify the fact, decision, or preference to remember. Usage: /remember <fact>"
+
+    words = [re.sub(r'[^a-zA-Z0-9]', '', w.lower()) for w in fact_clean.split()[:5]]
+    slug = "-".join(w for w in words if w) or f"note-{int(time.time())}"
+    title = fact_clean[:60].strip()
+    desc = fact_clean[:140].strip()
+
+    cmd = [
+        "python3", str(wscript), "new", "preference", slug,
+        "--title", title,
+        "--description", desc,
+        "--summary", fact_clean,
+        "--force",
+        "--root", str(wroot)
+    ]
+    try:
+        subprocess.run(cmd, cwd=workspace, capture_output=True, text=True, check=True)
+        subprocess.run(["python3", str(wscript), "lint", "--write-index", "--root", str(wroot)], cwd=workspace, capture_output=True)
+        subprocess.run(["python3", str(wscript), "log", f"Ingestion. Remembered {slug}", "--root", str(wroot)], cwd=workspace, capture_output=True)
+        return f"Saved → [{slug}.md](wiki/preferences/{slug}.md)"
+    except Exception as e:
+        return f"Error saving to wiki: {e}"
+
+
 def tool_local_wiki(args: dict, workspace: Path, mode: str = "act", session_context: dict | None = None) -> str:
     action = (args.get("action") or "").strip()
     if not action:
-        return "Error: action required (search, read_page, new_page, lint, digest, init, env_list, log)"
+        return "Error: action required (search, read_page, new_page, lint, digest, init, env_list, log, backup, remember)"
 
-    if mode == "plan" and action in ("new_page", "init", "log"):
+    if mode == "plan" and action in ("new_page", "init", "log", "backup", "remember"):
         return f"Error: [PLAN MODE] Action '{action}' modifies the wiki and is disabled in Plan Mode. Use 'search' or 'read_page' to explore existing knowledge first."
+
+    if action == "backup":
+        msgs = (session_context or {}).get("messages")
+        return perform_wiki_backup(workspace, messages=msgs, note=args.get("summary") or args.get("note") or "")
+
+    if action == "remember":
+        msgs = (session_context or {}).get("messages")
+        fact_text = args.get("summary") or args.get("query") or args.get("fact") or ""
+        return perform_wiki_remember(workspace, fact=fact_text, messages=msgs)
+
+    if action == "lint":
+        return perform_wiki_lint(workspace, auto_fix=True)
 
     wiki_script = find_wiki_script(workspace)
     if not wiki_script:
@@ -1468,9 +1639,9 @@ def tool_local_wiki(args: dict, workspace: Path, mode: str = "act", session_cont
         except subprocess.CalledProcessError as e:
             return f"Error initializing Local Wiki in {target_root}: {e.stderr or e.stdout}"
 
-    if not wiki_root and action in ("search", "read_page", "digest", "lint", "env_list"):
+    if not wiki_root and action in ("search", "read_page", "digest", "env_list"):
         return (f"Local Wiki is inactive in this workspace ({workspace}) because no wiki/ folder exists. "
-                "Call local_wiki(action='init') to initialize it, or local_wiki(action='new_page', ...) to create the first page.")
+                "Call local_wiki(action='init') to initialize one, or local_wiki(action='new_page', ...) to create the first page.")
 
     if action == "read_page":
         ppath_str = args.get("page_path") or args.get("query")
@@ -3160,6 +3331,10 @@ def interactive_loop(workspace: Path, url: str, api_key: str, initial_mode: str 
                 print(f"  /syntax [path]        Run AST syntax check on Python, JS, Bash, JSON, YAML")
                 print(f"  /test [files]         Smart targeted test runner (pytest, unittest, npm, make)")
                 print(f"  /wiki [search|lint|digest] Query or manage workspace Local Wiki")
+                print(f"  /wiki-backup, /wiki backup  Back up session artifacts, plans, and outcomes to wiki/artifacts")
+                print(f"  /wiki-lint, /wiki lint      Lint and repair project wiki (verify frontmatter, links, index)")
+                print(f"  /remember <fact>            Save a fact, decision, or preference directly to Local Wiki")
+                print(f"  /recall <topic>             Query Local Wiki knowledge with ranked citations")
                 print(f"  /continue             Go on after the agent stopped at its tool-round limit")
                 print(f"  /clear, /reset        Reset conversation memory")
                 print(f"  /prefix [toggle|text] Set assistant seed prefix to suppress chatter")
@@ -3324,70 +3499,139 @@ def interactive_loop(workspace: Path, url: str, api_key: str, initial_mode: str 
                 parts = prompt.split(" ", 1)
                 sub_arg = parts[1].strip() if len(parts) > 1 and parts[0] == "/continue" else ""
                 prompt = sub_arg or CONTINUE_PROMPT
-            elif prompt.startswith("/wiki"):
-                sub = prompt[5:].strip()
+            # Local Wiki slash command suite: /wiki-backup, /wiki backup, /wiki-lint, /wiki lint, /remember, /recall, /wiki
+            elif (
+                prompt.startswith("/wiki-backup") or prompt.startswith("/wiki backup") or
+                prompt.startswith("/wiki-lint") or prompt.startswith("/wiki lint") or
+                prompt.startswith("/remember") or prompt.startswith("/recall") or
+                prompt.startswith("/wiki")
+            ):
                 wroot = resolve_wiki_root(workspace)
                 wscript = find_wiki_script(workspace)
                 if not wscript:
                     print(f"{C_RED}Error: local-wiki script (wiki.py) not found on system.{C_RESET}\n")
                     continue
 
-                if not wroot:
-                    # Wiki is not active by default. When invoked, create the wiki in the defined project folder!
-                    target_folder = workspace
-                    if sub.startswith("init"):
-                        custom_path = sub[4:].strip()
-                        if custom_path:
-                            target_folder = Path(custom_path).expanduser().resolve()
-                    elif sub and not any(sub.startswith(cmd) for cmd in ("status", "info", "search", "lint", "digest", "env", "help")):
-                        cand = Path(sub).expanduser()
-                        if cand.is_dir() or cand.parent.is_dir():
-                            target_folder = cand.resolve()
+                # Multi-command chaining parser: e.g. "/wiki-backup /wiki-lint update readme and git push"
+                tokens = prompt.split()
+                consumed_all = True
+                remainder_prompt = ""
 
-                    target_wiki = (target_folder / "wiki" if target_folder.name != "wiki" else target_folder).resolve()
-                    print(f"\n{C_ACCENT}✦ Local Wiki is currently INACTIVE in this project.{C_RESET}")
-                    print(f"{C_INK_SOFT}✦ Initializing and activating Local Wiki in defined project folder:{C_RESET}")
-                    print(f"  {C_BOLD}{target_wiki}{C_RESET}...\n")
-
-                    cmd = ["python3", str(wscript), "init", "--root", str(target_wiki)]
-                    try:
-                        res = subprocess.run(cmd, cwd=target_folder, capture_output=True, text=True, check=True)
-                        print(f"{C_GREEN}✓ Local Wiki ready at {target_wiki}!{C_RESET}")
-                        if res.stdout:
-                            print(f"{C_MUTED}{res.stdout.strip()}{C_RESET}\n")
-                        # Update current session system prompt and state in memory
+                # 1. /wiki-backup or /wiki backup
+                if prompt.startswith("/wiki-backup") or prompt.startswith("/wiki backup"):
+                    print(f"\n{C_ACCENT}✦ Running Local Wiki Artifact Backup...{C_RESET}")
+                    backup_res = perform_wiki_backup(workspace, messages=messages)
+                    print(f"{C_GREEN}✓ {backup_res}{C_RESET}\n")
+                    # Check for chained commands
+                    p_rest = prompt.replace("/wiki-backup", "", 1).replace("/wiki backup", "", 1).strip()
+                    if p_rest.startswith("/wiki-lint") or p_rest.startswith("/wiki lint"):
+                        print(f"{C_ACCENT}✦ Linting & repairing Local Wiki...{C_RESET}")
+                        lint_res = perform_wiki_lint(workspace, auto_fix=True)
+                        print(f"{C_MUTED}{lint_res}{C_RESET}\n")
+                        p_rest = p_rest.replace("/wiki-lint", "", 1).replace("/wiki lint", "", 1).strip()
+                    if p_rest:
+                        print(f"{C_GREEN}⚡ Proceeding in ACT MODE: {p_rest}{C_RESET}\n")
+                        prompt = p_rest
+                        current_mode = "act"
                         messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
-                    except subprocess.CalledProcessError as e:
-                        print(f"{C_RED}Failed to initialize wiki: {e.stderr or e.stdout}{C_RESET}\n")
+                        # continue into loop without 'continue'
+                    else:
+                        continue
+
+                # 2. /wiki-lint or /wiki lint
+                elif prompt.startswith("/wiki-lint") or prompt.startswith("/wiki lint"):
+                    print(f"\n{C_ACCENT}✦ Linting & repairing Local Wiki...{C_RESET}")
+                    lint_res = perform_wiki_lint(workspace, auto_fix=True)
+                    print(f"{C_MUTED}{lint_res}{C_RESET}\n")
+                    p_rest = prompt.replace("/wiki-lint", "", 1).replace("/wiki lint", "", 1).strip()
+                    if p_rest:
+                        print(f"{C_GREEN}⚡ Proceeding in ACT MODE: {p_rest}{C_RESET}\n")
+                        prompt = p_rest
+                        current_mode = "act"
+                        messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
+                    else:
+                        continue
+
+                # 3. /remember <fact>
+                elif prompt.startswith("/remember"):
+                    fact_arg = prompt[9:].strip()
+                    print(f"\n{C_ACCENT}✦ Remembering into Local Wiki...{C_RESET}")
+                    rem_res = perform_wiki_remember(workspace, fact=fact_arg, messages=messages)
+                    print(f"{C_GREEN}✓ {rem_res}{C_RESET}\n")
                     continue
 
-                # Wiki is already active in this project folder:
-                if not sub or sub in ("status", "info"):
-                    print(f"\n{C_BOLD}Local Wiki Status:{C_RESET}")
-                    print(f"  • Root:   {C_ACCENT_SOFT}{wroot}{C_RESET}")
-                    print(f"  • Script: {wscript}")
-                    res = tool_local_wiki({"action": "digest"}, workspace)
-                    print(f"\n{res}\n")
-                elif sub.startswith("search"):
-                    q = sub[6:].strip()
+                # 4. /recall <query>
+                elif prompt.startswith("/recall"):
+                    q = prompt[7:].strip()
                     if q:
-                        print(f"\n{C_CYAN}Searching Local Wiki for:{C_RESET} {q}\n")
+                        print(f"\n{C_CYAN}Recalling from Local Wiki for:{C_RESET} {q}\n")
                         print(tool_local_wiki({"action": "search", "query": q}, workspace) + "\n")
                     else:
-                        print("Usage: /wiki search <query>\n")
-                elif sub == "lint":
-                    print(f"\n{C_CYAN}Linting Local Wiki...{C_RESET}\n")
-                    print(tool_local_wiki({"action": "lint"}, workspace) + "\n")
-                elif sub == "digest":
-                    print("\n" + tool_local_wiki({"action": "digest"}, workspace) + "\n")
-                elif sub.startswith("init"):
-                    print(f"{C_YELLOW}Local Wiki is already active in this project at: {wroot}{C_RESET}\n")
-                elif sub.startswith("env"):
-                    print("\n" + tool_local_wiki({"action": "env_list"}, workspace) + "\n")
+                        print("Usage: /recall <query>\n")
+                    continue
+
+                # 5. Base /wiki commands
                 else:
-                    print(f"\n{C_CYAN}Searching Local Wiki for:{C_RESET} {sub}\n")
-                    print(tool_local_wiki({"action": "search", "query": sub}, workspace) + "\n")
-                continue
+                    sub = prompt[5:].strip()
+                    if not wroot:
+                        target_folder = workspace
+                        if sub.startswith("init"):
+                            custom_path = sub[4:].strip()
+                            if custom_path:
+                                target_folder = Path(custom_path).expanduser().resolve()
+                        elif sub and not any(sub.startswith(cmd) for cmd in ("status", "info", "search", "lint", "digest", "env", "help")):
+                            cand = Path(sub).expanduser()
+                            if cand.is_dir() or cand.parent.is_dir():
+                                target_folder = cand.resolve()
+
+                        target_wiki = (target_folder / "wiki" if target_folder.name != "wiki" else target_folder).resolve()
+                        print(f"\n{C_ACCENT}✦ Initializing Local Wiki in defined project folder:{C_RESET}")
+                        print(f"  {C_BOLD}{target_wiki}{C_RESET}...\n")
+
+                        cmd = ["python3", str(wscript), "init", "--root", str(target_wiki)]
+                        try:
+                            res = subprocess.run(cmd, cwd=target_folder, capture_output=True, text=True, check=True)
+                            print(f"{C_GREEN}✓ Local Wiki ready at {target_wiki}!{C_RESET}")
+                            if res.stdout:
+                                print(f"{C_MUTED}{res.stdout.strip()}{C_RESET}\n")
+                            messages[0] = {"role": "system", "content": build_dl_system_prompt(workspace, mode=current_mode)}
+                        except subprocess.CalledProcessError as e:
+                            print(f"{C_RED}Failed to initialize wiki: {e.stderr or e.stdout}{C_RESET}\n")
+                        continue
+
+                    if not sub or sub in ("status", "info"):
+                        print(f"\n{C_BOLD}Local Wiki Status:{C_RESET}")
+                        print(f"  • Root:   {C_ACCENT_SOFT}{wroot}{C_RESET}")
+                        print(f"  • Script: {wscript}")
+                        res = tool_local_wiki({"action": "digest"}, workspace)
+                        print(f"\n{res}\n")
+                    elif sub.startswith("search"):
+                        q = sub[6:].strip()
+                        if q:
+                            print(f"\n{C_CYAN}Searching Local Wiki for:{C_RESET} {q}\n")
+                            print(tool_local_wiki({"action": "search", "query": q}, workspace) + "\n")
+                        else:
+                            print("Usage: /wiki search <query>\n")
+                    elif sub == "lint":
+                        print(f"\n{C_CYAN}Linting Local Wiki...{C_RESET}\n")
+                        print(perform_wiki_lint(workspace, auto_fix=True) + "\n")
+                    elif sub == "backup":
+                        print(f"\n{C_ACCENT}✦ Running Local Wiki Artifact Backup...{C_RESET}")
+                        print(f"{C_GREEN}✓ {perform_wiki_backup(workspace, messages=messages)}{C_RESET}\n")
+                    elif sub.startswith("remember"):
+                        fact_arg = sub[8:].strip()
+                        print(f"\n{C_ACCENT}✦ Remembering into Local Wiki...{C_RESET}")
+                        print(f"{C_GREEN}✓ {perform_wiki_remember(workspace, fact=fact_arg, messages=messages)}{C_RESET}\n")
+                    elif sub == "digest":
+                        print("\n" + tool_local_wiki({"action": "digest"}, workspace) + "\n")
+                    elif sub.startswith("init"):
+                        print(f"{C_YELLOW}Local Wiki is already active in this project at: {wroot}{C_RESET}\n")
+                    elif sub.startswith("env"):
+                        print("\n" + tool_local_wiki({"action": "env_list"}, workspace) + "\n")
+                    else:
+                        print(f"\n{C_CYAN}Searching Local Wiki for:{C_RESET} {sub}\n")
+                        print(tool_local_wiki({"action": "search", "query": sub}, workspace) + "\n")
+                    continue
             elif prompt.startswith("/think"):
                 print(f"{C_MUTED}/think is gone: the CLI follows the web app's Chat settings "
                       f"({chat_settings_summary(url, api_key)}). Change them under Chat > Settings.{C_RESET}\n")
