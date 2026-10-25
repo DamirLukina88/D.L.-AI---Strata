@@ -134,7 +134,7 @@ A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) ex
 - Interactive MCP tools explorer in the web GUI via `/mcp`.
 - Loads when it is needed, not by default: when your message mentions the smart home, or when the agent turns it on itself.
 
-### 6. Tools & On-Demand Knowledge Suites (28 MCP Servers)
+### 6. Tools & On-Demand Knowledge Suites (34 MCP Servers)
 
 Ray features a zero-overhead, on-demand MCP router (`tools/dl_mcp.py`) that keeps tools dormant to save prompt context until matched by request triggers or explicitly toggled via `/mcp on <name>`:
 
@@ -146,6 +146,7 @@ Ray features a zero-overhead, on-demand MCP router (`tools/dl_mcp.py`) that keep
 | **Development & Standards** | `context7`, `modernweb`, `rfc`, `osv`, `devstandards` | Live library documentation, Modern Web Guidance (CSS/HTML5), IETF RFC protocol specs, OSV package vulnerabilities (CVEs), Game Programming Patterns, MDN. |
 | **Science & Biomedical** | `arxiv`, `openalex`, `europepmc`, `pubchem`, `clinicaltrials`, `opentargets`, `reactome` | arXiv preprints (AI/CS/Math), OpenAlex 250M+ scholarly works graph, Europe PMC open access papers, PubChem chemical formulas, ClinicalTrials.gov studies, Open Targets drug targets, Reactome biological pathways. |
 | **Hardware, 3D & Laws** | `print3d`, `cadmaterials`, `osm`, `laws`, `weather`, `minipaint`, `electronics`, `networking` | Klipper G-code & Bambu/Prusa filament presets, STEP AP242/IGES & AFLOW material properties, OpenStreetMap geocoding, Croatian (Zakon.hr/NN) & EU (EUR-Lex/CURIA) laws, Open-Meteo live weather, miniature painting & acrylics (3,340+ paint conversions across Citadel, Vallejo, AK, Army Painter, airbrush thinning ratios, NMM/slapchop techniques), electronics & components (LCSC/JLCPCB parts, SMD resistor code decoder), networking & LAN (SFP/SFP+/QSFP optics, OM3/OM4/OS2 fiber standards, RJ45 T568A/B cabling, PoE, IEEE MAC vendor lookup). |
+| **Photo, Video & Drones** | `photovideo`, `drones` | Exposure & 180° cinematic shutter calculations, camera log profiles (Sony S-Log3, Canon C-Log3, DJI D-Log, Panasonic V-Log), storyboard shot composition (ELS, LS, MCU, CU, OTS, Dutch angles), DJI drone specifications (Mini 4 Pro, Air 3, Mavic 3 Pro), CCAA & EASA Croatian drone laws, and Croatia Control AMC Portal automated airspace booking (Zagreb LDZA CTR). |
 
 ### 7. Workspace, JIT Model Loading & Remote Access
 - **Server File Workspace:** upload files by drag and drop, browse folder trees, stream and resume large downloads.

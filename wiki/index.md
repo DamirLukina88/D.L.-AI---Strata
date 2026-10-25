@@ -129,6 +129,7 @@ Every page in this wiki is listed below. The list is generated; do not edit betw
 - [Upstream v0.1.42 Fixes Integration Plan](artifacts/upstream-v0-1-42-fixes-plan.md) — Plan and execution details for integrating upstream Strata v0.1.42 fixes into the custom local installation.
 - [Upstream v0.1.45 Enhancements: Evaluation and Dual-Tier Benchmark Plan](artifacts/upstream-v0-1-45-evaluation-and-benchmark-plan.md) — Evaluation, technical spec, validation protocol, and exhaustive dual-tier benchmarks for upstream v0.1.45 on RX 7600 XT
 - [Workstation Expansion: Miniature Painting, Electronics, and Networking MCP Suites](artifacts/hardware-electronics-networking-minipaint-walkthrough.md) — Implementation report for minipaint (3,340 paints), electronics (LCSC/JLCPCB/SMD), and networking (SFP/Fiber/PoE) on-demand MCP servers.
+- [Workstation Expansion: Photo, Video, and Drone Regulations MCP Suites](artifacts/photo-video-and-drone-regulations-walkthrough.md) — Report for photovideo (exposure, log profiles, storyboarding) and drones (DJI specs, Croatian CCAA/EASA rules, AMC Portal) MCP servers.
 - [Workstation RAM Upgrade Plan: Qwen3.8 Context & Quantization Scaling vs. DeepSeek V4.1](artifacts/ram-upgrade-plan-qwen-context-vs-deepseek.md) — Hardware analysis and execution plan for upgrading workstation RAM to scale Qwen3.8 Coder context window and quantization tier.
 
 ## Logs
