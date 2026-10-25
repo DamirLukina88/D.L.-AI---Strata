@@ -17,18 +17,16 @@ reach from anywhere:
 - a live monitor of the GPU, RAM and engine, and a file workspace on the server
 - remote access through a Cloudflare Tunnel over QUIC, behind a Cloudflare Access login
 
-The inference engine is Strata, unchanged except for configuration and hardware kernel ports. Upstream
-Strata releases are merged as they come out (currently **v0.1.45**). Upstream 0.2.0-beta and 0.2.1 (the new desktop
-app, Terminal and engine 0.1.46) were reviewed on 2026-10-20 and not merged: most of their changes are for other
-hardware or the new app ([review](wiki/artifacts/upstream-v0-2-releases-review-2026-10-20.md)). From 0.2.2, four
-fixes that apply to this PC were ported by hand on 2026-10-21: the HIP verify-window hang, the batched prompt retry
-after non-finite logits, drifted tool-call openers, and one answer-speed figure
-([review](wiki/artifacts/upstream-v0-2-2-review-2026-10-21.md)). From 0.2.3 and 0.2.3.1 (and the remaining 0.2.2 commits), seven
-more engine, vision, server, CSS and `setup.py` fixes were ported on 2026-10-23 (1-token `--spec` fix, speculative
-adaptive tier warm-up, elastic vision encoder for tool-returned images, enforced vision token limits, unread tool-call
-logging, narrow `.cfg-form` layout, and `BUILD.json` `archs`/`vision_archs` string-or-list parsing) alongside enabling
-8-bit hyper-connection weights (`STRATA_HC_Q8=1`) after a same-day A/B benchmark
-([review](wiki/artifacts/upstream-v0-2-3-review-2026-10-23.md)).
+The inference engine is Strata, configured and optimized for AMD RDNA3 (ROCm/HIP). Upstream
+Strata releases are continuously evaluated and synced with each release. Upstream 0.2.0-beta and 0.2.1 were
+reviewed on 2026-10-20 ([review](wiki/artifacts/upstream-v0-2-releases-review-2026-10-20.md)). From 0.2.2 and 0.2.3/0.2.3.1,
+crucial engine, vision, and spec fixes were ported alongside enabling 8-bit hyper-connection weights (`STRATA_HC_Q8=1`)
+after an A/B benchmark ([review](wiki/artifacts/upstream-v0-2-3-review-2026-10-23.md)). On 2026-10-25, **v0.2.5** and
+**v0.2.6** were synchronized: CommonMark soft linebreaks, direct screenshot clipboard paste (`Ctrl+V`), window-level
+drag-and-drop, dynamic model load timeout scaling, safe shard removal guards, `require_messages(messages)` OpenAI-spec
+validation, 1-token health check speed guards, and stable GPU hardware telemetry IDs
+([v0.2.5 walkthrough](wiki/artifacts/strata-v0-2-5-sync-and-ergonomics-walkthrough.md),
+[v0.2.6 & tools walkthrough](wiki/artifacts/davinci-cst-ipc2152-wargaming-and-v026-sync-walkthrough.md)).
 
 ## How fast is it?
 
