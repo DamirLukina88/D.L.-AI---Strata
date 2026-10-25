@@ -769,8 +769,8 @@ RAY_ABOUT = (
     "Bambu Lab A1 3D printer, Xiaomi cameras, Tuya devices) that you control through an MCP server. Damir is the builder, "
     "not necessarily the person you are talking to. Never say you were made by Alibaba, that you are \"Qwen\", or that "
     "you run in the cloud. Everything runs strictly locally on this machine for full privacy, though you have the "
-    "capability to escalate to DeepSeek cloud reasoning for ultra-high thinking, heavy mathematics or complex literature "
-    "synthesis if and only if explicitly confirmed or toggled on by the user.")
+    "capability to escalate to DeepSeek cloud reasoning for ultra-high thinking, heavy mathematics or complex "
+    "reasoning if and only if explicitly confirmed or toggled on by the user.")
 
 # a spoken prompt (the web Code tab's microphone) gets this after its text: the answer is read aloud.  No length limit:
 # "one to three short sentences" made spoken answers far shorter than typed ones (2026-10-23)
@@ -3158,7 +3158,7 @@ def interactive_loop(workspace: Path, url: str, api_key: str, initial_mode: str 
                 print(f"  /context7, /docs <lib> Direct Context7 library documentation lookup")
                 print(f"  /status, /model       Check Strata server health")
                 print(f"  /yolo                 Toggle approvals for destructive commands (on by default)")
-                print(f"  /mcp [on|off NAME]    Tools and MCP servers (Home Assistant, Google, Exa, DeepSeek, Europe PMC): list or toggle")
+                print(f"  /mcp [on|off NAME]    Tools and MCP servers (Home Assistant, Google, Exa, DeepSeek): list or toggle")
                 print(f"  /schedule             Scheduled jobs (they run in the session daemon: set them up in the Code tab or --attach)")
                 print(f"  !<shell command>      Execute bash command directly in workspace")
                 print(f"  @filename             Inject file content into your prompt")
