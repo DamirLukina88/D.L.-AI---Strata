@@ -636,7 +636,9 @@ Tools and jobs
                   live weather, miniature painting & acrylics (3,340+ paint conversions, airbrushing),
                   electronics (LCSC/JLCPCB parts, SMD resistor calc), networking & LAN (SFP optics, cabling),
                   photography & videography (exposure calc, log profiles, storyboarding),
-                  drones & regulations (DJI specs, CCAA & EASA Croatian rules, AMC Portal)
+                  drones & regulations (DJI specs, CCAA & EASA Croatian rules, AMC Portal),
+                  Zagreb civic & transit (ZET, 24/7 pharmacies, waste schedules, air quality),
+                  Croatia live data (HAK road conditions, DHMZ observations, fuel prices, METAR)
                   (list, turn on/off; they also start when needed)
 /schedule ...     Scheduled jobs: /schedule [--email] <when> <task>; list; off|on|run|rm N; stop (the running job)
                   when: 2026-10-16 09:00, tomorrow 07:00, fri 09:00, in 2h, daily 08:00, mon-fri 07:30, every 2h
