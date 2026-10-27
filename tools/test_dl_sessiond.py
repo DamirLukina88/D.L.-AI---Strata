@@ -268,7 +268,7 @@ class TurnEffort(unittest.TestCase):
                 notices = []
                 s.notice = lambda text, level="info": notices.append(text)
                 s._command("/effort show")
-                self.assertEqual(notices, ["Thinking level: auto (last: high, coding task)"])
+                self.assertEqual(notices, ["Thinking level: auto (chosen for each prompt). Last one: high, because the prompt asks for coding work."])
         finally:
             dl_sessiond.cli.execute_agent_loop = orig
         self.assertEqual(

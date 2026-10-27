@@ -2975,7 +2975,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             if session_context is not None:
                 session_context["effort"] = "high"
                 session_context["reasoning_budget_tokens"] = budget
-            _note(emit, f"Auto thinking: raised to high ({reason})")
+            _note(emit, dl_effort.describe_raise(reason) if dl_effort is not None else f"Thinking raised to high ({reason}).")
 
     registry = (session_context or {}).get("mcp")
     if registry is not None and registry.active:

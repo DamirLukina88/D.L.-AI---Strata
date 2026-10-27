@@ -680,7 +680,7 @@ class Session:
             level, reason = dl_effort.pick(prompt, voice=voice, mode=self.mode, last_reply=last_reply)
             budget = dl_effort.budget_for(level)
             self.last_auto = (level, reason)
-            self.notice(f"Auto thinking: {level} ({reason}{f', cap: {budget}' if budget else ''})")
+            self.notice(dl_effort.describe_pick(level, reason, budget))
             resolved_effort = level
             resolved_budget = budget
         else:
@@ -777,7 +777,8 @@ class Session:
                 if self.effort == "auto":
                     if getattr(self, "last_auto", None):
                         lev, reas = self.last_auto
-                        self.notice(f"Thinking level: auto (last: {lev}, {reas})")
+                        self.notice(f"Thinking level: auto (chosen for each prompt). Last one: "
+                                    f"{dl_effort.LEVEL_WORDS.get(lev, lev)}, because {dl_effort.pick_why(reas)}.")
                     else:
                         self.notice("Thinking level: auto (default)")
                 else:

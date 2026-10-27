@@ -92,9 +92,9 @@ class TestDlAutoRaise(unittest.TestCase):
         self.assertEqual(ctx["effort"], "high")
 
         # Exactly one raise notice was posted
-        raise_notices = [n for n in notices if "Auto thinking: raised to high" in n]
+        raise_notices = [n for n in notices if "Thinking raised to high" in n]
         self.assertEqual(len(raise_notices), 1)
-        self.assertIn("Auto thinking: raised to high (command failed)", raise_notices[0])
+        self.assertIn("because a command ended with an error code", raise_notices[0])
 
     def test_without_effort_auto_level_never_changes(self):
         call_count = 0
@@ -151,7 +151,7 @@ class TestDlAutoRaise(unittest.TestCase):
         # Effort never changed
         self.assertEqual(efforts_seen, ["low", "low"])
         self.assertEqual(ctx["effort"], "low")
-        self.assertFalse(any("Auto thinking: raised to high" in n for n in notices))
+        self.assertFalse(any("Thinking raised to high" in n for n in notices))
 
     def test_already_high_turn_posts_no_notice(self):
         call_count = 0
@@ -207,7 +207,7 @@ class TestDlAutoRaise(unittest.TestCase):
 
         self.assertEqual(efforts_seen, ["high", "high"])
         self.assertEqual(ctx["effort"], "high")
-        self.assertFalse(any("Auto thinking: raised to high" in n for n in notices))
+        self.assertFalse(any("Thinking raised to high" in n for n in notices))
 
     def test_loop_guard_raises_to_high(self):
         call_count = 0
@@ -251,7 +251,7 @@ class TestDlAutoRaise(unittest.TestCase):
 
         self.assertEqual(efforts_seen, ["low", "high"])
         self.assertEqual(ctx["effort"], "high")
-        self.assertTrue(any("Auto thinking: raised to high (thinking loop)" in n for n in notices))
+        self.assertTrue(any("because the thinking was going in circles" in n for n in notices))
 
     def test_text_call_retry_raises_to_high(self):
         call_count = 0
@@ -294,7 +294,7 @@ class TestDlAutoRaise(unittest.TestCase):
 
         self.assertEqual(efforts_seen, ["low", "high"])
         self.assertEqual(ctx["effort"], "high")
-        self.assertTrue(any("Auto thinking: raised to high (tool call sent as text)" in n for n in notices))
+        self.assertTrue(any("because a tool call came back as plain text" in n for n in notices))
 
     def test_finish_checks_raise_to_high(self):
         call_count = 0
@@ -336,7 +336,7 @@ class TestDlAutoRaise(unittest.TestCase):
 
         self.assertEqual(efforts_seen, ["low", "high"])
         self.assertEqual(ctx["effort"], "high")
-        self.assertTrue(any("Auto thinking: raised to high (sent back by the finish checks)" in n for n in notices))
+        self.assertTrue(any("because the finish checks sent the work back" in n for n in notices))
 
     def test_auto_raise_updates_reasoning_budget_tokens_and_payload(self):
         call_count = 0
