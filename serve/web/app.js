@@ -2236,6 +2236,10 @@ let sessionsTimer = null;
 function openSessions(open) {
   const d = $("sessions-drawer");
   if (!d) return;
+  if (!open && d.contains(document.activeElement)) {        // focus leaves before the drawer is hidden from AT
+    document.activeElement.blur();
+    try { ($("code-mobile-input") || $("code-sessions-btn")).focus(); } catch (_) {}
+  }
   d.dataset.open = String(open);
   d.toggleAttribute("inert", !open);
   d.inert = !open;
