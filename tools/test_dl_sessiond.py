@@ -517,6 +517,21 @@ class RewindEditBranch(SavedSessions):
         self.assertEqual(len(self.prompts_now()), 2)                               # nothing was cut
         self.assertIn("N from 1 to 2", self.notices(self.cmd("/rewind 7")))
 
+    def test_unmarked_prompt_inside_a_built_message(self):
+        """2026-10-27: a prompt sent before the marks is stored as "[Now: ...]\\n<prompt>" (with_now), or as parts."""
+        self.s.emit({"type": "user", "text": "how are you?", "origin": "me"})
+        self.s.messages += [{"role": "user", "content": "[Now: utorak, 27.10.2026. 17:44 (Europe/Zagreb)]\nhow are you?"},
+                            {"role": "assistant", "content": "fine"}]
+        self.s.emit({"type": "user", "text": "look at this\n@shot.png", "origin": "me"})
+        self.s.messages += [{"role": "user", "content": [{"type": "text", "text": "[Now: x]\nlook at this\n(image)"},
+                                                         {"type": "image_url", "image_url": {"url": "data:"}}]},
+                            {"role": "assistant", "content": "a cat"}]
+        self.cmd("/rewind 2")
+        self.assertEqual(len(self.s.messages), 3)
+        self.cmd("/branch 1")
+        self.assertEqual([m["role"] for m in self.s.messages], ["system"])
+        self.assertEqual(self.sd.archive_list("t")[0]["turns"], 1)
+
     def prompts_now(self):
         return self.s.prompt_events()
 

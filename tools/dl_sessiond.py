@@ -462,11 +462,19 @@ class Session:
         model's messages included.  Returns why it cannot (None when done)."""
         at = next((i for i, m in enumerate(self.messages) if m.get("role") == "user" and m.get("dl_turn") == ev["seq"]),
                   None)
-        if at is None:                               # a prompt from before the marks: the same text, newest match
-            text = ev.get("text") or ""
-            at = next((i for i in range(len(self.messages) - 1, 0, -1) if self.messages[i].get("role") == "user"
-                       and isinstance(self.messages[i].get("content"), str)
-                       and self.messages[i]["content"].strip() == text.strip()), None)
+        if at is None:
+            # a prompt from before the marks: the newest unmarked user message holding its first line.  The message
+            # is not the bare prompt: with_now() puts "[Now: ...]" first, @files are expanded, a picture makes it a
+            # list of parts (2026-10-27: "how are you?" was not found as "[Now: ...]\nhow are you?")
+            head = next((ln.strip() for ln in (ev.get("text") or "").splitlines() if ln.strip()), "")[:200]
+
+            def text_of(m: dict) -> str:
+                c = m.get("content")
+                return c if isinstance(c, str) else " ".join(p.get("text") or "" for p in c if isinstance(p, dict)) \
+                    if isinstance(c, list) else ""
+            at = next((i for i in range(len(self.messages) - 1, 0, -1) if head
+                       and self.messages[i].get("role") == "user" and self.messages[i].get("dl_turn") is None
+                       and head in text_of(self.messages[i])), None)
         if at is None or at < 1:
             return ("that prompt is no longer in the model's context (trimmed from a long conversation), so the "
                     "session cannot go back to it")
