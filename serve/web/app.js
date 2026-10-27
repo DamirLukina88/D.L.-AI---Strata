@@ -1656,19 +1656,70 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
 });
 
 let tab = "code";
+// 1200 px and wider: Code on the left and Monitor (or About) on the right, with a draggable divider between them
+const splitQuery = matchMedia("(min-width: 1200px)");
+let split = splitQuery.matches;
+let side = "monitor";                                      // the right pane in the side-by-side view
+function shown(v) { return split ? v === "code" || v === side : v === tab; }
 function showTab(name) {
   if (typeof STTController !== "undefined") STTController.cancelAutoSendTimer();
   tab = ["code", "monitor", "about"].includes(name) ? name : "code";
-  for (const b of document.querySelectorAll(".st-tab")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
+  if (split && tab !== "code") side = tab;
+  document.body.classList.toggle("is-split", split);
+  if ($("split-handle")) $("split-handle").hidden = !split;
+  for (const b of document.querySelectorAll(".st-tab")) {
+    b.setAttribute("aria-selected", String(split ? b.dataset.tab === side : b.dataset.tab === tab));
+  }
   for (const v of ["code", "monitor", "about"]) {
-    if ($(`view-${v}`)) $(`view-${v}`).hidden = v !== tab;
+    if ($(`view-${v}`)) $(`view-${v}`).hidden = !shown(v);
   }
   if (location.hash.slice(1) !== tab) history.replaceState(null, "", tab === "code" ? location.pathname : `#${tab}`);
-  if (tab === "code") openCodeSession(); else codeDisconnect();
-  if (tab === "monitor") loadMcp();
-  if (tab === "about") loadConfig();
+  if (shown("code")) openCodeSession(); else codeDisconnect();
+  if (shown("monitor")) loadMcp();
+  if (shown("about")) loadConfig();
   if (lastMetrics) render(lastMetrics);
 }
+function checkSplit() { if (splitQuery.matches !== split) { split = splitQuery.matches; showTab(tab); } }
+splitQuery.addEventListener("change", checkSplit);
+window.addEventListener("resize", checkSplit);            // some browsers (and devtools emulation) skip the change event
+
+(function splitHandle() {
+  const handle = $("split-handle");
+  if (!handle) return;
+  const set = (pct, save) => {
+    pct = Math.min(75, Math.max(25, pct));
+    document.documentElement.style.setProperty("--split", `${pct}%`);
+    handle.setAttribute("aria-valuenow", String(Math.round(pct)));
+    if (save) store.set("splitPct", pct);
+  };
+  set(Number(store.get("splitPct", 50)) || 50, false);
+  handle.setAttribute("aria-valuemin", "25");
+  handle.setAttribute("aria-valuemax", "75");
+  const at = (x) => { const r = document.querySelector("main").getBoundingClientRect(); return ((x - r.left) / r.width) * 100; };
+  handle.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    handle.classList.add("is-dragging");
+    document.body.classList.add("is-resizing");
+  });
+  handle.addEventListener("pointermove", (e) => { if (handle.hasPointerCapture(e.pointerId)) set(at(e.clientX), false); });
+  const end = (e) => {
+    if (!handle.classList.contains("is-dragging")) return;
+    handle.classList.remove("is-dragging");
+    document.body.classList.remove("is-resizing");
+    if (e.type === "pointerup") set(at(e.clientX), true);
+    else store.set("splitPct", parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--split")) || 50);
+  };
+  handle.addEventListener("pointerup", end);
+  handle.addEventListener("pointercancel", end);
+  handle.addEventListener("dblclick", () => set(50, true));
+  handle.addEventListener("keydown", (e) => {
+    const now = Number(handle.getAttribute("aria-valuenow")) || 50;
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); set(now + (e.key === "ArrowLeft" ? -2 : 2), true); }
+    else if (e.key === "Home" || e.key === "Enter") { e.preventDefault(); set(50, true); }
+  });
+})();
 for (const b of document.querySelectorAll(".st-tab")) b.onclick = () => showTab(b.dataset.tab);
 window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
 
@@ -1828,7 +1879,24 @@ function codeSetState(st) {
   }
   const busy = !!code.state.busy;
   if ($("code-stop-btn")) $("code-stop-btn").hidden = !busy;
+  codeBarFit();
   document.querySelector(".code-dot")?.classList.toggle("code-dot--busy", busy);
+}
+
+// The session line in the Code bar goes to a row of its own when it would be cut (a narrow side-by-side pane, many
+// MCP chips): measured in its one-row form, so it moves back up as soon as there is room again.
+function codeBarFit() {
+  const bar = document.querySelector(".code-terminal-bar"), meta = $("code-scaffold-meta");
+  if (!bar || !meta) return;
+  bar.classList.remove("code-terminal-bar--stacked");
+  if (meta.scrollWidth > meta.clientWidth + 1) bar.classList.add("code-terminal-bar--stacked");
+}
+if (window.ResizeObserver && document.querySelector(".code-terminal-bar")) {
+  let barW = 0;                                            // its height changes when it stacks: react to width only
+  new ResizeObserver((es) => {
+    const w = Math.round(es[0].contentRect.width);
+    if (w !== barW) { barW = w; codeBarFit(); }
+  }).observe(document.querySelector(".code-terminal-bar"));
 }
 
 function codeEvent(ev, replay) {
@@ -1968,18 +2036,18 @@ async function codeConnect() {
     if (dog) clearInterval(dog);
     code.conn = null;
   }
-  if (tab === "code" && code.stale) {                       // a dead stream: reconnect now, the hello redraws the feed
+  if (shown("code") && code.stale) {                       // a dead stream: reconnect now, the hello redraws the feed
     code.stale = false;
     code.opAt = 0;
     setTimeout(codeConnect, 0);
-  } else if (tab === "code" && !ctl.signal.aborted) {      // reconnect: the daemon or the tunnel went away
+  } else if (shown("code") && !ctl.signal.aborted) {      // reconnect: the daemon or the tunnel went away
     code.retry = Math.min(code.retry + 1, 6);
     setTimeout(codeConnect, 500 * 2 ** code.retry);
   }
 }
 
 document.addEventListener("visibilitychange", () => {     // back to the page after a while: check the stream first
-  if (!document.hidden && tab === "code" && code.conn && Date.now() - (code.lastData || 0) > 20000) {
+  if (!document.hidden && shown("code") && code.conn && Date.now() - (code.lastData || 0) > 20000) {
     code.stale = true;
     code.conn.abort();
   }
@@ -2179,7 +2247,7 @@ document.querySelectorAll(".code-mobile-chip").forEach((chip) => {
   };
 });
 document.addEventListener("visibilitychange", () => {     // phones suspend background tabs: reconnect on return
-  if (document.visibilityState === "visible" && tab === "code" && !code.conn) codeConnect();
+  if (document.visibilityState === "visible" && shown("code") && !code.conn) codeConnect();
 });
 
 // ------------------------------------------------------------------ server access
@@ -2385,7 +2453,7 @@ async function poll() {
   } catch (e) {
     if (++metricsFailures === 3) setPill("error", "Server not reachable");
   }
-  if (tab === "monitor" && ++mcpTick % 10 === 0) loadMcp();       // server states change rarely: every 10 s
+  if (shown("monitor") && ++mcpTick % 10 === 0) loadMcp();       // server states change rarely: every 10 s
   setTimeout(poll, 1000);
 }
 
@@ -2407,9 +2475,9 @@ function render(m) {
     setPill("idle", "Idle");
   }
   if (live.queued > 0) setPill("queued", `${live.queued} queued`);
-  if (tab === "monitor") renderMonitor(live, hw, st, eng, h, last, m.requests || [], m.totals, m.requests_kept);
-  if (tab === "monitor") renderConvCache(m.conversation_cache);
-  if (tab === "about") renderAbout(eng, hw, st);
+  if (shown("monitor")) renderMonitor(live, hw, st, eng, h, last, m.requests || [], m.totals, m.requests_kept);
+  if (shown("monitor")) renderConvCache(m.conversation_cache);
+  if (shown("about")) renderAbout(eng, hw, st);
 }
 
 // #596: the conversation cache - the prompt's state the engine keeps between requests (always), and the whole
@@ -2828,7 +2896,7 @@ function openDrawer(open) {
       document.activeElement.blur();
       if (lastDrawerTrigger && typeof lastDrawerTrigger.focus === "function") {
         try { lastDrawerTrigger.focus(); } catch (_) {}
-      } else if (tab === "code" && $("code-mobile-input")) {
+      } else if (shown("code") && $("code-mobile-input")) {
         try { $("code-mobile-input").focus(); } catch (_) {}
       }
     }

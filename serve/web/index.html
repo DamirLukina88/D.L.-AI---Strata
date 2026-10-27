@@ -8,7 +8,7 @@
 <link rel="icon" type="image/svg+xml" href="web/favicon.svg">
 <link rel="stylesheet" href="web/tokens.css">
 <link rel="stylesheet" href="web/components.css">
-<link rel="stylesheet" href="web/app.css?v=20261023-cfgform1">
+<link rel="stylesheet" href="web/app.css?v=20261027-split4">
 <script>
   // the theme before the first paint: default dark for D.L. AI
   try {
@@ -123,6 +123,10 @@
       </div>
     </div>
   </section>
+
+  <!-- side by side (1200 px and wider): Code | Monitor or About; drag to resize, double-click for 50/50 -->
+  <div class="split-handle" id="split-handle" role="separator" aria-orientation="vertical" aria-controls="view-code"
+       aria-label="Resize the Code and Monitor panes" tabindex="0" hidden></div>
 
   <!-- ============================ Monitor ============================ -->
   <section class="view view--monitor" id="view-monitor" role="tabpanel" aria-labelledby="tab-btn-monitor" hidden>
@@ -461,6 +465,6 @@
 <div class="scrim" id="scrim" hidden></div>
 <div class="st-toasts" id="toasts" aria-live="polite"></div>
 <script src="web/site-config.js?v=20261020-logout1"></script>
-<script src="web/app.js?v=20261027-stream-watchdog"></script>
+<script src="web/app.js?v=20261027-split4"></script>
 </body>
 </html>

@@ -122,6 +122,30 @@ main { flex: 1; min-height: 0; min-width: 0; max-width: 100vw; overflow-x: hidde
   .cfg-form { grid-template-columns: 1fr; gap: 4px; }
   .cfg-form .st-input { margin-bottom: var(--st-s-2); }
 }
+/* the same when a pane is narrow in the side-by-side view (the viewport is wide there) */
+.is-split .view--monitor, .is-split .view--about { container-type: inline-size; }
+@container (max-width: 1000px) {
+  .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .monitor-row { grid-template-columns: 1fr; }
+  .cc-bars { grid-template-columns: 1fr; }
+  .cfg-form { grid-template-columns: 1fr; gap: 4px; }
+  .cfg-form .st-input { margin-bottom: var(--st-s-2); }
+}
+@container (max-width: 560px) {
+  .metrics { grid-template-columns: 1fr; }
+  .monitor, .about { padding: var(--st-s-4); }
+}
+
+/* ---------------------------------------------------------------- side by side: Code | Monitor (1200 px and wider) */
+.is-split .view--code { flex: 0 0 var(--split, 50%); width: auto; max-width: none; }
+.is-split .view--monitor, .is-split .view--about { flex: 1 1 0; max-width: none; }
+.is-split #tab-btn-code { display: none; }             /* Code is always on the left; the tabs pick the right pane */
+.split-handle { flex: 0 0 9px; margin: 0 -3px; position: relative; z-index: 1; cursor: col-resize; touch-action: none;
+                display: flex; justify-content: center; outline: none; }
+.split-handle::before { content: ""; width: 1px; height: 100%; background: var(--st-line); transition: background 120ms, width 120ms; }
+.split-handle:hover::before, .split-handle:focus-visible::before, .split-handle.is-dragging::before { width: 3px; background: var(--st-accent); }
+body.is-resizing { cursor: col-resize; user-select: none; }
+body.is-resizing .view { pointer-events: none; }      /* the drag keeps going over the panes */
 @media (max-width: 768px) {
   .st-header {
     padding: 0 var(--st-s-3);
@@ -595,6 +619,9 @@ main { flex: 1; min-height: 0; min-width: 0; max-width: 100vw; overflow-x: hidde
 .code-meta {
   color: var(--st-ink-muted);
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;                  /* never under the buttons: a long session line is cut, not drawn over them */
+  text-overflow: ellipsis;
 }
 .code-meta code {
   background: var(--st-surface);
@@ -1136,7 +1163,15 @@ main { flex: 1; min-height: 0; min-width: 0; max-width: 100vw; overflow-x: hidde
   overflow-wrap: anywhere;
 }
 
-
-
-
-
+/* ---------------------------------------------------------------- the Code bar when its session line does not fit
+   app.js (codeBarFit) adds --stacked when the session line (mode, YOLO, plan, MCP, folder) would be cut: "CLI" and the
+   buttons stay on the first row and the line gets its own row below, as on a phone (narrow screens have that already).
+   Last in the file so it wins over the base rules. */
+@media (min-width: 901px) {
+  .code-terminal-bar--stacked { flex-wrap: wrap; padding: 6px 10px; gap: 6px; }
+  .code-terminal-bar--stacked .code-terminal-info { display: contents; }
+  .code-terminal-bar--stacked .code-terminal-actions { order: 1; margin-left: auto; gap: 4px; }
+  .code-terminal-bar--stacked .code-meta { order: 2; flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center;
+                                           gap: 4px; white-space: normal; overflow: visible; font-size: 11px; }
+  .code-terminal-bar--stacked .code-meta code { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
