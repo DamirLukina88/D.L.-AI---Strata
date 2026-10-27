@@ -1741,8 +1741,38 @@ function followText(box, text) {
   box.textContent = text;
   if (atEnd) box.scrollTop = box.scrollHeight;
 }
-function codeAtBottom() { const f = codeFeed(); return !f || f.scrollHeight - f.scrollTop - f.clientHeight < 80; }
-function codeScroll(force) { const f = codeFeed(); if (f && (force || codeAtBottom())) f.scrollTop = f.scrollHeight; }
+// The feed follows the answer while the reader has not left (#4014, from upstream 0.2.7). Asking "within 80 px of the
+// bottom?" pulled the view back after every wheel notch (about 100 px) while text streamed in; now the reader's own input
+// (wheel up, a finger, a key moving up, the scrollbar) lets go at once, and a scroll back to the bottom follows again.
+const FOLLOW_SLACK = 24, FAR_AWAY = 400, INPUT_WINDOW_MS = 400;
+let codeStick = true, codeLastInput = 0;
+function followAfterScroll(distance, wasFollowing, msSinceInput) {
+  if (distance <= FOLLOW_SLACK) return true;
+  if (msSinceInput <= INPUT_WINDOW_MS || distance > FAR_AWAY) return false;
+  return wasFollowing;
+}
+function codeAtBottom() { return codeStick; }
+function codeScroll(force) {
+  const f = codeFeed();
+  if (!f) return;
+  if (force) codeStick = true;
+  if (codeStick) f.scrollTop = f.scrollHeight;
+}
+(function watchCodeReader() {
+  const f = codeFeed();
+  if (!f) return;
+  const touch = () => { codeLastInput = Date.now(); };
+  f.addEventListener("wheel", (e) => { touch(); if (e.deltaY < 0 && f.scrollTop > 0) codeStick = false; }, { passive: true });
+  f.addEventListener("touchmove", touch, { passive: true });
+  f.addEventListener("pointerdown", touch, { passive: true });
+  f.addEventListener("keydown", (e) => {
+    touch();
+    if (["PageUp", "ArrowUp", "Home"].includes(e.key) && f.scrollTop > 0) codeStick = false;
+  });
+  f.addEventListener("scroll", () => {
+    codeStick = followAfterScroll(f.scrollHeight - f.scrollTop - f.clientHeight, codeStick, Date.now() - codeLastInput);
+  }, { passive: true });
+})();
 
 function codeCard(cls, html) {
   const el = document.createElement("div");
@@ -1915,6 +1945,7 @@ function codeEvent(ev, replay) {
     case "user":
       codeEnd();
       codeCard("code-mobile-card--user", `<div class="code-mobile-card-body">${esc(ev.text)}</div>`);
+      if (!replay && ev.origin && ev.origin === code.client) codeScroll(true);   // #4014: what you sent is shown, even scrolled up
       break;
     case "tool_call": {
       codeEnd();
