@@ -43,6 +43,8 @@ The customized Strata platform (featuring the authenticated Claude Code Web Term
   `auto-thinking-level.md`, `cli-graphical-styling-and-thinking-defaults.md`, `rx-7600-xt-cachyos-deployment.md`)
   to `origin/main` (fast-forward, no force) after `scan_secrets_in_text` verified 0 findings across all staged files.
 
+- 2026-10-27: Pushed `92b7249a..1c564fc4` (11 commits, fast-forward, `main` only, no force): the v0.2.7 engine/server fixes, web side-by-side view, Home Assistant light groups, the Code feed scroll fix, saved sessions, edit/rewind/branch and the README. Before the push, `scan_secrets_in_text` ran over all 31 changed files (0 findings; a planted fake key was caught), and the 1,971 added lines were checked for the home path, the checkout's parent folder, the host name, the profile email, the private domain and the LAN IPs: 0 hits. Pushed from Claude Code after the user's explicit "then push main to origin".
+
 ## Decisions & Configuration
 
 ### 1. Remote Layout
