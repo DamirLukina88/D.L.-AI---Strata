@@ -247,7 +247,7 @@ def score(case: dict, surface: str, rec: dict) -> list[dict]:
 
 # ------------------------------------------------------------------ prompt size
 def sizes() -> dict:
-    ws = Path(os.environ.get("STRATA_WORKSPACE_DIR") or "/mnt/data/DL-AI-workspace")
+    ws = Path(os.environ.get("STRATA_WORKSPACE_DIR") or Path(__file__).resolve().parents[2] / "DL-AI-workspace")
     system = cli.build_dl_system_prompt(ws, "act")
     registry = None                                   # the tools a fresh Code tab session sends, as dl_sessiond builds them
     if cli.dl_mcp is not None:
@@ -390,7 +390,7 @@ def main() -> int:
     r.add_argument("--cases", default="", help="comma-separated case ids (default: all)")
     r.add_argument("--repeat", type=int, default=1)
     r.add_argument("--timeout", type=float, default=600, help="seconds per CLI turn")
-    r.add_argument("--out", default="/mnt/data/DL-AI-workspace/bench")
+    r.add_argument("--out", default=str(Path(os.environ.get("STRATA_WORKSPACE_DIR") or Path(__file__).resolve().parents[2] / "DL-AI-workspace") / "bench"))
     s = sub.add_parser("score")
     s.add_argument("run_dir")
     c = sub.add_parser("compare")

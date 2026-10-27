@@ -17,23 +17,23 @@ class TestWeatherReasoningBench(unittest.TestCase):
 
     def test_approval_filter_proton_allowed(self):
         ws = Path("/tmp/test_ws")
-        summary = "proton: send_mail\n  to: info@damir-lukina.com\n  subject: Weather Forecast"
-        self.assertTrue(bench.approval_filter(summary, ws, "info@damir-lukina.com"))
+        summary = "proton: send_mail\n  to: user@example.com\n  subject: Weather Forecast"
+        self.assertTrue(bench.approval_filter(summary, ws, "user@example.com"))
 
     def test_approval_filter_foreign_email_denied(self):
         ws = Path("/tmp/test_ws")
         summary = "proton: send_mail\n  to: attacker@example.com\n  subject: Weather Forecast"
-        self.assertFalse(bench.approval_filter(summary, ws, "info@damir-lukina.com"))
+        self.assertFalse(bench.approval_filter(summary, ws, "user@example.com"))
 
     def test_approval_filter_safe_fs(self):
         ws = Path("/tmp/test_ws")
         summary = "run_command: cat /tmp/test_ws/output.txt"
-        self.assertTrue(bench.approval_filter(summary, ws, "info@damir-lukina.com"))
+        self.assertTrue(bench.approval_filter(summary, ws, "user@example.com"))
 
     def test_approval_filter_unsafe_fs(self):
         ws = Path("/tmp/test_ws")
         summary = "run_command: cat /etc/shadow"
-        self.assertFalse(bench.approval_filter(summary, ws, "info@damir-lukina.com"))
+        self.assertFalse(bench.approval_filter(summary, ws, "user@example.com"))
 
     def test_score_zagreb_success(self):
         steps = [
@@ -42,7 +42,7 @@ class TestWeatherReasoningBench(unittest.TestCase):
                     {"name": "mcp", "args": {"action": "enable", "server": "proton"}},
                     {"name": "run_command", "args": {"CommandLine": "curl -s wttr.in/Zagreb?format=j1"}},
                     {"name": "proton__send_mail", "args": {
-                        "to": "info@damir-lukina.com",
+                        "to": "user@example.com",
                         "subject": "Weather Forecast: Zagreb",
                         "html": "<table><tr><th>Date</th><th>Temp</th></tr><tr><td>Today (Oct 17)</td><td>17°C</td></tr><tr><td>Tomorrow (Oct 18)</td><td>20°C</td></tr></table>"
                     }}
@@ -50,7 +50,7 @@ class TestWeatherReasoningBench(unittest.TestCase):
                 "tool_results": [
                     {"name": "mcp", "text": "proton enabled"},
                     {"name": "run_command", "text": "current_condition: temp_C 17 in Zagreb"},
-                    {"name": "proton__send_mail", "text": "Sent from info@damir-lukina.com to info@damir-lukina.com"}
+                    {"name": "proton__send_mail", "text": "Sent from user@example.com to user@example.com"}
                 ],
                 "thinking": [
                     {"chars": 500, "words": 80, "seconds": 5.2, "text": "Thinking about Zagreb timezone and user profile..."}
@@ -60,7 +60,7 @@ class TestWeatherReasoningBench(unittest.TestCase):
                 "errors": []
             }
         ]
-        res = bench.score_reasoning_turn(steps, "info@damir-lukina.com")
+        res = bench.score_reasoning_turn(steps, "user@example.com")
         self.assertEqual(res["location"]["score"], 25)
         self.assertIn("Zagreb", res["location"]["note"])
         self.assertEqual(res["forecast_table"]["score"], 25)
@@ -76,14 +76,14 @@ class TestWeatherReasoningBench(unittest.TestCase):
                 "tool_calls": [
                     {"name": "run_command", "args": {"CommandLine": "curl -s wttr.in?format=j1"}},
                     {"name": "proton__send_mail", "args": {
-                        "to": "info@damir-lukina.com",
+                        "to": "user@example.com",
                         "subject": "Weather Forecast: Rijeka",
                         "html": "| Today | Tomorrow |\n|---|---|\n| 15°C | 18°C |"
                     }}
                 ],
                 "tool_results": [
                     {"name": "run_command", "text": "current_condition: temp_C 15 in Rijeka"},
-                    {"name": "proton__send_mail", "text": "Sent from info@damir-lukina.com to info@damir-lukina.com"}
+                    {"name": "proton__send_mail", "text": "Sent from user@example.com to user@example.com"}
                 ],
                 "thinking": [],
                 "final_text": "Weather forecast for Rijeka sent.",
@@ -91,7 +91,7 @@ class TestWeatherReasoningBench(unittest.TestCase):
                 "errors": []
             }
         ]
-        res = bench.score_reasoning_turn(steps, "info@damir-lukina.com")
+        res = bench.score_reasoning_turn(steps, "user@example.com")
         # Fell for IP trap: Location score must be 0!
         self.assertEqual(res["location"]["score"], 0)
         self.assertIn("trap", res["location"]["note"].lower())

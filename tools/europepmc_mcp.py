@@ -12,7 +12,7 @@ import json
 import subprocess
 from pathlib import Path
 
-WRAPPER = "/home/damirl/.gemini/config/plugins/science/skills/literature_search_europepmc/scripts/europepmc_api.py"
+WRAPPER = str(Path.home() / ".gemini" / "config" / "plugins" / "science" / "skills" / "literature_search_europepmc" / "scripts" / "europepmc_api.py")
 
 def run_cmd(subcmd: str, arg: str) -> str:
     out_file = "/tmp/epmc_out.json"
@@ -27,6 +27,23 @@ def run_cmd(subcmd: str, arg: str) -> str:
         return f"Error: No output generated. Stderr: {res.stderr}"
     except Exception as e:
         return f"Europe PMC query error: {e}"
+
+def _reply(req, res):
+    """Write one JSON-RPC reply: nothing for a notification, an empty result for ping, and isError on a tool
+    result whose text is an error message ("... error: ...")."""
+    if "id" not in req:
+        return
+    if req.get("method") == "ping":
+        res = {"jsonrpc": "2.0", "id": req["id"], "result": {}}
+    result = res.get("result")
+    if req.get("method") == "tools/call" and isinstance(result, dict) and "isError" not in result:
+        text = "".join(c.get("text", "") for c in result.get("content", []) if isinstance(c, dict))
+        head = text.lstrip().split(":", 1)
+        result["isError"] = len(head) == 2 and len(head[0]) <= 45 and any(
+            w in head[0].lower() for w in ("error", "failed"))
+    sys.stdout.write(json.dumps(res) + "\n")
+    sys.stdout.flush()
+
 
 def main():
     while True:
@@ -51,8 +68,7 @@ def main():
                     "serverInfo": {"name": "europepmc-mcp", "version": "1.0.0"}
                 }
             }
-            sys.stdout.write(json.dumps(res) + "\n")
-            sys.stdout.flush()
+            _reply(req, res)
         elif method == "tools/list":
             tools = [
                 {
@@ -79,8 +95,7 @@ def main():
                 }
             ]
             res = {"jsonrpc": "2.0", "id": msg_id, "result": {"tools": tools}}
-            sys.stdout.write(json.dumps(res) + "\n")
-            sys.stdout.flush()
+            _reply(req, res)
         elif method == "tools/call":
             params = req.get("params", {})
             name = params.get("name")
@@ -107,8 +122,9 @@ def main():
                     "id": msg_id,
                     "error": {"code": -32601, "message": f"Method not found: {name}"}
                 }
-            sys.stdout.write(json.dumps(res) + "\n")
-            sys.stdout.flush()
+            _reply(req, res)
+        else:
+            _reply(req, {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": "Method not found"}})
 
 if __name__ == "__main__":
     main()

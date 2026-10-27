@@ -10,35 +10,16 @@ Exposes:
 import os
 import sys
 import json
-from pathlib import Path
 from openai import OpenAI
 
 def resolve_api_key():
-    key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("OPENAI_API_KEY")
-    if key and key.startswith("sk-"):
-        return key
-    
-    env_paths = [
-        Path.home() / "Desktop" / "Strata" / "wiki" / "private" / ".env",
-        Path.home() / ".config" / "dl-ai" / "secrets.env"
-    ]
-    for p in env_paths:
-        if p.is_file():
-            try:
-                for line in p.read_text(encoding="utf-8").splitlines():
-                    line = line.strip()
-                    if line.startswith("DEEPSEEK_API_KEY="):
-                        val = line.split("=", 1)[1].strip().strip('"').strip("'")
-                        if val:
-                            return val
-            except Exception:
-                pass
-    return key
+    """Only the key D.L. AI hands this server (mcp.json env_from_secrets, from ~/.config/dl-ai/secrets.env)."""
+    return os.environ.get("DEEPSEEK_API_KEY", "").strip()
 
 def handle_query(prompt: str, model: str = "deepseek-flash", max_tokens: int = 4096) -> str:
     api_key = resolve_api_key()
     if not api_key:
-        return "Error: No DeepSeek API key configured in secrets.env or wiki/private/.env."
+        return "Error: DEEPSEEK_API_KEY is not set in ~/.config/dl-ai/secrets.env."
     
     base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     client = OpenAI(api_key=api_key, base_url=base_url)
@@ -64,6 +45,23 @@ def handle_query(prompt: str, model: str = "deepseek-flash", max_tokens: int = 4
             if m == models[-1]:
                 return f"DeepSeek API Error: {e}"
 
+def _reply(req, res):
+    """Write one JSON-RPC reply: nothing for a notification, an empty result for ping, and isError on a tool
+    result whose text is an error message ("... error: ...")."""
+    if "id" not in req:
+        return
+    if req.get("method") == "ping":
+        res = {"jsonrpc": "2.0", "id": req["id"], "result": {}}
+    result = res.get("result")
+    if req.get("method") == "tools/call" and isinstance(result, dict) and "isError" not in result:
+        text = "".join(c.get("text", "") for c in result.get("content", []) if isinstance(c, dict))
+        head = text.lstrip().split(":", 1)
+        result["isError"] = len(head) == 2 and len(head[0]) <= 45 and any(
+            w in head[0].lower() for w in ("error", "failed"))
+    sys.stdout.write(json.dumps(res) + "\n")
+    sys.stdout.flush()
+
+
 def main():
     while True:
         line = sys.stdin.readline()
@@ -87,8 +85,7 @@ def main():
                     "serverInfo": {"name": "deepseek-mcp", "version": "1.0.0"}
                 }
             }
-            sys.stdout.write(json.dumps(res) + "\n")
-            sys.stdout.flush()
+            _reply(req, res)
         elif method == "tools/list":
             tools = [
                 {
@@ -105,8 +102,7 @@ def main():
                 }
             ]
             res = {"jsonrpc": "2.0", "id": msg_id, "result": {"tools": tools}}
-            sys.stdout.write(json.dumps(res) + "\n")
-            sys.stdout.flush()
+            _reply(req, res)
         elif method == "tools/call":
             params = req.get("params", {})
             name = params.get("name")
@@ -126,8 +122,9 @@ def main():
                     "id": msg_id,
                     "error": {"code": -32601, "message": f"Method not found: {name}"}
                 }
-            sys.stdout.write(json.dumps(res) + "\n")
-            sys.stdout.flush()
+            _reply(req, res)
+        else:
+            _reply(req, {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": "Method not found"}})
 
 if __name__ == "__main__":
     main()

@@ -1,85 +1,169 @@
 #!/usr/bin/env python3
 """ray_identity_mcp.py - Ray's self-awareness, identity, architecture, and live project git status MCP server."""
-import sys
 import json
+import os
 import subprocess
+import sys
+import urllib.request
 from pathlib import Path
 
-WORKSPACE = Path("/home/damirl/Desktop/Strata")
-GITHUB_REPO = "https://github.com/DamirLukina88/D.L.-AI---Strata"
+WORKSPACE = Path(__file__).resolve().parent.parent      # the Strata checkout this server runs from
 
+# Who Ray is does not change; everything about the machine and the engine is read when the tool is called, so it
+# cannot go stale (the hardcoded copy said 0.0.0.0:8080 and a 2,560 MiB reserve while the server listened on
+# 127.0.0.1 with 3,584 MiB).
 RAY_PROFILE = {
     "name": "Ray (Rei)",
     "role": "Autonomous local AI pair programmer, engineering assistant, and smart home orchestrator",
     "persona": "Calm, technically rigorous, concise, direct, and pragmatic. Values measured benchmarks over claims, maintains documentation integrity, and preserves strict local privacy.",
-    "host_hardware": {
-        "os": "CachyOS Linux (Arch Linux kernel with BORE / x86-64-v3 optimizations)",
-        "cpu": "AMD Ryzen 5 3600 (6 cores, 12 threads)",
-        "ram": "32 GB DDR4 (system RAM hosts pageable experts and KV caches)",
-        "gpu": "AMD Radeon RX 7600 XT 16 GB VRAM (Navi 33 / gfx1102, ROCm 7.2.4)",
-        "storage": "Dual NVMe SSDs (/ on root, /mnt/data for Strata build trees and 59GB model shards)"
-    },
-    "engine_and_model": {
-        "engine": "Strata (C++/CUDA/HIP high-performance local MoE inference engine, v0.2.5 sync)",
-        "model": "Qwen3.8-Flash-Next Coder (IQ1_M quantization, 256 experts, mtp-q2_0 speculative decoding)",
-        "vram_allocation": "3,736 resident expert slots on device with 2,560 MiB VRAM reserve for display and desktop stability",
-        "vision": "CPU vision inference pipeline (--vision cpu)",
-        "audio_voice": "Local PipeWire speechd TTS + browser speech-to-text (STT)"
-    },
-    "runtime_services": [
-        "strata-server.service (0.0.0.0:8080 with bearer token authentication)",
-        "strata-watchdog.service (auto-recovery and health monitor probing /health every 30s)",
-        "dl-ai-sessiond.service (shared multi-client session daemon, CLI, web interface)",
-        "cloudflared.service (zero-port secure remote access via QUIC tunnel and Cloudflare Access JWT)"
-    ],
-    "github_repository": GITHUB_REPO,
-    "privacy_policy": "Zero telemetry, 100% local execution on CachyOS / RX 7600 XT; cloud reasoning (DeepSeek) remains strictly gated behind explicit user confirmation."
+    "privacy_policy": "Runs locally on this PC. DeepSeek (cloud) asks before each call unless the user typed /mcp trust deepseek for the session.",
 }
+SERVICES = ("strata-server", "strata-watchdog", "dl-ai-sessiond", "cloudflared")
+
+
+def _run(cmd: list[str], cwd: Path | None = None) -> str:
+    try:
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def _read(path: str) -> str:
+    try:
+        return Path(path).read_text(errors="replace")
+    except OSError:
+        return ""
+
+
+def _server_cmdline() -> list[str]:
+    """The running Strata server's command line (serve/server.py), read from /proc."""
+    for proc in Path("/proc").glob("[0-9]*"):
+        try:
+            args = (proc / "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        args = [a.decode(errors="replace") for a in args if a]
+        if any(a.endswith("serve/server.py") for a in args):
+            return args
+    return []
+
+
+def _flag(args: list[str], name: str) -> str | None:
+    if name in args:
+        i = args.index(name)
+        return args[i + 1] if i + 1 < len(args) and not args[i + 1].startswith("--") else ""
+    return None
+
+
+def _host() -> list[str]:
+    osr = dict(l.split("=", 1) for l in _read("/etc/os-release").splitlines() if "=" in l)
+    cpu = next((l.split(":", 1)[1].strip() for l in _read("/proc/cpuinfo").splitlines() if l.startswith("model name")), "?")
+    cores = next((l.split(":", 1)[1].strip() for l in _read("/proc/cpuinfo").splitlines() if l.startswith("cpu cores")), "?")
+    mem = next((int(l.split()[1]) for l in _read("/proc/meminfo").splitlines() if l.startswith("MemTotal")), 0)
+    gpus = [l.split('"')[5] for l in _run(["lspci", "-mm"]).splitlines() if '"VGA' in l or '"Display' in l]
+    vram = [int(_read(str(f)) or 0) for f in Path("/sys/class/drm").glob("card*/device/mem_info_vram_total")]
+    rocm = _read("/opt/rocm/.info/version").strip()
+    return [
+        f"- **OS:** {osr.get('PRETTY_NAME', '?').strip(chr(34))}, kernel {_run(['uname', '-r'])}",
+        f"- **CPU:** {cpu} ({cores} cores, {os.cpu_count()} threads)",
+        f"- **RAM:** {mem / 1024 / 1024:.1f} GiB",
+        f"- **GPU:** {'; '.join(gpus) or '?'}" + (f", {max(vram) / 2**30:.1f} GiB VRAM" if vram else "")
+        + (f", ROCm {rocm}" if rocm else ""),
+    ]
+
+
+def _engine() -> list[str]:
+    args = _server_cmdline()
+    if not args:
+        return ["- **Strata server:** not running"]
+    cfg_path = _flag(args, "--config")
+    try:
+        cfg = json.loads(Path(cfg_path).read_text()) if cfg_path else {}
+    except (OSError, ValueError):
+        cfg = {}
+    eng = [str(a) for a in cfg.get("args") or []]
+    host = _flag(args, "--host") or cfg.get("host") or "127.0.0.1"
+    port = _flag(args, "--port") or cfg.get("port") or 8080
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=3) as r:
+            health = json.loads(r.read())
+    except (OSError, ValueError):
+        health = {}
+    lines = [
+        f"- **Strata server:** listening on {host}:{port}, {health.get('status', 'no answer')}"
+        + (", model loaded" if health.get("loaded") else ", model not loaded (loads on the first request)" if health else ""),
+        f"- **Model:** {health.get('model') or cfg.get('display_name') or cfg.get('model_name', '?')}, "
+        f"context {health.get('max_context') or _flag(eng, '--max-context') or '?'} tokens",
+    ]
+    picks = [(f, label) for f, label in (("--vram-reserve-mib", "VRAM reserve (MiB)"), ("--kv", "KV cache"),
+                                          ("--spec", "speculative tokens"), ("--expert-cache", "expert cache"),
+                                          ("--prefill", "prefill"))]
+    found = [f"{label} {_flag(eng, f)}" for f, label in picks if _flag(eng, f)]
+    if "--resident-experts" in eng:
+        found.append("resident experts on")
+    if _flag(eng, "--mtp") is not None:
+        found.append("MTP draft on")
+    if found:
+        lines.append(f"- **Engine settings ({Path(cfg_path).name if cfg_path else 'config'}):** " + ", ".join(found))
+    if cfg.get("vision"):
+        lines.append("- **Vision:** on (CPU pipeline)")
+    return lines
+
+
+def _services() -> list[str]:
+    out = []
+    for name in SERVICES:
+        state = _run(["systemctl", "--user", "is-active", name]) or "unknown"
+        if state in ("inactive", "unknown"):
+            state = _run(["systemctl", "is-active", name]) or state
+        out.append(f"- `{name}`: {state}")
+    return out
+
 
 def get_identity_text() -> str:
     lines = [
         f"# Core Identity: {RAY_PROFILE['name']}",
         f"**Role:** {RAY_PROFILE['role']}",
-        f"**Repository:** [{GITHUB_REPO}]({GITHUB_REPO})",
         f"**Persona:** {RAY_PROFILE['persona']}\n",
-        "### Hardware Environment (Host PC):",
-        f"- **OS:** {RAY_PROFILE['host_hardware']['os']}",
-        f"- **CPU:** {RAY_PROFILE['host_hardware']['cpu']}",
-        f"- **RAM:** {RAY_PROFILE['host_hardware']['ram']}",
-        f"- **GPU:** {RAY_PROFILE['host_hardware']['gpu']}",
-        f"- **Storage:** {RAY_PROFILE['host_hardware']['storage']}\n",
-        "### Inference Engine & Model Architecture:",
-        f"- **Engine:** {RAY_PROFILE['engine_and_model']['engine']}",
-        f"- **Base Model:** {RAY_PROFILE['engine_and_model']['model']}",
-        f"- **VRAM Topology:** {RAY_PROFILE['engine_and_model']['vram_allocation']}",
-        f"- **Vision:** {RAY_PROFILE['engine_and_model']['vision']}",
-        f"- **Voice Persona:** {RAY_PROFILE['engine_and_model']['audio_voice']}\n",
-        "### Active Systemd Daemons:",
+        "### Host PC (read now)",
+        *_host(),
+        "",
+        "### Engine and model (read now)",
+        *_engine(),
+        "",
+        "### Services (read now)",
+        *_services(),
+        f"\n**Privacy:** {RAY_PROFILE['privacy_policy']}",
     ]
-    for srv in RAY_PROFILE['runtime_services']:
-        lines.append(f"- `{srv}`")
-    lines.append(f"\n**Privacy & Governance:** {RAY_PROFILE['privacy_policy']}")
     return "\n".join(lines)
 
 def get_git_status() -> str:
     try:
-        branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=WORKSPACE).decode().strip()
-        head = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=WORKSPACE).decode().strip()
-        log = subprocess.check_output(["git", "log", "-n", "8", "--pretty=format:- `%h` %s *(%cr)*"], cwd=WORKSPACE).decode().strip()
-        remote = subprocess.check_output(["git", "remote", "get-url", "origin"], cwd=WORKSPACE).decode().strip()
-        status = subprocess.check_output(["git", "status", "-s"], cwd=WORKSPACE).decode().strip()
-        
+        branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], WORKSPACE)
+        head = _run(["git", "rev-parse", "--short", "HEAD"], WORKSPACE)
+        if not head:
+            return f"Greška pri dohvaćanju git statusa: {WORKSPACE} nije git repozitorij"
+        log = _run(["git", "log", "-n", "8", "--pretty=format:- `%h` %s *(%cr)*"], WORKSPACE)
+        remote = _run(["git", "remote", "get-url", "origin"], WORKSPACE)
+        status = subprocess.run(["git", "status", "-s"], cwd=WORKSPACE, capture_output=True, text=True,
+                                timeout=5).stdout.rstrip()       # unstripped: " M" (changed, not staged) keeps its column
+        counts = (_run(["git", "rev-list", "--left-right", "--count", "@{u}...HEAD"], WORKSPACE)
+                  or _run(["git", "rev-list", "--left-right", "--count", f"origin/{branch}...HEAD"], WORKSPACE)).split()
+        if len(counts) == 2:
+            behind, ahead = counts
+            sync = ("isto kao udaljena grana, prema zadnjem fetchu" if behind == ahead == "0"
+                    else f"{ahead} commitova ispred i {behind} iza udaljene grane, prema zadnjem fetchu")
+        else:
+            sync = "nema udaljene grane za usporedbu"
         status_line = "Radno stablo je čisto (nema nepohranjenih izmjena)." if not status else f"Nepohranjene izmjene:\n```\n{status}\n```"
-        
         return (
             f"## D.L. AI - Strata: Git Status & Najnovije Promjene\n"
-            f"- **Repozitorij:** [{remote}]({remote})\n"
-            f"- **Aktivna grana:** `{branch}`\n"
+            + (f"- **Repozitorij:** {remote}\n" if remote else "")
+            + f"- **Aktivna grana:** `{branch}` ({sync})\n"
             f"- **Zadnji commit (HEAD):** `{head}`\n"
             f"- **Status radnog stabla:** {status_line}\n\n"
             f"### Najnoviji commitovi na projektu:\n"
-            f"{log}\n\n"
-            f"*Izvorni kod i dokumentacija sinkronizirani su na GitHubu.*"
+            f"{log}"
         )
     except Exception as e:
         return f"Greška pri dohvaćanju git statusa: {e}"
@@ -105,6 +189,23 @@ def get_catalog_summary() -> str:
         return "\n".join(lines)
     except Exception as e:
         return f"Greška pri dohvaćanju kataloga: {e}"
+
+def _reply(req, res):
+    """Write one JSON-RPC reply: nothing for a notification, an empty result for ping, and isError on a tool
+    result whose text is an error message ("... error: ...")."""
+    if "id" not in req:
+        return
+    if req.get("method") == "ping":
+        res = {"jsonrpc": "2.0", "id": req["id"], "result": {}}
+    result = res.get("result")
+    if req.get("method") == "tools/call" and isinstance(result, dict) and "isError" not in result:
+        text = "".join(c.get("text", "") for c in result.get("content", []) if isinstance(c, dict))
+        head = text.lstrip().split(":", 1)
+        result["isError"] = len(head) == 2 and len(head[0]) <= 45 and any(
+            w in head[0].lower() for w in ("error", "failed"))
+    sys.stdout.write(json.dumps(res) + "\n")
+    sys.stdout.flush()
+
 
 def main():
     while True:
@@ -151,8 +252,7 @@ def main():
             res = {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": ans}]}}
         else:
             res = {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"Method {m} not found"}}
-        sys.stdout.write(json.dumps(res) + "\n")
-        sys.stdout.flush()
+        _reply(req, res)
 
 if __name__ == "__main__":
     main()

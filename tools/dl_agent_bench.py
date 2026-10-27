@@ -48,7 +48,7 @@ from typing import Callable
 
 HERE = Path(__file__).resolve().parent
 BENCH = HERE / "dl_agent_bench"
-DEFAULT_ROOT = Path("/mnt/data/DL-AI-workspace/bench")
+DEFAULT_ROOT = Path(__file__).resolve().parents[2] / "DL-AI-workspace" / "bench"     # the workspace next to the checkout
 NUDGE = "continue"
 
 WRITE_TOOLS = ("write_to_file", "replace_file_content")

@@ -9,7 +9,7 @@ def wiki_summary(title: str) -> str:
     try:
         encoded = urllib.parse.quote(title.strip().replace(" ", "_"))
         url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded}"
-        req = urllib.request.Request(url, headers={"User-Agent": "DL-AI-Strata/1.0 (info@damir-lukina.com)"})
+        req = urllib.request.Request(url, headers={"User-Agent": "DL-AI-Strata/1.0 (+https://github.com/DamirLukina88/D.L.-AI---Strata)"})
         with urllib.request.urlopen(req, timeout=10) as r:
             data = json.loads(r.read().decode("utf-8"))
         
@@ -24,6 +24,23 @@ def wiki_summary(title: str) -> str:
         return f"Wikipedia HTTP Error: {e}"
     except Exception as e:
         return f"Wikipedia API error: {e}"
+
+def _reply(req, res):
+    """Write one JSON-RPC reply: nothing for a notification, an empty result for ping, and isError on a tool
+    result whose text is an error message ("... error: ...")."""
+    if "id" not in req:
+        return
+    if req.get("method") == "ping":
+        res = {"jsonrpc": "2.0", "id": req["id"], "result": {}}
+    result = res.get("result")
+    if req.get("method") == "tools/call" and isinstance(result, dict) and "isError" not in result:
+        text = "".join(c.get("text", "") for c in result.get("content", []) if isinstance(c, dict))
+        head = text.lstrip().split(":", 1)
+        result["isError"] = len(head) == 2 and len(head[0]) <= 45 and any(
+            w in head[0].lower() for w in ("error", "failed"))
+    sys.stdout.write(json.dumps(res) + "\n")
+    sys.stdout.flush()
+
 
 def main():
     while True:
@@ -57,8 +74,7 @@ def main():
             res = {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": text}]}}
         else:
             res = {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "Method not found"}}
-        sys.stdout.write(json.dumps(res) + "\n")
-        sys.stdout.flush()
+        _reply(req, res)
 
 if __name__ == "__main__":
     main()

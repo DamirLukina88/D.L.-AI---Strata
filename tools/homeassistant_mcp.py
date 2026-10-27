@@ -15,7 +15,7 @@ Tools provided to Strata:
 
 Authentication:
 Reads token and URL from:
-1. --config / path /mnt/data/homeassistant/mcp_config.json
+1. --config / path <the checkout's parent>/homeassistant/mcp_config.json
 2. HASS_TOKEN and HASS_URL environment variables
 3. --token and --url CLI arguments
 """
@@ -37,7 +37,8 @@ from typing import Any
 PROTOCOL = "2025-06-18"
 PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
 VERSION = "1.0.0"
-DEFAULT_CONFIG_PATH = Path("/mnt/data/homeassistant/mcp_config.json")
+HA_DIR = Path(__file__).resolve().parents[2] / "homeassistant"        # Home Assistant lives next to the checkout
+DEFAULT_CONFIG_PATH = HA_DIR / "mcp_config.json"
 DEFAULT_HASS_URL = "http://127.0.0.1:8123"
 
 
@@ -50,7 +51,7 @@ class AreaDeviceRegistry:
     """Loads and caches Home Assistant area, device, and entity registries from disk."""
 
     def __init__(self, storage_dir: Path | None = None):
-        self.storage_dir = storage_dir or Path("/mnt/data/homeassistant/config/.storage")
+        self.storage_dir = storage_dir or HA_DIR / "config" / ".storage"
         self._last_loaded = 0.0
         self._cache_ttl = 30.0  # seconds
         self._areas: dict[str, str] = {}  # area_id -> area_name
@@ -659,7 +660,7 @@ class HomeAssistantMcpServer:
             raise ValueError("entity_id is required")
         image_bytes = self.client.get_camera_snapshot(entity_id)
         if not save_path:
-            save_dir = Path("/mnt/data/homeassistant/snapshots")
+            save_dir = HA_DIR / "snapshots"
             save_dir.mkdir(parents=True, exist_ok=True)
             clean_eid = entity_id.replace(".", "_")
             ts = int(time.time())
@@ -708,7 +709,7 @@ def load_config(config_file: Path | None = None) -> dict[str, str]:
     cfg: dict[str, str] = {
         "url": os.environ.get("HASS_URL", DEFAULT_HASS_URL),
         "token": os.environ.get("HASS_TOKEN", ""),
-        "storage_dir": os.environ.get("HASS_STORAGE_DIR", "/mnt/data/homeassistant/config/.storage"),
+        "storage_dir": os.environ.get("HASS_STORAGE_DIR", str(HA_DIR / "config" / ".storage")),
     }
     path = config_file or DEFAULT_CONFIG_PATH
     if path.is_file():

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import aiohttp
 
-CONFIG_PATH = Path("/mnt/data/homeassistant/mcp_config.json")
+CONFIG_PATH = Path(__file__).resolve().parents[2] / "homeassistant" / "mcp_config.json"   # next to the checkout
 
 TARGET_POWER_SENSORS = [
     "sensor.pc_power",

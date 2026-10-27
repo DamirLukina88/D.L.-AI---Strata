@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """croatia_live_mcp.py - Live Croatian road conditions (HAK), official DHMZ observations, fuel prices, and aviation METAR."""
-import sys
+import gzip
 import json
 import re
+import statistics
+import sys
 import urllib.request
 import xml.etree.ElementTree as ET
 
@@ -83,8 +85,43 @@ def get_dhmz_weather(city: str = "Zagreb") -> str:
     except Exception as e:
         return f"Greška pri dohvaćanju DHMZ podataka: {e}"
 
+# The Ministry of Economy's fuel price register (mzoe-gor.hr): every station reports its prices, the web app reads
+# them from this file.  vrsta_goriva ids: 2 Eurosuper 95 and 8 Eurodizel without additives (the grades the
+# Government decree caps), 11 plavi dizel, 9 autoplin, 1 / 7 the same with additives.
+FUEL_DATA_URL = "https://webservis.mzoe-gor.hr/data.gz"
+FUEL_GRADES = ((2, "Eurosuper 95 (bez aditiva)"), (8, "Eurodizel (bez aditiva)"), (11, "Plavi dizel"),
+               (9, "Autoplin (UNP)"), (1, "Eurosuper 95 s aditivima"), (7, "Eurodizel s aditivima"))
+
+
+def get_fuel_prices() -> str:
+    """Median price per grade over the stations in the Ministry's register, read now.  The median, because a few
+    stations report wrong prices (over 9 EUR/l)."""
+    try:
+        req = urllib.request.Request(FUEL_DATA_URL, headers={"User-Agent": "Strata-Fuel/1.0"})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            raw = resp.read()
+        data = json.loads(gzip.decompress(raw) if raw[:2] == b"\x1f\x8b" else raw)
+        grade_of = {g["id"]: g["vrsta_goriva_id"] for g in data.get("gorivos") or []}
+        prices: dict[int, list[float]] = {}
+        for station in data.get("postajas") or []:
+            for c in station.get("cjenici") or []:
+                v = grade_of.get(c.get("gorivo_id"))
+                if v is not None and c.get("cijena"):
+                    prices.setdefault(v, []).append(float(c["cijena"]))
+        lines = [f"### Cijene goriva u RH (Ministarstvo gospodarstva, mzoe-gor.hr, {len(data.get('postajas') or [])} postaja, očitano sada)"]
+        for vid, label in FUEL_GRADES:
+            xs = prices.get(vid)
+            if xs:
+                lines.append(f"- **{label}:** medijan {statistics.median(xs):.2f} € / l ({len(xs)} cijena)".replace(".", ",", 1))
+        lines.append("- Najviše cijene Eurosupera 95, Eurodizela i plavog dizela bez aditiva određuje Vlada uredbom (obično tjedno); "
+                     "goriva s aditivima i cijene na autocestama nisu ograničene.")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Cijene goriva nedostupne (mzoe-gor.hr): {e}"
+
+
 def get_fuel_and_aviation(airport_icao: str = "LDZA") -> str:
-    """Fetch live aviation METAR (LDZA / LDZL) and official Croatian fuel prices."""
+    """Fetch live aviation METAR (LDZA / LDZL) and the current Croatian fuel prices."""
     icao = airport_icao.strip().upper()
     metar_url = f"https://aviationweather.gov/api/data/metar?ids={icao}&format=json"
     metar_text = ""
@@ -105,14 +142,7 @@ def get_fuel_and_aviation(airport_icao: str = "LDZA") -> str:
     except Exception as e:
         metar_text = f"METAR nedostupan za {icao}: {e}\n"
     
-    fuel_text = (
-        "### Službene regulirane cijene goriva u Republici Hrvatskoj\n"
-        "- Cijene naftnih derivata u RH određuju se Vladinom Uredbom o utvrđivanju najviših maloprodajnih cijena naftnih derivata (14-dnevni obračunski ciklus):\n"
-        "  • **Eurosuper 95:** ~1,43 € / litra\n"
-        "  • **Eurodizel:** ~1,33 € / litra\n"
-        "  • **Plavi dizel (poljoprivreda i ribarstvo):** ~0,73 € / litra\n"
-        "- *Napomena:* Cijene na autocestama i za premium goriva s aditivima mogu se slobodno formirati od strane distributera (INA, Petrol, Lukoil, Crodux)."
-    )
+    fuel_text = get_fuel_prices()
     
     return f"## Zrakoplovni i Cestovni Podaci RH\n\n{metar_text}\n{fuel_text}"
 
@@ -233,6 +263,23 @@ def get_holidays_and_sundays(query: str = "") -> str:
         
     return "\n".join(lines)
 
+def _reply(req, res):
+    """Write one JSON-RPC reply: nothing for a notification, an empty result for ping, and isError on a tool
+    result whose text is an error message ("... error: ...")."""
+    if "id" not in req:
+        return
+    if req.get("method") == "ping":
+        res = {"jsonrpc": "2.0", "id": req["id"], "result": {}}
+    result = res.get("result")
+    if req.get("method") == "tools/call" and isinstance(result, dict) and "isError" not in result:
+        text = "".join(c.get("text", "") for c in result.get("content", []) if isinstance(c, dict))
+        head = text.lstrip().split(":", 1)
+        result["isError"] = len(head) == 2 and len(head[0]) <= 45 and any(
+            w in head[0].lower() for w in ("error", "failed"))
+    sys.stdout.write(json.dumps(res) + "\n")
+    sys.stdout.flush()
+
+
 def main():
     while True:
         line = sys.stdin.readline()
@@ -267,7 +314,7 @@ def main():
                 },
                 {
                     "name": "croatia_fuel_and_aviation",
-                    "description": "Official Croatian government-regulated fuel prices (Eurosuper, Eurodizel, Plavi dizel) and live decoded aviation METAR for Zagreb Pleso (LDZA) and Lučko (LDZL).",
+                    "description": "Current Croatian fuel prices (median over all stations in the Ministry of Economy register: Eurosuper 95, Eurodizel, plavi dizel, autoplin) and live decoded aviation METAR for Zagreb Pleso (LDZA) and Lučko (LDZL).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {"airport_icao": {"type": "string", "description": "ICAO airport code (default 'LDZA' for Zagreb Pleso, or 'LDZL' for Lučko)."}},
@@ -312,8 +359,7 @@ def main():
             res = {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": ans}]}}
         else:
             res = {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"Method {m} not found"}}
-        sys.stdout.write(json.dumps(res) + "\n")
-        sys.stdout.flush()
+        _reply(req, res)
 
 if __name__ == "__main__":
     main()

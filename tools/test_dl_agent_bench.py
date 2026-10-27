@@ -232,7 +232,7 @@ class Live(unittest.TestCase):
             self.assertEqual(FakeModel.efforts, ["low"])
             bench.drive(live, "/effort default", self.ws, 30)
             bench.drive(live, "think again", self.ws, 60)
-            self.assertEqual(FakeModel.efforts[-1], None)            # back to the server's Chat settings
+            self.assertIn(FakeModel.efforts[-1], ("none", "low", "medium", "high"))  # back to auto: it picks one
         finally:
             live.close()
         self.assertEqual(len(r["thinking"]), 1)

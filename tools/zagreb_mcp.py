@@ -1,75 +1,60 @@
 #!/usr/bin/env python3
-"""zagreb_mcp.py - Zagreb civic services, ZET public transit (zet.skoljka.org), 24/7 pharmacies, waste management, live air quality, and BAJS / Nextbike live stations."""
+"""zagreb_mcp.py - Zagreb civic services, ZET tram lines (from ZET GTFS) and live news (zet.skoljka.org), on-duty pharmacies (City of Zagreb list), where to find waste schedules, live air quality, and BAJS / Nextbike live stations."""
 import sys
 import json
 import re
 import html
+import unicodedata
 import urllib.request
 
+# Endpoints as ZET's GTFS timetable feed names them (routes.txt, feed version 000397, valid from 2026-10-21).
+# 31-34 are the night lines.
 ZET_TRAM_LINES = {
-    "1": "Zapadni kolodvor - Borongaj (dnevna)",
-    "2": "Črnomerec - Savišće (dnevna, preko Glavnog kolodvora i Autobusnog kolodvora)",
-    "3": "Ljubljanica - Savišće (dnevna, ne vozi subotom, nedjeljom i blagdanom)",
-    "4": "Savski most - Dubec (dnevna, preko Glavnog kolodvora i Draškovićeve)",
-    "5": "Prečko - Park Maksimir (dnevna)",
-    "6": "Črnomerec - Sopot (dnevna, preko Trga bana Jelačića i Glavnog kolodvora)",
-    "7": "Savski most - Dubrava (dnevna, preko Novog Zagreba i Šubićeve)",
-    "8": "Mihaljevac - Zapruđe (dnevna, preko Draškovićeve i Autobusnog kolodvora)",
-    "9": "Ljubljanica - Borongaj (dnevna, preko Glavnog kolodvora)",
-    "11": "Črnomerec - Dubec (dnevna, glavna žila kucavica preko Trga bana Jelačića)",
-    "12": "Ljubljanica - Dubrava (dnevna, preko Trga bana Jelačića)",
-    "13": "Žitnjak - Kvaternikov trg (dnevna, preko Trga bana Jelačića i Glavnog kolodvora)",
-    "14": "Mihaljevac - Savski most (dnevna, preko Trga bana Jelačića i Savske)",
-    "15": "Mihaljevac - Gračansko dolje (dnevna, veza s Žičarom Sljeme)",
-    "17": "Prečko - Borongaj (dnevna, preko Savske, Trga bana Jelačića i Trga žrtava fašizma)",
-    "31": "Črnomerec - Savski most (noćna linija: 23:30 - 04:30)",
-    "32": "Prečko - Borongaj (noćna linija: 23:30 - 04:30)",
-    "33": "Gračansko dolje - Savišće (noćna linija: 23:30 - 04:30)",
-    "34": "Ljubljanica - Dubec (noćna linija: 23:30 - 04:30)"
+    "1": "Zapadni kolodvor - Borongaj",
+    "2": "Črnomerec - Savišće",
+    "3": "Ljubljanica - Savišće",
+    "4": "Savski most - Dubec",
+    "5": "Prečko - Park Maksimir",
+    "6": "Črnomerec - Sopot",
+    "7": "Savski most - Dubrava",
+    "8": "Mihaljevac - Zapruđe",
+    "9": "Ljubljanica - Borongaj",
+    "11": "Črnomerec - Dubec",
+    "12": "Ljubljanica - Dubrava",
+    "13": "Žitnjak - Kvaternikov trg",
+    "14": "Mihaljevac - Zapruđe",
+    "15": "Mihaljevac - Gračansko dolje",
+    "17": "Prečko - Borongaj",
+    "31": "Črnomerec - Savski most (noćna)",
+    "32": "Prečko - Borongaj (noćna)",
+    "33": "Mihaljevac - Savišće (noćna)",
+    "34": "Ljubljanica - Dubec (noćna)"
 }
 
+# The City of Zagreb's list of on-duty pharmacies (zagreb.hr/dezurne-ljekarne/497, page dated 20.10.2025): five
+# Gradska ljekarna Zagreb pharmacies with a day service 7-20 and a night service 20-7, and Ljekarna ZEUS 0-24.
+PHARMACIES_SOURCE = "Grad Zagreb, https://zagreb.hr/en/dezurne-ljekarne/497 (stranica od 20.10.2025.)"
 PHARMACIES_24_7 = [
-    {
-        "name": "Ljekarna Centar (Trg bana Jelačića)",
-        "address": "Trg bana Josipa Jelačića 3",
-        "phone": "+385 1 4816 198",
-        "notes": "Stalno dežurstvo 0-24h svaki dan uključujući nedjelje i blagdane."
-    },
-    {
-        "name": "Ljekarna Črnomerec",
-        "address": "Ilica 301 (okretište Črnomerec)",
-        "phone": "+385 1 3750 321",
-        "notes": "Stalno dežurstvo 0-24h za zapadni dio grada."
-    },
-    {
-        "name": "Ljekarna Dubrava",
-        "address": "Grižanska 4 (kod Doma zdravlja Dubrava)",
-        "phone": "+385 1 2992 350",
-        "notes": "Stalno dežurstvo 0-24h za istočni dio grada."
-    },
-    {
-        "name": "Ljekarna Siget (Novi Zagreb)",
-        "address": "Avenija Većeslava Holjevca 22",
-        "phone": "+385 1 6525 425",
-        "notes": "Stalno dežurstvo 0-24h za Novi Zagreb."
-    },
-    {
-        "name": "Ljekarna Trešnjevka",
-        "address": "Ozaljska 1 (kod Trešnjevačkog trga)",
-        "phone": "+385 1 3097 586",
-        "notes": "Stalno dežurstvo 0-24h."
-    }
+    {"name": "Gradska ljekarna Zagreb", "address": "Trg bana J. Jelačića 3", "phone": "01 4816 198",
+     "notes": "Dnevna služba 7-20 h, noćna služba 20-7 h."},
+    {"name": "Gradska ljekarna Zagreb", "address": "Ilica 291", "phone": "01 3750 321",
+     "notes": "Dnevna služba 7-20 h, noćna služba 20-7 h."},
+    {"name": "Gradska ljekarna Zagreb", "address": "Ozaljska 1", "phone": "01 3097 586",
+     "notes": "Dnevna služba 7-20 h, noćna služba 20-7 h."},
+    {"name": "Gradska ljekarna Zagreb", "address": "Grižanska 4", "phone": "01 2992 350",
+     "notes": "Dnevna služba 7-20 h, noćna služba 20-7 h."},
+    {"name": "Gradska ljekarna Zagreb", "address": "Av. V. Holjevca 22", "phone": "01 6525 425",
+     "notes": "Dnevna služba 7-20 h, noćna služba 20-7 h."},
+    {"name": "Ljekarna ZEUS", "address": "Divka Budaka 17, Borongaj (okretište tramvaja)", "phone": "nije naveden",
+     "notes": "Svaki dan 0-24 h, i nedjeljom i praznicima."},
 ]
 
-DISTRICT_SCHEDULES = {
-    "donji grad": "Miješani komunalni otpad: Ponedjeljak, Srijeda, Petak. Papir: Utorkom (svaka 2 tjedna). Plastika/Metal: Četvrtkom (svaka 2 tjedna). Biootpad: Ponedjeljkom i Četvrtkom.",
-    "gornji grad": "Miješani komunalni otpad: Ponedjeljak, Srijeda, Petak. Papir: Utorkom. Plastika: Četvrtkom. Biootpad: Ponedjeljkom i Četvrtkom.",
-    "tresnjevka": "Miješani komunalni otpad: Utorak i Petak. Papir: Ponedjeljkom (svaka 2 tjedna). Plastika: Srijedom (svaka 2 tjedna). Biootpad: Utorkom.",
-    "maksimir": "Miješani komunalni otpad: Ponedjeljak i Četvrtak. Papir: Srijedom (svaka 2 tjedna). Plastika: Petkom (svaka 2 tjedna). Biootpad: Četvrtkom.",
-    "novi zagreb": "Miješani komunalni otpad: Utorak i Petak. Papir: Četvrtkom (svaka 2 tjedna). Plastika: Ponedjeljkom (svaka 2 tjedna). Biootpad: Srijedom.",
-    "dubrava": "Miješani komunalni otpad: Ponedjeljak i Četvrtak. Papir: Utorkom (svaka 2 tjedna). Plastika: Srijedom (svaka 2 tjedna). Biootpad: Petkom.",
-    "crnomerec": "Miješani komunalni otpad: Utorak i Petak. Papir: Četvrtkom (svaka 2 tjedna). Plastika: Ponedjeljkom (svaka 2 tjedna). Biootpad: Srijedom."
-}
+
+
+def _fold(text: str) -> str:
+    """Lower case without diacritics, so 'Trešnjevka' and 'tresnjevka' match."""
+    text = text.strip().lower().replace("đ", "d")
+    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
 
 def get_zet_live_news() -> str:
     """Fetch live service alerts and disruptions from zet.skoljka.org/news."""
@@ -103,19 +88,19 @@ def get_zet_transit(query: str = "") -> str:
         return "\n".join(lines)
     
     if "noc" in q:
-        lines = ["## ZET Noćne Tramvajske Linije (23:30 - 04:30 h):"]
+        lines = ["## ZET noćne tramvajske linije:"]
         for num in ["31", "32", "33", "34"]:
             lines.append(f"- **Linija {num}:** {ZET_TRAM_LINES[num]}")
         return "\n".join(lines)
     
     matches = []
     for num, desc in ZET_TRAM_LINES.items():
-        if num == q or f"linija {num}" in q or q in desc.lower():
+        if num == q or f"linija {num}" in q or _fold(q) in _fold(desc):
             matches.append(f"- **Linija {num}:** {desc}")
     
     if matches:
         return f"## Rezultati pretrage ZET linija za '{query}':\n" + "\n".join(matches) + "\n" + live_news
-    return f"Nije pronađena ZET linija za pojam '{query}'. Dostupne linije: 1-17 (dnevne) i 31-34 (noćne).\n{live_news}"
+    return f"Nije pronađena ZET linija za pojam '{query}'. Linije: {', '.join(ZET_TRAM_LINES)} (31-34 noćne).\n{live_news}"
 
 def get_bajs_bikes(query: str = "") -> str:
     """Fetch real-time bike availability and free racks across all 200 BAJS / Nextbike stations in Zagreb."""
@@ -175,7 +160,7 @@ def get_emergency_services() -> str:
         "- **Hitni prijem za male životinje:** Tel: **+385 1 2390 111**\n"
         "- **Usluga:** 24/7 hitna kirurška, internistička i intenzivna skrb za pse, mačke i kućne ljubimce.\n\n"
         "### 4. Hitna stomatološka služba (Dežurni zubar noću, vikendom i blagdanom):\n"
-        "- **Dom zdravlja Zagreb - Centar:** Runjaninova 4 (radno vrijeme noću: 22:00 - 06:00, nedjeljom i blagdanom 0-24h)\n"
+        "- **Dom zdravlja Zagreb - Centar:** Runjaninova 4, centrala 01 4897 666 (radno vrijeme hitne službe provjerite telefonom)\n"
         "- **Klinička bolnica Dubrava:** Avenija Gojka Šuška 6 (Maksilofacijalna kirurgija i akutne traume lica i čeljusti)\n\n"
         "### 5. Opći hitni brojevi:\n"
         "- **Jedinstveni europski broj za hitne službe:** 112\n"
@@ -186,7 +171,7 @@ def get_emergency_services() -> str:
     )
 
 def get_pharmacies() -> str:
-    lines = ["## Dežurne ljekarne u Zagrebu (0-24 h):"]
+    lines = ["## Dežurne ljekarne u Zagrebu", f"*Izvor: {PHARMACIES_SOURCE}. Prije dolaska noću nazovite ljekarnu.*\n"]
     for ph in PHARMACIES_24_7:
         lines.append(f"### {ph['name']}")
         lines.append(f"- **Adresa:** {ph['address']}")
@@ -198,24 +183,18 @@ def get_pharmacies() -> str:
     return "\n".join(lines)
 
 def get_waste_schedule(district: str = "") -> str:
-    d = district.strip().lower()
-    if not d:
-        lines = [
-            "## Zagrebački Holding - Čistoća: Odvoz otpada",
-            "**Sustav ZG vrećica:** Miješani komunalni otpad smije se odlagati isključivo u službenim plavim ZG vrećicama (10L, 20L, 40L).",
-            "**Besplatno preuzimanje:** Žute vrećice (plastika/metal) i smeđe vrećice (biootpad) Čistoća dijeli korisnicima.",
-            "\n### Odvoz po gradskim četvrtima:"
-        ]
-        for name, sched in DISTRICT_SCHEDULES.items():
-            lines.append(f"- **{name.title()}:** {sched}")
-        lines.append("\n**Glomazni otpad:** Svako kućanstvo ima pravo na besplatan odvoz do 2 m³ glomaznog otpada godišnje na zahtjev.")
-        return "\n".join(lines)
-    
-    for name, sched in DISTRICT_SCHEDULES.items():
-        if name in d or d in name:
-            return f"## Čistoća Raspored: {name.title()}\n- {sched}\n\n**Reciklažna dvorišta:** Dostupna u svakoj gradskoj četvrti za besplatno odlaganje elektroničkog, glomaznog i opasnog otpada za građane Zagreba."
-    
-    return f"Gradska četvrt '{district}' nije pronađena. Podržane četvrti: {', '.join(k.title() for k in DISTRICT_SCHEDULES.keys())}."
+    """Odvoz otpada: Čistoća ga raspoređuje po adresi, ne po gradskoj četvrti, pa ovdje nema rasporeda po četvrtima
+    (prijašnji popis po četvrtima nije imao izvor)."""
+    where = f" za '{district.strip()}'" if district.strip() else ""
+    return (
+        f"## Čistoća Zagreb: raspored odvoza otpada{where}\n"
+        "Raspored ovisi o adresi (ulici i kućnom broju), ne o gradskoj četvrti. Točne dane za svoju adresu nađite:\n"
+        "- **cistoca.hr:** tražilica rasporeda po adresi\n"
+        "- **aplikacija Razvrstaj MojZG:** raspored za odabranu adresu, po vrsti otpada\n"
+        "- **Upiti:** WhatsApp / Viber 091 6471 100, e-pošta cistoca@zgh.hr\n"
+        "\n**Glomazni otpad:** odvozi se na zahtjev (cistoca.hr).\n"
+        "*Izvor: Index.hr o novom rasporedu odvoza; podaci iz 2022., provjerite na cistoca.hr.*"
+    )
 
 def get_air_quality() -> str:
     url = "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=45.815&longitude=15.9819&current=european_aqi,pm10,pm2_5,ozone,nitrogen_dioxide"
@@ -260,6 +239,23 @@ def get_air_quality() -> str:
     except Exception as e:
         return f"Greška pri dohvaćanju kvalitete zraka: {e}"
 
+def _reply(req, res):
+    """Write one JSON-RPC reply: nothing for a notification, an empty result for ping, and isError on a tool
+    result whose text is an error message ("... error: ...")."""
+    if "id" not in req:
+        return
+    if req.get("method") == "ping":
+        res = {"jsonrpc": "2.0", "id": req["id"], "result": {}}
+    result = res.get("result")
+    if req.get("method") == "tools/call" and isinstance(result, dict) and "isError" not in result:
+        text = "".join(c.get("text", "") for c in result.get("content", []) if isinstance(c, dict))
+        head = text.lstrip().split(":", 1)
+        result["isError"] = len(head) == 2 and len(head[0]) <= 45 and any(
+            w in head[0].lower() for w in ("error", "failed"))
+    sys.stdout.write(json.dumps(res) + "\n")
+    sys.stdout.flush()
+
+
 def main():
     while True:
         line = sys.stdin.readline()
@@ -294,7 +290,7 @@ def main():
                 },
                 {
                     "name": "zagreb_pharmacies",
-                    "description": "24/7 on-duty pharmacies in Zagreb (Centar, Črnomerec, Dubrava, Siget, Trešnjevka) with phone numbers and hospital emergency centers.",
+                    "description": "On-duty pharmacies in Zagreb from the City of Zagreb list (dated 20.10.2025): addresses, phones, day and night service hours. Static list: tell the user to call before going at night.",
                     "inputSchema": {"type": "object", "properties": {}}
                 },
                 {
@@ -304,10 +300,10 @@ def main():
                 },
                 {
                     "name": "cistoca_waste_schedule",
-                    "description": "Zagreb Čistoća waste collection schedule by city district, ZG bag system, and recycling yard rules.",
+                    "description": "Zagreb Čistoća waste collection: where to find the schedule for an address (cistoca.hr, Razvrstaj MojZG app) and whom to ask. It has no schedule of its own: collection days depend on the street address.",
                     "inputSchema": {
                         "type": "object",
-                        "properties": {"district": {"type": "string", "description": "City district (e.g. 'Tresnjevka', 'Donji grad', 'Maksimir', 'Novi Zagreb')."}},
+                        "properties": {"district": {"type": "string", "description": "Optional: the street, address or district the user asked about (only repeated in the answer)."}},
                         "required": []
                     }
                 },
@@ -339,8 +335,7 @@ def main():
             res = {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": ans}]}}
         else:
             res = {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"Method {m} not found"}}
-        sys.stdout.write(json.dumps(res) + "\n")
-        sys.stdout.flush()
+        _reply(req, res)
 
 if __name__ == "__main__":
     main()

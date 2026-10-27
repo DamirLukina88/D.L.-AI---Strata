@@ -2,6 +2,7 @@
 """cad_materials_mcp.py - Free CAD (STEP/IGES/OpenCascade) & Material Science (AFLOW/Materials) MCP server."""
 import sys
 import json
+import re
 import urllib.request
 import urllib.parse
 
@@ -36,11 +37,12 @@ def lookup_cad_format(format_name: str) -> str:
 
 def query_aflow_materials(formula: str) -> str:
     try:
-        # Query AFLOW public REST API
-        encoded = urllib.parse.quote(formula.strip())
-        url = f"https://aflowlib.duke.edu/AFLOWDATA/LIB3_RAW/{encoded}/"
-        # Search public AFLOW material property endpoint
-        api_url = f"https://aflowlib.duke.edu/search/API/?species({encoded}),$catalog,compound,density,energy_cell,Bravais_lattice_orig?format=json"
+        # AFLUX search API: the elements of the formula, exactly that many species
+        species = sorted(set(re.findall(r"[A-Z][a-z]?", formula.strip())))
+        if not species:
+            return f"No element symbols in '{formula}'. Use a formula such as Fe, Al2O3 or TiN."
+        api_url = ("https://aflow.org/API/aflux/?species(" + ",".join(species) + f"),nspecies({len(species)}),"
+                   "compound,density,energy_cell,Bravais_lattice_orig,$paging(1,3),format(json)")
         req = urllib.request.Request(api_url, headers={"User-Agent": "DL-AI-Strata/1.0"})
         with urllib.request.urlopen(req, timeout=12) as r:
             data = json.loads(r.read().decode("utf-8"))
@@ -59,6 +61,23 @@ def query_aflow_materials(formula: str) -> str:
         return "\n".join(lines)
     except Exception as e:
         return f"AFLOW material query error: {e}"
+
+def _reply(req, res):
+    """Write one JSON-RPC reply: nothing for a notification, an empty result for ping, and isError on a tool
+    result whose text is an error message ("... error: ...")."""
+    if "id" not in req:
+        return
+    if req.get("method") == "ping":
+        res = {"jsonrpc": "2.0", "id": req["id"], "result": {}}
+    result = res.get("result")
+    if req.get("method") == "tools/call" and isinstance(result, dict) and "isError" not in result:
+        text = "".join(c.get("text", "") for c in result.get("content", []) if isinstance(c, dict))
+        head = text.lstrip().split(":", 1)
+        result["isError"] = len(head) == 2 and len(head[0]) <= 45 and any(
+            w in head[0].lower() for w in ("error", "failed"))
+    sys.stdout.write(json.dumps(res) + "\n")
+    sys.stdout.flush()
+
 
 def main():
     while True:
@@ -111,8 +130,7 @@ def main():
             res = {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": text}]}}
         else:
             res = {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "Method not found"}}
-        sys.stdout.write(json.dumps(res) + "\n")
-        sys.stdout.flush()
+        _reply(req, res)
 
 if __name__ == "__main__":
     main()

@@ -5,7 +5,7 @@ description: "Record of every change the agent made to this wiki"
 status: active
 tags: [meta, changelog]
 created: 2026-10-05
-updated: 2026-10-25
+updated: 2026-10-27
 last_verified: 2026-10-05
 ---
 
@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-27:** Ingestion. decisions/ray-mcp-audit-fixes-2026-10-27.md. (Agent: claude-code)
 - **2026-10-25:** Docs: reference official SolidCraft git repository documentation in skill, MCP server, and wiki artifact. (Agent: Antigravity)
 - **2026-10-25:** Artifact Backup. SolidCraft CAD MCP server integrated for Ray with direct workspace saving, README updated. (Agent: Antigravity)
 - **2026-10-25:** Ingestion. artifacts/solidcraft-3d-cad-modeling-and-workspace-integration.md. (Agent: Antigravity)

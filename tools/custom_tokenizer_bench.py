@@ -80,7 +80,7 @@ __global__ void matrix_vector_kernel_s{conv_id}(const T* __restrict__ A, const T
     return prompts
 
 def run_benchmark():
-    pack_dir = os.environ.get("STRATA_TOKENIZER", "/mnt/data/Strata-data/packs/coder-iq1_m/tokenizer")
+    pack_dir = os.environ.get("STRATA_TOKENIZER", str(Path(__file__).resolve().parents[2] / "Strata-data" / "packs" / "coder-iq1_m" / "tokenizer"))
     os.environ["STRATA_TOKENIZER"] = pack_dir
     print(f"================================================================================")
     print(f"Strata v0.1.45 Component 4: Prompt Tokenizer Prefix Caching Benchmark")

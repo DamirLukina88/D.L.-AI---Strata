@@ -15,15 +15,18 @@ Runs 100% locally on the Strata engine with live SSE streaming.
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime
 import difflib
 import hashlib
+import http.client
 import json
 import os
 import re
 import readline
 import shlex
 import shutil
+import socket
 import stat
 import subprocess
 import sys
@@ -164,7 +167,7 @@ DL_TOOLS = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Target absolute or relative directory path to switch to (e.g. '/mnt/data/DL-AI-workspace', '~/projects/myapp')."
+                        "description": "Target absolute or relative directory path to switch to (e.g. '~/DL-AI-workspace', '~/projects/myapp')."
                     }
                 },
                 "required": ["path"]
@@ -421,8 +424,8 @@ DL_ACT_TOOLS = DL_TOOLS
 def find_wiki_script(workspace: Path) -> Path | None:
     candidates = [
         workspace / "wiki" / "scripts" / "wiki.py",
-        Path("/home/damirl/Desktop/local-wiki/scripts/wiki.py"),
-        Path("/home/damirl/.gemini/config/plugins/local-wiki-plugin/skills/local-wiki/scripts/wiki.py"),
+        Path.home() / "Desktop" / "local-wiki" / "scripts" / "wiki.py",
+        Path.home() / ".gemini" / "config" / "plugins" / "local-wiki-plugin" / "skills" / "local-wiki" / "scripts" / "wiki.py",
     ]
     for c in candidates:
         if c.is_file():
@@ -1969,8 +1972,14 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str, tools: list[d
     loop_guard = _switch("DL_LOOP_GUARD")
     reasoning_len, next_loop_check, loop_sentence = 0, LOOP_CHECK_EVERY, None
 
+    socks: list = []
+    done = threading.Event()
+    open_url = urllib.request.urlopen                # no Stop to wait for (the terminal REPL): as before
+    if cancel is not None:
+        open_url = urllib.request.build_opener(_ConnHTTPHandler(socks), _ConnHTTPSHandler(socks)).open
+        threading.Thread(target=_cut_on_cancel, args=(socks, cancel, done), daemon=True).start()
     try:
-        with urllib.request.urlopen(req, timeout=600) as resp:
+        with open_url(req, timeout=600) as resp:
             for raw_line in resp:
                 if cancel is not None and cancel.is_set():
                     finish_reason = "cancelled"
@@ -2066,7 +2075,13 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str, tools: list[d
         err = e.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"Strata API HTTP {e.code}: {err}")
     except Exception as e:
-        raise RuntimeError(f"Connection failed to Strata at {endpoint}: {e}")
+        if cancel is None or not cancel.is_set():
+            raise RuntimeError(f"Connection failed to Strata at {endpoint}: {e}")
+        finish_reason = "cancelled"                 # Stop cut the connection (_cut_on_cancel)
+    finally:
+        done.set()
+    if finish_reason is None and cancel is not None and cancel.is_set():
+        finish_reason = "cancelled"                 # the cut connection ended the stream before a finish reason
 
     dt = time.time() - t0
     rate = tok_count / dt if dt > 0 else 0
@@ -2083,6 +2098,51 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str, tools: list[d
         "prompt_tokens": usage.get("prompt_tokens"),     # Strata reports the exact prompt size at the end
         "loop_sentence": loop_sentence,
     }
+
+
+def _keep_socket(conn, socks: list):
+    """Record the connection's socket once it connects: http.client lets go of it when the response starts."""
+    connect = conn.connect
+
+    def keep():
+        connect()
+        socks.append(conn.sock)
+    conn.connect = keep
+    return conn
+
+
+class _ConnHTTPHandler(urllib.request.HTTPHandler):
+    """urlopen's HTTP handler that keeps the socket it opens, so a Stop can cut it (see _cut_on_cancel)."""
+    def __init__(self, socks: list):
+        super().__init__()
+        self.socks = socks
+
+    def http_open(self, req):
+        return self.do_open(lambda host, **kw: _keep_socket(http.client.HTTPConnection(host, **kw), self.socks), req)
+
+
+class _ConnHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, socks: list):
+        super().__init__()
+        self.socks = socks
+
+    def https_open(self, req):
+        return self.do_open(lambda host, **kw: _keep_socket(http.client.HTTPSConnection(host, **kw), self.socks),
+                            req, context=self._context)
+
+
+def _cut_on_cancel(socks: list, cancel, done: threading.Event) -> None:
+    """Stop pressed: shut the model request's socket at once.  The stream loop only sees `cancel` when a line
+    arrives, and while the server reads a long prompt or waits for another request a line comes every 10 s; the
+    server notices the closed connection at its next heartbeat and stops the engine."""
+    while not done.wait(0.2):
+        if cancel.is_set():
+            for sock in socks:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            return
 
 
 def format_args_preview(args: dict) -> str:

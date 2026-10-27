@@ -33,7 +33,7 @@ check_bridge() {
     fi
     # IMAP greets with "* OK" and authenticates (verifies the keyring/vault is decrypted)
     if timeout 10 bash -c "exec 3<>/dev/tcp/127.0.0.1/$BRIDGE_IMAP_PORT && head -c 4 <&3" 2>/dev/null | grep -q '^\* OK' && \
-       timeout 8 python3 -c 'import sys; sys.path.insert(0, "/mnt/data/Strata"); import tools.dl_proton as p; m = p.imap_connect(p.settings()); m.logout()' 2>/dev/null; then
+       timeout 8 python3 -c 'import sys; sys.path.insert(0, "'"$(dirname "$(dirname "$(readlink -f "$0")")")"'"); import tools.dl_proton as p; m = p.imap_connect(p.settings()); m.logout()' 2>/dev/null; then
         BRIDGE_FAILURES=0
     else
         BRIDGE_FAILURES=$((BRIDGE_FAILURES + 1))

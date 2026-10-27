@@ -5032,7 +5032,7 @@ def _dump_claude_prompt(req: dict):
     """Save full system prompt and tool definitions per model into dumps/claude_models/."""
     try:
         model = str(req.get("model") or "unknown").replace("/", "_")
-        dump_dir = Path("/mnt/data/Strata/dumps/claude_models")
+        dump_dir = Path(__file__).resolve().parent.parent / "dumps" / "claude_models"
         dump_dir.mkdir(parents=True, exist_ok=True)
         sys_val = req.get("system")
         sys_text = ""

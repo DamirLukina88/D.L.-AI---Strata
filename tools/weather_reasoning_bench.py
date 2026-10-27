@@ -10,7 +10,7 @@ Evaluates:
      instead of falling for the IP geolocation trap (Rijeka)?
   2. Weather forecast completeness: Did it fetch both today & tomorrow and format a structured table?
   3. Autonomous tool usage: Did it discover/enable and use Proton Mail?
-  4. Email delivery: Did it send the email to info@damir-lukina.com with subject and table?
+  4. Email delivery: Did it send the email to the recipient (--recipient; default the profile's email) with subject and table?
   5. Telemetry: Thinking time, wall time, reasoning length, and tool turn efficiency.
 """
 from __future__ import annotations
@@ -33,7 +33,15 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_SOCKET = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "dl-ai" / "sessiond.sock"
 DEFAULT_ROOT = Path.home() / ".cache" / "strata" / "bench" / "weather_reasoning"
 DEFAULT_PROMPT = "I would like you to create a weather forecast table for me for todays and tomorrow's weather, our forecast and send it to me per email."
-DEFAULT_RECIPIENT = "info@damir-lukina.com"
+def _profile_email() -> str:
+    """The user's address from ~/.config/dl-ai/profile.json ("email"), so none is written in the repository."""
+    try:
+        return str(json.loads((Path.home() / ".config" / "dl-ai" / "profile.json").read_text()).get("email") or "")
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
+DEFAULT_RECIPIENT = _profile_email()
 
 # ANSI Colors (Strata Palette)
 C_ORANGE = "\033[38;5;208m"

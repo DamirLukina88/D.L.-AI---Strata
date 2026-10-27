@@ -625,7 +625,7 @@ HELP = """Modes
 /act [task]       Act Mode (executes the agreed plan when given no task; it is saved as PLAN.md); also /execute
 /planfile [path]  The plan the agent is held to (ticks its Progress; done check); off clears it
 /yolo             Fully autonomous: nothing asks (sending email included) until you turn it off again
-/effort [level]   This session's thinking level: none, low, medium, high, auto, or default (the Chat settings)
+/effort [level]   This session's thinking level: none, low, medium, high, or auto (default; also /effort default)
 
 Tools and jobs
 /mcp [on|off N]   On-demand tools: Home Assistant, web search (Exa), Context7, Fetch, DeepL, browser,

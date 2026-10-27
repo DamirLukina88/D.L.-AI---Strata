@@ -68,6 +68,10 @@ class Entry:
         # "ask" tools run without asking while the server's page is local (file://, localhost): the agent testing
         # its own work in a browser.  Opt-in per server; anything else, or a page not known yet, still asks.
         self.trust_local_pages = raw.get("trust_local_pages") is True
+        # why its `ask` tools ask (shown on the card), e.g. "sends your text to DeepSeek's cloud"
+        self.ask_reason = str(raw.get("ask_reason") or "acts in the browser / outside D.L. CLI")
+        # the card shows these arguments in full, not cut at 60 characters (e.g. the prompt that leaves the PC)
+        self.ask_full_args = [str(a) for a in raw.get("ask_full_args") or []]
         self.surfaces = list(raw.get("surfaces") or [])      # empty: everywhere
         self.idle_s = float(raw.get("idle_s") or 0)
         # arguments set here, hidden from the model and added to every call (e.g. the Google account)
@@ -297,6 +301,7 @@ class McpRegistry:
         self.enabled: dict[str, dict] = {}                   # name -> {"turn", "used", "why", "tools"}
         self.routes: dict[str, tuple[str, str]] = {}         # name the model sees -> (server, tool)
         self.turn = 0
+        self.trusted: set[str] = set()                       # /mcp trust NAME: its `ask` tools stop asking this session
         self.lock = threading.RLock()
         self.on_change = None                                # the daemon re-sends its state
         self._timer = None
@@ -651,8 +656,12 @@ class McpRegistry:
         if tool in entry.ask:
             if entry.trust_local_pages and is_local_url(self.page.get(name, "")):
                 return None
-            preview = ", ".join(f"{k}={str(v)[:60]!r}" for k, v in (args or {}).items())
-            return f"{name}: {tool}({preview})", "acts in the browser / outside D.L. CLI", False
+            if name in self.trusted:
+                return None
+            preview = ", ".join(f"{k}={str(v)[:60]!r}" for k, v in (args or {}).items() if k not in entry.ask_full_args)
+            full = [f"  {k}:\n    " + str(v)[:4000].replace("\n", "\n    ") + (" …" if len(str(v)) > 4000 else "")
+                    for k, v in (args or {}).items() if k in entry.ask_full_args]
+            return "\n".join([f"{name}: {tool}({preview})"] + full), entry.ask_reason, False
         return None
 
     # ------------------------------------------------------------------ state
@@ -664,9 +673,18 @@ class McpRegistry:
                      "unavailable": e.unavailable(self.surface) or ""} for n, e in self.catalog.items()]
 
     def command(self, arg: str) -> str:
-        """/mcp, /mcp on NAME, /mcp off NAME."""
+        """/mcp, /mcp on NAME, /mcp off NAME, /mcp trust NAME, /mcp ask NAME."""
         sub, _, name = arg.strip().partition(" ")
         name = name.strip()
+        if sub in ("trust", "ask") and name:
+            # the user's own switch (never the model's mcp tool): NAME's `ask` tools run without the card this session
+            if name not in self.catalog or not self.catalog[name].ask:
+                return f"{name}: no tools that ask (see /mcp)."
+            if sub == "trust":
+                self.trusted.add(name)
+                return f"{name}: its tools run without asking for the rest of this session (/mcp ask {name} to undo)."
+            self.trusted.discard(name)
+            return f"{name}: asks again before each call."
         if sub in ("on", "enable") and name:
             return self.enable(name, "/mcp on")
         if sub in ("off", "disable") and name:
@@ -682,7 +700,7 @@ class McpRegistry:
         always = [(n, d) for n, d in BUILT_IN if n not in self.catalog]
         if always:
             rows += ["", "Built in, always on (not in mcp.json):"] + [f"● {n:<12} {d}" for n, d in always]
-        return "\n".join(rows) + "\n\n/mcp on NAME · /mcp off NAME · servers also turn on by themselves when a request needs them"
+        return "\n".join(rows) + "\n\n/mcp on NAME · /mcp off NAME · /mcp trust NAME (no card this session) · /mcp ask NAME · servers also turn on by themselves when a request needs them"
 
     def close(self) -> None:
         with self.lock:
@@ -693,6 +711,7 @@ class McpRegistry:
                     pass
             self.servers.clear()
             self.enabled.clear()
+            self.trusted.clear()                     # a new conversation asks again
             self.page.clear()
             self.routes.clear()
             self._defaults_done = False

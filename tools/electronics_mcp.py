@@ -44,9 +44,9 @@ def decode_smd_resistor(code: str) -> str:
         return f"Could not decode SMD code '{code}'. Supported formats: 3-digit (e.g. 103 = 10k), 4-digit (e.g. 4702 = 47k), or with R (e.g. 4R7 = 4.7Ω)."
     
     if val >= 1_000_000:
-        formatted = f"{val/1_000_000:.2f} MΩ".rstrip("0").rstrip(".") + " MΩ"
+        formatted = f"{val/1_000_000:.2f}".rstrip("0").rstrip(".") + " MΩ"
     elif val >= 1_000:
-        formatted = f"{val/1_000:.2f} kΩ".rstrip("0").rstrip(".") + " kΩ"
+        formatted = f"{val/1_000:.2f}".rstrip("0").rstrip(".") + " kΩ"
     else:
         formatted = f"{val} Ω"
     return f"## SMD Resistor Code `{code}`\n- **Resistance Value:** **{formatted}** ({val} Ohms)"
@@ -99,6 +99,23 @@ def calc_pcb_trace(current_a: float, copper_weight_oz: float = 1.0, temp_rise_c:
         )
     except Exception as e:
         return f"PCB calculation error: {e}"
+
+def _reply(req, res):
+    """Write one JSON-RPC reply: nothing for a notification, an empty result for ping, and isError on a tool
+    result whose text is an error message ("... error: ...")."""
+    if "id" not in req:
+        return
+    if req.get("method") == "ping":
+        res = {"jsonrpc": "2.0", "id": req["id"], "result": {}}
+    result = res.get("result")
+    if req.get("method") == "tools/call" and isinstance(result, dict) and "isError" not in result:
+        text = "".join(c.get("text", "") for c in result.get("content", []) if isinstance(c, dict))
+        head = text.lstrip().split(":", 1)
+        result["isError"] = len(head) == 2 and len(head[0]) <= 45 and any(
+            w in head[0].lower() for w in ("error", "failed"))
+    sys.stdout.write(json.dumps(res) + "\n")
+    sys.stdout.flush()
+
 
 def main():
     while True:
@@ -167,8 +184,7 @@ def main():
             res = {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": text}]}}
         else:
             res = {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "Method not found"}}
-        sys.stdout.write(json.dumps(res) + "\n")
-        sys.stdout.flush()
+        _reply(req, res)
 
 if __name__ == "__main__":
     main()

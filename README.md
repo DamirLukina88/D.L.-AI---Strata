@@ -90,8 +90,9 @@ and seamlessly inspect or continue it from your terminal:
 - Native Markdown formatting, folding reasoning streams, and expandable tool cards.
 - **Approvals for destructive actions:** recursive deletes, `sudo`, disk tools, git history rewriting, and writes outside workspace require explicit Approve/Deny.
 - **YOLO Mode & Infinite Continuation:** `/yolo` disables approval prompts per session and enables infinite autonomous auto-continuation past `DL_MAX_TURNS` for complex workflows.
+- **Stop and Clear respond at once:** Stop closes the model request immediately, also while the engine is still reading a long prompt or the request waits behind another one (measured 1.0 s against a silent test server; before, it waited for the server's next 10 s heartbeat). The Code tab reconnects a live stream that died silently (phone asleep, Wi-Fi or tunnel dropped), so Clear and Stop no longer look stuck until you switch tabs.
 - **Plan Mode:** `/plan` investigates read-only and presents an *Execute this plan?* prompt to transition cleanly into act mode.
-- **Automatic Thinking Level (`/effort auto`):** default per-turn thinking selector (`tools/dl_effort.py`) that picks `none` for greetings, wake words and smart-home/clock commands, `low` for short factual questions, `medium` for conceptual explanations, and `high` for code, files, errors, plan mode, or follow-up complaints—and escalates mid-turn to `high` if any tool call errors, repeats, or hits a retry guard ([decision](wiki/decisions/auto-thinking-level.md)). Configurable via the Settings/Sampling drawer or `/effort auto|none|low|medium|high|default`.
+- **Automatic Thinking Level (`/effort auto`):** default per-turn thinking selector (`tools/dl_effort.py`) that picks `none` for greetings, wake words and smart-home/clock commands, `low` for short factual questions, `medium` for conceptual explanations, and `high` for code, files, errors, plan mode, or follow-up complaints—and escalates mid-turn to `high` if any tool call errors, repeats, or hits a retry guard ([decision](wiki/decisions/auto-thinking-level.md)). Configurable via the Settings/Sampling drawer or `/effort auto|none|low|medium|high` (`/effort default` is auto).
 - **Dynamic Reasoning Budget Capping:** tiered token caps (`none: 0`, `low: 1024`, `medium: 2048`, `high: 4096`) passed in `reasoning_budget_tokens` eliminate runaway loops without clipping solutions. On mid-turn escalation, the budget automatically raises to 4,096 tokens alongside effort to `high`.
 - **Empirical Response Matrix & CPU Semantic Router:** a 75-item evaluation suite (`tools/bench_effort_matrix.py`) across Voice, Chat, and Coding cohorts and a zero-dependency CPU difficulty router (`tools/dl_effort_scorer.py`, 0.09 ms latency, deterministic CRC32 feature hashing, cosine $k$-NN, safety upward bias).
 - **Conversational Continues:** naturally typing *"continue"*, *"keep going"*, or *"go on"* routes directly to turn continuation.
@@ -135,19 +136,19 @@ A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) ex
 
 ### 6. Tools & On-Demand Knowledge Suites (38 MCP Servers)
 
-Ray features a zero-overhead, on-demand MCP router (`tools/dl_mcp.py`) that keeps tools dormant to save prompt context until matched by request triggers or explicitly toggled via `/mcp on <name>`:
+Ray features a zero-overhead, on-demand MCP router (`tools/dl_mcp.py`) that keeps tools dormant to save prompt context until matched by request triggers or explicitly toggled via `/mcp on <name>`. Each server answers `ping`, sends nothing back to notifications, and marks a failed call with `isError`, so the automatic thinking level sees tool failures:
 
 | Suite / Category | Servers & Tools | What It Covers |
 | :--- | :--- | :--- |
-| **Self-Identity & Project** | `ray_identity` | Ray's (Rei's) self-awareness, origin repository ([DamirLukina88/D.L.-AI---Strata](https://github.com/DamirLukina88/D.L.-AI---Strata)), host hardware architecture (CachyOS, RX 7600 XT, Ryzen 3600), Qwen3.8-Flash-Next Coder MoE specs, live git repository status, commit changelog, and active MCP catalog. |
-| **Reasoning Escalation** | `deepseek` (`deepseek_reason`) | Gated DeepSeek cloud reasoning (ultra-high thinking effort) for heavy mathematics and frontier logic. Off by default for privacy; requires user confirmation. |
+| **Self-Identity & Project** | `ray_identity` | Who Ray (Rei) is, plus this PC's hardware, the running engine's address, model and settings, the services and the git status, all read when she is asked (nothing hardcoded that can go stale), and the active MCP catalog. |
+| **Reasoning Escalation** | `deepseek` (`deepseek_reason`) | DeepSeek cloud reasoning for heavy mathematics and frontier logic. Every call shows an approval card with the full prompt that would leave the PC; `/mcp trust deepseek` stops asking for the session, `/mcp ask deepseek` asks again. The key comes only from `DEEPSEEK_API_KEY` in `~/.config/dl-ai/secrets.env`. |
 | **Smart Home & Automation** | `homeassistant` (Bambu, Xiaomi, plugs, lights, AC), `schedule` | Smart home control, camera snapshots, scheduled jobs, recurring reminders. |
 | **Web & Productivity** | `exa`, `fetch`, `playwright`, `deepl`, `proton`, `gmail`, `drive`, `docs` | Web search, headless browser automation, translation, email, and Google Workspace. |
 | **Development & Standards** | `context7`, `modernweb`, `rfc`, `osv`, `devstandards` | Live library documentation, Modern Web Guidance (CSS/HTML5), IETF RFC protocol specs, OSV package vulnerabilities (CVEs), Game Programming Patterns, MDN. |
 | **Science & Biomedical** | `arxiv`, `openalex`, `europepmc`, `pubchem`, `clinicaltrials`, `opentargets`, `reactome` | arXiv preprints (AI/CS/Math), OpenAlex 250M+ scholarly works graph, Europe PMC open access papers, PubChem chemical formulas, ClinicalTrials.gov studies, Open Targets drug targets, Reactome biological pathways. |
 | **Hardware, 3D & Laws** | `solidcraft`, `print3d`, `cadmaterials`, `osm`, `laws`, `weather`, `minipaint`, `electronics`, `networking` | SolidCraft parametric 3D CAD modeling & engine control (parametric enclosures, brackets, flanges, standoffs, custom sketches/extrusions/cuts, automatic `.solidcraft`/`.step`/`.stl`/`.3mf` export and GPU-rendered PNG snapshots saved directly into Ray's workspace, live GUI control via port 7878), Klipper G-code & Bambu/Prusa filament presets, STEP AP242/IGES & AFLOW material properties, OpenStreetMap geocoding, Croatian (Zakon.hr/NN) & EU (EUR-Lex/CURIA) laws, Open-Meteo live weather, miniature painting & wargaming (3,340+ paint conversions across Citadel, Vallejo, AK, Army Painter, airbrush thinning, NMM/slapchop, Warhammer 40k / Kill Team wound matrix, AP saves, FNP, faction color schemes & BGG mechanics), electronics & components (IPC-2152 PCB trace width & current capacity, copper weight, thermal rise, ESP32/RP2040 decoupling capacitor rules, LCSC/JLCPCB parts, SMD resistor code decoder), networking & LAN (SFP/SFP+/QSFP optics, OM3/OM4/OS2 fiber standards, RJ45 T568A/B cabling, PoE, IEEE MAC vendor lookup). |
 | **Photo, Video, Audio & Drones** | `photovideo`, `drones` | Exposure & 180° cinematic shutter calculations, camera log profiles (Sony S-Log3, Canon C-Log3, DJI D-Log, Panasonic V-Log), DaVinci Resolve Color Space Transform (CST) node tree workflow (DWG / DaVinci Wide Gamut intermediate, Rec.709 delivery, QuickTime gamma tags, shortcuts), storyboard shot composition (ELS, LS, MCU, CU, OTS, Dutch angles), audio engineering loudness targets (YouTube/Spotify -14 LUFS, Broadcast EBU R128 -23 LUFS, Podcasts -16 LUFS, True Peak), mic polar patterns (shotgun, lavalier, cardioid), 32-bit float audio, DJI drone hardware specifications (Mini 4 Pro, Air 3, Mavic 3 Pro), CCAA & EASA Croatian drone laws, and Croatia Control AMC Portal automated airspace booking (Zagreb LDZA CTR). |
-| **Zagreb & Croatia Live** | `zagreb`, `croatia_live` | ZET tram/bus routes (day 1-17, night 31-34) & live disruption alerts (zet.skoljka.org), BAJS (Nextbike) live bike availability across all 200 stations in Zagreb, 24/7 on-duty pharmacies, specialized 24/7 emergencies (Poison Control CKO, pediatric ER Klaićeva/Rebro, 24/7 vet clinic VetFak, night dentist), Čistoća district waste schedules & ZG vrećice rules, real-time Zagreb air quality (European AQI, PM2.5, PM10), HAK live highway/border conditions (A1/A3, Lučko, Bregana, Macelj, Bajakovo), official DHMZ meteorological observations, HNB official exchange rates (EUR/USD/BAM/CHF/GBP), state holidays & non-working Sunday shopping rules (Zakon o trgovini), regulated fuel prices, and Zagreb LDZA aviation METAR. |
+| **Zagreb & Croatia Live** | `zagreb`, `croatia_live` | ZET tram lines (ends from ZET's own GTFS feed; day 1-17, night 31-34) & live disruption alerts (zet.skoljka.org), BAJS (Nextbike) live bike availability across all 200 stations in Zagreb, on-duty pharmacies (the City of Zagreb's list, with its date), specialized emergencies (Poison Control CKO, pediatric ER Klaićeva/Rebro, vet clinic VetFak, dental emergency), where to look up Čistoća's waste schedule for an address, real-time Zagreb air quality (European AQI, PM2.5, PM10), HAK live highway/border conditions (A1/A3, Lučko, Bregana, Macelj, Bajakovo), official DHMZ meteorological observations, HNB official exchange rates (EUR/USD/BAM/CHF/GBP), state holidays & non-working Sunday shopping rules (Zakon o trgovini), current fuel prices (median over every station in the Ministry of Economy's price register, read live), and Zagreb LDZA aviation METAR. |
 
 ### 7. Workspace, JIT Model Loading & Remote Access
 - **Server File Workspace:** upload files by drag and drop, browse folder trees, stream and resume large downloads.
@@ -207,10 +208,11 @@ Ray features a zero-overhead, on-demand MCP router (`tools/dl_mcp.py`) that keep
   | `/yolo` | turn approvals off and enable infinite continuation |
   | `/continue` | continue execution of multi-turn assistant plans |
   | `/planfile <path>\|off` | attach a plan file the agent works from and ticks (`PLAN.md`) |
-  | `/effort none\|low\|medium\|high\|auto\|default` | this session's reasoning effort (`auto` picks per turn and escalates on tool failures; `default`: the web app's Thinking setting) |
+  | `/effort none\|low\|medium\|high\|auto` | this session's reasoning effort (`auto`, the default, picks per turn and escalates on tool failures; `/effort default` is auto) |
   | `/cd <path>` | change the project folder |
   | `/status`, `/health` | engine status, hardware health |
-  | `/mcp <server>` | inspect and execute tools on connected MCP servers |
+  | `/mcp`, `/mcp on\|off <server>` | list the MCP servers, turn one on or off |
+  | `/mcp trust\|ask <server>` | stop or resume a server's approval card for this session (e.g. DeepSeek) |
   | `/speak` | read the latest assistant message aloud |
   | `/exa <query>`, `/context7 <library>` | web search, library docs |
   | `/diff`, `/secrets`, `/test`, `/wiki` | review the diff, scan for secrets, run tests, search the wiki |
@@ -223,7 +225,10 @@ Ray features a zero-overhead, on-demand MCP router (`tools/dl_mcp.py`) that keep
 ## Security
 
 - **No secrets in the repository.** Keys live in `~/.config/dl-ai/secrets.env`, and the pre-commit hook blocks a
-  commit that contains one.
+  commit that contains one. It also blocks added lines that carry this machine's home path, the folder the checkout
+  sits in, or the profile's email address; it reads those at run time, so the hook names none of them.
+- **Cloud calls ask first.** DeepSeek is the only tool that sends your text off the PC, and it asks on a card before
+  every call unless you typed `/mcp trust deepseek` for the session.
 - **Browser requests** need a valid Cloudflare Access token (signature, issuer, audience and expiry are checked)
   or the API key. Keys are never accepted in URLs.
 - **The session daemon** listens only on a Unix socket in your runtime directory (mode 600).

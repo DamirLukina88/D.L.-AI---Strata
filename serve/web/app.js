@@ -1923,6 +1923,8 @@ async function codeConnect() {
   if (code.conn) return;
   const ctl = new AbortController();
   code.conn = ctl;
+  code.stale = false;
+  let dog = null;
   try {
     const r = await fetch(`api/code/session/events?session=${CODE_SESSION}`, { headers: headers(), signal: ctl.signal });
     if (!r.ok) {
@@ -1930,12 +1932,24 @@ async function codeConnect() {
       throw new Error(err.error?.message || `HTTP ${r.status}`);
     }
     code.retry = 0;
+    code.lastData = Date.now();
+    // A stream can die without an error (the phone slept, Wi-Fi or the tunnel dropped): the page then showed nothing
+    // more - Clear and Stop seemed to do nothing until a tab switch reconnected.  The server pings every 15 s, so 40 s
+    // of silence is a dead stream; an op (Clear, Stop, a prompt) that brought no event in 5 s is one too.
+    dog = setInterval(() => {
+      const now = Date.now();
+      if (now - code.lastData > 40000 || (code.opAt > code.lastData && now - code.opAt > 5000)) {
+        code.stale = true;
+        ctl.abort();
+      }
+    }, 2000);
     const reader = r.body.getReader();
     const dec = new TextDecoder();
     let buf = "";
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
+      code.lastData = Date.now();
       buf += dec.decode(value, { stream: true });
       let i;
       while ((i = buf.indexOf("\n\n")) >= 0) {
@@ -1951,13 +1965,25 @@ async function codeConnect() {
   } catch (e) {
     if (e.name !== "AbortError" && code.retry === 0) toast("warn", "CLI session", e.message || String(e), 5000);
   } finally {
+    if (dog) clearInterval(dog);
     code.conn = null;
   }
-  if (tab === "code" && !ctl.signal.aborted) {            // reconnect: the daemon or the tunnel went away
+  if (tab === "code" && code.stale) {                       // a dead stream: reconnect now, the hello redraws the feed
+    code.stale = false;
+    code.opAt = 0;
+    setTimeout(codeConnect, 0);
+  } else if (tab === "code" && !ctl.signal.aborted) {      // reconnect: the daemon or the tunnel went away
     code.retry = Math.min(code.retry + 1, 6);
     setTimeout(codeConnect, 500 * 2 ** code.retry);
   }
 }
+
+document.addEventListener("visibilitychange", () => {     // back to the page after a while: check the stream first
+  if (!document.hidden && tab === "code" && code.conn && Date.now() - (code.lastData || 0) > 20000) {
+    code.stale = true;
+    code.conn.abort();
+  }
+});
 
 codeFeed()?.addEventListener("toggle", (e) => {
   const d = e.target;
@@ -1971,6 +1997,7 @@ codeFeed()?.addEventListener("toggle", (e) => {
 function codeDisconnect() { if (code.conn) code.conn.abort(); code.conn = null; }
 
 async function codeOp(op, extra = {}) {
+  if (op !== "export") code.opAt = Date.now();             // the watchdog expects an event back (codeConnect)
   try {
     const r = await fetch("api/code/session", {
       method: "POST", headers: headers(true),
