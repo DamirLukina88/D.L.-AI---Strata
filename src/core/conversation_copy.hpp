@@ -7,6 +7,7 @@
 #include <cuda_runtime.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
@@ -20,11 +21,36 @@ namespace strata::core::conversation_detail {
 /// device, and while another thread captures a graph on one (a drafter or a stage worker), HIP refuses it with
 /// "operation would make the legacy stream depend on a capturing blocking stream".  The caller's contract is
 /// unchanged: the device was synchronized before the copy (the copy itself is complete on return).
+/// STRATA_TEST_COPY_FAIL_AT=N (tests only, #3350): the N-th snapshot / checkpoint copy of the process fails with
+/// cudaErrorMemoryAllocation, as when a card has no memory left for the copy.  Unset: nothing.
+inline long test_copy_fail_at() {
+    static const long v = [] { const char* e = std::getenv("STRATA_TEST_COPY_FAIL_AT"); return e ? std::atol(e) : 0L; }();
+    return v;
+}
+
+/// This thread's copy stream per device (created on first use, never destroyed: process lifetime).
+inline std::vector<cudaStream_t>& thread_copy_streams() {
+    thread_local std::vector<cudaStream_t> streams;
+    return streams;
+}
+
+/// #2409: true when a copy on `dev` from this thread needs no new stream. false: the next copy creates one (a small
+/// device allocation, which can fail on a full card).
+inline bool copy_stream_ready(int dev) {
+    if (dev < 0) dev = 0;
+    const std::vector<cudaStream_t>& streams = thread_copy_streams();
+    return (size_t) dev < streams.size() && streams[(size_t) dev];
+}
+
 inline cudaError_t copy_nonblocking(void* dst, const void* src, size_t bytes) {
+    if (const long at = test_copy_fail_at(); at > 0) {
+        static std::atomic<long> copies{0};
+        if (++copies == at) return cudaErrorMemoryAllocation;
+    }
     int dev = 0;
     cudaError_t e = cudaGetDevice(&dev);
     if (e != cudaSuccess) return e;
-    thread_local std::vector<cudaStream_t> streams;
+    std::vector<cudaStream_t>& streams = thread_copy_streams();
     if (dev < 0) dev = 0;
     if ((size_t) dev >= streams.size()) streams.resize((size_t) dev + 1, nullptr);   // never destroyed: process lifetime
     if (!streams[(size_t) dev]) {

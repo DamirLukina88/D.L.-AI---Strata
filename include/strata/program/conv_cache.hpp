@@ -77,4 +77,20 @@ inline size_t eviction_victim(const uint64_t* stamps, size_t n, int64_t cap, con
     return v;
 }
 
+/// #2409: what a conversation restore can allocate on a card. It writes into session buffers that already exist; the one
+/// thing it may create is the calling thread's private copy stream for that card (conversation_copy.hpp), and the first
+/// launch of the two small residency kernels loads their code. 64 MiB covers both many times over and is far below the
+/// reserves (--vram-reserve-mib), so the check can only fire on a card that is really full.
+constexpr uint64_t kRestoreFirstUseMib = 64;
+
+/// Whether a parked snapshot can be restored without a first-use allocation failing: every card for which the restore
+/// would have to create its copy stream (`stream_ready[i]` false) must have `need_bytes` free. A card that already has a
+/// stream needs nothing, so it never refuses. A missing sample (`free_bytes` null) does not refuse.
+inline bool restore_fits(const uint64_t* free_bytes, const uint8_t* stream_ready, size_t n, uint64_t need_bytes) {
+    if (free_bytes == nullptr || stream_ready == nullptr || need_bytes == 0) return true;
+    for (size_t i = 0; i < n; ++i)
+        if (!stream_ready[i] && free_bytes[i] < need_bytes) return false;
+    return true;
+}
+
 }  // namespace strata::program::conv_cache

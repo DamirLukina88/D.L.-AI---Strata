@@ -906,6 +906,12 @@ class OutputParser:
             if isinstance(name, str) and "." in name:
                 namespace, member = name.rsplit(".", 1)
                 aliases.setdefault(f"{namespace}__{member}", set()).add(name)
+        # #3796: the same tool written with every `__` collapsed to `_` (`mcp__playwright__browser_navigate` as
+        # `mcp_playwright_browser_navigate`, the way Qwen often flattens a name) is that tool.  Only a spelling of a declared
+        # name: a reordered or renamed tool (`server1_label_values` for `label_values_mcp_server1`) is not guessed.
+        for name in self.schemas:
+            if isinstance(name, str) and "__" in name:
+                aliases.setdefault(name.replace("__", "_"), set()).add(name)
         self.aliases = {alias: next(iter(names)) for alias, names in aliases.items()
                         if len(names) == 1 and alias not in self.schemas}
         # #804/#3075: in the answer too, a call counts only for a tool the request declared.  With tools declared a
