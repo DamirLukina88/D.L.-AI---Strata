@@ -27,7 +27,15 @@ drag-and-drop, dynamic model load timeout scaling, safe shard removal guards, `r
 validation, 1-token health check speed guards, and stable GPU hardware telemetry IDs
 ([v0.2.5 walkthrough](wiki/artifacts/strata-v0-2-5-sync-and-ergonomics-walkthrough.md),
 [v0.2.6 & tools walkthrough](wiki/artifacts/davinci-cst-ipc2152-wargaming-and-v026-sync-walkthrough.md),
-[system audit](wiki/artifacts/full-workstation-audit-and-verification-2026-10-25.md)).
+[system audit](wiki/artifacts/full-workstation-audit-and-verification-2026-10-25.md)). On 2026-10-27, four
+**v0.2.7** fixes were ported into engine `0.1.44.1+0.2.7-fixes`:
+- a failed read of the per-layer table no longer hangs the next request (#3602);
+- a checkpoint copy that runs out of memory is skipped instead of ending the engine (#3350);
+- no restore is attempted on a card too full to create its copy stream (#2409);
+- an MCP tool name written with `__` collapsed to `_` is read as the declared tool (#3796).
+
+Each was checked with tests and a short smoke test; no benchmark was run
+([review](wiki/artifacts/upstream-v0-2-7-review-2026-10-27.md)).
 
 ## How fast is it?
 
@@ -90,6 +98,16 @@ and seamlessly inspect or continue it from your terminal:
 - Native Markdown formatting, folding reasoning streams, and expandable tool cards.
 - **Approvals for destructive actions:** recursive deletes, `sudo`, disk tools, git history rewriting, and writes outside workspace require explicit Approve/Deny.
 - **YOLO Mode & Infinite Continuation:** `/yolo` disables approval prompts per session and enables infinite autonomous auto-continuation past `DL_MAX_TURNS` for complex workflows.
+- **Saved conversations:** `/clear` and the **New** button save the conversation they end, so nothing is lost.
+  - `/sessions [words]` lists the saved ones, newest first, and searches their titles and messages. `/resume N` brings one back after saving the current one. `/rename` and `/delete N` change the list; deleted ones go to a `.deleted` folder.
+  - In the Code tab, the **Sessions** drawer does the same.
+  - They are kept in `~/.local/state/dl-ai/archive/<session>/` and shared by the web app and the terminal ([decision](wiki/decisions/saved-cli-sessions.md)).
+- **Edit, rewind and branch:** every past prompt in the Code tab has ✎ Edit, ↶ Rewind and ⑂ Branch buttons; in the terminal, `/prompts` numbers the prompts.
+  - `/edit N <text>` replaces prompt N and runs the new text.
+  - `/rewind N` goes back to just before prompt N (it and what followed are removed).
+  - `/branch N [text]` keeps the whole conversation in Sessions and goes on from before prompt N.
+  - A prompt that context trimming already removed cannot be gone back to; the command says so and changes nothing.
+- **The feed lets you read:** while an answer streams, scrolling up (wheel, finger or PageUp) stops the feed from following, and scrolling back to the bottom resumes it. A message you send always scrolls into view.
 - **Stop and Clear respond at once:** Stop closes the model request immediately, also while the engine is still reading a long prompt or the request waits behind another one (measured 1.0 s against a silent test server; before, it waited for the server's next 10 s heartbeat). The Code tab reconnects a live stream that died silently (phone asleep, Wi-Fi or tunnel dropped), so Clear and Stop no longer look stuck until you switch tabs.
 - **Plan Mode:** `/plan` investigates read-only and presents an *Execute this plan?* prompt to transition cleanly into act mode.
 - **Automatic Thinking Level (`/effort auto`):** default per-turn thinking selector (`tools/dl_effort.py`) that picks `none` for greetings, wake words and smart-home/clock commands, `low` for short factual questions, `medium` for conceptual explanations, and `high` for code, files, errors, plan mode, or follow-up complaints—and escalates mid-turn to `high` if any tool call errors, repeats, or hits a retry guard ([decision](wiki/decisions/auto-thinking-level.md)). Configurable via the Settings/Sampling drawer or `/effort auto|none|low|medium|high` (`/effort default` is auto).
@@ -196,7 +214,8 @@ Ray features a zero-overhead, on-demand MCP router (`tools/dl_mcp.py`) that keep
 
 - **Browser:** open the app (`http://127.0.0.1:8080` locally, or your tunnel hostname).
   - **Code:** Ray, the shared coding agent, with voice typing, read-aloud TTS, and workspace files (*Attach* adds an
-    `@path` reference to the prompt).
+    `@path` reference to the prompt). **Sessions** opens the saved conversations, and **New** starts a new one (the
+    current one is saved). From 1,200 px wide, Code and Monitor or About sit side by side with a draggable divider.
   - **Monitor:** real-time GPU, VRAM, RAM, and KV cache monitoring.
 - **Terminal:** run `python3 tools/dl_cli.py --attach` to join the shared session, and `/detach` to leave it
   running.
@@ -217,7 +236,12 @@ Ray features a zero-overhead, on-demand MCP router (`tools/dl_mcp.py`) that keep
   | `/exa <query>`, `/context7 <library>` | web search, library docs |
   | `/diff`, `/secrets`, `/test`, `/wiki` | review the diff, scan for secrets, run tests, search the wiki |
   | `/save` | save the chat as Markdown |
-  | `/clear` | reset the conversation |
+  | `/clear`, `/new` | start a new conversation; the current one is saved |
+  | `/sessions [words]` | saved conversations, newest first; words search titles and messages |
+  | `/resume N`, `/delete N` | bring a saved conversation back, or remove it from the list |
+  | `/rename [N] <title>` | name this conversation, or saved conversation N |
+  | `/prompts` | this conversation's prompts, numbered |
+  | `/edit N <text>`, `/rewind N`, `/branch N [text]` | replace prompt N, go back to before it, or branch from before it |
   | `!<command>` | run a shell command |
 
 - **API:** the server speaks the OpenAI and Anthropic APIs on `/v1` (`/v1/chat/completions`, `/v1/audio/transcriptions`). Send the key as `Authorization: Bearer`.
