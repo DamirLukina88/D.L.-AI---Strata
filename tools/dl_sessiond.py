@@ -12,6 +12,9 @@ Protocol: JSON lines on $XDG_RUNTIME_DIR/dl-ai/sessiond.sock (mode 600).
   {"op": "approve" | "deny", "session": ..., "id": "..."}
   {"op": "interrupt", "session": ...}
   {"op": "export", "session": ...}                -> {"type": "export", "markdown": ..., "filename": ...}
+  {"op": "archives", "session": ..., "query": ""} -> {"type": "archives", "items": [...]}: saved conversations
+  {"op": "archive_rename", "session": ..., "id": ..., "title": ...} / {"op": "archive_delete", ..., "id": ...}
+  (/clear, /new, /sessions, /resume N, /rename, /delete are the same as input; resume is input "/resume <id>")
 An attached connection may send further ops; any other connection gets one {"type": "ok"} (or an error) reply.
 
 Sessions persist in ~/.local/state/dl-ai/sessions/<name>.json (history, workspace, mode, recent events).
@@ -69,6 +72,156 @@ def plain(text: str) -> str:
 
 _save_lock = threading.Lock()
 
+# ---------------------------------------------------------------- saved sessions
+# /clear and /new keep the conversation they end in ARCHIVE_DIR/<session>/<id>.json (messages, replay events, mode,
+# workspace); index.json holds each one's title and dates for the list.  /resume brings one back (the conversation it
+# replaces is kept the same way first); /delete moves the file to .deleted/, so nothing is lost by a wrong click.
+ARCHIVE_DIR = STATE_DIR.parent / "archive"
+ARCHIVE_ID = re.compile(r"^[0-9a-f]{8}$")
+_archive_lock = threading.RLock()
+
+
+def _archive_folder(session: str) -> Path:
+    return ARCHIVE_DIR / session
+
+
+def _write_private(path: Path, data) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    tmp = path.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(data, ensure_ascii=False))
+    tmp.replace(path)
+
+
+def _archive_meta(data: dict) -> dict:
+    return {k: data.get(k) for k in ("id", "title", "created", "updated", "turns", "workspace", "mode")}
+
+
+def _archive_index(session: str) -> dict[str, dict]:
+    """id -> meta; rebuilt from the files when index.json is missing or damaged."""
+    folder = _archive_folder(session)
+    try:
+        idx = json.loads((folder / "index.json").read_text(encoding="utf-8"))
+        if isinstance(idx, dict):
+            return {k: v for k, v in idx.items() if ARCHIVE_ID.match(k) and isinstance(v, dict)
+                    and (folder / f"{k}.json").is_file()}
+    except (OSError, ValueError):
+        pass
+    idx = {}
+    for p in folder.glob("*.json") if folder.is_dir() else []:
+        if ARCHIVE_ID.match(p.stem):
+            try:
+                idx[p.stem] = _archive_meta(json.loads(p.read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                continue
+    if idx:
+        _write_private(folder / "index.json", idx)
+    return idx
+
+
+def archive_list(session: str, query: str = "") -> list[dict]:
+    """Saved conversations, newest first, each with its list number `n` (the same with or without a search).
+    `query`: the words must all appear in the title or in a user or assistant message; `snippet` shows where."""
+    with _archive_lock:
+        items = sorted(_archive_index(session).values(), key=lambda m: m.get("updated") or 0, reverse=True)
+    for n, m in enumerate(items, 1):
+        m["n"] = n
+    words = [w for w in query.lower().split() if w]
+    if not words:
+        return items
+    found = []
+    for m in items:
+        title = (m.get("title") or "").lower()
+        if all(w in title for w in words):
+            found.append(m)
+            continue
+        data = archive_read(session, m["id"]) or {}
+        texts = [c for c in (msg.get("content") for msg in data.get("messages") or []
+                             if isinstance(msg, dict) and msg.get("role") in ("user", "assistant"))
+                 if isinstance(c, str)]
+        blob = "\n".join(texts)
+        low = blob.lower()
+        if all(w in low or w in title for w in words):
+            at = low.find(words[0])
+            if at >= 0:
+                s = blob[max(0, at - 40):at + 80].replace("\n", " ").strip()
+                m["snippet"] = ("…" if at > 40 else "") + s + "…"
+            found.append(m)
+    return found
+
+
+def archive_read(session: str, aid: str) -> dict | None:
+    if not ARCHIVE_ID.match(aid or ""):
+        return None
+    try:
+        data = json.loads((_archive_folder(session) / f"{aid}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def archive_write(session: str, data: dict) -> None:
+    with _archive_lock:
+        folder = _archive_folder(session)
+        _write_private(folder / f"{data['id']}.json", data)
+        idx = _archive_index(session)
+        idx[data["id"]] = _archive_meta(data)
+        _write_private(folder / "index.json", idx)
+
+
+def archive_resolve(session: str, ref: str) -> str | None:
+    """A list number (as /sessions shows it) or an id -> the id."""
+    ref = (ref or "").strip().lstrip("#")
+    items = archive_list(session)
+    if ref.isdigit() and not ARCHIVE_ID.match(ref):
+        n = int(ref)
+        return items[n - 1]["id"] if 1 <= n <= len(items) else None
+    return ref if any(m["id"] == ref for m in items) else None
+
+
+def archive_rename(session: str, aid: str, title: str) -> bool:
+    title = " ".join((title or "").split())[:120]
+    with _archive_lock:
+        data = archive_read(session, aid)
+        if data is None or not title:
+            return False
+        data["title"] = title
+        data["renamed"] = True
+        archive_write(session, data)
+    return True
+
+
+def archive_take(session: str, aid: str, deleted: bool) -> bool:
+    """Remove a saved conversation from the list: into .deleted/ (`deleted`), or gone because it is live again."""
+    with _archive_lock:
+        folder = _archive_folder(session)
+        src = folder / f"{aid}.json"
+        if not ARCHIVE_ID.match(aid or "") or not src.is_file():
+            return False
+        if deleted:
+            (folder / ".deleted").mkdir(exist_ok=True, mode=0o700)
+            src.replace(folder / ".deleted" / f"{aid}-{time.strftime('%Y%m%d-%H%M%S')}.json")
+        else:
+            src.unlink()
+        idx = _archive_index(session)
+        idx.pop(aid, None)
+        _write_private(folder / "index.json", idx)
+    return True
+
+
+def archive_list_text(session: str, query: str = "") -> str:
+    items = archive_list(session, query)
+    if not items:
+        return f"No saved conversation matches {query!r}." if query else \
+            "No saved conversations yet: /clear or /new keeps the current one here."
+    lines = []
+    for m in items:
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(m.get("updated") or 0))
+        lines.append(f"{m['n']:>3}. {m.get('title') or '(untitled)'}  ·  {m.get('turns') or 0} prompts  ·  {when}"
+                     f"  ·  {m['id']}" + (f"\n       {m['snippet']}" if m.get("snippet") else ""))
+    return "\n".join(lines) + "\n\n/resume N brings one back · /rename N <title> · /delete N"
+
 
 class Session:
     def __init__(self, name: str, workspace: Path):
@@ -90,6 +243,9 @@ class Session:
         self.plan_offer: str | None = None       # id of an open "Execute this plan?" offer
         self.plan_file: str | None = None        # the approved plan (PLAN.md) the done check holds the agent to
         self._plan_mtime: int | None = None      # the plan's mtime when a state was last sent for it
+        self.archive_id: str | None = None       # the saved conversation this one was resumed from (kept under it)
+        self.title: str | None = None            # /rename's title; otherwise the first prompt names it
+        self.created: float | None = None
         # MCP servers, on while a request needs them; "code": Google (Gmail) is allowed here, not in the REPL
         self.mcp = dl_mcp.McpRegistry(surface="code", notify=lambda t, level="info": self.notice(f"MCP {t}", level))
         self.mcp.on_change = self.emit_state
@@ -156,6 +312,7 @@ class Session:
                 "settings": cli.chat_settings_summary(), "effort": self.effort, "yolo": self.yolo, "busy": self.busy,
                 "wiki": str(cli.resolve_wiki_root(self.workspace) or ""),
                 "mcp": [m for m in self.mcp.status() if m["on"]], "plan": self.plan_summary(),
+                "title": self.title or self.auto_title(), "saved": len(archive_list(self.name)),
                 "pending": [{"id": k, "kind": v["kind"], "summary": v["summary"], "reason": v["reason"]}
                             for k, v in self.pending.items()]}
 
@@ -188,6 +345,7 @@ class Session:
                 self._open_block = None
             data = {"name": self.name, "workspace": str(self.workspace), "mode": self.mode, "effort": self.effort,
                     "yolo": self.yolo, "plan_file": self.plan_file,
+                    "archive_id": self.archive_id, "title": self.title, "created": self.created,
                     "messages": self.messages, "events": self.events[-REPLAY_MAX:], "seq": self.seq}
             STATE_DIR.mkdir(parents=True, exist_ok=True)
             tmp = self.path().with_suffix(".tmp")
@@ -227,6 +385,10 @@ class Session:
         pf = data.get("plan_file")
         s.plan_file = pf if isinstance(pf, str) and Path(pf).is_file() else None
         s.yolo = data.get("yolo") is True             # YOLO stays on until it is turned off, also after restarts
+        aid = data.get("archive_id")
+        s.archive_id = aid if isinstance(aid, str) and ARCHIVE_ID.match(aid) else None
+        s.title = data.get("title") if isinstance(data.get("title"), str) else None
+        s.created = data.get("created") if isinstance(data.get("created"), (int, float)) else None
         # what the model can be sent again: an assistant turn as saved (it may hold only tool calls), anything else
         # only with its text
         msgs = [m for m in data.get("messages") or [] if isinstance(m, dict) and (
@@ -244,6 +406,83 @@ class Session:
         # never below a number already shown: the web app keys thinking blocks by it
         s.seq = max([seq if type(seq) is int else 0, len(s.events), *used])
         return s
+
+    # ---------------------------------------------------------------- saved sessions
+    def prompts(self) -> list[str]:
+        """What the user asked in this conversation (not /commands or !shell), oldest first."""
+        out = [e.get("text") or "" for e in self.events if e.get("type") == "user"]
+        out = [t for t in out if t and not t.startswith(("/", "!"))]
+        if not out:                              # the replay keeps the last events only: the messages have them all
+            out = [m["content"] for m in self.messages[1:] if m.get("role") == "user" and isinstance(m.get("content"), str)]
+        return out
+
+    def auto_title(self) -> str:
+        first = next(iter(self.prompts()), "")
+        line = " ".join(first.split())
+        return (line[:72] + "…") if len(line) > 72 else line
+
+    def archive_current(self) -> str | None:
+        """Keep this conversation in the saved list (under its old id when it was resumed); None when it is empty."""
+        with self.lock:
+            if not any(m.get("role") == "user" for m in self.messages[1:]):
+                return None
+            events = list(self.events)
+            while events and (events[-1].get("type") == "state" or (       # the command that is archiving it
+                    events[-1].get("type") == "user" and (events[-1].get("text") or "").startswith("/"))):
+                events.pop()
+            now = time.time()
+            aid = self.archive_id or uuid.uuid4().hex[:8]
+            data = {"id": aid, "title": self.title or self.auto_title() or "(untitled)", "renamed": bool(self.title),
+                    "created": self.created or (events[0].get("ts") if events else None) or now, "updated": now,
+                    "turns": len(self.prompts()), "workspace": str(self.workspace), "mode": self.mode,
+                    "effort": self.effort, "plan_file": self.plan_file, "messages": self.messages,
+                    "events": events[-REPLAY_MAX:], "seq": self.seq}
+        archive_write(self.name, data)
+        return aid
+
+    def reset(self) -> None:
+        self.plan_file = None
+        self.archive_id = self.title = self.created = None
+        self.messages = [{"role": "system", "content": cli.build_dl_system_prompt(self.workspace, self.mode)}]
+        with self.lock:
+            self.events = []
+        self.emit({"type": "cleared"})
+        self.mcp.close()                         # a new conversation starts with only the default servers
+
+    def resume(self, aid: str) -> str:
+        data = archive_read(self.name, aid)
+        if data is None:
+            return "warn"
+        kept = self.archive_current()
+        ws = Path(data.get("workspace") or self.workspace)
+        self.workspace = ws if ws.is_dir() else self.workspace
+        self.mode = data.get("mode") if data.get("mode") in ("act", "plan") else "act"
+        self.effort = data.get("effort") if data.get("effort") in SESSION_EFFORTS else self.effort
+        pf = data.get("plan_file")
+        self.plan_file = pf if isinstance(pf, str) and Path(pf).is_file() else None
+        msgs = [m for m in data.get("messages") or [] if isinstance(m, dict) and m.get("role")]
+        self.messages = msgs or [{"role": "system", "content": ""}]
+        if self.messages[0].get("role") != "system":
+            self.messages.insert(0, {"role": "system", "content": ""})
+        self._system()
+        self.archive_id = aid
+        self.title = data.get("title") if data.get("renamed") else None
+        self.created = data.get("created")
+        self.mcp.close()
+        events = [e for e in data.get("events") or [] if isinstance(e, dict)]
+        with self.lock:
+            self._open_block = None
+            self.events = events
+            used = [e["seq"] for e in events if type(e.get("seq")) is int]
+            self.seq = max([self.seq, *used])
+            for q in list(self.clients):          # every client draws the resumed conversation as a replay
+                q.put({"type": "restored", "events": list(events), "title": data.get("title") or ""})
+        archive_take(self.name, aid, deleted=False)          # it is the live conversation now
+        self.notice(f"Resumed \"{data.get('title') or '(untitled)'}\" ({len(self.prompts())} prompts, "
+                    f"{self.mode} mode, {self.workspace})."
+                    + (" The conversation before it is in /sessions." if kept else ""))
+        self.emit_state()
+        return "info"
 
     # ---------------------------------------------------------------- approvals
     def approve(self, kind: str, summary: str, reason: str, cancel: threading.Event | None = None) -> bool:
@@ -462,14 +701,50 @@ class Session:
                         else "Approvals back on.", "warn" if self.yolo else "info")
             self.emit_state()
             return None
-        if cmd in ("/clear", "/reset"):
-            self.plan_file = None
-            self.messages = [{"role": "system", "content": cli.build_dl_system_prompt(self.workspace, self.mode)}]
-            with self.lock:
-                self.events = []
-            self.emit({"type": "cleared"})
-            self.mcp.close()                     # a new conversation starts with only the default servers
-            self.notice(f"Memory reset ({self.mode} mode).")
+        if cmd in ("/clear", "/reset", "/new"):
+            title = self.title or self.auto_title()
+            kept = self.archive_current()
+            self.reset()
+            self.notice(f"New conversation ({self.mode} mode)."
+                        + (f" The last one is saved as \"{title or '(untitled)'}\": /sessions lists it, /resume 1 "
+                           "brings it back." if kept else ""))
+            self.emit_state()
+            return None
+        if cmd == "/sessions":
+            self.output("/sessions" + (f" {arg}" if arg else ""), archive_list_text(self.name, arg))
+            return None
+        if cmd == "/resume":
+            aid = archive_resolve(self.name, arg) if arg else None
+            if not aid:
+                self.notice("Usage: /resume N (the number /sessions shows) or its id." if not arg
+                            else f"No saved conversation {arg!r}: /sessions lists them.", "warn")
+                return None
+            self.resume(aid)
+            return None
+        if cmd == "/rename":
+            ref, _, rest = arg.partition(" ")
+            aid = archive_resolve(self.name, ref) if rest.strip() else None
+            if aid:
+                ok = archive_rename(self.name, aid, rest)
+                self.notice(f"Renamed saved conversation {ref} to \"{' '.join(rest.split())}\"." if ok
+                            else "Give it a title: /rename N <title>.", "info" if ok else "warn")
+            elif arg:
+                self.title = " ".join(arg.split())[:120]
+                self.notice(f"This conversation is now \"{self.title}\".")
+            else:
+                self.notice("Usage: /rename <title> (this conversation) or /rename N <title> (a saved one).", "warn")
+            self.emit_state()
+            return None
+        if cmd == "/delete":
+            aid = archive_resolve(self.name, arg) if arg else None
+            if not aid:
+                self.notice("Usage: /delete N (the number /sessions shows)." if not arg
+                            else f"No saved conversation {arg!r}: /sessions lists them.", "warn")
+                return None
+            title = (archive_read(self.name, aid) or {}).get("title") or aid
+            archive_take(self.name, aid, deleted=True)
+            self.notice(f"Deleted \"{title}\" from the saved list (a copy stays in "
+                        f"{_archive_folder(self.name) / '.deleted'}).")
             self.emit_state()
             return None
         if cmd == "/mcp":
@@ -656,7 +931,10 @@ Session
 /continue         Go on after the agent stopped at its tool-round limit (DL_MAX_TURNS)
 /save [file]      Save the chat as Markdown in the workspace (also /export)
 /save full [file] The same with the whole run since /clear from the transcript, thinking included
-/clear            Reset the conversation (also /reset)
+/clear            Start a new conversation; the current one is saved (also /new, /reset)
+/sessions [words] Saved conversations, newest first; words search their titles and messages
+/resume N         Bring saved conversation N back (the current one is saved first)
+/rename [N] <t>   Name this conversation, or saved conversation N   /delete N  Remove N from the list
 /help             This list
 
 Direct lookups, without the model: /exa <query> (also /search), /context7 <library> (also /docs)"""
@@ -934,6 +1212,19 @@ class Handler(socketserver.StreamRequestHandler):
                     reply = {"type": "export", "filename": name, "markdown": md}
                 elif op == "state":
                     reply = sess.state()
+                elif op == "archives":
+                    reply = {"type": "archives", "items": archive_list(sess.name, str(msg.get("query") or "")),
+                             "current": {"title": sess.title or sess.auto_title(), "id": sess.archive_id}}
+                elif op == "archive_rename":
+                    if not archive_rename(sess.name, str(msg.get("id") or ""), str(msg.get("title") or "")):
+                        reply = {"type": "error", "text": "no such saved conversation, or no title"}
+                    else:
+                        sess.emit_state()
+                elif op == "archive_delete":
+                    if not archive_take(sess.name, str(msg.get("id") or ""), deleted=True):
+                        reply = {"type": "error", "text": "no such saved conversation"}
+                    else:
+                        sess.emit_state()
                 else:
                     reply = {"type": "error", "text": f"unknown op {op!r}"}
                 if attached is None:

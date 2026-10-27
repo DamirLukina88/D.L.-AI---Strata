@@ -1994,7 +1994,23 @@ function codeEvent(ev, replay) {
       codeOnTurnEnd();
       break;
     case "state": codeSetState(ev); break;
+    case "restored": codeRestored(ev); break;
   }
+}
+
+// /resume: the saved conversation replaces the feed, drawn like the history on attach
+function codeRestored(ev) {
+  code.replaying = true;
+  code.turnFromVoice = false;
+  codeFeed().innerHTML = "";
+  codeEnd();
+  code.approvals = {};
+  codeThinkClosed.clear(); codeSaveThinkState();
+  for (const e of ev.events || []) codeEvent(e, true);
+  codeRenderCur();
+  codeScroll(true);
+  code.replaying = false;
+  if ($("sessions-drawer")?.dataset.open === "true") sessionsLoad();
 }
 
 function codeHello(h) {
@@ -2096,7 +2112,7 @@ codeFeed()?.addEventListener("toggle", (e) => {
 function codeDisconnect() { if (code.conn) code.conn.abort(); code.conn = null; }
 
 async function codeOp(op, extra = {}) {
-  if (op !== "export") code.opAt = Date.now();             // the watchdog expects an event back (codeConnect)
+  if (op !== "export" && op !== "archives") code.opAt = Date.now();   // the watchdog expects an event back (codeConnect)
   try {
     const r = await fetch("api/code/session", {
       method: "POST", headers: headers(true),
@@ -2162,7 +2178,7 @@ function setScaffoldUI() {
 }
 
 if ($("code-restart-btn")) {
-  $("code-restart-btn").onclick = () => { if (confirm("Clear this CLI conversation (in every client)?")) codeSend("/clear"); };
+  $("code-restart-btn").onclick = () => codeSend("/new");     // the current conversation goes to Sessions first
 }
 if ($("code-stop-btn")) {
   $("code-stop-btn").onclick = () => {
@@ -2195,6 +2211,72 @@ if ($("code-export-btn")) {
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     toast("success", "Chat saved", a.download);
   };
+}
+// ------------------------------------------------------------------ saved sessions (dl_sessiond: /sessions)
+// /clear and New keep the conversation they end; this drawer lists them, searches their titles and messages, and
+// resumes, renames or deletes one. Resume goes through the session like the typed /resume, so every client follows.
+let sessionsTimer = null;
+function openSessions(open) {
+  const d = $("sessions-drawer");
+  if (!d) return;
+  d.dataset.open = String(open);
+  d.toggleAttribute("inert", !open);
+  d.inert = !open;
+  if (open) { d.removeAttribute("aria-hidden"); sessionsLoad(); setTimeout(() => $("sessions-search")?.focus(), 50); }
+  else d.setAttribute("aria-hidden", "true");
+  $("scrim").hidden = !open;
+}
+async function sessionsLoad() {
+  const q = ($("sessions-search")?.value || "").trim();
+  const res = await codeOp("archives", { query: q });
+  if (!res) return;
+  const cur = res.current || {};
+  $("sessions-current").innerHTML = `<div class="sess-item sess-item--current">
+      <div class="sess-main"><div class="sess-title">${esc(cur.title || "(nothing asked yet)")}</div>
+        <div class="sess-meta">Now open${cur.id ? " · resumed" : ""}</div></div>
+      <div class="sess-actions"><button type="button" class="st-btn st-btn--icon st-btn--sm" data-sess-rename-current title="Rename this conversation" aria-label="Rename this conversation">✎</button></div></div>`;
+  const items = res.items || [];
+  $("sessions-list").innerHTML = items.length ? items.map((m) => {
+    const when = m.updated ? new Date(m.updated * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "";
+    const ws = (m.workspace || "").split("/").slice(-2).join("/");
+    return `<div class="sess-item" data-sess-id="${esc(m.id)}">
+      <button type="button" class="sess-main" data-sess-resume title="Resume this conversation">
+        <span class="sess-title">${m.n}. ${esc(m.title || "(untitled)")}</span>
+        <span class="sess-meta">${m.turns || 0} prompts · ${esc(when)} · ${esc(ws)}</span>
+        ${m.snippet ? `<span class="sess-snippet">${esc(m.snippet)}</span>` : ""}</button>
+      <div class="sess-actions">
+        <button type="button" class="st-btn st-btn--icon st-btn--sm" data-sess-rename title="Rename" aria-label="Rename">✎</button>
+        <button type="button" class="st-btn st-btn--icon st-btn--sm" data-sess-delete title="Delete" aria-label="Delete">${icon("trash")}</button>
+      </div></div>`;
+  }).join("") : `<p class="muted small">${q ? "Nothing matches." : "No saved conversations yet. New (or /clear) keeps the current one here."}</p>`;
+}
+if ($("sessions-drawer")) {
+  $("code-sessions-btn").onclick = () => openSessions(true);
+  $("sessions-close").onclick = () => openSessions(false);
+  $("scrim").addEventListener("click", () => openSessions(false));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("sessions-drawer").dataset.open === "true") openSessions(false); });
+  $("sessions-search").addEventListener("input", () => { clearTimeout(sessionsTimer); sessionsTimer = setTimeout(sessionsLoad, 250); });
+  $("sessions-new").onclick = () => { codeSend("/new"); openSessions(false); };
+  $("sessions-drawer").addEventListener("click", async (e) => {
+    const item = e.target.closest("[data-sess-id]");
+    if (e.target.closest("[data-sess-rename-current]")) {
+      const t = prompt("Name this conversation:", code.state.title || "");
+      if (t && t.trim()) { await codeSend(`/rename ${t.trim()}`); setTimeout(sessionsLoad, 400); }
+      return;
+    }
+    if (!item) return;
+    const id = item.dataset.sessId, title = item.querySelector(".sess-title")?.textContent.replace(/^\d+\.\s*/, "") || "";
+    if (e.target.closest("[data-sess-resume]")) {
+      if (code.state.busy) { toast("warn", "Sessions", "The session is working: stop it or wait, then resume."); return; }
+      codeSend(`/resume ${id}`);
+      openSessions(false);
+    } else if (e.target.closest("[data-sess-rename]")) {
+      const t = prompt("Rename this saved conversation:", title);
+      if (t && t.trim() && await codeOp("archive_rename", { id, title: t.trim() })) sessionsLoad();
+    } else if (e.target.closest("[data-sess-delete]")) {
+      if (confirm(`Delete "${title}" from the saved list?`) && await codeOp("archive_delete", { id })) sessionsLoad();
+    }
+  });
 }
 if ($("code-fullscreen-btn")) {
   $("code-fullscreen-btn").onclick = () => document.querySelector(".code-terminal-wrap")?.classList.toggle("code-terminal--fullscreen");

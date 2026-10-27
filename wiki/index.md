@@ -48,6 +48,7 @@ Every page in this wiki is listed below. The list is generated; do not edit betw
 - [Ray: Assistant Name, Female Voice and Persona](decisions/ray-assistant-persona.md) — D.L. AI is now Ray; Piper HFC female voice; casual persona crediting Damir's stack on every Chat request
 - [Revert of Struggle Diary and Modular Harness](decisions/revert-struggle-diary-and-modular-harness.md) — Reverted struggle diary telemetry and modular harness files due to prompt bloat, latency overhead, and RAM eviction on reload
 - [RX 7600 XT CachyOS Deployment](decisions/rx-7600-xt-cachyos-deployment.md) — Deployment configuration for the RX 7600 XT on CachyOS, and how to start and stop it (strata.sh)
+- [Saved CLI Sessions (/sessions, /resume)](decisions/saved-cli-sessions.md) — /clear and New keep the conversation in dl_sessiond's archive; list, search, rename, delete and resume from the Code tab drawer or the terminal
 - [Scheduled Jobs in D.L. AI](decisions/dl-ai-scheduled-jobs.md) — The session daemon runs prompts or one exact pre-approved action at a time or on repeat; model warm-up, retries, catch-up, notices
 - [Sensitive File Guardrail and Prefix Mode in D.L. CLI](decisions/sensitive-file-guard-and-prefix-mode-in-dl-cli.md) — Prevents credential leaks via @file injection and suppresses conversational chatter using assistant seed prefixes.
 - [Shared CLI Session Daemon for Web and Terminal](decisions/shared-cli-session-daemon.md) — One D.L. CLI agent session in dl-ai-sessiond, used from the web Code tab and dl_cli.py --attach; replaced ttyd + tmux scraping

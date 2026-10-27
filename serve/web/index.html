@@ -8,7 +8,7 @@
 <link rel="icon" type="image/svg+xml" href="web/favicon.svg">
 <link rel="stylesheet" href="web/tokens.css">
 <link rel="stylesheet" href="web/components.css">
-<link rel="stylesheet" href="web/app.css?v=20261027-split4">
+<link rel="stylesheet" href="web/app.css?v=20261027-sessions1">
 <script>
   // the theme before the first paint: default dark for D.L. AI
   try {
@@ -74,8 +74,11 @@
           <button type="button" class="st-btn st-btn--secondary st-btn--sm code-action-btn" id="code-stop-btn" title="Interrupt the running turn" hidden>
             <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-stop"/></svg><span>Stop</span>
           </button>
-          <button type="button" class="st-btn st-btn--secondary st-btn--sm code-action-btn" id="code-restart-btn" title="Clear the conversation (/clear)">
-            <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-refresh"/></svg><span>Clear</span>
+          <button type="button" class="st-btn st-btn--icon code-action-btn" id="code-sessions-btn" title="Saved conversations (/sessions)" aria-label="Saved conversations">
+            <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-layers"/></svg>
+          </button>
+          <button type="button" class="st-btn st-btn--secondary st-btn--sm code-action-btn" id="code-restart-btn" title="Start a new conversation; the current one is saved in Sessions (/new)">
+            <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-new-chat"/></svg><span>New</span>
           </button>
           <button type="button" class="st-btn st-btn--icon code-action-btn" id="code-fullscreen-btn" title="Toggle Fullscreen" aria-label="Toggle Fullscreen">
             <svg class="st-icon st-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
@@ -327,6 +330,20 @@
   </section>
 </main>
 
+<!-- ============================ Saved sessions drawer ============================ -->
+<aside class="st-drawer sessions-drawer" id="sessions-drawer" data-open="false" aria-label="Saved conversations" aria-hidden="true" inert>
+  <div class="st-drawer__head"><span class="card-title">Sessions</span>
+    <button class="st-btn st-btn--icon" id="sessions-close" aria-label="Close">
+      <svg class="st-icon"><use href="web/sprite.svg#i-chevron"/></svg></button></div>
+  <div class="st-drawer__body">
+    <div id="sessions-current"></div>
+    <button type="button" class="st-btn st-btn--secondary st-btn--sm" id="sessions-new">
+      <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-new-chat"/></svg><span>New conversation</span></button>
+    <input type="search" class="st-input" id="sessions-search" placeholder="Search titles and messages" aria-label="Search saved conversations">
+    <div class="sess-list" id="sessions-list"></div>
+  </div>
+</aside>
+
 <!-- ============================ Sampling drawer ============================ -->
 <aside class="st-drawer" id="drawer" data-open="false" aria-label="Sampling and thinking" aria-hidden="true" inert>
   <div class="st-drawer__head"><span class="card-title">Sampling</span>
@@ -465,6 +482,6 @@
 <div class="scrim" id="scrim" hidden></div>
 <div class="st-toasts" id="toasts" aria-live="polite"></div>
 <script src="web/site-config.js?v=20261020-logout1"></script>
-<script src="web/app.js?v=20261027-follow1"></script>
+<script src="web/app.js?v=20261027-sessions1"></script>
 </body>
 </html>

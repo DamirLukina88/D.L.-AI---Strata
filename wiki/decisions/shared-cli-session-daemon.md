@@ -27,6 +27,8 @@ last_verified: 2026-10-13
   - Not changed: `tools/antigravity_local.py`, a separate copy of the CLI.
 - 2026-10-17: Autonomous session management tools (`save_chat`, `get_system_health`, `get_engine_status`, `clear_conversation`) added to `DL_TOOLS` and `DL_PLAN_TOOLS`, allowing Qwen Coder to export sessions, inspect hardware/engine stats, and reset conversation memory autonomously. Conversational continuation phrases (`"continue"`, `"keep going"`, `"go on"`, `"proceed"`) in `dl_sessiond` and `dl_cli` automatically map to `/continue` after the tool-turn limit (`DL_MAX_TURNS`) is reached. In YOLO mode, reaching `DL_MAX_TURNS` automatically continues execution indefinitely without prompting the user. Tests in `tools/test_dl_session_tools.py` and `tools/test_dl_yolo_continue.py`.
 
+- 2026-10-27: Saved sessions: /clear and /new keep the conversation; /sessions, /resume, /rename, /delete and a Sessions drawer in the Code tab. See [Saved CLI Sessions](saved-cli-sessions.md).
+
 ## Related
 
 - [Scheduled Jobs in D.L. AI](dl-ai-scheduled-jobs.md)

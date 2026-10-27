@@ -6290,10 +6290,13 @@ def make_handler(svc: Service):
                 except ValueError:
                     req = {}
                 op = req.get("op")
-                if op not in ("input", "approve", "deny", "interrupt", "export", "state"):
-                    self._json(400, {"error": {"message": "op must be input, approve, deny, interrupt, export or state"}})
+                if op not in ("input", "approve", "deny", "interrupt", "export", "state", "archives", "archive_rename",
+                              "archive_delete"):
+                    self._json(400, {"error": {"message": "op must be input, approve, deny, interrupt, export, state, "
+                                                          "archives, archive_rename or archive_delete"}})
                     return
-                msg = {k: req[k] for k in ("op", "session", "text", "id", "origin", "effort", "voice") if k in req}
+                msg = {k: req[k] for k in ("op", "session", "text", "id", "origin", "effort", "voice", "query", "title")
+                       if k in req}
                 try:
                     self._json(200, self._session_op(msg))
                 except OSError as e:

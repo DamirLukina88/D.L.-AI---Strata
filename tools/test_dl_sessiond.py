@@ -347,5 +347,109 @@ class TurnEffort(unittest.TestCase):
         self.assertNotIn("Spoken prompt", seen[1])
 
 
+class SavedSessions(unittest.TestCase):
+    """/clear and /new keep the conversation they end; /sessions lists and searches, /resume brings one back (the
+    one it replaces is kept first), /rename and /delete change the list. No model: the turns are written directly."""
+
+    def setUp(self):
+        sys.path.insert(0, str(HERE))
+        import dl_sessiond
+        from unittest import mock
+        self.sd = dl_sessiond
+        self.tmp = Path(tempfile.mkdtemp())
+        self.ws = self.tmp / "ws"
+        self.ws.mkdir()
+        self.patches = [mock.patch.object(dl_sessiond, "STATE_DIR", self.tmp / "sessions"),
+                        mock.patch.object(dl_sessiond, "ARCHIVE_DIR", self.tmp / "archive")]
+        for p in self.patches:
+            p.start()
+        self.s = dl_sessiond.Session("t", self.ws)
+        self.seen = []
+        self.q = __import__("queue").Queue()
+        self.s.clients.add(self.q)
+
+    def tearDown(self):
+        self.s.mcp.close()
+        for p in self.patches:
+            p.stop()
+
+    def turn(self, prompt, answer):
+        self.s.emit({"type": "user", "text": prompt, "origin": "x"})
+        self.s.emit({"type": "text", "text": answer})
+        self.s.messages += [{"role": "user", "content": prompt}, {"role": "assistant", "content": answer}]
+
+    def cmd(self, text):
+        self.s.emit({"type": "user", "text": text, "origin": "x"})
+        self.s._command(text)
+        out = []
+        while not self.q.empty():
+            out.append(self.q.get())
+        return out
+
+    def notices(self, evs):
+        return " ".join(e.get("text", "") for e in evs if e["type"] in ("notice", "output"))
+
+    def test_clear_saves_and_resume_brings_it_back(self):
+        self.turn("Fix the parser in tools/x.py", "Done, the parser is fixed.")
+        evs = self.cmd("/clear")
+        self.assertIn("Fix the parser", self.notices(evs))
+        self.assertEqual([m["role"] for m in self.s.messages], ["system"])
+        items = self.sd.archive_list("t")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["title"], "Fix the parser in tools/x.py")
+        self.assertEqual(items[0]["turns"], 1)
+        data = self.sd.archive_read("t", items[0]["id"])
+        self.assertFalse(any(e.get("text") == "/clear" for e in data["events"]))   # not the command that saved it
+        self.assertEqual(self.cmd("/clear")[-1]["type"], "state")                 # an empty conversation is not kept
+        self.assertEqual(len(self.sd.archive_list("t")), 1)
+
+        self.turn("Second task: write the docs", "Docs written.")
+        evs = self.cmd("/resume 1")
+        restored = [e for e in evs if e["type"] == "restored"]
+        self.assertEqual(len(restored), 1)
+        self.assertTrue(any(e.get("text") == "Done, the parser is fixed." for e in restored[0]["events"]))
+        self.assertEqual(self.s.messages[1]["content"], "Fix the parser in tools/x.py")
+        self.assertEqual(self.s.messages[0]["role"], "system")
+        titles = [m["title"] for m in self.sd.archive_list("t")]
+        self.assertEqual(titles, ["Second task: write the docs"])                 # the live one left the list
+        # cleared again, it goes back under its old id (not a second copy)
+        old_id = self.s.archive_id
+        self.cmd("/new")
+        self.assertIn(old_id, [m["id"] for m in self.sd.archive_list("t")])
+        self.assertEqual(len(self.sd.archive_list("t")), 2)
+
+    def test_search_rename_delete(self):
+        self.turn("Plan the garden lights", "Use the group light.garden.")
+        self.cmd("/new")
+        self.turn("Benchmark the engine", "4K prompt 302 tok/s.")
+        self.cmd("/new")
+        self.assertEqual([m["n"] for m in self.sd.archive_list("t")], [1, 2])
+        found = self.sd.archive_list("t", "302 tok")
+        self.assertEqual([m["title"] for m in found], ["Benchmark the engine"])
+        self.assertIn("302 tok/s", found[0]["snippet"])
+        self.assertEqual(found[0]["n"], 1)                                        # the number of the full list
+        self.assertIn("garden", self.notices(self.cmd("/sessions garden")))
+        self.cmd("/rename 2 Garden lighting")
+        self.assertEqual(self.sd.archive_list("t")[1]["title"], "Garden lighting")
+        self.cmd("/rename My live task")
+        self.assertEqual(self.s.state()["title"], "My live task")
+        self.assertIn("Deleted", self.notices(self.cmd("/delete 1")))
+        self.assertEqual([m["title"] for m in self.sd.archive_list("t")], ["Garden lighting"])
+        self.assertTrue(list((self.tmp / "archive" / "t" / ".deleted").glob("*.json")))   # recoverable
+        self.assertIn("No saved conversation", self.notices(self.cmd("/resume 9")))
+        (self.tmp / "archive" / "t" / "index.json").write_text("{broken")
+        self.assertEqual([m["title"] for m in self.sd.archive_list("t")], ["Garden lighting"])  # rebuilt from files
+
+    def test_saved_fields_survive_a_restart(self):
+        self.turn("Keep me", "ok")
+        self.cmd("/new")
+        self.cmd("/resume 1")
+        self.cmd("/rename Kept")
+        self.s.save()
+        again = self.sd.Session.load("t", self.ws)
+        self.assertEqual((again.archive_id, again.title), (self.s.archive_id, "Kept"))
+        again.mcp.close()
+
+
 if __name__ == "__main__":
     unittest.main()
