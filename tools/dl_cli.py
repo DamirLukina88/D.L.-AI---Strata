@@ -1943,7 +1943,8 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str, tools: list[d
     active_tools = DL_TOOLS if tools is None else tools
     payload = {
         "model": "strata",
-        "messages": messages,
+        # dl_turn: the session daemon's mark of which prompt a user message came from (/rewind); not the model's
+        "messages": [{k: v for k, v in m.items() if k != "dl_turn"} if "dl_turn" in m else m for m in messages],
         "tools": active_tools,
         "stream": True,
     }

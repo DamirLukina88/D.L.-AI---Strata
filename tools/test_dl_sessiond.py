@@ -451,5 +451,90 @@ class SavedSessions(unittest.TestCase):
         again.mcp.close()
 
 
+class RewindEditBranch(SavedSessions):
+    """/rewind N, /edit N <text> and /branch N [text] go back to just before a prompt: its event and its user
+    message (found by the dl_turn mark) and everything after them leave the conversation."""
+
+    def turn(self, prompt, answer):
+        self.s.emit({"type": "user", "text": prompt, "origin": "me"})
+        self.s.messages += [{"role": "user", "content": prompt, "dl_turn": self.s.seq},
+                            {"role": "assistant", "content": answer}]
+        self.s.emit({"type": "text", "text": answer})
+
+    def three(self):
+        self.turn("first prompt", "first answer")
+        self.turn("second prompt", "second answer")
+        self.turn("third prompt", "third answer")
+
+    def test_prompts_and_rewind(self):
+        self.three()
+        self.assertIn("2. second prompt", self.notices(self.cmd("/prompts")))
+        self.s._turn_origin = "me"
+        evs = self.cmd("/rewind 2")
+        self.assertEqual([m.get("content") for m in self.s.messages[1:]], ["first prompt", "first answer"])
+        self.assertEqual([e.get("text") for e in self.s.events if e["type"] in ("user", "text")],
+                         ["first prompt", "first answer"])
+        restored = [e for e in evs if e["type"] == "restored"]
+        self.assertEqual(len(restored), 1)
+        self.assertEqual([e for e in evs if e["type"] == "rewound"][0]["text"], "second prompt")
+        self.assertEqual(self.s.messages[0]["role"], "system")
+
+    def test_edit_returns_the_new_prompt_as_its_own_turn(self):
+        self.three()
+        self.s.emit({"type": "user", "text": "/edit 3 a better third", "origin": "me"})
+        self.s._turn_origin = "me"
+        prompt = self.s._command("/edit 3 a better third")
+        self.assertEqual(prompt, "a better third")
+        users = [e for e in self.s.events if e["type"] == "user"]
+        self.assertEqual([e["text"] for e in users], ["first prompt", "second prompt", "a better third"])
+        self.assertEqual(self.s._turn_seq, users[-1]["seq"])                     # the agent marks its message
+        self.assertEqual(len(self.s.messages), 5)                                 # system + two turns
+        self.assertIn("Usage", self.notices(self.cmd("/edit 2")))
+
+    def test_branch_keeps_the_whole_conversation(self):
+        self.three()
+        self.cmd("/rename Big task")
+        self.cmd("/branch 2")
+        saved = self.sd.archive_list("t")
+        self.assertEqual([(m["title"], m["turns"]) for m in saved], [("Big task", 3)])
+        self.assertEqual([m.get("content") for m in self.s.messages[1:]], ["first prompt", "first answer"])
+        self.assertIsNone(self.s.archive_id)
+        self.assertEqual(self.s.title, "Big task (branch)")
+        self.cmd("/new")                                                           # the branch is saved apart
+        self.assertEqual(sorted(m["title"] for m in self.sd.archive_list("t")), ["Big task", "Big task (branch)"])
+
+    def test_web_ref_unmarked_prompt_and_trimmed_prompt(self):
+        self.three()
+        second = [e for e in self.s.events if e.get("text") == "second prompt"][0]
+        for m in self.s.messages:                                                  # a session from before the marks
+            m.pop("dl_turn", None)
+        self.cmd(f"/rewind @{second['seq']}")
+        self.assertEqual(len(self.s.messages), 3)
+        self.turn("again", "ok")
+        self.s.messages = [m for m in self.s.messages if m.get("content") != "again"]   # trimmed away
+        evs = self.cmd("/rewind 2")
+        self.assertIn("no longer in the model's context", self.notices(evs))
+        self.assertEqual(len(self.prompts_now()), 2)                               # nothing was cut
+        self.assertIn("N from 1 to 2", self.notices(self.cmd("/rewind 7")))
+
+    def prompts_now(self):
+        return self.s.prompt_events()
+
+    def test_the_mark_is_not_sent_to_the_model(self):
+        import dl_cli
+        from unittest import mock
+        sent = {}
+
+        def fake(req, *a, **k):
+            sent.update(json.loads(req.data))
+            raise OSError("stop here")
+        with mock.patch.object(dl_cli.urllib.request, "urlopen", fake):
+            try:
+                dl_cli.stream_chat_turn([{"role": "user", "content": "hi", "dl_turn": 5}], "http://127.0.0.1:9", "x")
+            except Exception:
+                pass
+        self.assertEqual(sent.get("messages"), [{"role": "user", "content": "hi"}])
+
+
 if __name__ == "__main__":
     unittest.main()

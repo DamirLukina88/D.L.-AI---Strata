@@ -1944,7 +1944,16 @@ function codeEvent(ev, replay) {
     case "text": codeAssistant().text += ev.text; codeQueueRender(); break;
     case "user":
       codeEnd();
-      codeCard("code-mobile-card--user", `<div class="code-mobile-card-body">${esc(ev.text)}</div>`);
+      {
+        const prompt = ev.seq != null && ev.text && !/^[\/!]/.test(ev.text);   // a prompt: it can be gone back to
+        const card = codeCard("code-mobile-card--user", `<div class="code-mobile-card-body">${esc(ev.text)}</div>` + (prompt ? `
+          <div class="code-card-actions cs-prompt-actions">
+            <button type="button" class="st-btn st-btn--icon st-btn--sm code-card-action" data-prompt-edit title="Edit this prompt and run it again" aria-label="Edit this prompt">✎</button>
+            <button type="button" class="st-btn st-btn--icon st-btn--sm code-card-action" data-prompt-rewind title="Rewind to before this prompt" aria-label="Rewind to before this prompt">↶</button>
+            <button type="button" class="st-btn st-btn--icon st-btn--sm code-card-action" data-prompt-branch title="Branch: keep the whole conversation in Sessions, go on from before this prompt" aria-label="Branch from before this prompt">⑂</button>
+          </div>` : ""));
+        if (prompt) { card.dataset.seq = ev.seq; card.dataset.prompt = ev.text; }
+      }
       if (!replay && ev.origin && ev.origin === code.client) codeScroll(true);   // #4014: what you sent is shown, even scrolled up
       break;
     case "tool_call": {
@@ -1995,6 +2004,14 @@ function codeEvent(ev, replay) {
       break;
     case "state": codeSetState(ev); break;
     case "restored": codeRestored(ev); break;
+    case "rewound":                                  // the prompt you went back from, back in your input box
+      if (!replay && ev.origin === code.client && ev.cmd !== "/edit" && $("code-mobile-input")) {
+        const ta = $("code-mobile-input");
+        ta.value = ev.text || "";
+        ta.dispatchEvent(new Event("input"));
+        ta.focus();
+      }
+      break;
   }
 }
 
@@ -2290,6 +2307,8 @@ if (codeFeed()) {
       if (textEl) TTSController.speakText(textEl.innerText || textEl.textContent, sp);
       return;
     }
+    const pa = e.target.closest("[data-prompt-edit],[data-prompt-rewind],[data-prompt-branch],[data-prompt-send],[data-prompt-send-branch],[data-prompt-cancel]");
+    if (pa) { codePromptAction(pa); return; }
     const cp = e.target.closest("[data-code-copy]");
     if (cp) {
       const card = cp.closest(".code-mobile-card");
@@ -2298,6 +2317,44 @@ if (codeFeed()) {
       return;
     }
   });
+}
+// A past prompt: edit it in place and run it again (/edit), rewind to before it (/rewind), or branch from before it
+// (/branch: the whole conversation stays in Sessions). The daemon cuts the conversation and every client redraws it.
+function codePromptAction(btn) {
+  const card = btn.closest(".code-mobile-card--user");
+  if (!card) return;
+  const ref = `@${card.dataset.seq}`, body = card.querySelector(".code-mobile-card-body");
+  if (btn.matches("[data-prompt-cancel]")) { body.textContent = card.dataset.prompt; card.classList.remove("cs-editing"); return; }
+  if (code.state.busy) { toast("warn", "CLI session", "The session is working: stop it or wait first."); return; }
+  if (btn.matches("[data-prompt-edit]")) {
+    if (card.classList.contains("cs-editing")) return;
+    card.classList.add("cs-editing");
+    body.innerHTML = `<textarea class="cs-edit-input" rows="3" aria-label="Edited prompt"></textarea>
+      <div class="cs-edit-actions">
+        <button type="button" class="st-btn st-btn--primary st-btn--sm" data-prompt-send title="Replace this prompt and run it; what came after it is removed">Send</button>
+        <button type="button" class="st-btn st-btn--secondary st-btn--sm" data-prompt-send-branch title="Keep the whole conversation in Sessions and run the edited prompt in a branch">Send as branch</button>
+        <button type="button" class="st-btn st-btn--secondary st-btn--sm" data-prompt-cancel>Cancel</button></div>`;
+    const ta = body.querySelector("textarea");
+    ta.value = card.dataset.prompt;
+    ta.style.height = Math.min(ta.scrollHeight + 4, 240) + "px";
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); body.querySelector("[data-prompt-send]").click(); }
+      if (e.key === "Escape") { e.stopPropagation(); body.querySelector("[data-prompt-cancel]").click(); }
+    });
+    ta.focus();
+    return;
+  }
+  if (btn.matches("[data-prompt-send],[data-prompt-send-branch]")) {
+    const text = (body.querySelector("textarea")?.value || "").trim();
+    if (!text) return;
+    codeSend(`${btn.matches("[data-prompt-send]") ? "/edit" : "/branch"} ${ref} ${text}`);
+    return;
+  }
+  if (btn.matches("[data-prompt-rewind]")) {
+    if (confirm("Rewind to before this prompt? It and everything after it are removed (Branch keeps them).")) codeSend(`/rewind ${ref}`);
+    return;
+  }
+  if (btn.matches("[data-prompt-branch]")) codeSend(`/branch ${ref}`);
 }
 if ($("code-mobile-send-btn")) $("code-mobile-send-btn").onclick = () => codeSend();
 if ($("code-mobile-input")) {

@@ -440,6 +440,94 @@ class Session:
         archive_write(self.name, data)
         return aid
 
+    # ---------------------------------------------------------------- rewind, edit, branch
+    def prompt_events(self) -> list[dict]:
+        """This conversation's prompts that can be gone back to: the user events that are not /commands or !shell,
+        oldest first (numbered from 1 in /prompts)."""
+        return [e for e in self.events if e.get("type") == "user" and type(e.get("seq")) is int
+                and (e.get("text") or "") and not e["text"].startswith(("/", "!"))]
+
+    def find_prompt(self, ref: str) -> dict | None:
+        """`N` (the prompt's number in /prompts) or `@seq` (its event, as the web app sends) -> the user event."""
+        ref = (ref or "").strip()
+        prompts = self.prompt_events()
+        if ref.startswith("@") and ref[1:].isdigit():
+            return next((e for e in prompts if e["seq"] == int(ref[1:])), None)
+        if ref.isdigit() and 1 <= int(ref) <= len(prompts):
+            return prompts[int(ref) - 1]
+        return None
+
+    def cut_before(self, ev: dict) -> str | None:
+        """Go back to just before prompt event `ev`: it and everything after it leave the conversation, the
+        model's messages included.  Returns why it cannot (None when done)."""
+        at = next((i for i, m in enumerate(self.messages) if m.get("role") == "user" and m.get("dl_turn") == ev["seq"]),
+                  None)
+        if at is None:                               # a prompt from before the marks: the same text, newest match
+            text = ev.get("text") or ""
+            at = next((i for i in range(len(self.messages) - 1, 0, -1) if self.messages[i].get("role") == "user"
+                       and isinstance(self.messages[i].get("content"), str)
+                       and self.messages[i]["content"].strip() == text.strip()), None)
+        if at is None or at < 1:
+            return ("that prompt is no longer in the model's context (trimmed from a long conversation), so the "
+                    "session cannot go back to it")
+        with self.lock:
+            self.messages = self.messages[:at]
+            k = next(i for i, e in enumerate(self.events) if e is ev)
+            self.events = self.events[:k]
+            self._open_block = None
+            self.plan_offer = None
+        self._system()
+        return None
+
+    def redraw(self, title: str = "") -> None:
+        with self.lock:
+            for q in list(self.clients):
+                q.put({"type": "restored", "events": list(self.events), "title": title})
+
+    def go_back(self, cmd: str, arg: str) -> str | None:
+        """/rewind N, /edit N <text>, /branch N [text]; returns a prompt to run next, or None."""
+        ref, _, text = arg.partition(" ")
+        text = text.strip()
+        ev = self.find_prompt(ref)
+        if ev is None:
+            n = len(self.prompt_events())
+            self.notice(f"Usage: {cmd} N" + (" <new prompt>" if cmd == "/edit" else " [new prompt]" if cmd == "/branch"
+                                                 else "") + f" - N from 1 to {n} (/prompts lists them)." if n
+                        else "This conversation has no prompt to go back to.", "warn")
+            return None
+        if cmd == "/edit" and not text:
+            self.notice("Usage: /edit N <new prompt>", "warn")
+            return None
+        old = ev.get("text") or ""
+        kept = None
+        if cmd == "/branch":                          # the whole conversation stays in /sessions as it is
+            kept = self.archive_current()
+        why = self.cut_before(ev)
+        if why:
+            self.notice(f"Cannot {cmd[1:]}: {why}.", "warn")
+            return None
+        if cmd == "/branch":
+            parent = self.title or (archive_read(self.name, kept) or {}).get("title") if kept else self.title
+            self.archive_id, self.created = None, time.time()
+            self.title = f"{parent} (branch)" if parent else None
+        self.redraw(self.title or self.auto_title())
+        short = (old[:60] + "…") if len(old) > 60 else old
+        if cmd == "/rewind":
+            self.notice(f"Rewound to before \"{short}\"; it and everything after it are gone. Type the prompt again, "
+                        "or a different one.")
+        elif cmd == "/branch":
+            self.notice(f"Branched before \"{short}\": the whole conversation is kept in /sessions"
+                        + (", and this branch goes on with the new prompt." if text else "; type the next prompt."))
+        else:
+            self.notice(f"Edited prompt (was \"{short}\"); the answers after it were removed.")
+        # the client that asked gets the old prompt back in its input box (rewind, branch without a new prompt)
+        self.emit({"type": "rewound", "text": old, "cmd": cmd, "origin": getattr(self, "_turn_origin", "")})
+        if text:                                      # the new prompt is a turn of its own: shown, and markable
+            self.emit({"type": "user", "text": text, "origin": getattr(self, "_turn_origin", "")})
+            self._turn_seq = self.seq
+        self.emit_state()
+        return text or None
+
     def reset(self) -> None:
         self.plan_file = None
         self.archive_id = self.title = self.created = None
@@ -543,6 +631,8 @@ class Session:
 
     def _run(self, text: str, origin: str, effort: str | None = None, voice: bool = False) -> None:
         self.emit({"type": "user", "text": text, "origin": origin})
+        self._turn_seq = self.seq                     # this prompt's event: its user message carries it (/rewind)
+        self._turn_origin = origin
         self.emit_state()
         try:
             prompt = self._command(text)
@@ -588,7 +678,7 @@ class Session:
         else:
             resolved_effort = turn_effort
             resolved_budget = 0
-        self.messages.append({"role": "user",
+        self.messages.append({"role": "user", "dl_turn": getattr(self, "_turn_seq", None),
                               "content": cli.build_user_message_content(prompt, self.workspace, voice=voice)})
         ctx = {"workspace": self.workspace, "messages": self.messages, "mode": self.mode, "yolo": self.yolo,
                "plan_file": self.plan_file,
@@ -709,6 +799,15 @@ class Session:
                         + (f" The last one is saved as \"{title or '(untitled)'}\": /sessions lists it, /resume 1 "
                            "brings it back." if kept else ""))
             self.emit_state()
+            return None
+        if cmd in ("/rewind", "/edit", "/branch"):
+            return self.go_back(cmd, arg)
+        if cmd == "/prompts":
+            ps = self.prompt_events()
+            self.output("/prompts", "\n".join(f"{i:>3}. {' '.join((e.get('text') or '').split())[:100]}"
+                                               for i, e in enumerate(ps, 1))
+                        + "\n\n/edit N <new prompt> · /rewind N · /branch N [new prompt]" if ps
+                        else "No prompts in this conversation yet.")
             return None
         if cmd == "/sessions":
             self.output("/sessions" + (f" {arg}" if arg else ""), archive_list_text(self.name, arg))
@@ -935,6 +1034,10 @@ Session
 /sessions [words] Saved conversations, newest first; words search their titles and messages
 /resume N         Bring saved conversation N back (the current one is saved first)
 /rename [N] <t>   Name this conversation, or saved conversation N   /delete N  Remove N from the list
+/prompts          This conversation's prompts, numbered
+/edit N <prompt>  Replace prompt N and run it again (what came after it is removed)
+/rewind N         Go back to just before prompt N (it and what followed are removed)
+/branch N [p]     Keep the whole conversation in /sessions, go on from before prompt N (with p, run it)
 /help             This list
 
 Direct lookups, without the model: /exa <query> (also /search), /context7 <library> (also /docs)"""

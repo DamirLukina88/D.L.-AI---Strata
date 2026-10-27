@@ -82,7 +82,9 @@ class Renderer:
                 self.state = ev
             elif t == "cleared":
                 w(f"{C_MUTED}── conversation cleared ──{C_RESET}\n")
-            elif t == "restored":                       # /resume: the saved conversation, drawn as a replay
+            elif t == "rewound" and not replay and ev.get("origin") == self.client_id and ev.get("cmd") != "/edit":
+                w(f"{C_MUTED}The prompt was:{C_RESET} {ev.get('text', '')}\n")
+            elif t == "restored":                       # /resume, /rewind, /edit, /branch: drawn as a replay
                 self._close()
                 w(f"\n{C_MUTED}── resumed: {ev.get('title') or '(untitled)'} ──{C_RESET}\n")
                 for e in ev.get("events") or []:

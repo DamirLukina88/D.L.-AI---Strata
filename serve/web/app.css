@@ -1188,3 +1188,13 @@ body.is-resizing .view { pointer-events: none; }      /* the drag keeps going ov
 .sess-snippet { font-style: italic; }
 .sess-actions { display: flex; gap: 2px; flex-shrink: 0; }
 .sess-item:not(.sess-item--current):hover { border-color: var(--st-accent, var(--st-line)); }
+
+/* A past prompt's edit / rewind / branch buttons (dl_sessiond /edit, /rewind, /branch) */
+.code-mobile-card--user .cs-prompt-actions { justify-content: flex-end; opacity: 0; transition: opacity 120ms; }
+.code-mobile-card--user:hover .cs-prompt-actions, .code-mobile-card--user:focus-within .cs-prompt-actions { opacity: 1; }
+@media (hover: none) { .code-mobile-card--user .cs-prompt-actions { opacity: 0.7; } }
+.code-mobile-card--user.cs-editing { align-self: stretch; }
+.code-mobile-card--user.cs-editing .cs-prompt-actions { display: none; }
+.cs-edit-input { width: 100%; box-sizing: border-box; min-height: 64px; resize: vertical; font: inherit; color: var(--st-ink); background: var(--st-surface); border: 1.5px solid var(--st-line); border-radius: 8px; padding: 8px; white-space: pre-wrap; }
+.cs-edit-input:focus { outline: 0; border-color: var(--st-focus); }
+.cs-edit-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; flex-wrap: wrap; }
