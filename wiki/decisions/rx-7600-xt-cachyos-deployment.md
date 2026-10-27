@@ -5,7 +5,7 @@ description: "Deployment configuration for the RX 7600 XT on CachyOS, and how to
 status: active
 tags: [deployment, hardware, cachyos, amd, gfx1102, coder]
 created: 2026-10-05
-updated: 2026-10-21
+updated: 2026-10-27
 last_verified: 2026-10-09
 ---
 
@@ -63,6 +63,7 @@ Strata was successfully deployed on CachyOS Linux equipped with an AMD Ryzen 5 3
 - 2026-10-25: **Strata v0.2.5 Web Ergonomics and Server Reliability Sync**. Safety backup created at `~/.config/dl-ai/backup-20261025/` and git tag `backup/before-v025-sync-20261025`. Implemented CommonMark soft breaks (`#3818`), screenshot clipboard pasting (`Ctrl+V`, `#3748`), window drag & drop / PDF support (`#3838`), user bubble pre-wrap & copy feedback (`#3720`, `#3731`), decimal input helpers (`#3736`), dynamic model load timeout scaling up to 1800s (`#3949`, `#3459`), clean model shard deletion with `made_by_strata` (`#3716`), and ROCm `STRATA_PREFILL_WARM=1`. Verified via automated tests and live server health check. Details: [Strata v0.2.5 Sync Walkthrough](../artifacts/strata-v0-2-5-sync-and-ergonomics-walkthrough.md).
 - 2026-10-25: Post-v0.2.5 sync performance benchmark (`tools/strata_bench.py`, 479 s, 0 failures): Chat decode 25.20 tok/s (+1.6%, peak 31.10), 4K prompt 302.20 tok/s, 16K prompt 323.50 tok/s, agent decode 27.30 tok/s (peak 34.60), agent cache hit 68.46%. Details: [Strata Performance Benchmark Report (2026-10-25)](../artifacts/strata-benchmark-2026-10-25-v025-sync.md).
 - 2026-10-25: On-demand MCP catalog expansion to 37 servers, adding miniature painting, electronics, networking, photography/videography/audio, drone regulations, Zagreb civic/transit, Croatia live data, and Ray self-identity telemetry. Details: [Hardware, Electronics, Networking & Miniature Painting Walkthrough](../artifacts/hardware-electronics-networking-minipaint-walkthrough.md), [Photo, Video & Drone Regulations Walkthrough](../artifacts/photo-video-and-drone-regulations-walkthrough.md), [Zagreb and Croatia Live MCP Walkthrough](../artifacts/zagreb-and-croatia-live-mcp-walkthrough.md), and [Ray Self-Identity and Project Git Telemetry Walkthrough](../artifacts/ray-identity-and-project-telemetry-walkthrough.md).
+- 2026-10-27: Engine `0.1.44.1+0.2.7-fixes` deployed: four upstream 0.2.7 fixes ported by hand (#3602 PLE reader hang, #3350 checkpoint out of memory no longer ends the engine, #2409 restore guard on a nearly full card, #3796 collapsed `mcp__` tool names). Smoke test passed (tool call, two interleaved conversations restored correctly); no benchmark run. Rollback: `engine/strata.bak-20261027`. Details: [Upstream Strata 0.2.7 Review](../artifacts/upstream-v0-2-7-review-2026-10-27.md).
 
 ## Key Facts
 

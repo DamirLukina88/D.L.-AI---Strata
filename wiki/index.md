@@ -55,6 +55,7 @@ Every page in this wiki is listed below. The list is generated; do not edit betw
 - [Strata v0.1.43 Performance Switches and Memory Hygiene](decisions/strata-v0-1-43-performance-and-memory-optimizations.md) — Activation of adaptive tier memory overlap, resident RAM soft-commit, and Linux page cache release on exit
 - [Strata v0.2.5 Sync, Web Ergonomics, and Server Reliability](decisions/strata-v0-2-5-sync-and-ergonomics.md) — Selective synchronization of upstream Strata v0.2.5 ergonomics, dynamic startup timeouts, and clean shard deletion on RX 7600 XT
 - [Weather Reasoning Benchmark for CLI Thinking Levels](decisions/weather-reasoning-benchmark.md) — Standalone benchmark tools/weather_reasoning_bench.py evaluating CLI thinking levels with location inference, table quality, and Proton Mail.
+- [Web App Split View: Code | Monitor](decisions/web-app-split-view.md) — From 1200 px wide the Code tab and Monitor sit side by side with a draggable divider; narrower screens keep the tabs
 
 ## Preferences
 
@@ -126,6 +127,7 @@ Every page in this wiki is listed below. The list is generated; do not edit betw
 - [Upstream Strata 0.2.2 Review (2026-10-21)](artifacts/upstream-v0-2-2-review-2026-10-21.md) — Which 0.2.2 changes fit this install (RX 7600 XT, Linux, 32 GB RAM, one NUMA node): the HIP verify-hang fix and a few server fixes; most of the release does not apply
 - [Upstream Strata 0.2.3 & 0.2.3.1 Review (2026-10-23)](artifacts/upstream-v0-2-3-review-2026-10-23.md) — Upstream 0.2.3 & 0.2.3.1 review (RX 7600 XT): 6 engine/server/vision/web fixes + setup.py archs parser ported; STRATA_HC_Q8=1 enabled after A/B bench
 - [Upstream Strata 0.2.4 Review and Hardware Evaluation (2026-10-24)](artifacts/upstream-v0-2-4-review-2026-10-24.md) — Hardware evaluation of Strata 0.2.4 (DeepSeek-V4.1-Flash) on RX 7600 XT (gfx1102), 32 GB RAM, and 274 GB disk; why it cannot run here
+- [Upstream Strata 0.2.7 Review and Fix Port (2026-10-27)](artifacts/upstream-v0-2-7-review-2026-10-27.md) — What 0.2.7 brings, what applies to the RX 7600 XT, and the four fixes ported into engine 0.1.44.1+0.2.7-fixes
 - [Upstream Strata v0.1.43 Integration Plan](artifacts/upstream-v0-1-43-integration-plan.md) — Architecture and merge resolution plan for integrating upstream Strata v0.1.43 while preserving custom dark aesthetic, CLI, and guardrails
 - [Upstream v0.1.42 Fixes Integration Plan](artifacts/upstream-v0-1-42-fixes-plan.md) — Plan and execution details for integrating upstream Strata v0.1.42 fixes into the custom local installation.
 - [Upstream v0.1.45 Enhancements: Evaluation and Dual-Tier Benchmark Plan](artifacts/upstream-v0-1-45-evaluation-and-benchmark-plan.md) — Evaluation, technical spec, validation protocol, and exhaustive dual-tier benchmarks for upstream v0.1.45 on RX 7600 XT

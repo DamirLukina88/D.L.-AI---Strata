@@ -15,6 +15,10 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-27:** Update. decisions/rx-7600-xt-cachyos-deployment.md. (Agent: Claude Code)
+- **2026-10-27:** Ingestion. artifacts/upstream-v0-2-7-review-2026-10-27.md. (Agent: Claude Code)
+- **2026-10-27:** Ingestion. decisions/web-app-split-view.md. (Agent: claude-code)
+- **2026-10-27:** Update. decisions/home-assistant-strata-mcp.md. (Agent: Claude Code)
 - **2026-10-27:** Ingestion. decisions/ray-mcp-audit-fixes-2026-10-27.md. (Agent: claude-code)
 - **2026-10-25:** Docs: reference official SolidCraft git repository documentation in skill, MCP server, and wiki artifact. (Agent: Antigravity)
 - **2026-10-25:** Artifact Backup. SolidCraft CAD MCP server integrated for Ray with direct workspace saving, README updated. (Agent: Antigravity)
