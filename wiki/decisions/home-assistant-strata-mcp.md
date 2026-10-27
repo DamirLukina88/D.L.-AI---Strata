@@ -5,7 +5,7 @@ description: "Home Assistant Core on D disk (/mnt/data), systemd boot service, a
 status: active
 tags: [homeassistant, mcp, iot, systemd, strata]
 created: 2026-10-17
-updated: 2026-10-22
+updated: 2026-10-27
 last_verified: 2026-10-17
 ---
 
@@ -14,6 +14,15 @@ last_verified: 2026-10-17
 ## Summary
 
 Home Assistant Core is installed on dedicated storage (`/mnt/data/homeassistant`), configured as an enabled systemd service starting on system boot, and integrated with Strata via an MCP server (`tools/homeassistant_mcp.py`).
+
+- 2026-10-27: The five Living Room lights (kitchen, corner, metal shelf, monitor, work table) are one group,
+  `light.living_room_lights` (YAML `platform: group` with `unique_id`, area Living Room, aliases "living room lights",
+  "living lights", "the lights"). The Office lights and devices (printer light and air filtration, printer chamber
+  lights, camera indicator lights) stay separate, on purpose. Ray had switched the five one call each; the HA MCP
+  `list_entities` now lists a group first with its members in `group_of`, and `call_service` says to use the group
+  for several lights. Adding the group needed a restart (no group integration was loaded, so `group.reload` did not
+  exist); the restart switched the printer light and filtration plug off 6 s after start-up, and it was switched
+  back on.
 
 ## Context & Choices
 
@@ -103,6 +112,7 @@ Home Assistant Core is installed on dedicated storage (`/mnt/data/homeassistant`
 - [Home Assistant Entity Area Script](../artifacts/ha-entity-area-script.md)
 
 ## Sources
+- User, chat, 2026-10-27: "Living room lights have to be one group while the devices and lights in the office are separate".
 
 1. User, chat, 2026-10-17.
 2. Strata MCP client: `serve/mcp.py`.

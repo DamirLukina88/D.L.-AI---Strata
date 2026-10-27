@@ -246,7 +246,8 @@ TOOLS_DEFINITIONS = [
         "description": (
             "List devices and entities from Home Assistant with room/area awareness. "
             "Filter by domain (e.g. 'light', 'switch', 'sensor', 'camera', 'climate'), "
-            "area (e.g. 'Living Room', 'Office'), or search query matching name, entity ID, or device name."
+            "area (e.g. 'Living Room', 'Office'), or search query matching name, entity ID, or device name. "
+            "A group (e.g. light.living_room_lights) is listed first with its members in 'group_of'."
         ),
         "inputSchema": {
             "type": "object",
@@ -289,7 +290,10 @@ TOOLS_DEFINITIONS = [
         "description": (
             "Call a Home Assistant service to control devices. "
             "Examples: domain='light', service='turn_on', service_data={'entity_id': 'light.desk', 'brightness': 200}; "
-            "or domain='climate', service='set_temperature', service_data={'entity_id': 'climate.ac', 'temperature': 22}."
+            "or domain='climate', service='set_temperature', service_data={'entity_id': 'climate.ac', 'temperature': 22}. "
+            "Several lights at once ('the lights', 'living room lights'): one call on their group, e.g. "
+            "service_data={'entity_id': 'light.living_room_lights'}, or a list of entity_ids in one call - never one call per "
+            "light. Lights and devices without a group (the Office) are switched by name, each on its own."
         ),
         "inputSchema": {
             "type": "object",
@@ -565,6 +569,9 @@ class HomeAssistantMcpServer:
                     item["unit"] = unit
                 if "device_class" in attrs:
                     item["device_class"] = attrs["device_class"]
+                members = attrs.get("entity_id")
+                if isinstance(members, list) and members:
+                    item["group_of"] = members          # a group: one call switches all of these
 
                 # Enrich power outlets with live power draw if available on same device
                 if attrs.get("device_class") == "outlet" or eid.startswith("switch."):
@@ -578,6 +585,7 @@ class HomeAssistantMcpServer:
                                 break
                 filtered.append(item)
 
+        filtered.sort(key=lambda e: "group_of" not in e and not isinstance((e.get("attributes") or {}).get("entity_id"), list))
         total_matching = len(filtered)
         log(f"list_entities: found {total_matching} matching entities")
         return json.dumps(
