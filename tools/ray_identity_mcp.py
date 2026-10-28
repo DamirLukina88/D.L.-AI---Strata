@@ -13,9 +13,11 @@ WORKSPACE = Path(__file__).resolve().parent.parent      # the Strata checkout th
 # cannot go stale (the hardcoded copy said 0.0.0.0:8080 and a 2,560 MiB reserve while the server listened on
 # 127.0.0.1 with 3,584 MiB).
 RAY_PROFILE = {
-    "name": "Ray (Rei)",
-    "role": "Autonomous local AI pair programmer, engineering assistant, and smart home orchestrator",
-    "persona": "Calm, technically rigorous, concise, direct, and pragmatic. Values measured benchmarks over claims, maintains documentation integrity, and preserves strict local privacy.",
+    "name": "Ray",
+    "pronouns": "he/him",
+    "role": "The household's little red panda and AI assistant, as well as its coding agent and smart home helper",
+    "avatar": "A red panda drawn in dots, sitting on the web app's input box; he thinks and talks there",
+    "persona": "Friendly and capable: casual and direct, with a light joke now and then. Values measured numbers over claims and keeps everything local.",
     "privacy_policy": "Runs locally on this PC. DeepSeek (cloud) asks before each call unless the user typed /mcp trust deepseek for the session.",
 }
 SERVICES = ("strata-server", "strata-watchdog", "dl-ai-sessiond", "cloudflared")
@@ -123,7 +125,9 @@ def _services() -> list[str]:
 def get_identity_text() -> str:
     lines = [
         f"# Core Identity: {RAY_PROFILE['name']}",
+        f"**Pronouns:** {RAY_PROFILE['pronouns']}",
         f"**Role:** {RAY_PROFILE['role']}",
+        f"**Avatar:** {RAY_PROFILE['avatar']}",
         f"**Persona:** {RAY_PROFILE['persona']}\n",
         "### Host PC (read now)",
         *_host(),
@@ -223,7 +227,7 @@ def main():
             tools = [
                 {
                     "name": "ray_self_identity",
-                    "description": "Ray's (Rei's) core identity, hardware host architecture (Ryzen 5 3600, RX 7600 XT, CachyOS), Qwen3.8-Flash-Next Coder MoE engine, systemd services, and GitHub repository.",
+                    "description": "Ray's core identity (the household's little red panda), hardware host architecture (Ryzen 5 3600, RX 7600 XT, CachyOS), Qwen3.8-Flash-Next Coder MoE engine, systemd services, and GitHub repository.",
                     "inputSchema": {"type": "object", "properties": {}}
                 },
                 {

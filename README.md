@@ -191,21 +191,48 @@ A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) ex
 - Interactive MCP tools explorer in the web GUI via `/mcp`.
 - Loads when it is needed, not by default: when your message mentions the smart home, or when the agent turns it on itself.
 
-### 6. Tools & On-Demand Knowledge Suites (38 MCP Servers)
+### 6. Tools and MCP Servers (38 servers)
 
-Ray features a zero-overhead, on-demand MCP router (`tools/dl_mcp.py`) that keeps tools dormant to save prompt context until matched by request triggers or explicitly toggled via `/mcp on <name>`. Each server answers `ping`, sends nothing back to notifications, and marks a failed call with `isError`, so the automatic thinking level sees tool failures:
+**Always there.** Ray's own tools are in every request:
+- `run_command`, `view_file`, `write_to_file` and `replace_file_content` work on files and the shell in the workspace.
+- `switch_workspace` changes the folder he works in.
+- `local_wiki` reads and saves the project's `wiki/`.
+- `get_system_health` and `get_engine_status` report the PC and the engine.
+- `save_chat` and `clear_conversation` manage the conversation.
+- `mcp` turns the servers below on and off.
 
-| Suite / Category | Servers & Tools | What It Covers |
+Plan mode (`/plan`) gets the read-only ones.
+
+**On demand.** Every tool description is sent again with every turn, and the local model pays for it in prompt time.
+So the 38 MCP servers in `~/.config/dl-ai/mcp.json` stay off until a request needs them (`tools/dl_mcp.py`):
+- **They turn on by themselves:** a server starts when your message matches its trigger words (English, Croatian and
+  German), or when Ray turns it on with his `mcp` tool. One whose tools go unused for 3 turns is turned off again.
+- **A cap on tools at once:** 25 by default (`max_tools`; 45 on this PC); past it, the server used longest ago goes
+  first.
+- **By hand:** `/mcp` lists them all, with `/mcp on NAME` and `/mcp off NAME` to switch one. The Code tab shows the
+  ones that are on as chips.
+- **Approvals:** tools that send or share something (email, Drive sharing, a cloud call) show an approval card first.
+  `/mcp trust NAME` stops the card for the session, and `/mcp ask NAME` brings it back.
+- **Keys stay narrow:** each server gets only the keys it names from `~/.config/dl-ai/secrets.env`, never the whole
+  file.
+- **Errors reach the thinking level:** every server answers `ping`, and a failed call is marked `isError`, so the
+  automatic thinking level sees tool failures.
+- **Four are part of Ray himself, with no separate program:** `exa`, `deepl`, `proton` and `schedule`.
+
+| Group | Servers | What they cover |
 | :--- | :--- | :--- |
-| **Self-Identity & Project** | `ray_identity` | Who Ray (Rei) is, plus this PC's hardware, the running engine's address, model and settings, the services and the git status, all read when he is asked (nothing hardcoded that can go stale), and the active MCP catalog. |
-| **Reasoning Escalation** | `deepseek` (`deepseek_reason`) | DeepSeek cloud reasoning for heavy mathematics and frontier logic. Every call shows an approval card with the full prompt that would leave the PC; `/mcp trust deepseek` stops asking for the session, `/mcp ask deepseek` asks again. The key comes only from `DEEPSEEK_API_KEY` in `~/.config/dl-ai/secrets.env`. |
-| **Smart Home & Automation** | `homeassistant` (Bambu, Xiaomi, plugs, lights, AC), `schedule` | Smart home control, camera snapshots, scheduled jobs, recurring reminders. |
-| **Web & Productivity** | `exa`, `fetch`, `playwright`, `deepl`, `proton`, `gmail`, `drive`, `docs` | Web search, headless browser automation, translation, email, and Google Workspace. |
-| **Development & Standards** | `context7`, `modernweb`, `rfc`, `osv`, `devstandards` | Live library documentation, Modern Web Guidance (CSS/HTML5), IETF RFC protocol specs, OSV package vulnerabilities (CVEs), Game Programming Patterns, MDN. |
-| **Science & Biomedical** | `arxiv`, `openalex`, `europepmc`, `pubchem`, `clinicaltrials`, `opentargets`, `reactome` | arXiv preprints (AI/CS/Math), OpenAlex 250M+ scholarly works graph, Europe PMC open access papers, PubChem chemical formulas, ClinicalTrials.gov studies, Open Targets drug targets, Reactome biological pathways. |
-| **Hardware, 3D & Laws** | `solidcraft`, `print3d`, `cadmaterials`, `osm`, `laws`, `weather`, `minipaint`, `electronics`, `networking` | SolidCraft parametric 3D CAD modeling & engine control (parametric enclosures, brackets, flanges, standoffs, custom sketches/extrusions/cuts, automatic `.solidcraft`/`.step`/`.stl`/`.3mf` export and GPU-rendered PNG snapshots saved directly into Ray's workspace, live GUI control via port 7878), Klipper G-code & Bambu/Prusa filament presets, STEP AP242/IGES & AFLOW material properties, OpenStreetMap geocoding, Croatian (Zakon.hr/NN) & EU (EUR-Lex/CURIA) laws, Open-Meteo live weather, miniature painting & wargaming (3,340+ paint conversions across Citadel, Vallejo, AK, Army Painter, airbrush thinning, NMM/slapchop, Warhammer 40k / Kill Team wound matrix, AP saves, FNP, faction color schemes & BGG mechanics), electronics & components (IPC-2152 PCB trace width & current capacity, copper weight, thermal rise, ESP32/RP2040 decoupling capacitor rules, LCSC/JLCPCB parts, SMD resistor code decoder), networking & LAN (SFP/SFP+/QSFP optics, OM3/OM4/OS2 fiber standards, RJ45 T568A/B cabling, PoE, IEEE MAC vendor lookup). |
-| **Photo, Video, Audio & Drones** | `photovideo`, `drones` | Exposure & 180° cinematic shutter calculations, camera log profiles (Sony S-Log3, Canon C-Log3, DJI D-Log, Panasonic V-Log), DaVinci Resolve Color Space Transform (CST) node tree workflow (DWG / DaVinci Wide Gamut intermediate, Rec.709 delivery, QuickTime gamma tags, shortcuts), storyboard shot composition (ELS, LS, MCU, CU, OTS, Dutch angles), audio engineering loudness targets (YouTube/Spotify -14 LUFS, Broadcast EBU R128 -23 LUFS, Podcasts -16 LUFS, True Peak), mic polar patterns (shotgun, lavalier, cardioid), 32-bit float audio, DJI drone hardware specifications (Mini 4 Pro, Air 3, Mavic 3 Pro), CCAA & EASA Croatian drone laws, and Croatia Control AMC Portal automated airspace booking (Zagreb LDZA CTR). |
-| **Zagreb & Croatia Live** | `zagreb`, `croatia_live` | ZET tram lines (ends from ZET's own GTFS feed; day 1-17, night 31-34) & live disruption alerts (zet.skoljka.org), BAJS (Nextbike) live bike availability across all 200 stations in Zagreb, on-duty pharmacies (the City of Zagreb's list, with its date), specialized emergencies (Poison Control CKO, pediatric ER Klaićeva/Rebro, vet clinic VetFak, dental emergency), where to look up Čistoća's waste schedule for an address, real-time Zagreb air quality (European AQI, PM2.5, PM10), HAK live highway/border conditions (A1/A3, Lučko, Bregana, Macelj, Bajakovo), official DHMZ meteorological observations, HNB official exchange rates (EUR/USD/BAM/CHF/GBP), state holidays & non-working Sunday shopping rules (Zakon o trgovini), current fuel prices (median over every station in the Ministry of Economy's price register, read live), and Zagreb LDZA aviation METAR. |
+| **Ray himself** | `ray_identity` | Who Ray is, plus this PC's hardware, the running engine's address, model and settings, the services and the git status. All of it is read when he is asked, so nothing hardcoded can go stale. Also the MCP catalogue. |
+| **Smart home and jobs** | `homeassistant`, `schedule` | Lights, plugs, the Gree air conditioner, Bambu Lab A1 printer, Xiaomi cameras and air purifier, Zigbee sensors ([section 5](#5-home-assistant-smart-home-mcp-server)). Jobs: a prompt or one exact action at a set time or on repeat (reminders, daily summaries). |
+| **Cloud reasoning** | `deepseek` | DeepSeek for heavy maths and long proofs. Every call shows an approval card with the full prompt that would leave the PC. The key comes only from `DEEPSEEK_API_KEY`. |
+| **Web, mail and documents** | `exa`, `fetch`, `playwright`, `deepl`, `proton`, `gmail`, `drive`, `docs` | Exa web search, reading a page as Markdown, and a real headless browser that can click and fill forms. DeepL translation of texts, HTML emails and workspace files. Proton Mail through Bridge, Gmail, Google Drive and Google Docs: search, read, draft, and send or share after approval. |
+| **Programming** | `context7`, `modernweb`, `rfc`, `osv`, `devstandards` | Up-to-date library docs (Context7), modern HTML and CSS guidance, IETF RFCs, known vulnerabilities in PyPI, npm, Go and crates.io packages (OSV), game programming patterns and MDN. |
+| **Knowledge and science** | `wikipedia`, `arxiv`, `openalex`, `europepmc`, `pubchem`, `clinicaltrials`, `opentargets`, `reactome` | Wikipedia overviews, arXiv preprints, OpenAlex (250M+ scholarly works), Europe PMC open-access papers, PubChem chemistry, ClinicalTrials.gov studies, Open Targets drug targets, Reactome pathways. |
+| **Making things** | `solidcraft`, `print3d`, `cadmaterials`, `electronics`, `networking`, `minipaint` | SolidCraft parametric 3D CAD modeling & engine control (parametric enclosures, brackets, flanges, standoffs, custom sketches/extrusions/cuts, automatic `.solidcraft`/`.step`/`.stl`/`.3mf` export and GPU-rendered PNG snapshots saved directly into Ray's workspace, live GUI control via port 7878), Klipper G-code & Bambu/Prusa filament presets, STEP AP242/IGES & AFLOW material properties, miniature painting & wargaming (3,340+ paint conversions across Citadel, Vallejo, AK, Army Painter, airbrush thinning, NMM/slapchop, Warhammer 40k / Kill Team wound matrix, AP saves, FNP, faction color schemes & BGG mechanics), electronics & components (IPC-2152 PCB trace width & current capacity, copper weight, thermal rise, ESP32/RP2040 decoupling capacitor rules, LCSC/JLCPCB parts, SMD resistor code decoder), networking & LAN (SFP/SFP+/QSFP optics, OM3/OM4/OS2 fiber standards, RJ45 T568A/B cabling, PoE, IEEE MAC vendor lookup). |
+| **Photo, video, audio and drones** | `photovideo`, `drones` | Exposure & 180° cinematic shutter calculations, camera log profiles (Sony S-Log3, Canon C-Log3, DJI D-Log, Panasonic V-Log), DaVinci Resolve Color Space Transform (CST) node tree workflow (DWG / DaVinci Wide Gamut intermediate, Rec.709 delivery, QuickTime gamma tags, shortcuts), storyboard shot composition (ELS, LS, MCU, CU, OTS, Dutch angles), audio engineering loudness targets (YouTube/Spotify -14 LUFS, Broadcast EBU R128 -23 LUFS, Podcasts -16 LUFS, True Peak), mic polar patterns (shotgun, lavalier, cardioid), 32-bit float audio, DJI drone hardware specifications (Mini 4 Pro, Air 3, Mavic 3 Pro), CCAA & EASA Croatian drone laws, and Croatia Control AMC Portal automated airspace booking (Zagreb LDZA CTR). |
+| **Places, laws and live data** | `osm`, `weather`, `laws`, `zagreb`, `croatia_live` | OpenStreetMap geocoding, Open-Meteo live weather for any city, Croatian (Zakon.hr, Narodne novine) and EU (EUR-Lex, CURIA) laws. Zagreb and Croatia: ZET tram lines (ends from ZET's own GTFS feed; day 1-17, night 31-34) & live disruption alerts (zet.skoljka.org), BAJS (Nextbike) live bike availability across all 200 stations in Zagreb, on-duty pharmacies (the City of Zagreb's list, with its date), specialized emergencies (Poison Control CKO, pediatric ER Klaićeva/Rebro, vet clinic VetFak, dental emergency), where to look up Čistoća's waste schedule for an address, real-time Zagreb air quality (European AQI, PM2.5, PM10), HAK live highway/border conditions (A1/A3, Lučko, Bregana, Macelj, Bajakovo), official DHMZ meteorological observations, HNB official exchange rates (EUR/USD/BAM/CHF/GBP), state holidays & non-working Sunday shopping rules (Zakon o trgovini), current fuel prices (median over every station in the Ministry of Economy's price register, read live), and Zagreb LDZA aviation METAR. |
+
+Separate from Ray, Strata has its own MCP server for installing and running the engine from another AI app
+([docs/MCP_SERVER.md](docs/MCP_SERVER.md)).
 
 ### 7. Workspace, JIT Model Loading & Remote Access
 - **Server File Workspace:** upload files by drag and drop, browse folder trees, stream and resume large downloads.
