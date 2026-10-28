@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-10-28:** Update. Ray's pictures and animations (tools/make_ray_media.py, docs/media/ray), README Meet Ray section, panda in the web app header. (Agent: Claude Code)
 - **2026-10-28:** Update. Ray's avatar page retitled to the red panda; thinking only on typed prompts; speed and pitch sliders fixed (server and desktop voice); pitch 1.5 default, cartoon voice intended; Ray is the household's little red panda. (Agent: Claude Code)
 - **2026-10-28:** Update. decisions/desktop-piper-voice-switching-and-stt-auto-speak.md, decisions/ray-assistant-persona.md. (Agent: Claude Code)
 - **2026-10-28:** Ingestion. decisions/ray-talking-face.md. (Agent: Claude Code)

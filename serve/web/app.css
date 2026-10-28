@@ -10,6 +10,8 @@ main { flex: 1; min-height: 0; min-width: 0; max-width: 100vw; overflow-x: hidde
 .small { font-size: var(--st-fs-xs); }
 .st-header { position: relative; z-index: 2; flex: none; width: 100%; max-width: 100vw; box-sizing: border-box; overflow-x: hidden; white-space: nowrap; }
 .st-header__brand { white-space: nowrap !important; word-break: keep-all; flex-shrink: 0 !important; line-height: 1; }
+.st-header__brand { display: inline-flex; align-items: center; gap: 8px; }
+.st-header__logo { width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0; }
 .st-header .st-tabs { margin-left: var(--st-s-4); flex-shrink: 0; }
 #drawer-close .st-icon { transform: rotate(-90deg); }
 

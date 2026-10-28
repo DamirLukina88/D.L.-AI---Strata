@@ -223,7 +223,23 @@ Added 2026-10-28 in serve/web/rayface.js (commit 616ec4c6). Choices made with th
 - Spoken prompts are unchanged: he thinks, reads the answer aloud, then says goodbye.
 - Code: `RayFace.leave()` in `serve/web/rayface.js`, called from `codeEvent` in `serve/web/app.js` (`codeRayTyped`).
 
+## Pictures and branding (2026-10-28)
+
+- **The generator:** `tools/make_ray_media.py` runs `rayface.js` itself in node, with its internals exposed and a fixed random seed, and draws with PIL. Output goes to `docs/media/ray/`:
+  - `ray.png`, the README header;
+  - `mood-*.png` and `moods.png`, the eight moods settled at the app's 60% strength, with the goodbye at full strength;
+  - `thinking.gif`, `talking.gif` and `goodbye.gif` at 15 fps;
+  - `social.png`, 1280 × 640.
+- **talking.gif** is driven by real Piper speech of a three-sentence line at pitch 1.5, through a fake analyser read at the fake clock, so it shows the real loudness motion and sentence moods.
+- **GIF corners** use one transparent palette colour, so the rounded tiles work on GitHub's light and dark themes.
+- **README:** the panda above the title, the tagline "The household's little red panda", a "Meet Ray" section with the three GIFs and the mood sheet, and the old blue-face text replaced.
+- **Web app header:** the panda icon (`favicon.svg`) sits next to "Ray".
+- **The moods are subtle at 60%:** they are shown as the app really draws them. The pictures don't exaggerate them.
+- **Not done by code:** GitHub's social preview has no API. `docs/media/ray/social.png` has to be uploaded in the repository's Settings → General → Social preview.
+
 ## Sources
+
+- User, chat, 2026-10-28: brand the project with the red panda; images of his states and emotions in the repo description
 
 - User, chat, 2026-10-28: Ray visible only while the model thinks on a typed prompt
 

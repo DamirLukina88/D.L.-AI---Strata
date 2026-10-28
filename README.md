@@ -1,15 +1,18 @@
+<p align="center"><img src="docs/media/ray/ray.png" alt="Ray, a little red panda drawn in dots, sitting" width="230"></p>
+
 <h1 align="center">Ray</h1>
 
-<p align="center"><b>A private AI assistant and coding agent built on <a href="https://github.com/Niko1221/Strata">Strata</a></b><br>
+<p align="center"><b>The household's little red panda: a private AI assistant and coding agent built on <a href="https://github.com/Niko1221/Strata">Strata</a></b><br>
 One desktop PC, no cloud model, nothing sent anywhere. Your own model, your own rules.</p>
 
-Ray is a household AI assistant that runs entirely on one desktop PC: the 125-billion-parameter Qwen3.8-Flash-Next
+Ray is the household's little red panda and AI assistant, and he runs entirely on one desktop PC: the 125-billion-parameter Qwen3.8-Flash-Next
 Coder model on an AMD RX 7600 XT with 16 GB, plus 32 GB of system RAM. This fork, by
 [Damir](https://github.com/DamirLukina88), adds everything around the engine and makes it a workstation you can
 reach from anywhere:
 
-- **Ray**, the assistant: you talk to him and he answers out loud, with a male neural voice and his own casual
-  personality. He knows he runs on the home server, not in someone's cloud, and you can reach him from your phone.
+- **Ray**, the assistant: the household's little red panda. You talk to him and he answers out loud, with a male
+  neural voice and his own casual personality, and in the web app he sits on the input box, thinking and talking
+  ([meet him](#meet-ray)). He knows he runs on the home server, not in someone's cloud, and you can reach him from your phone.
 - **D.L. CLI**, a coding agent with one shared session you can use from the terminal and from the browser
 - **Offline voice:** local Whisper speech-to-text and Piper text-to-speech, with no audio leaving the PC
 - **Home Assistant MCP server:** the coding agent switches lights and climate and reads printers and cameras
@@ -36,6 +39,39 @@ validation, 1-token health check speed guards, and stable GPU hardware telemetry
 
 Each was checked with tests and a short smoke test; no benchmark was run
 ([review](wiki/artifacts/upstream-v0-2-7-review-2026-10-27.md)).
+
+## Meet Ray
+
+Ray is a little red panda drawn in dots. In the web app's Code tab he sits on the top-left edge of the input box, and
+he is there only while he has something to do. All the pictures below come from the web app's own drawing code
+(`serve/web/rayface.js`), rendered by `tools/make_ray_media.py`. That includes his motion while talking, which follows
+real speech in his Piper voice.
+
+<table>
+<tr>
+<td align="center"><img src="docs/media/ray/thinking.gif" alt="Ray thinking, paw on his chin, question marks rising" width="220"><br><b>Thinking</b></td>
+<td align="center"><img src="docs/media/ray/talking.gif" alt="Ray reading a reply aloud" width="220"><br><b>Talking</b></td>
+<td align="center"><img src="docs/media/ray/goodbye.gif" alt="Ray's warm goodbye and fade" width="220"><br><b>Goodbye</b></td>
+</tr>
+<tr>
+<td>While the model works on your prompt, his paw goes to his chin, his eyes go up and to the side, and question
+marks rise. For a typed prompt he leaves as soon as the answer starts.</td>
+<td>While he reads a reply aloud, he moves with the loudness of his voice, read 50 ms before it is heard. He squashes
+and stretches on syllables, nods on stressed ones, blinks when a thought ends, and his ears and tail follow a beat later.</td>
+<td>When he has finished speaking, he gives a happy squint and a small nod, then fades out slowly.</td>
+</tr>
+</table>
+
+**His moods.** Simple rules on each sentence pick a mood, used at 60% strength and held for at least 2 s, so he never
+flickers. A sentence about an error or an apology makes him concerned, one ending in `?` makes him curious, "maybe"
+or "hmm" makes him thoughtful, and so on.
+
+<p align="center"><img src="docs/media/ray/moods.png" alt="Ray's eight moods: neutral, happy, excited, surprised, curious, thinking, concerned, goodbye" width="760"></p>
+
+He has no talking mouth on purpose. Every mouth that copied the speech looked uncanny, so he speaks through motion,
+and his mouth opens only on the strongest syllables. His voice is pitched up to 1.5 by default, a little cartoon-like
+to suit him. Click him to stop him talking. Two switches in About turn him off: *Show Ray while speaking* and
+*Show Ray thinking on every prompt*. The same panda is the app icon and the browser tab icon.
 
 ## How fast is it?
 
@@ -76,7 +112,7 @@ from coding traces with `tools/make_profile_mix.py`.
 ### 1. Ray, the Assistant
 The coding agent is Ray, in the web app's Code tab and in the terminal (the separate Chat tab was removed on
 2026-10-23):
-- **Who he is:** a casual, direct household assistant and coding agent with a light sense of humour. He never calls
+- **Who he is:** the household's little red panda, AI assistant and coding agent: casual and direct, with a light sense of humour. He never calls
   you "sir" or "madam", and he doesn't assume who is talking: anyone in the house or a guest may be. He uses a name
   only once someone gives it, and he credits the builder only when asked who made him. His identity note says who
   built what, that he runs on "the home server" (not "this PC", which sounds wrong from a phone), and that the model
@@ -141,7 +177,8 @@ Listen to responses hands-free without third-party audio streaming:
 - **Voice-Gated Auto-Speak:** *"Automatically read new answers aloud"* (on by default) speaks replies only when the input was dictated via STT, preserving silence when typing.
 - **20 US Neural Piper Voices:** high-quality local Piper speech synthesis integrated via Linux Speech Dispatcher and Web Speech API. Ray's voice, `en_US-hfc_male-medium` (male since 2026-10-28), is the default on the server, in the browser and on the desktop; any other voice can be picked in Settings. Where the server voice is off and Piper is missing (Edge, macOS), *Auto* picks a male voice by name (Edge's Andrew or Guy, Chrome's Google UK English Male); Android names voices by language only, so there it is the local US English voice.
 - **Ray's voice from the server:** `POST /v1/audio/speech` (OpenAI-style `input`, `voice`, `speed`; WAV, `serve/speech.py`) runs Piper on the home server, so phones hear the same voice as the PC (measured 0.39 s for 3.4 s of speech). The web app uses it by default (About: *Use Ray's voice from the server*) and falls back to the browser voice if it fails.
-- **Ray's face:** while a reply is read aloud, a small blue dot-matrix face at the bottom right of the Code feed shows the mood of each sentence, and its mouth is a level meter of the voice that ripples from the centre outwards, 50 ms ahead of the sound. While he works on a spoken prompt, a small thinking face shows at the bottom left. Click the face to stop him; turn it off in About.
+- **Ray's avatar:** a little red panda sitting on the input box who thinks while the model works and moves with his voice while he reads a reply aloud ([Meet Ray](#meet-ray)). Click him to stop the speech. Turn him off in About.
+- **Speed and pitch:** the sliders in About work for the server voice and the browser voice. Piper has no pitch setting, so pitch is made by playing the speech faster, which was asked from the server that much slower, so the pace stays at the Speed setting. The default pitch is 1.5.
 - **Natural Speech Cleaner (`cleanForSpeech`):** strips markdown, emojis, code blocks, box borders, and converts math, units, and symbols to natural spoken words.
 - **Mobile Keep-Alive & Controls:** Android Screen WakeLock and MediaSession notification drawer controls (play, pause, stop).
 
