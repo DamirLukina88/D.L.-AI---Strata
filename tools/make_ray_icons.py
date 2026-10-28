@@ -1,11 +1,11 @@
-"""make_ray_icons.py - the web app's icons from Ray's own drawing (serve/web/rayface.js): his head, neutral, on the
-app's dark surface.
+"""make_ray_icons.py - the web app's icons from Ray's own drawing (serve/web/rayface.js): the whole red panda
+sitting, neutral, on the app's dark surface.
 
     python3 tools/make_ray_icons.py
 
 Writes serve/web/favicon.svg (crisp squares, for browser tabs), favicon.ico (16, 32, 48 px) and icon-180.png
 (apple-touch-icon), icon-192.png, icon-512.png (the web manifest's home-screen icons, drawn as solid dots like Ray on
-the page).  Needs node (to run rayface.js's headCell) and Pillow.  Run it again after changing how Ray's head looks.
+the page).  Needs node (to run rayface.js's pandaCell) and Pillow.  Run it again after changing how Ray looks.
 """
 from __future__ import annotations
 
@@ -29,14 +29,14 @@ global.document = {getElementById: () => null};
 global.performance = {now: () => 0};
 global.requestAnimationFrame = noop;
 const R = new Function(src.replace("return {thinking, speakAudio",
-  "return {__head: headCell, __pose: newPose, thinking, speakAudio") + "; return RayFace;")();
+  "return {__cell: pandaCell, __pose: newPose, thinking, speakAudio") + "; return RayFace;")();
 const s = R.__pose(), rows = [];
-for (let j = 0; j < 26; j++) { const r = []; for (let i = 0; i < 44; i++) r.push(R.__head(i + 0.5, j + 0.5, s)); rows.push(r); }
+for (let j = 0; j < 40; j++) { const r = []; for (let i = 0; i < 46; i++) r.push(R.__cell(i + 0.5, j + 0.5, s)); rows.push(r); }
 process.stdout.write(JSON.stringify(rows));
 """
 
 
-def head_grid() -> list[list[str]]:
+def panda_grid() -> list[list[str]]:
     out = subprocess.run(["node", "-e", NODE, str(WEB / "rayface.js")], capture_output=True, text=True, check=True)
     grid = json.loads(out.stdout)
     rows = [j for j, r in enumerate(grid) if any(r)]
@@ -49,7 +49,7 @@ def rgb(c: str) -> tuple[int, int, int]:
 
 
 def place(grid, size: int, fill: float):
-    """cell size and top-left offset that centre the head in a size x size square, filling `fill` of it"""
+    """cell size and top-left offset that centre the panda in a size x size square, filling `fill` of it"""
     h, w = len(grid), len(grid[0])
     cell = size * fill / max(w, h)
     return cell, (size - w * cell) / 2, (size - h * cell) / 2
@@ -97,12 +97,12 @@ def svg(grid) -> str:
 
 
 def main() -> int:
-    grid = head_grid()
+    grid = panda_grid()
     (WEB / "favicon.svg").write_text(svg(grid))
     png(grid, 48, dots=False).save(WEB / "favicon.ico", sizes=[(16, 16), (32, 32), (48, 48)])
     for size in (180, 192, 512):
         png(grid, size, dots=True, radius=0 if size == 180 else 0.22).save(WEB / f"icon-{size}.png", optimize=True)
-    print(f"head {len(grid[0])} x {len(grid)} cells -> favicon.svg, favicon.ico, icon-180/192/512.png in {WEB}")
+    print(f"panda {len(grid[0])} x {len(grid)} cells -> favicon.svg, favicon.ico, icon-180/192/512.png in {WEB}")
     return 0
 
 
