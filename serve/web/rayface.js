@@ -24,7 +24,7 @@ const RayFace = (() => {
   const C = {
     rim: "rgba(56,189,248,0.45)",
     orange: "#e8834e", light: "#f4a46e", shade: "#c8673a", paw: "#9a6038", brown: "#7a4a2e", dark: "#4a2c1d",
-    white: "#f6efe4", navy: "#17213b", blush: "#e9967a", edge: "#3a2216", edgeLight: "#c9a682",
+    white: "#f6efe4", navy: "#17213b", blush: "#e9967a", edge: "#3a2216",
   };
 
   // moods: eye size, happy squint (0-1), ear lift (+ up, - droop), head tilt, gaze; used at 60% and held 2 s
@@ -345,7 +345,7 @@ const RayFace = (() => {
 
   // the page colour behind him (read again now and then, so a theme switch follows).  The gaps between his dots take a
   // darker shade of each dot's own colour and the dots are large, so he stays solid and saturated instead of washed out
-  // by white gaps or sunk into dark ones; his outline is dark on a light page and light tan on a dark one
+  // by white gaps or sunk into dark ones; on a light page he has a dark outline, on a dark page none
   let bgAt = 0, lightPage = false;
   const shadeCache = {};
   function deeper(hex) {
@@ -366,10 +366,10 @@ const RayFace = (() => {
       }
     }
     g.clearRect(0, 0, canvas.width, canvas.height);
-    const P = geo.pitch, rad = P * 0.47, EDGE = lightPage ? C.edge : C.edgeLight;
+    const P = geo.pitch, rad = P * 0.47, EDGE = lightPage ? C.edge : null;
     for (let j = 0; j < ROWS; j++) for (let i = 0; i < COLS; i++) cells[j * COLS + i] = pandaCell(i + 0.5, j + 0.5, pose);
-    // a one-dot outline around his shape, so he keeps an edge on any page
-    for (let j = 0; j < ROWS; j++) {
+    // on a light page, a one-dot dark outline around his shape, so his whites keep an edge
+    for (let j = 0; EDGE && j < ROWS; j++) {
       for (let i = 0; i < COLS; i++) {
         const k = j * COLS + i;
         if (cells[k]) continue;
