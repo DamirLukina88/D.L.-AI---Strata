@@ -2043,8 +2043,8 @@ function codeSetState(st) {
   }
   const busy = !!code.state.busy;
   if ($("code-stop-btn")) $("code-stop-btn").hidden = !busy;
-  // Ray thinks while the session works on a turn: he appears when it gets busy, and goes when it is done unless he is
-  // about to read the answer aloud (codeOnTurnEnd starts the speech; this only catches a turn with nothing to say)
+  // Ray thinks while the session works on a turn: he appears when it gets busy. A typed turn's answer sends him away
+  // (codeEvent); a spoken one keeps him until he reads it aloud (codeOnTurnEnd); this catches a turn with nothing to say
   if (typeof RayFace !== "undefined" && busy !== code.wasBusy) {
     if (busy && TTSController.isThinkAllOn()) RayFace.thinking();
     else if (!busy) setTimeout(() => { if (!TTSController.speaking && RayFace.state.mode === "think") RayFace.end(false); }, 400);
@@ -2070,7 +2070,18 @@ if (window.ResizeObserver && document.querySelector(".code-terminal-bar")) {
   }).observe(document.querySelector(".code-terminal-bar"));
 }
 
+// A typed prompt (a spoken one keeps him until he has read the answer aloud): Ray thinks while the model thinks and
+// runs tools, and goes as soon as the answer text starts
+function codeRayTyped(replay) {
+  return typeof RayFace !== "undefined" && !replay && !code.turnFromVoice && !TTSController.speaking &&
+    !!code.state.busy && TTSController.isThinkAllOn();
+}
+
 function codeEvent(ev, replay) {
+  if (codeRayTyped(replay)) {
+    if (ev.type === "text" && ev.text && ev.text.trim()) RayFace.leave();
+    else if (ev.type === "thinking" || ev.type === "tool_call") RayFace.thinking();   // thinks again after a tool
+  }
   switch (ev.type) {
     case "thinking": {
       const c = codeAssistant();

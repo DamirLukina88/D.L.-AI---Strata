@@ -194,7 +194,7 @@ const RayFace = (() => {
   const geo = {pitch: 3, cols: COLS, rows: ROWS, offX: 0, offY: 0, laidW: 0, laidH: 0};
   const pose = newPose();
   let target = calm("neutral");
-  let level = 0, paused = false, mode = "idle";   // "think" | "audio" | "text" | "warm" | "idle"
+  let level = 0, paused = false, mode = "idle";   // "think" | "audio" | "text" | "warm" | "leave" | "idle"
   let analyser = null, tbuf = null;
   let line = null;                            // the chunk being spoken: {text, times[], amp[], sentences[], total, …}
   let audioText = null, audioStart = 0, audioDur = 0, audioCtx = null;
@@ -469,6 +469,7 @@ const RayFace = (() => {
   // a spoken prompt is being answered: he appears in his thinking pose until he speaks (or the turn ends)
   function thinking() {
     if (mode === "audio" || mode === "text") return;   // already speaking
+    if (mode === "think" && visible) return;           // already thinking: keep his pose going
     show();
     mode = "think";
     thinkAt = performance.now();
@@ -512,7 +513,7 @@ const RayFace = (() => {
 
   // Ray stopped talking (or the turn ended): happy eyes and a small nod that settles, then he fades out slowly
   function end(finished = true) {
-    if (!visible || !el) return;
+    if (!visible || !el || mode === "leave") return;
     line = null; analyser = null; audioText = null;
     mode = "warm";
     target = {...EXPR.warm};
@@ -530,8 +531,23 @@ const RayFace = (() => {
     }, finished ? WARM_MS : WARM_MS / 2);
   }
 
+  // the answer of a typed prompt starts: he stops thinking and fades out at once, without the goodbye
+  function leave() {
+    if (!visible || !el || mode !== "think") return;
+    mode = "leave";
+    target = calm("neutral");
+    clearTimeout(warmTimer); clearTimeout(hideTimer);
+    el.classList.remove("is-on");
+    hideTimer = setTimeout(() => {
+      el.hidden = true;
+      visible = false;
+      mode = "idle";
+      makeRoom(false);
+    }, FADE_OUT);
+  }
+
   window.addEventListener("resize", () => { if (visible) { place(); layout(); } });
-  return {thinking, speakAudio, speakText, boundary, chunkEnd, pause, end, moodOf,
+  return {thinking, speakAudio, speakText, boundary, chunkEnd, pause, end, leave, moodOf,
           get visible() { return visible; }, get state() { return {...pose, mode, level, mood}; },
           set onStop(fn) { onStop = fn; }};
 })();
