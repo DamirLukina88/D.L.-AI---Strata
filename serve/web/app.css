@@ -1203,9 +1203,9 @@ body.is-resizing .view { pointer-events: none; }      /* the drag keeps going ov
   position: absolute;
   right: 16px;
   bottom: var(--ray-face-bottom, 120px);
-  width: 216px;
-  height: 132px;
-  padding: 8px;
+  width: 156px;
+  height: 192px;
+  padding: 6px;
   border-radius: var(--st-r-md);
   background: radial-gradient(ellipse at 50% 45%, #0a1a26 0%, #05090d 75%);
   border: 1px solid rgba(56, 189, 248, 0.28);
@@ -1247,7 +1247,7 @@ body.is-resizing .view { pointer-events: none; }      /* the drag keeps going ov
     transition: opacity 240ms var(--st-ease), height 240ms var(--st-ease), padding 240ms var(--st-ease);
   }
   .ray-face.is-on {
-    height: 112px;
+    height: 150px;
     padding: 6px 8px;
     transition-duration: 140ms;
   }
