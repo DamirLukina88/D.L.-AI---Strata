@@ -8,7 +8,7 @@
 <link rel="icon" type="image/svg+xml" href="web/favicon.svg">
 <link rel="stylesheet" href="web/tokens.css">
 <link rel="stylesheet" href="web/components.css">
-<link rel="stylesheet" href="web/app.css?v=20261028-face1">
+<link rel="stylesheet" href="web/app.css?v=20261028-face2">
 <script>
   // the theme before the first paint: default dark for D.L. AI
   try {
@@ -94,7 +94,7 @@
           </div>
         </div>
         <!-- Ray's face: shown only while a reply is read aloud (web/rayface.js) -->
-        <div class="ray-face" id="ray-face" hidden aria-hidden="true"><canvas></canvas></div>
+        <div class="ray-face" id="ray-face" hidden role="button" tabindex="0" title="Stop reading aloud" aria-label="Stop reading aloud"><canvas aria-hidden="true"></canvas></div>
         <div class="code-mobile-composer">
           <div class="code-mobile-chips">
             <button type="button" class="code-mobile-chip" data-cmd="/plan">/plan</button>
@@ -489,7 +489,8 @@
 <div class="scrim" id="scrim" hidden></div>
 <div class="st-toasts" id="toasts" aria-live="polite"></div>
 <script src="web/site-config.js?v=20261020-logout1"></script>
-<script src="web/rayface.js?v=20261028-face1"></script>
-<script src="web/app.js?v=20261028-face1"></script>
+<script src="web/lipsync-en.js?v=20261028-face2"></script>
+<script src="web/rayface.js?v=20261028-face2"></script>
+<script src="web/app.js?v=20261028-face2"></script>
 </body>
 </html>

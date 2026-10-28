@@ -673,6 +673,7 @@ const TTSController = {
         toast("info", `Auto-speak ${next ? "enabled" : "disabled"}`, next ? "Voice prompts (dictated via STT) will be read aloud automatically." : "Tap the speaker icon on any message to listen.", 2500);
       };
     }
+    if (typeof RayFace !== "undefined") RayFace.onStop = () => this.stop();   // clicking the face stops the speech
     const faceToggle = $("tts-face-toggle");
     if (faceToggle) {
       faceToggle.setAttribute("aria-checked", String(this.isFaceOn()));
