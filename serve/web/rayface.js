@@ -343,17 +343,31 @@ const RayFace = (() => {
     spring(pose, "mouth", talking && level > 0.8 ? 0.4 + 0.6 * stressK : 0, 0.3, 0.6);
   }
 
-  // the page colour behind him (read again now and then, so a theme switch follows)
-  let bg = "#0b0d10", bgAt = 0;
+  // the page colour behind him (read again now and then, so a theme switch follows).  On a light page the gaps between
+  // his dots take a darker shade of each dot's own colour and the dots are larger, so he stays solid and saturated
+  // instead of washed out by white gaps; on a dark page the gaps stay dark, the display look
+  let bg = "#0b0d10", bgAt = 0, lightPage = false;
+  const shadeCache = {};
+  function deeper(hex) {
+    if (!shadeCache[hex]) {
+      const n = parseInt(hex.slice(1), 16), f = 0.8;
+      shadeCache[hex] = `rgb(${((n >> 16) & 255) * f | 0},${((n >> 8) & 255) * f | 0},${(n & 255) * f | 0})`;
+    }
+    return shadeCache[hex];
+  }
   const cells = new Array(COLS * ROWS);
   function draw(now) {
     if (now - bgAt > 500) {
       bgAt = now;
       const c = el.parentElement && getComputedStyle(el.parentElement).backgroundColor;
-      if (c && c !== "rgba(0, 0, 0, 0)" && c !== "transparent") bg = c;
+      if (c && c !== "rgba(0, 0, 0, 0)" && c !== "transparent") {
+        bg = c;
+        const m = c.match(/\d+/g);
+        lightPage = m ? (0.299 * m[0] + 0.587 * m[1] + 0.114 * m[2]) / 255 > 0.5 : false;
+      }
     }
     g.clearRect(0, 0, canvas.width, canvas.height);
-    const P = geo.pitch, rad = P * 0.4;
+    const P = geo.pitch, rad = P * (lightPage ? 0.47 : 0.4);
     for (let j = 0; j < ROWS; j++) for (let i = 0; i < COLS; i++) cells[j * COLS + i] = pandaCell(i + 0.5, j + 0.5, pose);
     // a one-dot dark outline around his shape, so his whites keep an edge on a light page
     for (let j = 0; j < ROWS; j++) {
@@ -369,10 +383,15 @@ const RayFace = (() => {
         if (near) cells[k] = C.edge;
       }
     }
-    // a solid silhouette in the page colour behind the dots, so nothing behind him shows through the gaps
+    // a solid silhouette behind the dots, so nothing behind him shows through the gaps
     g.fillStyle = bg;
     for (let j = 0; j < ROWS; j++) {
-      for (let i = 0; i < COLS; i++) if (cells[j * COLS + i]) g.fillRect(geo.offX + i * P - 0.5, geo.offY + j * P - 0.5, P + 1, P + 1);
+      for (let i = 0; i < COLS; i++) {
+        const c = cells[j * COLS + i];
+        if (!c) continue;
+        if (lightPage) g.fillStyle = deeper(c);
+        g.fillRect(geo.offX + i * P - 0.5, geo.offY + j * P - 0.5, P + 1, P + 1);
+      }
     }
     for (let j = 0; j < ROWS; j++) {
       for (let i = 0; i < COLS; i++) {
