@@ -362,6 +362,9 @@ const TTSController = {
   isAutoSpeak() { return store.get("tts_auto_speak", true) !== false; },
   // on unless turned off in About: Ray's face while reading aloud, and the thinking circle (web/rayface.js)
   isOrbOn() { return store.get("tts_orb", true) !== false; },
+  // on unless turned off in About: Ray's thinking pose for every turn (typed, spoken or from the terminal), not only
+  // for spoken prompts that will be read aloud
+  isThinkAllOn() { return store.get("tts_think_all", true) !== false; },
   orb() { return typeof RayFace !== "undefined" && this.isOrbOn() && !(this.activeBtn && this.activeBtn.id === "tts-test-btn"); },
   // Ray's Piper voice made by the server (POST v1/audio/speech): on unless turned off, when the server has it.  The
   // audio plays through Web Audio, so the face's waveform follows the voice; a failure falls back to the browser voice.
@@ -768,6 +771,16 @@ const TTSController = {
         serverToggle.setAttribute("aria-checked", String(next));
         store.set("tts_server", next);
         this.serverFailed = false;
+      };
+    }
+    const thinkToggle = $("tts-think-toggle");
+    if (thinkToggle) {
+      thinkToggle.setAttribute("aria-checked", String(this.isThinkAllOn()));
+      thinkToggle.onclick = () => {
+        const next = thinkToggle.getAttribute("aria-checked") !== "true";
+        thinkToggle.setAttribute("aria-checked", String(next));
+        store.set("tts_think_all", next);
+        if (!next && typeof RayFace !== "undefined" && RayFace.state.mode === "think") RayFace.end(false);
       };
     }
     const orbToggle = $("tts-orb-toggle");
@@ -2030,6 +2043,13 @@ function codeSetState(st) {
   }
   const busy = !!code.state.busy;
   if ($("code-stop-btn")) $("code-stop-btn").hidden = !busy;
+  // Ray thinks while the session works on a turn: he appears when it gets busy, and goes when it is done unless he is
+  // about to read the answer aloud (codeOnTurnEnd starts the speech; this only catches a turn with nothing to say)
+  if (typeof RayFace !== "undefined" && busy !== code.wasBusy) {
+    if (busy && TTSController.isThinkAllOn()) RayFace.thinking();
+    else if (!busy) setTimeout(() => { if (!TTSController.speaking && RayFace.state.mode === "think") RayFace.end(false); }, 400);
+  }
+  code.wasBusy = busy;
   codeBarFit();
   document.querySelector(".code-dot")?.classList.toggle("code-dot--busy", busy);
 }
