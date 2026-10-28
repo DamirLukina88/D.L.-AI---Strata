@@ -651,27 +651,34 @@ const TTSController = {
     return this.audioCtx;
   },
 
-  // chunk i as decoded audio; the next chunk is fetched while this one plays
+  // chunk i as decoded audio; the next chunk is fetched while this one plays.  Piper has no pitch: the audio is played
+  // `pitch` times faster (higher) and asked from the server that much slower, so the pace stays the Speed setting.  A
+  // chunk fetched before a slider moved is fetched again with the new values.
   fetchChunk(i) {
-    if (!this.prefetch[i]) {
+    const rate = this.getRate(), pitch = this.getPitch();
+    const have = this.prefetch[i];
+    if (!have || have.rate !== rate || have.pitch !== pitch) {
       const ctx = this.audio();
-      this.prefetch[i] = fetch("v1/audio/speech", {
+      const p = fetch("v1/audio/speech", {
         method: "POST", headers: headers(true),
-        body: JSON.stringify({input: this.queue[i], speed: this.getRate()}),
+        body: JSON.stringify({input: this.queue[i], speed: rate / pitch}),
       }).then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.arrayBuffer();
       }).then((ab) => ctx.decodeAudioData(ab));
-      this.prefetch[i].catch(() => {});
+      p.catch(() => {});
+      this.prefetch[i] = Object.assign(p, {rate, pitch});
     }
     return this.prefetch[i];
   },
 
   async playServerChunk(i) {
     const queue = this.queue;
-    let buf;
+    let buf, pitch;
     try {
-      buf = await this.fetchChunk(i);
+      const p = this.fetchChunk(i);
+      pitch = p.pitch;
+      buf = await p;
     } catch (e) {
       if (!this.speaking || this.queue !== queue) return;
       console.warn("Server voice failed, using the browser voice:", e);
@@ -685,6 +692,7 @@ const TTSController = {
     if (ctx.state === "suspended" && !this.paused) { try { await ctx.resume(); } catch (e) {} }
     const src = ctx.createBufferSource();
     src.buffer = buf;
+    src.playbackRate.value = pitch;
     src.connect(this.analyser);
     this.currentSource = src;
     const orb = this.orb();
@@ -696,7 +704,7 @@ const TTSController = {
       this.speakNext();
     };
     src.start();
-    if (orb) RayFace.speakAudio(this.analyser, this.queue[i], ctx, ctx.currentTime, buf.duration);
+    if (orb) RayFace.speakAudio(this.analyser, this.queue[i], ctx, ctx.currentTime, buf.duration / pitch);
     if (i + 1 < this.queue.length) this.fetchChunk(i + 1);
   },
 

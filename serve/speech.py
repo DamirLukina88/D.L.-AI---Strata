@@ -77,7 +77,7 @@ def synthesize(text: str, voice: str | None = None, speed: float = 1.0, env=None
         speed = 1.0
     model = voices_dir(env) / f"{voice}.onnx"
     cmd = [exe, "-q", "-m", str(model), "-f", "-", "--length_scale", f"{1 / speed:.3f}",
-           "--sentence_silence", str(SENTENCE_SILENCE)]
+           "--sentence_silence", f"{SENTENCE_SILENCE / speed:.3f}"]   # pauses follow the pace
     with _slots:
         try:
             r = subprocess.run(cmd, input=text.encode("utf-8"), capture_output=True, timeout=timeout)
