@@ -2,8 +2,9 @@
 // while he thinks about a spoken prompt or reads a reply aloud.  There is no window around him: only his own dots are
 // drawn, and he fades in quickly and out slowly.
 //
-// A few colours only: oranges, browns, a warm white and a dark navy for the eyes and nose (the question marks of
-// the thinking pose use the display's blue as they fade).  Nothing else is drawn around him.  He carries the voice through motion, not a talking mouth (a mouth that copies speech read
+// A few colours only: oranges, browns, a warm white and a dark navy for the eyes and nose, with a one-dot dark outline
+// (so he keeps an edge on the light theme) and a solid backing in the page colour (so nothing shows through between
+// his dots).  The feed keeps room at its bottom while he is there.  The question marks fade in the display's blue.  He carries the voice through motion, not a talking mouth (a mouth that copies speech read
 // as uncanny in every earlier version), following character-animation practice:
 //   - squash and stretch on syllables, keeping volume; a small nod on stressed syllables (ease in and out)
 //   - a blink when a thought ends (a pause after speech), and a gaze change hidden inside that blink
@@ -23,7 +24,7 @@ const RayFace = (() => {
   const C = {
     rim: "rgba(56,189,248,0.45)",
     orange: "#e8834e", light: "#f4a46e", shade: "#c8673a", paw: "#9a6038", brown: "#7a4a2e", dark: "#4a2c1d",
-    white: "#f6efe4", navy: "#17213b", blush: "#e9967a",
+    white: "#f6efe4", navy: "#17213b", blush: "#e9967a", edge: "#3a2216",
   };
 
   // moods: eye size, happy squint (0-1), ear lift (+ up, - droop), head tilt, gaze; used at 60% and held 2 s
@@ -342,22 +343,69 @@ const RayFace = (() => {
     spring(pose, "mouth", talking && level > 0.8 ? 0.4 + 0.6 * stressK : 0, 0.3, 0.6);
   }
 
+  // the page colour behind him (read again now and then, so a theme switch follows)
+  let bg = "#0b0d10", bgAt = 0;
+  const cells = new Array(COLS * ROWS);
   function draw(now) {
+    if (now - bgAt > 500) {
+      bgAt = now;
+      const c = el.parentElement && getComputedStyle(el.parentElement).backgroundColor;
+      if (c && c !== "rgba(0, 0, 0, 0)" && c !== "transparent") bg = c;
+    }
     g.clearRect(0, 0, canvas.width, canvas.height);
-    const rad = geo.pitch * 0.4;
-    // while thinking, a question mark every 2.6 s rises beside his head and fades
-    const qt = ((now - thinkAt) / 1000 % 2.6) / 2.6, qa = pose.paw > 0.5 ? Math.sin(Math.PI * qt) : 0, qy = 3 - qt * 2;
+    const P = geo.pitch, rad = P * 0.4;
+    for (let j = 0; j < ROWS; j++) for (let i = 0; i < COLS; i++) cells[j * COLS + i] = pandaCell(i + 0.5, j + 0.5, pose);
+    // a one-dot dark outline around his shape, so his whites keep an edge on a light page
     for (let j = 0; j < ROWS; j++) {
       for (let i = 0; i < COLS; i++) {
-        const x = i + 0.5, y = j + 0.5;
-        const col = qa > 0.25 && qmarkCell(x, y, 39.5, qy) ? (qa > 0.6 ? C.white : C.rim) : pandaCell(x, y, pose);
+        const k = j * COLS + i;
+        if (cells[k]) continue;
+        let near = false;
+        for (let dj = -1; dj <= 1 && !near; dj++) for (let di = -1; di <= 1 && !near; di++) {
+          const ii = i + di, jj = j + dj;
+          const c = ii >= 0 && ii < COLS && jj >= 0 && jj < ROWS ? cells[jj * COLS + ii] : null;
+          if (c && c !== C.edge) near = true;
+        }
+        if (near) cells[k] = C.edge;
+      }
+    }
+    // a solid silhouette in the page colour behind the dots, so nothing behind him shows through the gaps
+    g.fillStyle = bg;
+    for (let j = 0; j < ROWS; j++) {
+      for (let i = 0; i < COLS; i++) if (cells[j * COLS + i]) g.fillRect(geo.offX + i * P - 0.5, geo.offY + j * P - 0.5, P + 1, P + 1);
+    }
+    for (let j = 0; j < ROWS; j++) {
+      for (let i = 0; i < COLS; i++) {
+        const col = cells[j * COLS + i];
         if (!col) continue;
         g.fillStyle = col;
         g.beginPath();
-        g.arc(geo.offX + x * geo.pitch, geo.offY + y * geo.pitch, col === C.rim ? rad * 0.75 : rad, 0, Math.PI * 2);
+        g.arc(geo.offX + (i + 0.5) * P, geo.offY + (j + 0.5) * P, rad, 0, Math.PI * 2);
         g.fill();
       }
     }
+    // while thinking, a question mark every 2.6 s rises beside his head and fades (no outline, no backing)
+    const qt = ((now - thinkAt) / 1000 % 2.6) / 2.6, qa = pose.paw > 0.5 ? Math.sin(Math.PI * qt) : 0, qy = 3 - qt * 2;
+    if (qa > 0.25) {
+      g.fillStyle = qa > 0.6 ? C.white : C.rim;
+      for (let j = 0; j < ROWS; j++) {
+        for (let i = 34; i < COLS; i++) {
+          if (!qmarkCell(i + 0.5, j + 0.5, 39.5, qy)) continue;
+          g.beginPath();
+          g.arc(geo.offX + (i + 0.5) * P, geo.offY + (j + 0.5) * P, rad, 0, Math.PI * 2);
+          g.fill();
+        }
+      }
+    }
+  }
+
+  // while he is there, the feed keeps room at its bottom so the last message stays above him
+  function makeRoom(on) {
+    const view = el && el.parentElement, feed = view && view.querySelector(".code-mobile-messages");
+    if (!feed) return;
+    const atEnd = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 48;
+    view.classList.toggle("ray-room", on);
+    if (on && atEnd) feed.scrollTop = feed.scrollHeight;
   }
 
   function frame(now) {
@@ -389,6 +437,7 @@ const RayFace = (() => {
                         settleAt: -1e9, twitchAt: now + 2500, twitchStart: -1e9, glance: {x: 0, y: 0}, glanceNext: {x: 0, y: 0}});
     el.hidden = false;
     visible = true;
+    makeRoom(true);
     layout();
     requestAnimationFrame(() => el.classList.add("is-on"));
     kick();
@@ -455,6 +504,7 @@ const RayFace = (() => {
         el.hidden = true;
         visible = false;
         mode = "idle";
+        makeRoom(false);
       }, FADE_OUT);
     }, finished ? WARM_MS : WARM_MS / 2);
   }

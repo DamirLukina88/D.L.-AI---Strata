@@ -1217,6 +1217,9 @@ body.is-resizing .view { pointer-events: none; }      /* the drag keeps going ov
   transition-duration: 160ms;
 }
 .ray-face:not(.is-on) { pointer-events: none; }
+/* while Ray sits on the input box, the feed keeps room at its bottom so its last message stays above him */
+.code-mobile-card-view.ray-room .code-mobile-messages { padding-bottom: 128px; }
+@media (max-width: 768px) { .code-mobile-card-view.ray-room .code-mobile-messages { padding-bottom: 98px; } }
 .ray-face:focus-visible { outline: 2px solid var(--st-focus); outline-offset: 2px; border-radius: var(--st-r-sm); }
 .ray-face canvas { display: block; width: 100%; height: 100%; }
 @media (max-width: 768px) {
