@@ -8,8 +8,8 @@ Coder model on an AMD RX 7600 XT with 16 GB, plus 32 GB of system RAM. This fork
 [Damir](https://github.com/DamirLukina88), adds everything around the engine and makes it a workstation you can
 reach from anywhere:
 
-- **Ray**, the assistant: you talk to her and she answers out loud, with a female neural voice and her own casual
-  personality. She knows she runs on the home server, not in someone's cloud, and you can reach her from your phone.
+- **Ray**, the assistant: you talk to him and he answers out loud, with a male neural voice and his own casual
+  personality. He knows he runs on the home server, not in someone's cloud, and you can reach him from your phone.
 - **D.L. CLI**, a coding agent with one shared session you can use from the terminal and from the browser
 - **Offline voice:** local Whisper speech-to-text and Piper text-to-speech, with no audio leaving the PC
 - **Home Assistant MCP server:** the coding agent switches lights and climate and reads printers and cameras
@@ -76,19 +76,19 @@ from coding traces with `tools/make_profile_mix.py`.
 ### 1. Ray, the Assistant
 The coding agent is Ray, in the web app's Code tab and in the terminal (the separate Chat tab was removed on
 2026-10-23):
-- **Who she is:** a casual, direct household assistant and coding agent with a light sense of humour. She never calls
-  you "sir" or "madam", and she doesn't assume who is talking: anyone in the house or a guest may be. She uses a name
-  only once someone gives it, and she credits the builder only when asked who made her. Her identity note says who
-  built what, that she runs on "the home server" (not "this PC", which sounds wrong from a phone), and that the model
-  weights come from Alibaba's Qwen team, who neither run her nor see anything she does. Without it, the model credits
+- **Who he is:** a casual, direct household assistant and coding agent with a light sense of humour. He never calls
+  you "sir" or "madam", and he doesn't assume who is talking: anyone in the house or a guest may be. He uses a name
+  only once someone gives it, and he credits the builder only when asked who made him. His identity note says who
+  built what, that he runs on "the home server" (not "this PC", which sounds wrong from a phone), and that the model
+  weights come from Alibaba's Qwen team, who neither run him nor see anything he does. Without it, the model credits
   everything to Alibaba.
-- **Talk to her:** speech-to-text often mangles her name (Rey, Rae, Wray, Ring); she answers anyway, without
+- **Talk to him:** speech-to-text often mangles his name (Rey, Rae, Wray, Ring); he answers anyway, without
   correcting the spelling, and greetings and small talk get an answer without tool calls. A spoken prompt gets a note
   to answer in plain speech (no tables, code blocks, emoji or URLs, numbers said as words) at full length, and the
-  answer is read back in the female Piper HFC voice. A typed prompt gets a normal written answer.
+  answer is read back in the male Piper HFC voice. A typed prompt gets a normal written answer.
 - **Fast spoken answers:** with default automatic thinking (`/effort auto`), greetings, wake words, and household commands answer right away with thinking off, while deep questions and coding turns get appropriate reasoning automatically.
-- **Checked with a benchmark:** `tools/ray_persona_bench.py` asks her 22 fixed questions (who is talking, being
-  addressed, who made her, persona, spoken answers, and the machine, folder, time and smart home through her tools)
+- **Checked with a benchmark:** `tools/ray_persona_bench.py` asks him 22 fixed questions (who is talking, being
+  addressed, who made him, persona, spoken answers, and the machine, folder, time and smart home through his tools)
   and scores the answers ([results and method](wiki/artifacts/ray-persona-bench-2026-10-23.md)).
 
 ### 2. Unified Shared CLI & Autonomous Coding Agent
@@ -139,7 +139,9 @@ Dictate prompts privately with 100% offline speech recognition:
 ### 4. Native Browser Text-to-Speech (TTS) & Neural Piper
 Listen to responses hands-free without third-party audio streaming:
 - **Voice-Gated Auto-Speak:** *"Automatically read new answers aloud"* (on by default) speaks replies only when the input was dictated via STT, preserving silence when typing.
-- **20 US Neural Piper Voices:** high-quality local Piper speech synthesis integrated via Linux Speech Dispatcher and Web Speech API. Ray's voice, `en_US-hfc_female-medium`, is the default in the browser and on the desktop; any other voice can be picked in Settings. Where Piper is missing (a phone, Edge, macOS), *Auto* still picks a female voice: Edge's Ava, Chrome's Google US English, Android's local US English voice.
+- **20 US Neural Piper Voices:** high-quality local Piper speech synthesis integrated via Linux Speech Dispatcher and Web Speech API. Ray's voice, `en_US-hfc_male-medium` (male since 2026-10-28), is the default on the server, in the browser and on the desktop; any other voice can be picked in Settings. Where the server voice is off and Piper is missing (Edge, macOS), *Auto* picks a male voice by name (Edge's Andrew or Guy, Chrome's Google UK English Male); Android names voices by language only, so there it is the local US English voice.
+- **Ray's voice from the server:** `POST /v1/audio/speech` (OpenAI-style `input`, `voice`, `speed`; WAV, `serve/speech.py`) runs Piper on the home server, so phones hear the same voice as the PC (measured 0.39 s for 3.4 s of speech). The web app uses it by default (About: *Use Ray's voice from the server*) and falls back to the browser voice if it fails.
+- **Ray's face:** while a reply is read aloud, a small blue dot-matrix face at the bottom right of the Code feed shows the mood of each sentence, and its mouth is a level meter of the voice that ripples from the centre outwards, 50 ms ahead of the sound. While he works on a spoken prompt, a small thinking face shows at the bottom left. Click the face to stop him; turn it off in About.
 - **Natural Speech Cleaner (`cleanForSpeech`):** strips markdown, emojis, code blocks, box borders, and converts math, units, and symbols to natural spoken words.
 - **Mobile Keep-Alive & Controls:** Android Screen WakeLock and MediaSession notification drawer controls (play, pause, stop).
 
@@ -158,7 +160,7 @@ Ray features a zero-overhead, on-demand MCP router (`tools/dl_mcp.py`) that keep
 
 | Suite / Category | Servers & Tools | What It Covers |
 | :--- | :--- | :--- |
-| **Self-Identity & Project** | `ray_identity` | Who Ray (Rei) is, plus this PC's hardware, the running engine's address, model and settings, the services and the git status, all read when she is asked (nothing hardcoded that can go stale), and the active MCP catalog. |
+| **Self-Identity & Project** | `ray_identity` | Who Ray (Rei) is, plus this PC's hardware, the running engine's address, model and settings, the services and the git status, all read when he is asked (nothing hardcoded that can go stale), and the active MCP catalog. |
 | **Reasoning Escalation** | `deepseek` (`deepseek_reason`) | DeepSeek cloud reasoning for heavy mathematics and frontier logic. Every call shows an approval card with the full prompt that would leave the PC; `/mcp trust deepseek` stops asking for the session, `/mcp ask deepseek` asks again. The key comes only from `DEEPSEEK_API_KEY` in `~/.config/dl-ai/secrets.env`. |
 | **Smart Home & Automation** | `homeassistant` (Bambu, Xiaomi, plugs, lights, AC), `schedule` | Smart home control, camera snapshots, scheduled jobs, recurring reminders. |
 | **Web & Productivity** | `exa`, `fetch`, `playwright`, `deepl`, `proton`, `gmail`, `drive`, `docs` | Web search, headless browser automation, translation, email, and Google Workspace. |

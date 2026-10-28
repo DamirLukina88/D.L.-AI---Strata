@@ -1,11 +1,12 @@
-// serve/web/rayface.js - Ray's face while she reads a reply aloud, and a small thinking face while she works on a
+// serve/web/rayface.js - Ray's face while he reads a reply aloud, and a small thinking face while he works on a
 // spoken prompt.  The face is the first blue-white dot-matrix style (eyes and brows that show the mood of each
-// sentence); the mouth is a dot-matrix waveform of her voice instead of lips, so it never pretends to form words.
-//   - Server voice (Web Audio): the waveform's bars come from the voice's spectrum and loudness, read from an analyser
-//     that sees the sound about 50 ms before it is heard (TTSController delays the output), so it leads the voice.
-//   - Browser voice (no audio to read): the bars follow a loudness estimated from the text.
+// sentence); the mouth is a level meter of his voice instead of lips, so it never pretends to form words.
+//   - Server voice (Web Audio): the meter follows the voice's loudness, read from an analyser that sees the sound about
+//     50 ms before it is heard (TTSController delays the output), so it leads the voice.  The centre bar shows the
+//     loudness now and each bar further out shows it a little later, so syllables ripple from the centre outwards.
+//   - Browser voice (no audio to read): the meter follows a loudness estimated from the text.
 //   - The end: a warm look and a small nod, then a slow fade.  Clicking the face stops the speech (onStop).
-// The motion is kept calm: slow easing, rare small glances, bars that rise quickly and fall slowly.
+// The motion is kept calm: slow easing, rare small glances, bars that rise gently and fall slowly.
 "use strict";
 
 const RayFace = (() => {
@@ -42,7 +43,7 @@ const RayFace = (() => {
   let target = {...EXPR.neutral};
   const bars = new Float32Array(BARS + 1);    // waveform half-heights in cells, centre first
   let level = 0, paused = false, mode = "idle";   // "audio" | "text" | "warm" | "idle"
-  let analyser = null, tbuf = null, fbuf = null;
+  let analyser = null, tbuf = null;
   let line = null;                            // the chunk being spoken: {text, times[], amp[], sentences[], total, …}
   let audioText = null, audioStart = 0, audioDur = 0, audioCtx = null;
   let speed = 1;
@@ -113,32 +114,24 @@ const RayFace = (() => {
     return i;
   };
 
-  // the voice's spectrum as BARS+1 band levels (low bands in the middle of the mouth), and its loudness
-  function readAudio(out) {
+  // the voice's loudness now, 0-1, with a noise gate (speech is about 0.02-0.2 RMS)
+  function readAudio() {
     const n = analyser.fftSize;
-    if (!tbuf || tbuf.length !== n) { tbuf = new Float32Array(n); fbuf = new Uint8Array(analyser.frequencyBinCount); }
+    if (!tbuf || tbuf.length !== n) tbuf = new Float32Array(n);
     analyser.getFloatTimeDomainData(tbuf);
     let sum = 0;
     for (let i = 0; i < n; i++) sum += tbuf[i] * tbuf[i];
-    const loud = Math.max(0, Math.min(1, (Math.sqrt(sum / n) - 0.012) / 0.14));   // a noise gate, speech ~0.02-0.2
-    analyser.getByteFrequencyData(fbuf);
-    const hz = analyser.context.sampleRate / n;
-    for (let b = 0; b <= BARS; b++) {
-      const lo = 120 * Math.pow(4000 / 120, b / (BARS + 1)), hi = 120 * Math.pow(4000 / 120, (b + 1) / (BARS + 1));
-      let m = 0, k = 0;
-      for (let i = Math.floor(lo / hz); i <= Math.ceil(hi / hz) && i < fbuf.length; i++) { m += fbuf[i]; k++; }
-      out[b] = k ? Math.max(0, (m / k - 70) / 150) : 0;
-    }
-    return loud;
+    return Math.max(0, Math.min(1, (Math.sqrt(sum / n) - 0.012) / 0.14));
   }
 
-  const want = new Float32Array(BARS + 1);
+  const METER = BARS + 1;                     // meter bars: the centre column and BARS each side
+  const hist = new Float32Array(64);
+  let histAt = 0;
   function step(now) {
     // the sentence being spoken sets the mood; the voice sets the waveform
     let loud = 0;
-    want.fill(0);
     if (!paused && mode === "audio" && analyser) {
-      loud = readAudio(want);
+      loud = readAudio();
       if (audioText && audioDur > 0) {
         const sec = (audioCtx.currentTime - audioStart) / audioDur * audioText.total;
         const i = charAt(audioText, sec);
@@ -153,14 +146,16 @@ const RayFace = (() => {
         const sen = line.sentences.find((s) => i >= s.from && i <= s.to);
         if (sen) setMood(sen.mood, now);
       }
-      for (let b = 0; b <= BARS; b++) want[b] = (1 - b / (BARS + 2)) * (0.75 + 0.25 * Math.sin(now / 260 + b * 1.7));
     }
-    level += (loud - level) * (loud > level ? 0.2 : 0.06);
-    for (let b = 0; b <= BARS; b++) {
-      const h = Math.min(1.6, level * (0.3 + 1.3 * want[b]));
-      bars[b] += (h - bars[b]) * (h > bars[b] ? 0.18 : 0.06);    // up gently, down slowly
+    level += (loud - level) * (loud > level ? 0.25 : 0.07);
+    // the meter: the centre bar shows the loudness now, each bar further out shows it a step (about 35 ms) later, so
+    // every syllable ripples from the centre outwards
+    hist[histAt = (histAt + 1) % hist.length] = level;
+    for (let k = 0; k < METER; k++) {
+      const then = hist[(histAt - k * 2 + hist.length * 4) % hist.length];
+      const h = Math.min(2.4, then * 2.6 * (1 - 0.07 * k));
+      bars[k] += (h - bars[k]) * (h > bars[k] ? 0.3 : 0.08);      // up gently, down slowly
     }
-    cur.phase = now / 240;
 
     // blinks, rare small glances and the closing nod
     if (now > nextBlink) { blinkUntil = now + 160; nextBlink = now + 3500 + Math.random() * 3500; }
@@ -201,21 +196,18 @@ const RayFace = (() => {
         v = Math.max(v, soft(Math.abs(y - by) - 0.25) * 0.55);
       }
     }
-    // mouth: a thin waveform line of the voice, travelling slowly, on a line that curves up when smiling; silent, it is
-    // just the line.  Neighbouring columns are joined so the wave stays one continuous line.
+    // mouth: a level meter on the mouth line (which curves up when smiling); a bar on every column grows up and down
+    // from the line; silent, it is just the line
     const mx = COLS / 2 + gx * 0.5, my = 19.5 + gy * 0.6;
     const col = Math.round(x - 0.5 - mx);
     if (Math.abs(col) <= BARS) {
-      const at = (k) => {
-        const u = k / (BARS + 0.5);
-        const amp = bb[Math.min(BARS, Math.abs(k))] * (1 - 0.5 * u * u);
-        return my - c.smile * 0.9 + c.smile * 1.8 * (1 - u * u) + amp * Math.sin((c.phase || 0) + k * 0.9);
-      };
-      const y0 = at(col), y1 = Math.abs(col + 1) <= BARS ? at(col + 1) : y0;
-      const lo = Math.min(y0, (y0 + y1) / 2), hi = Math.max(y0, (y0 + y1) / 2);
       const u = col / (BARS + 0.5);
-      const line = shimmer < 0 ? 1 : 0.45 + 0.55 * Math.exp(-(((u + 1) / 2 - shimmer) ** 2) / 0.02);
-      if (y >= lo - 0.55 && y <= hi + 0.55) v = Math.max(v, line * (Math.abs(u) > 0.9 ? 0.7 : 1));
+      const base = my - c.smile * 0.9 + c.smile * 1.8 * (1 - u * u);
+      const d = Math.abs(y - base);
+      const line = shimmer < 0 ? 0.85 : 0.4 + 0.55 * Math.exp(-(((u + 1) / 2 - shimmer) ** 2) / 0.02);
+      if (d < 0.6) v = Math.max(v, line * (Math.abs(u) > 0.9 ? 0.75 : 1));
+      const h = bb[Math.abs(col)] * (Math.abs(u) > 0.9 ? 0.75 : 1);
+      if (h > 0.3 && d <= h + 0.5) v = Math.max(v, 0.85);
     }
     return v;
   }

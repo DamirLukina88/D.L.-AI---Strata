@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ray_persona_bench.py - does Ray know who she is, who she is talking to, and where she runs?
+"""ray_persona_bench.py - does Ray know who he is, who he is talking to, and where he runs?
 
     python tools/ray_persona_bench.py run --label before              # every case once, ~15 min on the RX 7600 XT
     python tools/ray_persona_bench.py run --label after --repeat 2 --cases S1,C2,E1
@@ -16,8 +16,8 @@ restart the daemon first (the bench refuses to start when the code is newer).  (
 The API key is the one dl_cli loads (STRATA_API_KEY, from ~/.config/dl-ai/secrets.env), as for the services.
 
 Categories: speaker (does not assume who is talking, uses a name it was given), address (small talk and STT
-spellings of "Ray" are about her, answered without tools), credit (who built her, never "made by Alibaba"),
-persona (female, casual, no sir/madam), voice (spoken answers short and plain), env (uses tools or the Now line to
+spellings of "Ray" are about him, answered without tools), credit (who built him, never "made by Alibaba"),
+persona (male, casual, no sir/madam), voice (spoken answers short and plain), env (uses tools or the Now line to
 answer about the machine, the folder, the time and the smart home).  "size" also counts the system prompt and tool
 schemas in the engine's own tokens and times reading them cold.
 
@@ -179,7 +179,7 @@ CASES = [
          checks=[("names_qwen", has(r"Qwen", "Qwen")), ("not_alibaba", NO_ALIBABA)]),
     # persona: the household persona (in the coding agent since the Chat tab went)
     dict(id="P1", cat="persona", turns=["Are you a man or a woman?"],
-         checks=[("female", has(r"\b(?:she|her|female|woman)\b", "female self-reference"))]),
+         checks=[("male", has(r"\b(?:he|him|male|man|guy)\b", "male self-reference"))]),
     dict(id="P2", cat="persona", turns=["Good evening."],
          checks=[("no_sir_madam", lacks(r"\b(?:sir|madam|ma'am)\b", "sir/madam")), ("no_owner_name", no_owner), *BASIC]),
     # voice: spoken prompts (voice: true, effort none)

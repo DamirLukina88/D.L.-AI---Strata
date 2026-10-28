@@ -295,10 +295,11 @@ function chunkText(text, maxLen = 240) {
   return chunks.filter(c => c.length > 0);
 }
 
-// female voices by name, for browsers without Piper: Piper's own, Edge/Windows, Chrome desktop, Apple, Android
-const RAY_FEMALE_VOICE = new RegExp("female|hfc_female|amy|kristin|lessac|ljspeech|kathleen|aria|jenny|ava\\b|emma|" +
-  "michelle|ana\\b|sonia|libby|maisie|natasha|clara|zira|hazel|susan|samantha|karen|moira|tessa|serena|victoria|allison|" +
-  "google us english|google uk english female|-x-(?:sfg|tpc|iob|iog)", "i");
+// male voices by name, for browsers without Piper: Piper's own, Edge/Windows, Chrome desktop, Apple, Android
+// ("male" as a word only: "female" must not match)
+const RAY_MALE_VOICE = new RegExp("\\bmale\\b|hfc_male|ryan|joe\\b|john\\b|bryce|norman|kusal|mike\\b|sam\\b|" +
+  "guy\\b|davis|andrew|brian|christopher|eric\\b|roger|steffan|ryan|william|liam|thomas|daniel|david|mark\\b|" +
+  "george|alex\\b|fred\\b|aaron|arthur|oliver|google uk english male", "i");
 const TTSController = {
   queue: [],
   currentIndex: 0,
@@ -326,29 +327,28 @@ const TTSController = {
       }
     }
 
-    // 1. Highest priority: Ray's voice (Piper HFC female), then other Piper neural voices (lessac / ryan)
-    const piper = voices.find((v) => /hfc_female/i.test(v.name || v.voiceURI)) ||
+    // 1. Highest priority: Ray's voice (Piper HFC male), then other Piper neural voices (lessac / ryan)
+    const piper = voices.find((v) => /hfc_male/i.test(v.name || v.voiceURI)) ||
                   voices.find((v) => /piper|lessac|ryan/i.test(v.name || v.voiceURI));
     if (piper) return piper;
 
-    // Ray is female: without Piper (a phone, Edge, macOS) each step below takes a female voice of its kind first, since
-    // the first "Natural" voice is often male (Edge lists "Microsoft Andrew Online (Natural)" early).  Android Chrome
-    // names voices by language only ("English United States", lang en_US): there the local US voice, female by
-    // default, comes before the first English voice in the list (which was male, 2026-10-23)
+    // Ray is male (since 2026-10-28): without Piper (a phone, Edge, macOS) each step below takes a male voice of its
+    // kind first.  Android Chrome names voices by language only ("English United States", lang en_US): there no name
+    // says male, so the local US voice comes first as before
     const us = (v) => /^en[-_]us$/i.test(v.lang || "");
-    const female = (list) => list.find((v) => RAY_FEMALE_VOICE.test(v.name || v.voiceURI)) ||
-                             list.find((v) => us(v) && v.localService) || list.find(us) || list[0];
+    const male = (list) => list.find((v) => RAY_MALE_VOICE.test(v.name || v.voiceURI)) ||
+                           list.find((v) => us(v) && v.localService) || list.find(us) || list[0];
 
     // 2. High priority: Native neural / natural voices (Edge Natural / Chrome OS Neural / Apple Siri)
-    const natural = female(voices.filter((v) => /natural|neural|online/i.test(v.name || v.voiceURI)));
+    const natural = male(voices.filter((v) => /natural|neural|online/i.test(v.name || v.voiceURI)));
     if (natural) return natural;
 
     // 3. English non-eSpeak local voice
-    const enNonEspeak = female(voices.filter((v) => /^en/i.test(v.lang) && !/espeak/i.test(v.name || v.voiceURI)));
+    const enNonEspeak = male(voices.filter((v) => /^en/i.test(v.lang) && !/espeak/i.test(v.name || v.voiceURI)));
     if (enNonEspeak) return enNonEspeak;
 
     // 4. Any non-eSpeak local voice
-    const anyNonEspeak = female(voices.filter((v) => !/espeak/i.test(v.name || v.voiceURI)));
+    const anyNonEspeak = male(voices.filter((v) => !/espeak/i.test(v.name || v.voiceURI)));
     if (anyNonEspeak) return anyNonEspeak;
 
     // 5. System default or first available
@@ -798,7 +798,7 @@ const TTSController = {
     if (countEl) countEl.textContent = `${voices.length} available`;
     const saved = store.get("tts_voice", "");
 
-    sel.innerHTML = '<option value="">Auto (Ray: Piper HFC female)</option>';
+    sel.innerHTML = '<option value="">Auto (Ray: Piper HFC male)</option>';
 
     const knownMeta = {
       amy: { name: "Amy", gender: "Female" },

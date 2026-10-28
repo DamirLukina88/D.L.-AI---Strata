@@ -1198,7 +1198,7 @@ body.is-resizing .view { pointer-events: none; }      /* the drag keeps going ov
 .cs-edit-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; flex-wrap: wrap; }
 
 /* Ray's face (web/rayface.js): a dot-matrix box at the bottom right of the feed, above the input box, while a reply is
-   read aloud; a small thinking face at the bottom left while she works on a spoken prompt. Quick in, slow out. */
+   read aloud; a small thinking face at the bottom left while he works on a spoken prompt. Quick in, slow out. */
 .ray-face, .ray-think {
   position: absolute;
   bottom: var(--ray-face-bottom, 120px);

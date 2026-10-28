@@ -10,7 +10,7 @@ class Speech(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         d = Path(self.tmp.name)
         (d / "voices").mkdir()
-        for v in ("en_US-hfc_female-medium", "en_US-other"):
+        for v in ("en_US-hfc_male-medium", "en_US-other"):
             (d / "voices" / f"{v}.onnx").write_bytes(b"")
             (d / "voices" / f"{v}.onnx.json").write_text("{}")
         self.args = d / "args.txt"
@@ -27,13 +27,13 @@ class Speech(unittest.TestCase):
         wav = speech.synthesize("Hello there.", speed=2.0, env=self.env)
         self.assertEqual(wav, b"RIFFfakeWAVE")
         args = self.args.read_text()
-        self.assertIn("en_US-hfc_female-medium.onnx", args)
+        self.assertIn("en_US-hfc_male-medium.onnx", args)
         self.assertIn("--length_scale 0.500", args)
 
     def test_status(self):
         st = speech.get_tts_status(env=self.env)
         self.assertTrue(st["available"])
-        self.assertEqual(st["voices"], ["en_US-hfc_female-medium", "en_US-other"])
+        self.assertEqual(st["voices"], ["en_US-hfc_male-medium", "en_US-other"])
         self.assertFalse(speech.get_tts_status(env={**self.env, "STRATA_TTS_VOICE": "missing"})["available"])
 
     def test_refusals(self):

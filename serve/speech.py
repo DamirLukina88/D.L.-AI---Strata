@@ -5,7 +5,7 @@ guessing the browser's speech timing, and phones hear the same Piper voice as th
 `piper` program runs on the CPU, one short process per request.
 
 Settings (environment): STRATA_PIPER (the piper program), STRATA_PIPER_VOICES (the folder with <voice>.onnx and
-<voice>.onnx.json), STRATA_TTS_VOICE (default en_US-hfc_female-medium).
+<voice>.onnx.json), STRATA_TTS_VOICE (default en_US-hfc_male-medium, Ray's voice).
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import subprocess
 import threading
 from pathlib import Path
 
-DEFAULT_VOICE = "en_US-hfc_female-medium"
+DEFAULT_VOICE = "en_US-hfc_male-medium"
 MAX_CHARS = 4000                     # one request; the web app sends sentence-sized chunks
 SENTENCE_SILENCE = 0.25              # seconds after each sentence, as speech-dispatcher's Piper had (0.2)
 _slots = threading.BoundedSemaphore(2)
