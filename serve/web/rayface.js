@@ -126,31 +126,32 @@ const RayFace = (() => {
 
   // the tail: a thick curve from the hip out to the right and up, orange with dark rings, swaying about its root
   function tailCell(x, y, s) {
-    const bx = 26.5, by = 34.2;
+    const bx = 27.5, by = 34.5;
     let best = 1e9, bu = 0;
     for (let k = 0; k <= 24; k++) {
       const u = k / 24, a = s.tail * u;
-      const tx = 12.5 * u, ty = -4.5 * u ** 1.6;             // the curve before sway
+      const tx = 11 * u, ty = -5.5 * u ** 1.4;               // the curve before sway
       const px = bx + tx * Math.cos(a) - ty * Math.sin(a), py = by + tx * Math.sin(a) + ty * Math.cos(a);
-      const d = Math.hypot(x - px, y - py) - (3.2 - 0.9 * u);
+      const fur = 0.35 * Math.sin(Math.atan2(y - py, x - px) * 5 + u * 9);   // a tufted edge
+      const d = Math.hypot(x - px, y - py) - (3.9 - 0.6 * u + fur);
       if (d < best) { best = d; bu = u; }
     }
     if (best > 0.15) return null;
-    if (bu > 0.9) return C.brown;                             // a dark tip
-    return Math.floor(bu * 6) % 2 ? C.brown : C.orange;
+    if (bu > 0.9) return C.dark;                              // a dark tip
+    return Math.floor(bu * 5 + 0.5) % 2 ? C.dark : C.orange;
   }
 
   // the whole panda: head (with its own nod, tilt and squash about the neck), body, arms, feet and tail
   function pandaCell(x, y, s) {
     // the raised paw is in front of everything
-    const pawX = 16.8 + s.paw * 1.4, pawY = 31.6 - s.paw * 8.6;
+    const pawX = 15.6 + s.paw * 2.6, pawY = 31.8 - s.paw * 8.8;
     if (s.paw > 0.05) {
-      const pd = inEll(x, y, pawX, pawY + s.dy * 0.5, 2.4, 1.9);
+      const pd = inEll(x, y, pawX, pawY + s.dy * 0.5, 2.8, 2.2);
       if (pd < 1) return pd > 0.6 ? C.brown : C.paw;
       // the forearm from the shoulder up to the paw
-      const ax = 16.2, ay = 29.5, vx = pawX - ax, vy = pawY - ay, len = Math.hypot(vx, vy) || 1;
+      const ax = 14.6, ay = 30, vx = pawX - ax, vy = pawY - ay, len = Math.hypot(vx, vy) || 1;
       const t = Math.max(0, Math.min(1, ((x - ax) * vx + (y - ay) * vy) / (len * len)));
-      if (Math.hypot(x - ax - vx * t, y - ay - vy * t) < 1.8) return C.paw;
+      if (Math.hypot(x - ax - vx * t, y - ay - vy * t) < 2.3) return C.paw;
     }
     // the head: grid -> head space (head centre 22, 14.6 sits at 21, 15.5), undoing nod, tilt and squash
     let px = x - 21, py = y - 24.9 - s.dy - s.breath * 0.25;
@@ -160,17 +161,24 @@ const RayFace = (() => {
     if (head) return head;
     // feet, forward at the bottom, with light pads
     for (const side of [-1, 1]) {
-      const fx = 21 + side * 4.6, fy = 37.6;
-      if (inEll(x, y, fx, fy, 2.9, 1.9) < 1) return inEll(x, y, fx, fy + 0.5, 1.2, 0.7) < 1 ? C.light : C.paw;
+      const fx = 21 + side * 5.6, fy = 37.4;
+      if (inEll(x, y, fx, fy, 3.4, 2.3) < 1) {
+        if (inEll(x, y, fx, fy + 0.6, 1.4, 0.8) < 1) return C.light;           // the big pad
+        if (inEll(x, y, fx + side * 1.6, fy - 0.7, 0.6, 0.5) < 1) return C.light; // a toe
+        return C.paw;
+      }
     }
     // arms resting on the belly (the left one only while it is not raised)
     for (const side of [-1, 1]) {
       if (side < 0 && s.paw > 0.05) continue;
-      if (inEll(x, y, 21 + side * 4.4, 30.6 + s.breath * 0.1, 1.9, 3.2) < 1) return C.paw;
+      const ad = inEll(x, y, 21 + side * 6.4, 30.4 + s.breath * 0.1, 2.5, 3.6);
+      if (ad < 1) return ad > 0.62 ? C.dark : C.paw;
     }
     // the body: brown, darker at its edge, breathing
-    const bd = inEll(x, y, 21, 30.4 - s.breath * 0.15, 7.6, 7.4 * (1 + s.breath * 0.02));
-    if (bd < 1) return bd > 0.8 ? C.dark : C.brown;
+    const by = 31.2 - s.breath * 0.15;
+    const bd = inEll(x, y, 21, by, 10.2, 7 * (1 + s.breath * 0.02));
+    const tuft = 0.07 * Math.sin(Math.atan2(y - by, x - 21) * 11);              // fur at the edge
+    if (bd < 1 + tuft) return bd > 0.82 + tuft ? C.dark : C.brown;
     return tailCell(x, y, s);
   }
 
