@@ -8,7 +8,7 @@
 <link rel="icon" type="image/svg+xml" href="web/favicon.svg">
 <link rel="stylesheet" href="web/tokens.css">
 <link rel="stylesheet" href="web/components.css">
-<link rel="stylesheet" href="web/app.css?v=20261027-rewind3">
+<link rel="stylesheet" href="web/app.css?v=20261028-face1">
 <script>
   // the theme before the first paint: default dark for D.L. AI
   try {
@@ -93,6 +93,8 @@
             <div class="code-mobile-welcome-sub">Connecting&hellip; The same session is open in the terminal with <code>dl_cli.py --attach</code>.</div>
           </div>
         </div>
+        <!-- Ray's face: shown only while a reply is read aloud (web/rayface.js) -->
+        <div class="ray-face" id="ray-face" hidden aria-hidden="true"><canvas></canvas></div>
         <div class="code-mobile-composer">
           <div class="code-mobile-chips">
             <button type="button" class="code-mobile-chip" data-cmd="/plan">/plan</button>
@@ -270,6 +272,11 @@
         <div class="toggle-row">
           <span>Automatically read new answers aloud<br><span class="muted small">Starts speaking after voice prompts (dictated via STT)</span></span>
           <button class="st-toggle" id="tts-auto-toggle" role="switch" aria-checked="true" aria-label="Auto read answers"></button>
+        </div>
+
+        <div class="toggle-row">
+          <span>Show Ray's face while speaking<br><span class="muted small">A small dot-matrix face that moves its lips while a reply is read aloud</span></span>
+          <button class="st-toggle" id="tts-face-toggle" role="switch" aria-checked="true" aria-label="Show Ray's face while speaking"></button>
         </div>
 
 
@@ -482,6 +489,7 @@
 <div class="scrim" id="scrim" hidden></div>
 <div class="st-toasts" id="toasts" aria-live="polite"></div>
 <script src="web/site-config.js?v=20261020-logout1"></script>
-<script src="web/app.js?v=20261027-rewind2"></script>
+<script src="web/rayface.js?v=20261028-face1"></script>
+<script src="web/app.js?v=20261028-face1"></script>
 </body>
 </html>

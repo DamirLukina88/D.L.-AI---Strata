@@ -360,6 +360,8 @@ const TTSController = {
   getCodeMode() { return store.get("tts_code_mode", "skip"); },
   // on unless turned off: a spoken prompt is answered aloud (typed ones never are)
   isAutoSpeak() { return store.get("tts_auto_speak", true) !== false; },
+  // on unless turned off in About: Ray's face while reading aloud (web/rayface.js)
+  isFaceOn() { return store.get("tts_face", true) !== false; },
 
   clean(rawText) {
     return cleanForSpeech(rawText, this.getCodeMode());
@@ -474,6 +476,7 @@ const TTSController = {
 
   stop() {
     if (!window.speechSynthesis) return;
+    if (typeof RayFace !== "undefined") RayFace.end(this.speaking && this.currentIndex >= this.queue.length);
     this.stopWatchdog();
     this.releaseWakeLock();
     this.stopAudioKeepAlive();
@@ -493,6 +496,7 @@ const TTSController = {
     if (!window.speechSynthesis || !this.speaking) return;
     try { window.speechSynthesis.pause(); } catch (e) {}
     this.paused = true;
+    if (typeof RayFace !== "undefined") RayFace.pause(true);
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
   },
 
@@ -500,6 +504,7 @@ const TTSController = {
     if (!window.speechSynthesis || !this.speaking) return;
     try { window.speechSynthesis.resume(); } catch (e) {}
     this.paused = false;
+    if (typeof RayFace !== "undefined") RayFace.pause(false);
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
   },
 
@@ -560,7 +565,15 @@ const TTSController = {
     u.rate = this.getRate();
     u.pitch = this.getPitch();
 
+    // Ray's face follows the chunk being spoken (web/rayface.js); the test button in Settings has no face
+    const face = typeof RayFace !== "undefined" && this.isFaceOn() && !(this.activeBtn && this.activeBtn.id === "tts-test-btn");
+    if (face) {
+      u.onstart = () => RayFace.say(chunk, u.rate);
+      u.onboundary = (e) => RayFace.boundary(e.charIndex);
+    }
+
     u.onend = () => {
+      if (face) RayFace.chunkEnd();
       this.currentIndex++;
       // Yield briefly so browser audio driver cleanly settles before queueing the next utterance
       setTimeout(() => {
@@ -658,6 +671,16 @@ const TTSController = {
         autoToggle.setAttribute("aria-checked", String(next));
         store.set("tts_auto_speak", next);
         toast("info", `Auto-speak ${next ? "enabled" : "disabled"}`, next ? "Voice prompts (dictated via STT) will be read aloud automatically." : "Tap the speaker icon on any message to listen.", 2500);
+      };
+    }
+    const faceToggle = $("tts-face-toggle");
+    if (faceToggle) {
+      faceToggle.setAttribute("aria-checked", String(this.isFaceOn()));
+      faceToggle.onclick = () => {
+        const next = faceToggle.getAttribute("aria-checked") !== "true";
+        faceToggle.setAttribute("aria-checked", String(next));
+        store.set("tts_face", next);
+        if (!next && typeof RayFace !== "undefined") RayFace.end(false);
       };
     }
     const testBtn = $("tts-test-btn");
