@@ -390,7 +390,7 @@ const RayFace = (() => {
     if (lightPage) {
       const lit = (i, j) => i >= 0 && i < COLS && j >= 0 && j < ROWS && !!cells[j * COLS + i];
       g.strokeStyle = C.edge;
-      g.lineWidth = Math.max(1, P * 0.2);
+      g.lineWidth = Math.max(1.5, P * 0.32);
       g.lineCap = "square";
       g.beginPath();
       for (let j = 0; j < ROWS; j++) {
