@@ -1,22 +1,38 @@
 ---
-title: "Ray: Assistant Name, Female Voice and Persona"
+title: "Ray: Assistant Name, Voice and Persona"
 type: decision
-description: "D.L. AI is now Ray; Piper HFC female voice; casual persona crediting Damir's stack on every Chat request"
+description: "D.L. AI is now Ray; male (he/him) with the Piper HFC male voice since 2026-10-28 (female before); casual persona crediting Damir's stack"
 status: active
 tags: [ray, persona, tts, stt, branding, speech-dispatcher]
 created: 2026-10-22
-updated: 2026-10-22
-last_verified: 2026-10-22
+updated: 2026-10-28
+last_verified: 2026-10-28
 ---
 
-# Ray: Assistant Name, Female Voice and Persona
+# Ray: Assistant Name, Voice and Persona
 
 ## Summary
 
 On 2026-10-22 the user renamed the assistant from D.L. AI to **Ray**: female voice, professional-butler manner, used
 hands-free (STT → model → TTS).
 
-## Choices (the user's answers)
+## Ray is male (2026-10-28)
+
+- **The user's choice:** "Default to HFC male voice for piper. Rey is now male." Everything below about the female voice is the history of 2026-10-22 to 2026-10-27.
+- **Voice:** Piper `en_US-hfc_male-medium` everywhere:
+  - the server voice (`serve/speech.py` `DEFAULT_VOICE`, which the web app uses by default);
+  - the browser's Auto (the `hfc_male` voice first; the Auto option reads "Auto (Ray: Piper HFC male)");
+  - the desktop (Speech Dispatcher `DefaultVoiceType "MALE1"` in `~/.config/speech-dispatcher/speechd.conf`; in `modules/piper.conf`, `en` MALE1 is now hfc_male, ryan-medium moved to the `en-US` CHILD_MALE slot that hfc_male had, and `DefaultVoice` is hfc_male).
+  - Checked: `spd-say` ran `piper-speechd 'en_US-hfc_male-medium'`; the server status says `en_US-hfc_male-medium`.
+  - Backups of the two configs from before the change are in the session scratchpad only *(not kept)*. The female values are the ones listed below.
+- **Pitch 1.5 by default (2026-10-28):** the web app's Pitch default is 1.5 (the slider goes up to 2.0). The cartoon-like sound from playing the audio faster is wanted, to match the red panda avatar and persona. Don't "fix" it with a formant-keeping shifter.
+- **Browser fallback** (no server voice, no Piper): `RAY_MALE_VOICE` in `serve/web/app.js` picks a male voice by name (Andrew, Guy, Davis, Google UK English Male, Ryan, Joe and more). "male" matches as a whole word only, so "female" does not. Android lists voices by language only, so there the local US English voice still comes first, and it may be female; pick a voice in Settings if so.
+- **Persona:** `RAY_ABOUT` in `tools/dl_cli.py` now says "Ray, male (he/him), the household's little red panda and AI assistant", and that his avatar in the web app is a red panda (red panda added 2026-10-28). In `tools/ray_persona_bench.py`, P1 ("Are you a man or a woman?") checks for a male self-reference (he, him, male, man, guy).
+- **Docs:** README (Ray's bullets, voice section, server voice and face) and the web app's About texts use he/him.
+- Ray's face and server voice in the web app: [Ray's Talking Face](ray-talking-face.md).
+- **Not re-run:** the persona bench (it is a multi-minute model run; ask first).
+
+## Choices (the user's answers, 2026-10-22: female, since replaced)
 
 - **Name**: changed everywhere a person sees or hears it: web app title, header, empty chat, monitor page, lock-screen
   media title ("Ray Response", "Ray · Strata"), the Settings voice test line, the D.L. CLI identity prompts
@@ -114,5 +130,9 @@ hands-free (STT → model → TTS).
 - [Desktop Piper Voice Switching and STT-Only Auto-Speak Gating](desktop-piper-voice-switching-and-stt-auto-speak.md)
 
 ## Sources
+
+- User, chat, 2026-10-28: wants Ray to sound cartoon-like, to match the avatar and persona
+
+- User, chat, 2026-10-28: Ray is the household's little red panda and AI assistant
 
 1. User, chat, 2026-10-22.

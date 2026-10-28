@@ -79,10 +79,19 @@ This decision documents two critical speech subsystem fixes: (1) resolving Speec
 
 ## Related
 
-- [Ray: Assistant Name, Female Voice and Persona](ray-assistant-persona.md): the default voice is now HFC female.
+- [Ray: Assistant Name, Voice and Persona](ray-assistant-persona.md): the default voice was HFC female from 2026-10-22, and is HFC male since 2026-10-28.
 - [Ray TTS PipeWire Audio Backend and Truncation Fix Report](../artifacts/ray-tts-pipewire-and-truncation-fix-report.md)
 
+## Speed and pitch sliders (2026-10-28)
+
+- **Server voice (web app):** Piper has no pitch setting. Each chunk plays `pitch` times faster through Web Audio (`playbackRate`) and is requested at `speed = rate / pitch`, so the pace stays the Speed setting. A prefetched chunk is fetched again if a slider moved. `--sentence_silence` is scaled by `1/speed` in `serve/speech.py`, which needs a server restart to take effect.
+- **Desktop browser voice (speech-dispatcher):** `piper.conf` passes `'$RATE' '$PITCH'` to `~/.local/bin/piper-speechd`, with `GenericRateMultiply 100` / `GenericPitchMultiply 100`. speechd computes `value * Multiply / 100 + Add`, so `1` gave 0. The wrapper turns -100..100 into `3^(v/100)`, Chromium's mapping. Speed goes to `--length_scale` and the pauses. Pitch is an ffmpeg `asetrate` resample, with the phonemes lengthened to keep the pace.
+- **Measured** (`en_US-hfc_male-medium`, same sentence): pitch +24 gave f0 119 → 154 Hz (1.29×, asked 1.30); pitch -20 gave 119 → 97 Hz (0.82×, asked 0.80); rate +54 (1.81×) gave 3.87 s → 2.62 s. Phoneme pace in Piper doesn't scale exactly with `length_scale`.
+- **Backups** before this change are in the session scratchpad (`piper.conf.bak-rate`, `piper-speechd.bak-rate`).
+
 ## Sources
+
+- User, chat, 2026-10-28: pitch and speed controls did not work for the voice
 
 1. User, chat, 2026-10-17.
 2. Chromium Linux Speech Dispatcher backend: `content/browser/speech/tts_linux.cc`.

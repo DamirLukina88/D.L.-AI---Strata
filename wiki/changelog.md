@@ -5,7 +5,7 @@ description: "Record of every change the agent made to this wiki"
 status: active
 tags: [meta, changelog]
 created: 2026-10-05
-updated: 2026-10-27
+updated: 2026-10-28
 last_verified: 2026-10-05
 ---
 
@@ -15,7 +15,10 @@ Newest entries first.
 
 ## Log
 
-- **2026-10-27:** Update. decisions/shared-cli-session-daemon.md. (Agent: Claude Code)
+- **2026-10-28:** Update. Ray's avatar page retitled to the red panda; thinking only on typed prompts; speed and pitch sliders fixed (server and desktop voice); pitch 1.5 default, cartoon voice intended; Ray is the household's little red panda. (Agent: Claude Code)
+- **2026-10-28:** Update. decisions/desktop-piper-voice-switching-and-stt-auto-speak.md, decisions/ray-assistant-persona.md. (Agent: Claude Code)
+- **2026-10-28:** Ingestion. decisions/ray-talking-face.md. (Agent: Claude Code)
+- **2026-10-27:** Update. decisions/shared-cli-session-daemon.md, decisions/github-fork-and-sanitization.md. (Agent: Claude Code)
 - **2026-10-27:** Ingestion. decisions/saved-cli-sessions.md. (Agent: Claude Code)
 - **2026-10-27:** Update. decisions/rx-7600-xt-cachyos-deployment.md. (Agent: Claude Code)
 - **2026-10-27:** Ingestion. artifacts/upstream-v0-2-7-review-2026-10-27.md. (Agent: Claude Code)
