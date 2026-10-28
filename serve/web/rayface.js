@@ -1,31 +1,41 @@
-// serve/web/rayface.js - Ray's face while he reads a reply aloud, and a small thinking face while he works on a
-// spoken prompt.  The face is the first blue-white dot-matrix style (eyes and brows that show the mood of each
-// sentence); the mouth is a level meter of his voice instead of lips, so it never pretends to form words.
-//   - Server voice (Web Audio): the meter follows the voice's loudness, read from an analyser that sees the sound about
-//     50 ms before it is heard (TTSController delays the output), so it leads the voice.  The centre bar shows the
-//     loudness now and each bar further out shows it a little later, so syllables ripple from the centre outwards.
-//   - Browser voice (no audio to read): the meter follows a loudness estimated from the text.
-//   - The end: a warm look and a small nod, then a slow fade.  Clicking the face stops the speech (onStop).
-// The motion is kept calm: slow easing, rare small glances, bars that rise gently and fall slowly.
+// serve/web/rayface.js - Ray as a little red panda drawn in dots, sitting at the left on the top edge of the Code tab's input box
+// while he thinks about a spoken prompt or reads a reply aloud.  There is no window around him: only his own dots are
+// drawn, and he fades in quickly and out slowly.
+//
+// A few colours only: oranges, browns, a warm white and a dark navy for the eyes and nose (the question marks of
+// the thinking pose use the display's blue as they fade).  Nothing else is drawn around him.  He carries the voice through motion, not a talking mouth (a mouth that copies speech read
+// as uncanny in every earlier version), following character-animation practice:
+//   - squash and stretch on syllables, keeping volume; a small nod on stressed syllables (ease in and out)
+//   - a blink when a thought ends (a pause after speech), and a gaze change hidden inside that blink
+//   - a settle with a little overshoot after each sentence (follow-through)
+//   - ears and tail that move a beat after the head (overlapping, secondary action); one ear more than the other
+//   - a moving hold: breathing, a slow tail sway and a rare ear twitch, never fully still
+//   - moods from simple rules on each sentence: happy eyes, a curious tilt, soft worry with drooping ears
+//   - the mouth opens only on the strongest syllables (an accent), otherwise it is his small closed frown
+//   - thinking: a paw on his chin, eyes up and to the side, question marks rising; the paw drops when he speaks
+// Server voice (Web Audio): the motion follows the voice's loudness, read about 50 ms before it is heard
+// (TTSController delays the output).  Browser voice: a loudness estimated from the text.  Clicking stops (onStop).
 "use strict";
 
 const RayFace = (() => {
-  const COLS = 44, ROWS = 26;                 // the face's own grid; a wider panel shows more dark dots around it
-  const BARS = 9;                             // waveform columns each side of the centre
+  const COLS = 46, ROWS = 40;                 // the drawing's grid: head on top, body, feet and tail below
   const FADE_OUT = 700, WARM_MS = 1800;
-  const ON = "#e6f8ff", BLUE = (a) => `rgba(56,189,248,${a})`, OFF = "rgba(56,189,248,0.07)";
+  const C = {
+    rim: "rgba(56,189,248,0.45)",
+    orange: "#e8834e", light: "#f4a46e", shade: "#c8673a", paw: "#9a6038", brown: "#7a4a2e", dark: "#4a2c1d",
+    white: "#f6efe4", navy: "#17213b", blush: "#e9967a",
+  };
 
-  // expressions: eye openness, happy eye arcs, brow height/tilt/asymmetry, waveform smile, gaze; while speaking they are
-  // used at 60% of their distance from neutral and held at least 2 s, so the face stays calm and pleasant
+  // moods: eye size, happy squint (0-1), ear lift (+ up, - droop), head tilt, gaze; used at 60% and held 2 s
   const EXPR = {
-    neutral:   {eyeOpen: 1,    arc: 0.1, browY: 0,    browTilt: 0,    browAsym: 0,   smile: 0.3,  lookX: 0,    lookY: 0},
-    happy:     {eyeOpen: 0.9,  arc: 0.7, browY: -0.4, browTilt: 0,    browAsym: 0,   smile: 0.6,  lookX: 0,    lookY: 0},
-    excited:   {eyeOpen: 1.1,  arc: 0.2, browY: -1,   browTilt: 0,    browAsym: 0,   smile: 0.65, lookX: 0,    lookY: -0.2},
-    surprised: {eyeOpen: 1.25, arc: 0,   browY: -1.4, browTilt: 0,    browAsym: 0,   smile: 0,    lookX: 0,    lookY: -0.2},
-    curious:   {eyeOpen: 1.05, arc: 0,   browY: -0.4, browTilt: 0,    browAsym: 1,   smile: 0.2,  lookX: 0.4,  lookY: -0.1},
-    thinking:  {eyeOpen: 0.95, arc: 0,   browY: -0.5, browTilt: 0,    browAsym: 0.3, smile: 0.15, lookX: -0.6, lookY: -0.5},
-    concerned: {eyeOpen: 0.9,  arc: 0,   browY: -0.2, browTilt: 0.6,  browAsym: 0,   smile: -0.1, lookX: 0,    lookY: 0.2},
-    warm:      {eyeOpen: 0.8,  arc: 1,   browY: -0.3, browTilt: 0.2,  browAsym: 0,   smile: 0.8,  lookX: 0,    lookY: 0.2},
+    neutral:   {eye: 1,    happy: 0.1,  ears: 0,    tilt: 0,     lookX: 0,    lookY: 0},
+    happy:     {eye: 1,    happy: 0.6,  ears: 0.3,  tilt: 0,     lookX: 0,    lookY: 0},
+    excited:   {eye: 1.12, happy: 0.35, ears: 0.6,  tilt: 0,     lookX: 0,    lookY: -0.2},
+    surprised: {eye: 1.25, happy: 0,    ears: 0.8,  tilt: 0,     lookX: 0,    lookY: -0.2},
+    curious:   {eye: 1.06, happy: 0.05, ears: 0.3,  tilt: 0.09,  lookX: 0.4,  lookY: -0.2},
+    thinking:  {eye: 0.95, happy: 0,    ears: 0.1,  tilt: -0.05, lookX: -0.6, lookY: -0.6},
+    concerned: {eye: 0.92, happy: 0,    ears: -0.6, tilt: 0,     lookX: 0,    lookY: 0.4},
+    warm:      {eye: 1,    happy: 1,    ears: 0.2,  tilt: 0,     lookX: 0,    lookY: 0.1},
   };
   const RULES = [
     ["concerned", /\b(error|errors|fail|fails|failed|failing|sorry|unfortunately|can't|cannot|couldn't|won't|warning|problem|broken|crash(ed)?|denied|refused|missing|lost|wrong|issue)\b/i],
@@ -36,23 +46,155 @@ const RayFace = (() => {
     ["thinking",  /\b(maybe|perhaps|let me|hmm|probably|might|not sure|i think|wonder)\b/i],
   ];
   const moodOf = (sentence) => (RULES.find(([, re]) => re.test(sentence)) || ["neutral"])[0];
-
-  let el = null, canvas = null, g = null, raf = 0, visible = false, hideTimer = 0, warmTimer = 0, onStop = null;
-  const geo = {pitch: 6, cols: COLS, rows: ROWS, offX: 0, offY: 0, laidW: 0, laidH: 0};
-  const cur = {...EXPR.neutral, blink: 0, nod: 0};
-  let target = {...EXPR.neutral};
-  const bars = new Float32Array(BARS + 1);    // waveform half-heights in cells, centre first
-  let level = 0, paused = false, mode = "idle";   // "audio" | "text" | "warm" | "idle"
-  let analyser = null, tbuf = null;
-  let line = null;                            // the chunk being spoken: {text, times[], amp[], sentences[], total, …}
-  let audioText = null, audioStart = 0, audioDur = 0, audioCtx = null;
-  let speed = 1;
-  let nextBlink = 0, blinkUntil = 0, nodStart = 0, nextGlance = 0, glance = {x: 0, y: 0}, mood = "neutral", moodAt = 0;
   const calm = (name) => {
     const e = EXPR[name], n = EXPR.neutral, out = {};
     for (const k of Object.keys(n)) out[k] = n[k] + (e[k] - n[k]) * 0.6;
     return out;
   };
+
+  // a spring towards a target; damping below 1 gives a small overshoot and settle
+  function spring(o, key, to, k, d) {
+    const vk = key + "_v";
+    o[vk] = ((o[vk] || 0) + (to - o[key]) * k) * d;
+    o[key] += o[vk];
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // the red panda, as a colour per grid cell (null where nothing is drawn).  A pose:
+  //   dy, rot, sx, sy (head transform about the neck), blink (0-1), eye (size), happy (0-1), lookX/Y, ears (both
+  //   lift, + up, - droop), earL/earR (each ear's extra lift), mouth (0-1 open), paw (0-1: the paw raised to the
+  //   chin), breath (-1..1), tail (sway angle)
+  const newPose = () => ({dy: 0, rot: 0, sx: 1, sy: 1, blink: 0, eye: 1, happy: 0.1, lookX: 0, lookY: 0,
+                          ears: 0, earL: 0, earR: 0, mouth: 0, paw: 0, tilt: 0, breath: 0, tail: 0});
+  const inEll = (x, y, cx, cy, rx, ry) => ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2;
+
+  // the head, in its own coordinates: centre (22, 14.6), chin near y 24
+  function headCell(hx, hy, s) {
+    const hd = inEll(hx, hy, 22, 14.6, 14, 9.6);
+    if (hd < 1) {
+      for (const side of [-1, 1]) {
+        const ex = 22 + side * 7.6 + s.lookX * 0.8, ey = 13.6 + s.lookY * 0.6;
+        // white brow marks above the eyes, slanted (outer end higher), lifting with the ears
+        const bxc = 22 + side * 7.4, byc = 9.4 - s.ears * 0.5 - (side > 0 ? s.earR : s.earL) * 0.4;
+        if (inEll(hx, hy + (hx - bxc) * side * 0.3, bxc, byc, 2, 1.1) < 1) return C.white;
+        // eyes: large round navy dots with a small white highlight; a happy squint turns them into soft arcs
+        const r = 2.15 * s.eye, ry = Math.max(0.4, r * (1 - s.blink) * (1 - 0.5 * s.happy));
+        if (s.happy > 0.55 && s.blink < 0.5) {
+          const ar = Math.hypot((hx - ex) / 2.2, (hy - (ey + 1.2)) / 1.9);
+          if (hy < ey + 1.1 && Math.abs(ar - 1) < 0.38) return C.navy;
+        } else if (inEll(hx, hy, ex, ey + s.happy * 0.5, r, ry) < 1) {
+          if (s.blink < 0.5 && s.eye > 0.6 && inEll(hx, hy, ex - 0.8 + s.lookX * 0.3, ey - 0.9, 0.6, 0.6) < 1) return C.white;
+          return C.navy;
+        }
+      }
+      // nose, a short line down from it, and a small frown; the frown opens only as an accent
+      if (inEll(hx, hy, 22, 16.1, 1.55, 0.85) < 1) return C.navy;
+      if (s.mouth > 0.15) {
+        if (inEll(hx, hy, 22, 19.3, 1.1 + s.mouth * 0.5, 0.6 + s.mouth * 0.7) < 1) return C.navy;
+        if (hy > 16.8 && hy < 18.4 && Math.abs(hx - 22) < 0.6) return C.navy;
+      } else {
+        if (hy > 16.8 && hy < 18.9 && Math.abs(hx - 22) < 0.6) return C.navy;
+        if (hy >= 18.9 && hy < 20 && Math.abs(Math.abs(hx - 22) - 1.5) < 0.6) return C.navy;
+      }
+      // white muzzle, white cheek patches at the sides, a dusky blush between eye and cheek
+      if (inEll(hx, hy, 22, 18.7, 5.6, 4.5) < 1) return C.white;
+      for (const side of [-1, 1]) {
+        if (inEll(hx, hy, 22 + side * 12.4, 18.6, 3.6, 4.2) < 1) return C.white;
+        if (inEll(hx, hy, 22 + side * 10.6, 16.4, 1.6, 0.8) < 1) return C.blush;
+      }
+      if (hd > 0.72 && hy > 19) return C.shade;                 // the darker lower rim
+      if (hd < 0.45 && hy < 9.5) return C.light;                // the lit top of the head
+      return C.orange;
+    }
+    // a small tuft of darker fur on top of the head, right of centre
+    if (hy > 3.6 && hy < 5.4 && hx > 24.2 && hx < 28.4 && ((hx - 24.2) % 1.4) < 0.9 - (5.4 - hy) * 0.25) return C.shade;
+    // ears: big, white, rounded triangles leaning outward, with orange fur at their base
+    for (const side of [-1, 1]) {
+      const lift = s.ears + (side > 0 ? s.earR : s.earL);
+      const bx = 22 + side * 10.4, by = 7.8;
+      const a = side * (0.55 - lift * 0.2);                // lean outward; a droop leans them further out and down
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const ux = (hx - bx) * ca + (hy - by) * sa, uy = -(hx - bx) * sa + (hy - by) * ca;   // ear space, tip up (-y)
+      const h = 7 + lift * 0.8;
+      if (uy < 1.5 && uy > -h) {
+        const half = 4.1 * Math.sqrt(Math.max(0, 1 + uy / h)) + 0.3;   // a rounded tip
+        if (Math.abs(ux) < half) return uy > -2.2 ? C.orange : C.white;
+      }
+    }
+    return null;
+  }
+
+  // the tail: a thick curve from the hip out to the right and up, orange with dark rings, swaying about its root
+  function tailCell(x, y, s) {
+    const bx = 26.5, by = 34.2;
+    let best = 1e9, bu = 0;
+    for (let k = 0; k <= 24; k++) {
+      const u = k / 24, a = s.tail * u;
+      const tx = 12.5 * u, ty = -4.5 * u ** 1.6;             // the curve before sway
+      const px = bx + tx * Math.cos(a) - ty * Math.sin(a), py = by + tx * Math.sin(a) + ty * Math.cos(a);
+      const d = Math.hypot(x - px, y - py) - (3.2 - 0.9 * u);
+      if (d < best) { best = d; bu = u; }
+    }
+    if (best > 0.15) return null;
+    if (bu > 0.9) return C.brown;                             // a dark tip
+    return Math.floor(bu * 6) % 2 ? C.brown : C.orange;
+  }
+
+  // the whole panda: head (with its own nod, tilt and squash about the neck), body, arms, feet and tail
+  function pandaCell(x, y, s) {
+    // the raised paw is in front of everything
+    const pawX = 16.8 + s.paw * 1.4, pawY = 31.6 - s.paw * 8.6;
+    if (s.paw > 0.05) {
+      const pd = inEll(x, y, pawX, pawY + s.dy * 0.5, 2.4, 1.9);
+      if (pd < 1) return pd > 0.6 ? C.brown : C.paw;
+      // the forearm from the shoulder up to the paw
+      const ax = 16.2, ay = 29.5, vx = pawX - ax, vy = pawY - ay, len = Math.hypot(vx, vy) || 1;
+      const t = Math.max(0, Math.min(1, ((x - ax) * vx + (y - ay) * vy) / (len * len)));
+      if (Math.hypot(x - ax - vx * t, y - ay - vy * t) < 1.8) return C.paw;
+    }
+    // the head: grid -> head space (head centre 22, 14.6 sits at 21, 15.5), undoing nod, tilt and squash
+    let px = x - 21, py = y - 24.9 - s.dy - s.breath * 0.25;
+    const c = Math.cos(-s.rot), sn = Math.sin(-s.rot);
+    [px, py] = [px * c - py * sn, px * sn + py * c];
+    const head = headCell(px / s.sx + 22, py / s.sy + 24, s);
+    if (head) return head;
+    // feet, forward at the bottom, with light pads
+    for (const side of [-1, 1]) {
+      const fx = 21 + side * 4.6, fy = 37.6;
+      if (inEll(x, y, fx, fy, 2.9, 1.9) < 1) return inEll(x, y, fx, fy + 0.5, 1.2, 0.7) < 1 ? C.light : C.paw;
+    }
+    // arms resting on the belly (the left one only while it is not raised)
+    for (const side of [-1, 1]) {
+      if (side < 0 && s.paw > 0.05) continue;
+      if (inEll(x, y, 21 + side * 4.4, 30.6 + s.breath * 0.1, 1.9, 3.2) < 1) return C.paw;
+    }
+    // the body: brown, darker at its edge, breathing
+    const bd = inEll(x, y, 21, 30.4 - s.breath * 0.15, 7.6, 7.4 * (1 + s.breath * 0.02));
+    if (bd < 1) return bd > 0.8 ? C.dark : C.brown;
+    return tailCell(x, y, s);
+  }
+
+  // a small "?" (5 x 7 dots) for the thinking pose
+  const QMARK = ["01110", "10001", "00001", "00110", "00100", "00000", "00100"];
+  function qmarkCell(x, y, ox, oy) {
+    const cx = Math.floor(x - ox), cy = Math.floor(y - oy);
+    return cy >= 0 && cy < 7 && cx >= 0 && cx < 5 && QMARK[cy][cx] === "1";
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  let el = null, canvas = null, g = null, raf = 0, visible = false, hideTimer = 0, warmTimer = 0, onStop = null;
+  const geo = {pitch: 3, cols: COLS, rows: ROWS, offX: 0, offY: 0, laidW: 0, laidH: 0};
+  const pose = newPose();
+  let target = calm("neutral");
+  let level = 0, paused = false, mode = "idle";   // "think" | "audio" | "text" | "warm" | "idle"
+  let analyser = null, tbuf = null;
+  let line = null;                            // the chunk being spoken: {text, times[], amp[], sentences[], total, …}
+  let audioText = null, audioStart = 0, audioDur = 0, audioCtx = null;
+  let speed = 1, thinkAt = 0;
+  let mood = "neutral", moodAt = 0;
+  const mem = {lastLoud: 0, wasTalking: false, stressAt: -1e9, prevL: 0, blinkAt: -1e9, nextIdleBlink: 0,
+               glance: {x: 0, y: 0}, glanceNext: {x: 0, y: 0}, settleAt: -1e9, twitchAt: 0, twitchStart: -1e9, twitchSide: 1};
+
   function setMood(name, now) {
     if (name === mood || now - moodAt < 2000) return;
     mood = name; moodAt = now;
@@ -72,21 +214,18 @@ const RayFace = (() => {
     return true;
   }
 
-  // fit the dot grid to a canvas's size (once per size change)
-  function fit(cv, q) {
-    const r = cv.getBoundingClientRect();
-    if (!r.width || !r.height || (r.width === q.laidW && r.height === q.laidH)) return;
-    q.laidW = r.width; q.laidH = r.height;
+  // fit the dot grid to the canvas's size (once per size change); the drawing sits on the canvas's bottom edge
+  function layout() {
+    const r = canvas.getBoundingClientRect();
+    if (!r.width || !r.height || (r.width === geo.laidW && r.height === geo.laidH)) return;
+    geo.laidW = r.width; geo.laidH = r.height;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    cv.width = Math.round(r.width * dpr);
-    cv.height = Math.round(r.height * dpr);
-    q.pitch = Math.min(r.width / (COLS + 2), r.height / (ROWS + 2)) * dpr;
-    q.cols = Math.floor(cv.width / q.pitch);
-    q.rows = Math.floor(cv.height / q.pitch);
-    q.offX = (cv.width - q.cols * q.pitch) / 2;
-    q.offY = (cv.height - q.rows * q.pitch) / 2;
+    canvas.width = Math.round(r.width * dpr);
+    canvas.height = Math.round(r.height * dpr);
+    geo.pitch = Math.min(canvas.width / COLS, canvas.height / ROWS);
+    geo.offX = (canvas.width - COLS * geo.pitch) / 2;
+    geo.offY = canvas.height - ROWS * geo.pitch;
   }
-  const layout = () => fit(canvas, geo);
 
   // a chunk's text: when each character is reached (seconds at rate 1), how loud it is likely to be, sentence moods
   function plan(text) {
@@ -124,139 +263,139 @@ const RayFace = (() => {
     return Math.max(0, Math.min(1, (Math.sqrt(sum / n) - 0.012) / 0.14));
   }
 
-  const METER = BARS + 1;                     // meter bars: the centre column and BARS each side
-  const hist = new Float32Array(64);
-  let histAt = 0;
+  // the motion, from the loudness and the clock
   function step(now) {
-    // the sentence being spoken sets the mood; the voice sets the waveform
     let loud = 0;
     if (!paused && mode === "audio" && analyser) {
       loud = readAudio();
       if (audioText && audioDur > 0) {
-        const sec = (audioCtx.currentTime - audioStart) / audioDur * audioText.total;
-        const i = charAt(audioText, sec);
+        const i = charAt(audioText, (audioCtx.currentTime - audioStart) / audioDur * audioText.total);
         const sen = audioText.sentences.find((s) => i >= s.from && i <= s.to);
         if (sen) setMood(sen.mood, now);
       }
     } else if (!paused && mode === "text" && line) {
-      const base = line.times[line.anchorIdx] + (now - line.start) / 1000 * line.rate / speed - line.anchorT;
-      const i = charAt(line, base);
+      const i = charAt(line, line.times[line.anchorIdx] + (now - line.start) / 1000 * line.rate / speed - line.anchorT);
       if (i < line.text.length) {
         loud = line.amp[i];
         const sen = line.sentences.find((s) => i >= s.from && i <= s.to);
         if (sen) setMood(sen.mood, now);
       }
     }
-    level += (loud - level) * (loud > level ? 0.25 : 0.07);
-    // the meter: the centre bar shows the loudness now, each bar further out shows it a step (about 35 ms) later, so
-    // every syllable ripples from the centre outwards
-    hist[histAt = (histAt + 1) % hist.length] = level;
-    for (let k = 0; k < METER; k++) {
-      const then = hist[(histAt - k * 2 + hist.length * 4) % hist.length];
-      const h = Math.min(2.4, then * 2.6 * (1 - 0.07 * k));
-      bars[k] += (h - bars[k]) * (h > bars[k] ? 0.3 : 0.08);      // up gently, down slowly
-    }
+    level += (loud - level) * (loud > level ? 0.3 : 0.1);
+    const talking = mode === "audio" || mode === "text", think = mode === "think";
 
-    // blinks, rare small glances and the closing nod
-    if (now > nextBlink) { blinkUntil = now + 160; nextBlink = now + 3500 + Math.random() * 3500; }
-    cur.blink = now < blinkUntil ? 1 : 0;
-    if (now > nextGlance) {
-      glance = Math.random() < 0.7 ? {x: 0, y: 0} : {x: (Math.random() - 0.5) * 0.5, y: (Math.random() - 0.5) * 0.25};
-      nextGlance = now + 6000 + Math.random() * 4000;
-    }
-    cur.nod = nodStart ? Math.sin(Math.min(1, (now - nodStart) / 900) * Math.PI) * 0.7 : 0;
-    for (const k of Object.keys(EXPR.neutral)) {
-      const v = target[k] + (k === "lookX" ? glance.x : k === "lookY" ? glance.y : 0);
-      cur[k] += (v - cur[k]) * 0.035;
-    }
-  }
-
-  // brightness 0-1 at grid cell (x, y), in face coordinates (0..COLS, 0..ROWS), for face state c with waveform bars
-  // (bb); shimmer (0-1, or -1 for none) is a soft bright spot moving along a silent mouth line
-  function shade(x, y, c, bb, shimmer) {
-    const gx = c.lookX * 1.2, gy = c.lookY * 0.8 + c.nod * 1.5;
-    let v = 0;
-    const soft = (d) => Math.max(0, Math.min(1, 0.6 - d));
-    for (const side of [-1, 1]) {
-      // eye: a filled oval, blended into an upward arc when happy
-      const ex = COLS / 2 + side * 9 + gx, ey = 10 + gy;
-      const rx = 4.6, ry = Math.max(0.35, 3.3 * c.eyeOpen * (1 - c.blink * 0.9));
-      const dx = (x - ex) / rx, dy = (y - ey) / ry;
-      const r = Math.hypot(dx, dy);
-      const filled = soft((r - 1) * Math.min(rx, ry));
-      const ay = (y - (ey + 1.4)) / 3.4, ar = Math.hypot(dx, ay);
-      const arc = y <= ey + 1.4 ? soft(Math.abs(ar - 1) * 3.2 - 0.4) : 0;
-      v = Math.max(v, filled * (1 - c.arc) + arc * c.arc);
-      // brow: a short, faint, softly arched line; tilt only ever raises the inner end, asymmetry raises the right brow
-      const bx = (x - ex - side * 0.4) / 3.3;
-      if (Math.abs(bx) <= 1) {
-        const inner = side < 0 ? bx : -bx;            // +1 at the end nearest the nose
-        const by = ey - 5.8 + c.browY - (1 - bx * bx) * 0.7 - Math.max(0, c.browTilt) * Math.max(0, inner) * 0.7
-                 - (side > 0 ? c.browAsym : 0) - (c.eyeOpen - 1) * 2;
-        v = Math.max(v, soft(Math.abs(y - by) - 0.25) * 0.55);
+    // a stressed syllable: the loudness rising past 0.72
+    if (level > 0.72 && mem.prevL <= 0.72 && now - mem.stressAt > 260) mem.stressAt = now;
+    mem.prevL = level;
+    if (level > 0.08) { mem.lastLoud = now; mem.wasTalking = true; }
+    // a thought ends: quiet for 280 ms after speech -> a settle, a blink, and sometimes a new gaze inside the blink
+    if (mem.wasTalking && now - mem.lastLoud > 280) {
+      mem.wasTalking = false;
+      mem.settleAt = now;
+      if (now - mem.blinkAt > 900) {
+        mem.blinkAt = now;
+        if (Math.random() < 0.45) mem.glanceNext = Math.random() < 0.5 ? {x: 0, y: 0} : {x: (Math.random() - 0.5) * 0.9, y: -Math.random() * 0.3};
       }
     }
-    // mouth: a level meter on the mouth line (which curves up when smiling); a bar on every column grows up and down
-    // from the line; silent, it is just the line
-    const mx = COLS / 2 + gx * 0.5, my = 19.5 + gy * 0.6;
-    const col = Math.round(x - 0.5 - mx);
-    if (Math.abs(col) <= BARS) {
-      const u = col / (BARS + 0.5);
-      const base = my - c.smile * 0.9 + c.smile * 1.8 * (1 - u * u);
-      const d = Math.abs(y - base);
-      const line = shimmer < 0 ? 0.85 : 0.4 + 0.55 * Math.exp(-(((u + 1) / 2 - shimmer) ** 2) / 0.02);
-      if (d < 0.6) v = Math.max(v, line * (Math.abs(u) > 0.9 ? 0.75 : 1));
-      const h = bb[Math.abs(col)] * (Math.abs(u) > 0.9 ? 0.75 : 1);
-      if (h > 0.3 && d <= h + 0.5) v = Math.max(v, 0.85);
-    }
-    return v;
+    // a moving hold: a rare blink in long stillness, an occasional ear twitch
+    if (now > mem.nextIdleBlink && now - mem.blinkAt > 4200) { mem.blinkAt = now; mem.nextIdleBlink = now + 4500 + Math.random() * 3000; }
+    if (now > mem.twitchAt) { mem.twitchAt = now + 3500 + Math.random() * 4000; mem.twitchSide = Math.random() < 0.5 ? -1 : 1; mem.twitchStart = now; }
+
+    // blink: 120 ms closing, 60 ms closed, 180 ms opening (large eyes blink slowly); the gaze moves while closed
+    const bt = now - mem.blinkAt;
+    pose.blink = bt < 120 ? bt / 120 : bt < 180 ? 1 : bt < 360 ? 1 - (bt - 180) / 180 : 0;
+    if (bt > 120 && bt < 180) mem.glance = mem.glanceNext;
+
+    const stressK = Math.exp(-(now - mem.stressAt) / 220);           // 1 right at a stressed syllable, then fades
+    const settleK = now - mem.settleAt < 260 ? 1 : 0;                 // a short push that the spring overshoots
+    pose.breath = Math.sin(now / 1000 * Math.PI * 2 / 4.2);           // a 4.2 s breath
+    const tw = now - mem.twitchStart;
+    const twitch = tw >= 0 && tw < 260 ? Math.sin(tw / 260 * Math.PI) : 0;
+    const t = (now - thinkAt) / 1000;
+
+    // thinking: paw to the chin, eyes up and to the side, drifting; a small slow tilt
+    const tgt = think ? {...target, lookX: 0.7 + 0.25 * Math.sin(t / 2.4), lookY: -0.75, tilt: -0.06 + 0.03 * Math.sin(t / 3.1)} : target;
+    spring(pose, "paw", think ? 1 : 0, 0.08, 0.75);
+
+    // squash and stretch (volume kept), the nod, the settle
+    spring(pose, "sy", 1 - 0.035 * level, 0.25, 0.62);
+    pose.sx = 1 / pose.sy;
+    spring(pose, "dy", 0.7 * stressK + 0.55 * settleK, 0.14, 0.74);
+    // mood, eased slowly; ears and tail follow a beat later, with an extra flick on stresses
+    for (const k of ["eye", "happy", "tilt"]) spring(pose, k, tgt[k] + (k === "happy" && talking ? 0.25 * stressK : 0), 0.05, 0.8);
+    spring(pose, "rot", pose.tilt, 0.06, 0.8);
+    spring(pose, "ears", tgt.ears, 0.04, 0.82);
+    spring(pose, "earL", 0.18 * stressK + (mem.twitchSide < 0 ? 0.5 * twitch : 0), 0.18, 0.68);
+    spring(pose, "earR", 0.25 * stressK + (think ? 0.2 : 0) + (mem.twitchSide > 0 ? 0.5 * twitch : 0), 0.18, 0.68);
+    spring(pose, "tail", 0.1 * Math.sin(now / 1600) - 0.12 * Math.exp(-(now - mem.stressAt - 120) / 300) * (now > mem.stressAt + 120 ? 1 : 0), 0.05, 0.85);
+    spring(pose, "lookX", tgt.lookX + mem.glance.x, 0.08, 0.8);
+    spring(pose, "lookY", tgt.lookY + mem.glance.y, 0.08, 0.8);
+    // the mouth: only an accent on the strongest syllables
+    spring(pose, "mouth", talking && level > 0.8 ? 0.4 + 0.6 * stressK : 0, 0.3, 0.6);
   }
 
-  function paint(gc, cv, q, c, bb, shimmer = -1) {
-    gc.clearRect(0, 0, cv.width, cv.height);
-    const fx = Math.floor((q.cols - COLS) / 2), fy = Math.floor((q.rows - ROWS) / 2);
-    const rad = q.pitch * 0.36;
-    for (let j = 0; j < q.rows; j++) {
-      for (let i = 0; i < q.cols; i++) {
-        const v = shade(i - fx + 0.5, j - fy + 0.5, c, bb, shimmer);
-        gc.fillStyle = v < 0.04 ? OFF : v > 0.8 ? ON : BLUE(0.25 + v * 0.75);
-        gc.beginPath();
-        gc.arc(q.offX + (i + 0.5) * q.pitch, q.offY + (j + 0.5) * q.pitch, v < 0.04 ? rad * 0.8 : rad, 0, Math.PI * 2);
-        gc.fill();
+  function draw(now) {
+    g.clearRect(0, 0, canvas.width, canvas.height);
+    const rad = geo.pitch * 0.4;
+    // while thinking, a question mark every 2.6 s rises beside his head and fades
+    const qt = ((now - thinkAt) / 1000 % 2.6) / 2.6, qa = pose.paw > 0.5 ? Math.sin(Math.PI * qt) : 0, qy = 3 - qt * 2;
+    for (let j = 0; j < ROWS; j++) {
+      for (let i = 0; i < COLS; i++) {
+        const x = i + 0.5, y = j + 0.5;
+        const col = qa > 0.25 && qmarkCell(x, y, 39.5, qy) ? (qa > 0.6 ? C.white : C.rim) : pandaCell(x, y, pose);
+        if (!col) continue;
+        g.fillStyle = col;
+        g.beginPath();
+        g.arc(geo.offX + x * geo.pitch, geo.offY + y * geo.pitch, col === C.rim ? rad * 0.75 : rad, 0, Math.PI * 2);
+        g.fill();
       }
     }
   }
-  const draw = () => paint(g, canvas, geo, cur, bars);
 
   function frame(now) {
     raf = 0;
     if (!visible) return;
     layout();
     step(now);
-    draw();
+    draw(now);
     raf = requestAnimationFrame(frame);
   }
   function kick() { if (!raf) raf = requestAnimationFrame(frame); }
 
+  // where he sits: at the left, his feet on the top edge of the input box
+  function place() {
+    const composer = el.parentElement && el.parentElement.querySelector(".code-mobile-composer");
+    if (composer) el.style.setProperty("--ray-face-bottom", `${composer.offsetHeight - 3}px`);
+  }
+
   function show() {
     if (!mount()) return;
-    Thinking.hide();
     clearTimeout(hideTimer); clearTimeout(warmTimer);
-    nodStart = 0;
     if (visible && el.classList.contains("is-on")) return;
-    const composer = el.parentElement && el.parentElement.querySelector(".code-mobile-composer");
-    if (composer) el.style.setProperty("--ray-face-bottom", `${composer.offsetHeight + 10}px`);
-    target = {...EXPR.neutral};
+    place();
+    mood = "neutral"; moodAt = 0; target = calm("neutral");
+    const now = performance.now();
+    // anticipation: he arrives a little stretched and raised, and settles
+    Object.assign(pose, newPose(), {dy: -1.2, sy: 1.06, sx: 1 / 1.06, earL: 0.4, earR: 0.4});
+    Object.assign(mem, {wasTalking: false, lastLoud: now, blinkAt: now - 2000, nextIdleBlink: now + 2500, stressAt: -1e9,
+                        settleAt: -1e9, twitchAt: now + 2500, twitchStart: -1e9, glance: {x: 0, y: 0}, glanceNext: {x: 0, y: 0}});
     el.hidden = false;
     visible = true;
     layout();
-    nextBlink = performance.now() + 1800;
-    nextGlance = performance.now() + 3000;
     requestAnimationFrame(() => el.classList.add("is-on"));
     kick();
   }
 
   // --- what the web app calls ---
+
+  // a spoken prompt is being answered: he appears in his thinking pose until he speaks (or the turn ends)
+  function thinking() {
+    if (mode === "audio" || mode === "text") return;   // already speaking
+    show();
+    mode = "think";
+    thinkAt = performance.now();
+    target = calm("neutral");
+  }
 
   // a chunk of server audio starts playing through `an`; `text` and `duration` give the sentence moods their timing
   function speakAudio(an, text, ctx, startAt, duration) {
@@ -293,83 +432,27 @@ const RayFace = (() => {
 
   function pause(on) { paused = !!on; }
 
-  // Ray stopped talking: a warm look and a small nod, then the panel fades out slowly
+  // Ray stopped talking (or the turn ended): happy eyes and a small nod that settles, then he fades out slowly
   function end(finished = true) {
-    Thinking.hide();
     if (!visible || !el) return;
     line = null; analyser = null; audioText = null;
     mode = "warm";
     target = {...EXPR.warm};
-    mood = "neutral"; moodAt = 0;
-    nodStart = performance.now();
+    mood = "warm";
+    mem.stressAt = performance.now();          // the nod
     clearTimeout(warmTimer); clearTimeout(hideTimer);
     warmTimer = setTimeout(() => {
       el.classList.remove("is-on");
       hideTimer = setTimeout(() => {
         el.hidden = true;
         visible = false;
-        nodStart = 0;
         mode = "idle";
       }, FADE_OUT);
     }, finished ? WARM_MS : WARM_MS / 2);
   }
 
-  // the thinking face: the same face, small, at the other side; eyes up and to the side, drifting slowly from one side
-  // to the other, a slight smile, an occasional blink, and a soft light moving along the closed mouth
-  const Thinking = (() => {
-    let tel = null, tc = null, tg = null, traf = 0, on = false, thide = 0, tBlink = 0, tBlinkUntil = 0;
-    const q = {pitch: 6, cols: COLS, rows: ROWS, offX: 0, offY: 0, laidW: 0, laidH: 0};
-    const tc0 = {...EXPR.thinking, blink: 0, nod: 0};
-    const still = new Float32Array(BARS + 1);
-    function frame(now) {
-      traf = 0;
-      if (!on) return;
-      fit(tc, q);
-      const side = Math.sin(now / 2600);                 // about 16 s for a full look left, right and back
-      const t = {...EXPR.thinking, lookX: 0.6 * side, lookY: -0.5 + 0.08 * Math.sin(now / 1700),
-                 browAsym: 0.3 * Math.max(0, side), smile: 0.2};
-      for (const k of Object.keys(EXPR.neutral)) tc0[k] += (t[k] - tc0[k]) * 0.04;
-      if (now > tBlink) { tBlinkUntil = now + 160; tBlink = now + 4000 + Math.random() * 3000; }
-      tc0.blink = now < tBlinkUntil ? 1 : 0;
-      if (q.laidW) paint(tg, tc, q, tc0, still, (now / 1800) % 1.4 - 0.2);
-      traf = requestAnimationFrame(frame);
-    }
-    return {
-      show() {
-        tel = tel || document.getElementById("ray-think");
-        if (!tel) return;
-        tc = tc || tel.querySelector("canvas");
-        tg = tg || tc.getContext("2d");
-        clearTimeout(thide);
-        const composer = tel.parentElement && tel.parentElement.querySelector(".code-mobile-composer");
-        if (composer) tel.style.setProperty("--ray-face-bottom", `${composer.offsetHeight + 10}px`);
-        tel.hidden = false;
-        on = true;
-        tBlink = performance.now() + 2000;
-        requestAnimationFrame(() => tel.classList.add("is-on"));
-        if (!traf) traf = requestAnimationFrame(frame);
-      },
-      hide() {
-        if (!tel || !on) return;
-        tel.classList.remove("is-on");
-        thide = setTimeout(() => { tel.hidden = true; on = false; }, FADE_OUT);
-      },
-    };
-  })();
-
-  // a spoken prompt is being answered: the thinking face shows until Ray speaks (or the turn ends)
-  function thinking() {
-    if (mode === "audio" || mode === "text") return;   // already speaking
-    if (visible) {                                      // still saying goodbye to the last reply: let it go now
-      clearTimeout(warmTimer); clearTimeout(hideTimer);
-      el.classList.remove("is-on");
-      hideTimer = setTimeout(() => { el.hidden = true; visible = false; nodStart = 0; mode = "idle"; }, FADE_OUT);
-    }
-    Thinking.show();
-  }
-
-  window.addEventListener("resize", () => { if (visible) layout(); });
+  window.addEventListener("resize", () => { if (visible) { place(); layout(); } });
   return {thinking, speakAudio, speakText, boundary, chunkEnd, pause, end, moodOf,
-          get visible() { return visible; }, get state() { return {...cur, mode, level, bars: [...bars]}; },
+          get visible() { return visible; }, get state() { return {...pose, mode, level, mood}; },
           set onStop(fn) { onStop = fn; }};
 })();

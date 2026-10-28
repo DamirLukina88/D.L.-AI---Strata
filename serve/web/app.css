@@ -1197,53 +1197,31 @@ body.is-resizing .view { pointer-events: none; }      /* the drag keeps going ov
 .cs-edit-input:focus { outline: 0; border-color: var(--st-focus); }
 .cs-edit-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; flex-wrap: wrap; }
 
-/* Ray's face (web/rayface.js): a dot-matrix box at the bottom right of the feed, above the input box, while a reply is
-   read aloud; a small thinking face at the bottom left while he works on a spoken prompt. Quick in, slow out. */
-.ray-face, .ray-think {
-  position: absolute;
-  bottom: var(--ray-face-bottom, 120px);
-  z-index: 5;
-  opacity: 0;
-  transform: translateY(6px) scale(0.97);
-  transition: opacity 700ms var(--st-ease), transform 700ms var(--st-ease);
-  background: radial-gradient(ellipse at 50% 45%, #0a1a26 0%, #05090d 75%);
-  border: 1px solid rgba(56, 189, 248, 0.28);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45), 0 0 18px rgba(56, 189, 248, 0.12), inset 0 0 18px rgba(56, 189, 248, 0.08);
-}
+/* Ray (web/rayface.js): a little red panda drawn in dots, with nothing around him, sitting at the left on the top edge
+   of the input box while he thinks about a spoken prompt or reads a reply aloud. Quick in, slow out. */
 .ray-face {
-  right: 16px;
-  width: 216px;
-  height: 132px;
-  padding: 8px;
-  border-radius: var(--st-r-md);
+  position: absolute;
+  left: 14px;
+  bottom: var(--ray-face-bottom, 110px);
+  width: 138px;
+  height: 120px;
+  z-index: 5;
   cursor: pointer;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 700ms var(--st-ease), transform 700ms var(--st-ease);
 }
-.ray-think {
-  left: 16px;
-  width: 112px;
-  height: 70px;
-  padding: 5px;
-  border-radius: var(--st-r-sm);
-  pointer-events: none;
-}
-.ray-face.is-on, .ray-think.is-on {
+.ray-face.is-on {
   opacity: 1;
   transform: none;
   transition-duration: 160ms;
 }
 .ray-face:not(.is-on) { pointer-events: none; }
-.ray-face:hover { border-color: rgba(56, 189, 248, 0.6); }
-.ray-face:focus-visible { outline: 2px solid var(--st-focus); outline-offset: 2px; }
-.ray-face canvas, .ray-think canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-  filter: drop-shadow(0 0 3px rgba(56, 189, 248, 0.7));
-}
+.ray-face:focus-visible { outline: 2px solid var(--st-focus); outline-offset: 2px; border-radius: var(--st-r-sm); }
+.ray-face canvas { display: block; width: 100%; height: 100%; }
 @media (max-width: 768px) {
-  .ray-face { right: 10px; width: 176px; height: 108px; padding: 6px; }
-  .ray-think { left: 10px; width: 96px; height: 60px; padding: 4px; }
+  .ray-face { left: 10px; width: 104px; height: 90px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ray-face, .ray-face.is-on, .ray-think, .ray-think.is-on { transition: none; }
+  .ray-face, .ray-face.is-on { transition: none; }
 }
