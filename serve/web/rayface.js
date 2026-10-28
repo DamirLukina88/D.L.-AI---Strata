@@ -14,15 +14,16 @@ const RayFace = (() => {
   const FADE_OUT = 700, WARM_MS = 1800;
   const ON = "#e6f8ff", BLUE = (a) => `rgba(56,189,248,${a})`, OFF = "rgba(56,189,248,0.07)";
 
-  // expressions: eye openness, happy eye arcs, brow height/tilt/asymmetry, waveform smile, gaze
+  // expressions: eye openness, happy eye arcs, brow height/tilt/asymmetry, waveform smile, gaze; while speaking they are
+  // used at 60% of their distance from neutral and held at least 2 s, so the face stays calm and pleasant
   const EXPR = {
-    neutral:   {eyeOpen: 1,    arc: 0,   browY: 0,    browTilt: 0,    browAsym: 0,   smile: 0.15, lookX: 0,    lookY: 0},
+    neutral:   {eyeOpen: 1,    arc: 0.1, browY: 0,    browTilt: 0,    browAsym: 0,   smile: 0.3,  lookX: 0,    lookY: 0},
     happy:     {eyeOpen: 0.9,  arc: 0.7, browY: -0.4, browTilt: 0,    browAsym: 0,   smile: 0.6,  lookX: 0,    lookY: 0},
     excited:   {eyeOpen: 1.1,  arc: 0.2, browY: -1,   browTilt: 0,    browAsym: 0,   smile: 0.65, lookX: 0,    lookY: -0.2},
     surprised: {eyeOpen: 1.25, arc: 0,   browY: -1.4, browTilt: 0,    browAsym: 0,   smile: 0,    lookX: 0,    lookY: -0.2},
     curious:   {eyeOpen: 1.05, arc: 0,   browY: -0.4, browTilt: 0,    browAsym: 1,   smile: 0.2,  lookX: 0.4,  lookY: -0.1},
-    thinking:  {eyeOpen: 0.85, arc: 0,   browY: -0.2, browTilt: -0.3, browAsym: 0.7, smile: 0,    lookX: -0.7, lookY: -0.6},
-    concerned: {eyeOpen: 0.85, arc: 0,   browY: 0.2,  browTilt: 1,    browAsym: 0,   smile: -0.4, lookX: 0,    lookY: 0.3},
+    thinking:  {eyeOpen: 0.95, arc: 0,   browY: -0.5, browTilt: 0,    browAsym: 0.3, smile: 0.15, lookX: -0.6, lookY: -0.5},
+    concerned: {eyeOpen: 0.9,  arc: 0,   browY: -0.2, browTilt: 0.6,  browAsym: 0,   smile: -0.1, lookX: 0,    lookY: 0.2},
     warm:      {eyeOpen: 0.8,  arc: 1,   browY: -0.3, browTilt: 0.2,  browAsym: 0,   smile: 0.8,  lookX: 0,    lookY: 0.2},
   };
   const RULES = [
@@ -45,7 +46,17 @@ const RayFace = (() => {
   let line = null;                            // the chunk being spoken: {text, times[], amp[], sentences[], total, …}
   let audioText = null, audioStart = 0, audioDur = 0, audioCtx = null;
   let speed = 1;
-  let nextBlink = 0, blinkUntil = 0, nodStart = 0, nextGlance = 0, glance = {x: 0, y: 0};
+  let nextBlink = 0, blinkUntil = 0, nodStart = 0, nextGlance = 0, glance = {x: 0, y: 0}, mood = "neutral", moodAt = 0;
+  const calm = (name) => {
+    const e = EXPR[name], n = EXPR.neutral, out = {};
+    for (const k of Object.keys(n)) out[k] = n[k] + (e[k] - n[k]) * 0.6;
+    return out;
+  };
+  function setMood(name, now) {
+    if (name === mood || now - moodAt < 2000) return;
+    mood = name; moodAt = now;
+    target = calm(name);
+  }
 
   function mount() {
     if (el) return true;
@@ -132,7 +143,7 @@ const RayFace = (() => {
         const sec = (audioCtx.currentTime - audioStart) / audioDur * audioText.total;
         const i = charAt(audioText, sec);
         const sen = audioText.sentences.find((s) => i >= s.from && i <= s.to);
-        if (sen) target = {...EXPR[sen.mood]};
+        if (sen) setMood(sen.mood, now);
       }
     } else if (!paused && mode === "text" && line) {
       const base = line.times[line.anchorIdx] + (now - line.start) / 1000 * line.rate / speed - line.anchorT;
@@ -140,27 +151,28 @@ const RayFace = (() => {
       if (i < line.text.length) {
         loud = line.amp[i];
         const sen = line.sentences.find((s) => i >= s.from && i <= s.to);
-        if (sen) target = {...EXPR[sen.mood]};
+        if (sen) setMood(sen.mood, now);
       }
       for (let b = 0; b <= BARS; b++) want[b] = (1 - b / (BARS + 2)) * (0.75 + 0.25 * Math.sin(now / 260 + b * 1.7));
     }
-    level += (loud - level) * (loud > level ? 0.3 : 0.08);
+    level += (loud - level) * (loud > level ? 0.2 : 0.06);
     for (let b = 0; b <= BARS; b++) {
-      const h = Math.min(3.4, level * (0.6 + 2.6 * want[b]));
-      bars[b] += (h - bars[b]) * (h > bars[b] ? 0.32 : 0.09);    // up quickly, down slowly
+      const h = Math.min(1.6, level * (0.3 + 1.3 * want[b]));
+      bars[b] += (h - bars[b]) * (h > bars[b] ? 0.18 : 0.06);    // up gently, down slowly
     }
+    cur.phase = now / 240;
 
     // blinks, rare small glances and the closing nod
-    if (now > nextBlink) { blinkUntil = now + 150; nextBlink = now + 3000 + Math.random() * 3000; }
+    if (now > nextBlink) { blinkUntil = now + 160; nextBlink = now + 3500 + Math.random() * 3500; }
     cur.blink = now < blinkUntil ? 1 : 0;
     if (now > nextGlance) {
-      glance = Math.random() < 0.6 ? {x: 0, y: 0} : {x: (Math.random() - 0.5) * 0.8, y: (Math.random() - 0.5) * 0.4};
-      nextGlance = now + 3500 + Math.random() * 3500;
+      glance = Math.random() < 0.7 ? {x: 0, y: 0} : {x: (Math.random() - 0.5) * 0.5, y: (Math.random() - 0.5) * 0.25};
+      nextGlance = now + 6000 + Math.random() * 4000;
     }
     cur.nod = nodStart ? Math.sin(Math.min(1, (now - nodStart) / 900) * Math.PI) * 0.7 : 0;
     for (const k of Object.keys(EXPR.neutral)) {
       const v = target[k] + (k === "lookX" ? glance.x : k === "lookY" ? glance.y : 0);
-      cur[k] += (v - cur[k]) * 0.06;
+      cur[k] += (v - cur[k]) * 0.035;
     }
   }
 
@@ -180,24 +192,30 @@ const RayFace = (() => {
       const ay = (y - (ey + 1.4)) / 3.4, ar = Math.hypot(dx, ay);
       const arc = y <= ey + 1.4 ? soft(Math.abs(ar - 1) * 3.2 - 0.4) : 0;
       v = Math.max(v, filled * (1 - c.arc) + arc * c.arc);
-      // brow: a short bar above the eye; tilt raises the inner end, asymmetry raises the right brow
-      const bx = (x - ex) / 4.2;
+      // brow: a short, faint, softly arched line; tilt only ever raises the inner end, asymmetry raises the right brow
+      const bx = (x - ex - side * 0.4) / 3.3;
       if (Math.abs(bx) <= 1) {
         const inner = side < 0 ? bx : -bx;            // +1 at the end nearest the nose
-        const by = ey - 5.4 + c.browY - c.browTilt * inner * 1.1 - (side > 0 ? c.browAsym : 0) - (c.eyeOpen - 1) * 2;
-        v = Math.max(v, soft(Math.abs(y - by) - 0.15) * 0.75);
+        const by = ey - 5.8 + c.browY - (1 - bx * bx) * 0.7 - Math.max(0, c.browTilt) * Math.max(0, inner) * 0.7
+                 - (side > 0 ? c.browAsym : 0) - (c.eyeOpen - 1) * 2;
+        v = Math.max(v, soft(Math.abs(y - by) - 0.25) * 0.55);
       }
     }
-    // mouth: a waveform of the voice on a line that curves up when smiling; silent, it is just the line
+    // mouth: a thin waveform line of the voice, travelling slowly, on a line that curves up when smiling; silent, it is
+    // just the line.  Neighbouring columns are joined so the wave stays one continuous line.
     const mx = COLS / 2 + gx * 0.5, my = 19.5 + gy * 0.6;
     const col = Math.round(x - 0.5 - mx);
     if (Math.abs(col) <= BARS) {
+      const at = (k) => {
+        const u = k / (BARS + 0.5);
+        const amp = bb[Math.min(BARS, Math.abs(k))] * (1 - 0.5 * u * u);
+        return my - c.smile * 0.9 + c.smile * 1.8 * (1 - u * u) + amp * Math.sin((c.phase || 0) + k * 0.9);
+      };
+      const y0 = at(col), y1 = Math.abs(col + 1) <= BARS ? at(col + 1) : y0;
+      const lo = Math.min(y0, (y0 + y1) / 2), hi = Math.max(y0, (y0 + y1) / 2);
       const u = col / (BARS + 0.5);
-      const base = my - c.smile * 0.9 + c.smile * 1.8 * (1 - u * u);
-      const h = bb[Math.abs(col)] * (1 - 0.35 * u * u);
-      const d = Math.abs(y - base);
       const line = shimmer < 0 ? 1 : 0.45 + 0.55 * Math.exp(-(((u + 1) / 2 - shimmer) ** 2) / 0.02);
-      if (d <= h + 0.5) v = Math.max(v, d < 0.6 ? line : 0.95 - 0.35 * (d / (h + 0.5)));
+      if (y >= lo - 0.55 && y <= hi + 0.55) v = Math.max(v, line * (Math.abs(u) > 0.9 ? 0.7 : 1));
     }
     return v;
   }
@@ -290,6 +308,7 @@ const RayFace = (() => {
     line = null; analyser = null; audioText = null;
     mode = "warm";
     target = {...EXPR.warm};
+    mood = "neutral"; moodAt = 0;
     nodStart = performance.now();
     clearTimeout(warmTimer); clearTimeout(hideTimer);
     warmTimer = setTimeout(() => {
@@ -304,7 +323,7 @@ const RayFace = (() => {
   }
 
   // the thinking face: the same face, small, at the other side; eyes up and to the side, drifting slowly from one side
-  // to the other, one brow raised in turn, an occasional blink, and a soft light moving along the closed mouth
+  // to the other, a slight smile, an occasional blink, and a soft light moving along the closed mouth
   const Thinking = (() => {
     let tel = null, tc = null, tg = null, traf = 0, on = false, thide = 0, tBlink = 0, tBlinkUntil = 0;
     const q = {pitch: 6, cols: COLS, rows: ROWS, offX: 0, offY: 0, laidW: 0, laidH: 0};
@@ -315,10 +334,10 @@ const RayFace = (() => {
       if (!on) return;
       fit(tc, q);
       const side = Math.sin(now / 2600);                 // about 16 s for a full look left, right and back
-      const t = {...EXPR.thinking, lookX: 0.8 * side, lookY: -0.65 + 0.1 * Math.sin(now / 1700),
-                 browAsym: 0.7 * (side > 0 ? 1 : -0.4), smile: 0.02};
-      for (const k of Object.keys(EXPR.neutral)) tc0[k] += (t[k] - tc0[k]) * 0.05;
-      if (now > tBlink) { tBlinkUntil = now + 150; tBlink = now + 3500 + Math.random() * 3000; }
+      const t = {...EXPR.thinking, lookX: 0.6 * side, lookY: -0.5 + 0.08 * Math.sin(now / 1700),
+                 browAsym: 0.3 * Math.max(0, side), smile: 0.2};
+      for (const k of Object.keys(EXPR.neutral)) tc0[k] += (t[k] - tc0[k]) * 0.04;
+      if (now > tBlink) { tBlinkUntil = now + 160; tBlink = now + 4000 + Math.random() * 3000; }
       tc0.blink = now < tBlinkUntil ? 1 : 0;
       if (q.laidW) paint(tg, tc, q, tc0, still, (now / 1800) % 1.4 - 0.2);
       traf = requestAnimationFrame(frame);
