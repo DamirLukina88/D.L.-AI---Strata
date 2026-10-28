@@ -356,7 +356,7 @@ const TTSController = {
   },
 
   getRate() { return +store.get("tts_rate", 1.0); },
-  getPitch() { return +store.get("tts_pitch", 1.0); },
+  getPitch() { return +store.get("tts_pitch", 1.5); },
   getCodeMode() { return store.get("tts_code_mode", "skip"); },
   // on unless turned off: a spoken prompt is answered aloud (typed ones never are)
   isAutoSpeak() { return store.get("tts_auto_speak", true) !== false; },
