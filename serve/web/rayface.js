@@ -2,9 +2,8 @@
 // while he thinks about a spoken prompt or reads a reply aloud.  There is no window around him: only his own dots are
 // drawn, and he fades in quickly and out slowly.
 //
-// A few colours only: oranges, browns, a warm white and a dark navy for the eyes and nose, with a one-dot dark outline
-// (so he keeps an edge on the light theme) and a solid backing in the page colour (so nothing shows through between
-// his dots).  The feed keeps room at its bottom while he is there.  The question marks fade in the display's blue.  He carries the voice through motion, not a talking mouth (a mouth that copies speech read
+// A few colours only: oranges, browns, a warm white and a dark navy for the eyes and nose.  The gaps between his dots
+// are filled (so nothing shows through), and on the light theme a thin dark line follows his edge.  The feed keeps room at its bottom while he is there.  The question marks fade in the display's blue.  He carries the voice through motion, not a talking mouth (a mouth that copies speech read
 // as uncanny in every earlier version), following character-animation practice:
 //   - squash and stretch on syllables, keeping volume; a small nod on stressed syllables (ease in and out)
 //   - a blink when a thought ends (a pause after speech), and a gaze change hidden inside that blink
@@ -345,7 +344,7 @@ const RayFace = (() => {
 
   // the page colour behind him (read again now and then, so a theme switch follows).  The gaps between his dots take a
   // darker shade of each dot's own colour and the dots are large, so he stays solid and saturated instead of washed out
-  // by white gaps or sunk into dark ones; on a light page he has a dark outline, on a dark page none
+  // by white gaps or sunk into dark ones; on a light page a thin dark line follows his edge, on a dark page nothing
   let bgAt = 0, lightPage = false;
   const shadeCache = {};
   function deeper(hex) {
@@ -366,22 +365,8 @@ const RayFace = (() => {
       }
     }
     g.clearRect(0, 0, canvas.width, canvas.height);
-    const P = geo.pitch, rad = P * 0.47, EDGE = lightPage ? C.edge : null;
+    const P = geo.pitch, rad = P * 0.47;
     for (let j = 0; j < ROWS; j++) for (let i = 0; i < COLS; i++) cells[j * COLS + i] = pandaCell(i + 0.5, j + 0.5, pose);
-    // on a light page, a one-dot dark outline around his shape, so his whites keep an edge
-    for (let j = 0; EDGE && j < ROWS; j++) {
-      for (let i = 0; i < COLS; i++) {
-        const k = j * COLS + i;
-        if (cells[k]) continue;
-        let near = false;
-        for (let dj = -1; dj <= 1 && !near; dj++) for (let di = -1; di <= 1 && !near; di++) {
-          const ii = i + di, jj = j + dj;
-          const c = ii >= 0 && ii < COLS && jj >= 0 && jj < ROWS ? cells[jj * COLS + ii] : null;
-          if (c && c !== EDGE) near = true;
-        }
-        if (near) cells[k] = EDGE;
-      }
-    }
     // a solid silhouette behind the dots, so nothing behind him shows through the gaps
     for (let j = 0; j < ROWS; j++) {
       for (let i = 0; i < COLS; i++) {
@@ -400,6 +385,25 @@ const RayFace = (() => {
         g.arc(geo.offX + (i + 0.5) * P, geo.offY + (j + 0.5) * P, rad, 0, Math.PI * 2);
         g.fill();
       }
+    }
+    // on a light page, a thin dark line along his outer edge, so his whites keep an edge without a heavy outline
+    if (lightPage) {
+      const lit = (i, j) => i >= 0 && i < COLS && j >= 0 && j < ROWS && !!cells[j * COLS + i];
+      g.strokeStyle = C.edge;
+      g.lineWidth = Math.max(1, P * 0.2);
+      g.lineCap = "square";
+      g.beginPath();
+      for (let j = 0; j < ROWS; j++) {
+        for (let i = 0; i < COLS; i++) {
+          if (!lit(i, j)) continue;
+          const x0 = geo.offX + i * P, y0 = geo.offY + j * P;
+          if (!lit(i, j - 1)) { g.moveTo(x0, y0); g.lineTo(x0 + P, y0); }
+          if (!lit(i, j + 1)) { g.moveTo(x0, y0 + P); g.lineTo(x0 + P, y0 + P); }
+          if (!lit(i - 1, j)) { g.moveTo(x0, y0); g.lineTo(x0, y0 + P); }
+          if (!lit(i + 1, j)) { g.moveTo(x0 + P, y0); g.lineTo(x0 + P, y0 + P); }
+        }
+      }
+      g.stroke();
     }
     // while thinking, a question mark every 2.6 s rises beside his head and fades (no outline, no backing)
     const qt = ((now - thinkAt) / 1000 % 2.6) / 2.6, qa = pose.paw > 0.5 ? Math.sin(Math.PI * qt) : 0, qy = 3 - qt * 2;
