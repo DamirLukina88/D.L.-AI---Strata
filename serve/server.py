@@ -5939,6 +5939,11 @@ def make_handler(svc: Service):
                 if self._authorized():
                     self._json(200, svc.mcp.status() if svc.mcp else {"servers": [], "tools": 0})
                 return
+            if path == "/v1/audio/speech/status":
+                if self._authorized():
+                    from serve.speech import get_tts_status
+                    self._json(200, get_tts_status())
+                return
             if path in ("/v1/audio/transcriptions", "/v1/audio/status", "/audio/status"):
                 if self._authorized():
                     from serve.transcribe import get_stt_status
@@ -6305,6 +6310,9 @@ def make_handler(svc: Service):
             if path in ("/v1/audio/transcriptions", "/audio/transcriptions"):
                 self._audio_transcriptions()
                 return
+            if path == "/v1/audio/speech":
+                self._audio_speech()
+                return
             try:
                 req = json.loads(self._body() or b"{}")
                 if not isinstance(req, dict):
@@ -6541,6 +6549,39 @@ def make_handler(svc: Service):
                 self._json(500, {"error": {"type": "server_error", "message": str(e)}})
             except Exception as e:
                 self._json(500, {"error": {"type": "server_error", "message": f"transcription failed: {e}"}})
+
+        def _audio_speech(self):
+            """POST /v1/audio/speech (serve/speech.py): local Piper speech as WAV, OpenAI-style
+            {"input", "voice", "speed"}.  Ray's voice and talking face in the web app use it."""
+            from serve.speech import SpeechError, synthesize
+            try:
+                req = json.loads(self._body() or b"{}")
+                if not isinstance(req, dict):
+                    raise ValueError
+            except ValueError:
+                self._json(400, {"error": {"type": "invalid_request_error", "message": "body must be a JSON object"}})
+                return
+            fmt = req.get("response_format") or "wav"
+            if fmt != "wav":
+                self._json(400, {"error": {"type": "invalid_request_error", "message": "response_format must be wav"}})
+                return
+            voice = req.get("voice")
+            if voice in ("alloy", "nova", "shimmer", "echo", "fable", "onyx", "ray", "default"):
+                voice = None                                  # OpenAI's voice names: Ray's own voice
+            try:
+                t0 = time.time()
+                wav = synthesize(str(req.get("input") or ""), voice=voice, speed=req.get("speed") or 1.0)
+            except SpeechError as e:
+                self._json(400, {"error": {"type": "invalid_request_error", "message": str(e)}})
+                return
+            print(f"[strata] tts: {len(str(req.get('input') or ''))} chars in {time.time() - t0:.2f}s, "
+                  f"{len(wav) // 1024} KB", flush=True)
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/wav")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(wav)))
+            self.end_headers()
+            self.wfile.write(wav)
 
         def _props(self):
             model = parse_qs(urlsplit(self.path).query).get("model", [svc.model])[0]

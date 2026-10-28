@@ -360,8 +360,14 @@ const TTSController = {
   getCodeMode() { return store.get("tts_code_mode", "skip"); },
   // on unless turned off: a spoken prompt is answered aloud (typed ones never are)
   isAutoSpeak() { return store.get("tts_auto_speak", true) !== false; },
-  // on unless turned off in About: Ray's face while reading aloud (web/rayface.js)
-  isFaceOn() { return store.get("tts_face", true) !== false; },
+  // on unless turned off in About: Ray's voice orb while reading aloud (web/rayorb.js)
+  isOrbOn() { return store.get("tts_orb", true) !== false; },
+  orb() { return typeof RayOrb !== "undefined" && this.isOrbOn() && !(this.activeBtn && this.activeBtn.id === "tts-test-btn"); },
+  // Ray's Piper voice made by the server (POST v1/audio/speech): on unless turned off, when the server has it.  The
+  // audio plays through Web Audio, so the orb follows its loudness and pitch; a failure falls back to the browser voice.
+  serverTTS: null,
+  isServerVoiceOn() { return store.get("tts_server", true) !== false; },
+  useServer() { return this.isServerVoiceOn() && !!(this.serverTTS && this.serverTTS.available) && !this.serverFailed; },
 
   clean(rawText) {
     return cleanForSpeech(rawText, this.getCodeMode());
@@ -379,7 +385,7 @@ const TTSController = {
     let lastIndex = this.currentIndex;
     let stuckCount = 0;
     this.watchdogTimer = setInterval(() => {
-      if (!this.speaking || window.speechSynthesis?.paused) return;
+      if (!this.speaking || this.paused || this.useServer() || window.speechSynthesis?.paused) return;
       if (this.currentIndex === lastIndex) {
         stuckCount++;
         if (stuckCount >= 4) { // 4 ticks of 5s = 20s stuck on the same chunk
@@ -476,12 +482,17 @@ const TTSController = {
 
   stop() {
     if (!window.speechSynthesis) return;
-    if (typeof RayFace !== "undefined") RayFace.end(this.speaking && this.currentIndex >= this.queue.length);
+    if (typeof RayOrb !== "undefined") RayOrb.end(this.speaking && this.currentIndex >= this.queue.length);
     this.stopWatchdog();
     this.releaseWakeLock();
     this.stopAudioKeepAlive();
     this.clearMediaSession();
     try { window.speechSynthesis.cancel(); } catch (e) {}
+    const src = this.currentSource;
+    this.currentSource = null;
+    if (src) { try { src.stop(); } catch (e) {} }
+    this.prefetch = [];
+    if (this.paused && this.audioCtx) { try { this.audioCtx.resume(); } catch (e) {} }
     this.updateButtonState(false);
     this.speaking = false;
     this.paused = false;
@@ -495,16 +506,18 @@ const TTSController = {
   pause() {
     if (!window.speechSynthesis || !this.speaking) return;
     try { window.speechSynthesis.pause(); } catch (e) {}
+    if (this.currentSource && this.audioCtx) { try { this.audioCtx.suspend(); } catch (e) {} }
     this.paused = true;
-    if (typeof RayFace !== "undefined") RayFace.pause(true);
+    if (typeof RayOrb !== "undefined") RayOrb.pause(true);
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
   },
 
   resume() {
     if (!window.speechSynthesis || !this.speaking) return;
     try { window.speechSynthesis.resume(); } catch (e) {}
+    if (this.currentSource && this.audioCtx) { try { this.audioCtx.resume(); } catch (e) {} }
     this.paused = false;
-    if (typeof RayFace !== "undefined") RayFace.pause(false);
+    if (typeof RayOrb !== "undefined") RayOrb.pause(false);
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
   },
 
@@ -529,6 +542,7 @@ const TTSController = {
 
     this.queue = this.chunk(clean);
     if (!this.queue.length) return;
+    this.prefetch = [];
 
     this.currentIndex = 0;
     this.speaking = true;
@@ -552,6 +566,7 @@ const TTSController = {
     }
 
     const chunk = this.queue[this.currentIndex];
+    if (this.useServer()) { this.playServerChunk(this.currentIndex); return; }
     const u = new SpeechSynthesisUtterance(chunk);
     this.currentUtterance = u; // Anchor to avoid V8 GC mid-speech
 
@@ -565,15 +580,15 @@ const TTSController = {
     u.rate = this.getRate();
     u.pitch = this.getPitch();
 
-    // Ray's face follows the chunk being spoken (web/rayface.js); the test button in Settings has no face
-    const face = typeof RayFace !== "undefined" && this.isFaceOn() && !(this.activeBtn && this.activeBtn.id === "tts-test-btn");
-    if (face) {
-      u.onstart = () => RayFace.say(chunk, u.rate);
-      u.onboundary = (e) => RayFace.boundary(e.charIndex);
+    // Ray's orb pulses with the chunk being spoken (web/rayorb.js); the test button in Settings has no orb
+    const orb = this.orb();
+    if (orb) {
+      u.onstart = () => RayOrb.speakText(chunk, u.rate);
+      u.onboundary = (e) => RayOrb.boundary(e.charIndex);
     }
 
     u.onend = () => {
-      if (face) RayFace.chunkEnd();
+      if (orb) RayOrb.chunkEnd();
       this.currentIndex++;
       // Yield briefly so browser audio driver cleanly settles before queueing the next utterance
       setTimeout(() => {
@@ -615,6 +630,71 @@ const TTSController = {
       this.stop();
       toast("warn", "Speech blocked", "Click the speaker button to start audio playback.");
     }
+  },
+
+  audio() {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    if (!this.audioCtx) this.audioCtx = new AudioCtx();
+    if (!this.analyser) {
+      // the orb reads the analyser; the sound reaches the speakers 50 ms later, so the orb moves just before the voice
+      this.analyser = this.audioCtx.createAnalyser();
+      this.analyser.fftSize = 1024;
+      const delay = this.audioCtx.createDelay(0.2);
+      delay.delayTime.value = 0.05;
+      this.analyser.connect(delay);
+      delay.connect(this.audioCtx.destination);
+    }
+    return this.audioCtx;
+  },
+
+  // chunk i as decoded audio; the next chunk is fetched while this one plays
+  fetchChunk(i) {
+    if (!this.prefetch[i]) {
+      const ctx = this.audio();
+      this.prefetch[i] = fetch("v1/audio/speech", {
+        method: "POST", headers: headers(true),
+        body: JSON.stringify({input: this.queue[i], speed: this.getRate()}),
+      }).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.arrayBuffer();
+      }).then((ab) => ctx.decodeAudioData(ab));
+      this.prefetch[i].catch(() => {});
+    }
+    return this.prefetch[i];
+  },
+
+  async playServerChunk(i) {
+    const queue = this.queue;
+    let buf;
+    try {
+      buf = await this.fetchChunk(i);
+    } catch (e) {
+      if (!this.speaking || this.queue !== queue) return;
+      console.warn("Server voice failed, using the browser voice:", e);
+      this.serverFailed = true;                      // until the page reloads
+      toast("warn", "Ray's server voice failed", "Reading on with the browser's voice.", 4000);
+      this.speakNext();
+      return;
+    }
+    if (!this.speaking || this.queue !== queue || i !== this.currentIndex) return;
+    const ctx = this.audio();
+    if (ctx.state === "suspended" && !this.paused) { try { await ctx.resume(); } catch (e) {} }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(this.analyser);
+    this.currentSource = src;
+    const orb = this.orb();
+    src.onended = () => {
+      if (this.currentSource !== src) return;       // stopped
+      this.currentSource = null;
+      if (orb) RayOrb.chunkEnd();
+      this.currentIndex++;
+      this.speakNext();
+    };
+    src.start();
+    if (orb) RayOrb.speakAudio(this.analyser);
+    if (i + 1 < this.queue.length) this.fetchChunk(i + 1);
   },
 
   toggleMessage(msg, btn) {
@@ -673,15 +753,31 @@ const TTSController = {
         toast("info", `Auto-speak ${next ? "enabled" : "disabled"}`, next ? "Voice prompts (dictated via STT) will be read aloud automatically." : "Tap the speaker icon on any message to listen.", 2500);
       };
     }
-    if (typeof RayFace !== "undefined") RayFace.onStop = () => this.stop();   // clicking the face stops the speech
-    const faceToggle = $("tts-face-toggle");
-    if (faceToggle) {
-      faceToggle.setAttribute("aria-checked", String(this.isFaceOn()));
-      faceToggle.onclick = () => {
-        const next = faceToggle.getAttribute("aria-checked") !== "true";
-        faceToggle.setAttribute("aria-checked", String(next));
-        store.set("tts_face", next);
-        if (!next && typeof RayFace !== "undefined") RayFace.end(false);
+    if (typeof RayOrb !== "undefined") RayOrb.onStop = () => { this.stop(); RayOrb.end(false); };   // a click stops it
+    // the server's Piper voice: find out once whether it is there; Web Audio may only start after a tap (phones)
+    fetch("v1/audio/speech/status", {headers: headers()}).then((r) => (r.ok ? r.json() : null))
+      .then((st) => { this.serverTTS = st; }).catch(() => {});
+    const unlock = () => { const ctx = this.audio(); if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {}); };
+    document.addEventListener("pointerdown", unlock, {once: true, capture: true});
+    document.addEventListener("keydown", unlock, {once: true, capture: true});
+    const serverToggle = $("tts-server-toggle");
+    if (serverToggle) {
+      serverToggle.setAttribute("aria-checked", String(this.isServerVoiceOn()));
+      serverToggle.onclick = () => {
+        const next = serverToggle.getAttribute("aria-checked") !== "true";
+        serverToggle.setAttribute("aria-checked", String(next));
+        store.set("tts_server", next);
+        this.serverFailed = false;
+      };
+    }
+    const orbToggle = $("tts-orb-toggle");
+    if (orbToggle) {
+      orbToggle.setAttribute("aria-checked", String(this.isOrbOn()));
+      orbToggle.onclick = () => {
+        const next = orbToggle.getAttribute("aria-checked") !== "true";
+        orbToggle.setAttribute("aria-checked", String(next));
+        store.set("tts_orb", next);
+        if (!next && typeof RayOrb !== "undefined") RayOrb.end(false);
       };
     }
     const testBtn = $("tts-test-btn");
@@ -1845,6 +1941,7 @@ function codeOnTurnEnd() {
     }
   }
   code.turnFromVoice = false;
+  if (typeof RayOrb !== "undefined" && !TTSController.speaking) RayOrb.end(false);   // thought, but nothing to say
 }
 
 function codeRenderCur(block) {
@@ -2012,6 +2109,7 @@ function codeEvent(ev, replay) {
       codeEnd();
       codeCard("cs-notice cs-notice--error", esc(ev.text));
       code.turnFromVoice = false;
+      if (!replay && typeof RayOrb !== "undefined" && !TTSController.speaking) RayOrb.end(false);
       break;
     case "stats": codeEnd(); codeCard("cs-stats", `${ev.tokens} tokens · ${ev.seconds}s · ${ev.rate} t/s`); break;
     case "approval_request": codeEnd(); codeApprovalCard(ev); break;
@@ -2209,6 +2307,8 @@ async function codeSend(text) {
   const turn = fromVoice ? { text, voice: true } : { text };
   if (await codeOp("input", turn)) {
     if (ta && ta.value.trim() === text) { ta.value = ""; ta.style.height = "auto"; }
+    // the answer will be read aloud: the orb shows Ray thinking until then
+    if (fromVoice && TTSController.isAutoSpeak() && TTSController.orb()) RayOrb.thinking();
   }
 }
 
@@ -2224,6 +2324,7 @@ if ($("code-restart-btn")) {
 if ($("code-stop-btn")) {
   $("code-stop-btn").onclick = () => {
     if (typeof TTSController !== "undefined") TTSController.stop();
+    if (typeof RayOrb !== "undefined") RayOrb.end(false);
     code.turnFromVoice = false;
     codeOp("interrupt");
   };
