@@ -5,7 +5,7 @@ description: "Dot-matrix red panda sitting on the Code tab input box: thinks whi
 status: active
 tags: [web, tts, ray, code-tab]
 created: 2026-10-28
-updated: 2026-10-28
+updated: 2026-10-29
 last_verified: 2026-10-28
 ---
 
@@ -236,6 +236,16 @@ Added 2026-10-28 in serve/web/rayface.js (commit 616ec4c6). Choices made with th
 - **Web app header:** the panda icon (`favicon.svg`) sits next to "Ray".
 - **The moods are subtle at 60%:** they are shown as the app really draws them. The pictures don't exaggerate them.
 - **Not done by code:** GitHub's social preview has no API. `docs/media/ray/social.png` has to be uploaded in the repository's Settings → General → Social preview.
+
+## Cocoa break while thinking (2026-10-29)
+
+- **The user's request:** now and then while thinking, Ray holds and drinks a hot, steaming cup of hot chocolate with two hands; not every time. Five versions were drawn on a private studies page first (`https://claude.ai/artifact/RSg4dddrHkzokLG6KWjgAv`).
+- **The user's choices:** a chance after a while (8 s into a think, 1 in 3, never on two thinks in a row); the mug sits beside him on the input box and he picks it up; cosy closed eyes on the sip; the **muzzle-white mug**. The first five studies varied the mug colour, but the user wanted different *animation styles*, not colours; they then picked four styles to mix, one picked at random per break (never the same twice running).
+- **Styles (`STYLES` in `serve/web/rayface.js`):** classic (one long sip, "ahh", ~9 s), savour (cradled under the chin, breathing in the steam, swaying, two sips with a sigh, ~17 s), hot (blows, test sip, startled jolt with a steam puff, blows again, sips, ~12 s), thinking (keeps the thinking look and question marks with the mug in both paws, sips now and then, ~13 s). The quick-sip study was not chosen.
+- **Drawing:** a 9 x 8 white mug on whole cells, cocoa at the rim, a dark edge when in front of him; dark paws and forearms; steam as two wisps of dashes with no backing (warm grey on a light page). No reduced-motion breaks.
+- **Interruptions:** speech, `end()` or `leave()` take the mug away in 250 ms.
+- **Trying it:** `RayFace.cocoa("classic" | "savour" | "hot" | "thinking")` while he is thinking; `RayFace.state.cocoa` and `.phase` show it.
+- **Verified:** Node with stubs: a break starts 8 s into a think and runs every phase, the paw is back on the chin after, no break on the next think, speech mid-break shrinks the mug away. Not yet seen in the real app.
 
 ## Sources
 
