@@ -20,6 +20,8 @@
 //   - on a long task (30 s into the turn, or 6 tool calls) he works at something, picked at random for each round from
 //     what fits the work (weights in POOLS): a blueprint, calipers on a printed cube, a notepad of equations, a Rubik's
 //     cube.  The newest kind of work counts; there is only ever one prop, and a round always finishes before the next
+//   - when he calls Home Assistant, about 1 time in 2 (once a turn) he works a control panel at once, picked by the
+//     action: a lamp for lights, a mixing desk for scenes or many devices, a thermostat dial for heating
 // Server voice (Web Audio): the motion follows the voice's loudness, read about 50 ms before it is heard
 // (TTSController delays the output).  Browser voice: a loudness estimated from the text.  Clicking stops (onStop).
 "use strict";
@@ -338,7 +340,7 @@ const RayFace = (() => {
     "0": ["111", "101", "101", "101", "111"], "1": ["010", "110", "010", "010", "111"], "2": ["111", "001", "111", "100", "111"],
     "3": ["111", "001", "111", "001", "111"], "7": ["111", "001", "010", "010", "010"], "8": ["111", "101", "111", "101", "111"],
     "9": ["111", "101", "111", "001", "111"], "x": ["000", "101", "010", "101", "000"], "+": ["000", "010", "111", "010", "000"],
-    "=": ["000", "111", "000", "111", "000"], ".": ["000", "000", "000", "000", "010"],
+    "=": ["000", "111", "000", "111", "000"], ".": ["000", "000", "000", "000", "010"], "°": ["110", "110", "000", "000", "000"],
   };
   const BULB = ["..r.r..", "r.yyy.r", ".yyhyy.", ".yyyyy.", ".yyyyy.", "..yyy..", "..ggg..", "..ggg.."];
   const clamp01 = (v) => Math.max(0, Math.min(1, v));
@@ -583,7 +585,173 @@ const RayFace = (() => {
       return F;
     },
   };
-  const WORKS = {blueprint, measure, cube, maths};
+  // ---------------------------------------------------------------------------------------------------------------
+  // Home Assistant: a control panel, one round with its core once.  Knobs are 3 x 3 with a dark pointer at step k of 8
+  const KNOB_DIR = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]];
+  function knob(map, cx, cy, k) {
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) map.set((cy + dy) * COLS + cx + dx, dx && dy ? "#94a3b8" : "#e2e8f0");
+    const [px, py] = KNOB_DIR[((Math.round(k) % 8) + 8) % 8];
+    map.set((cy + py) * COLS + cx + px, "#0f172a");
+  }
+  // a box of cells that grows from its bottom centre when it pops in
+  function panel(F, x0, x1, y0, y1, sc, colour) {
+    const cx = (x0 + x1) / 2;
+    for (let j = y0; j <= y1; j++) for (let i = x0; i <= x1; i++) {
+      if (Math.abs(i - cx) > (x1 - cx) * sc + 0.01 || y1 - j > (y1 - y0) * sc + 0.01) continue;
+      const c = colour(i, j);
+      if (c) F.prop.set(j * COLS + i, c);
+    }
+  }
+  const orderOf = (W) => [...W.intro, ...W.core, ...W.outro].map(([n]) => n);
+
+  // a panel on the input box with a lamp on it: a knob, a button, the lamp comes on; dimmed and back; warm to cool white
+  const lamp = {
+    rounds: 1, intro: [["pop", 0.6], ["grab", 0.5]], outro: [["away", 0.5], ["fade", 0.5]],
+    core: [["turn1", 1.3], ["press1", 0.7], ["look", 1.0], ["turn2", 1.6], ["press2", 0.7], ["proud", 0.9]],
+    frame(ph) {
+      const F = blank(), sc = pop(ph), order = orderOf(this), at = order.indexOf(ph.name);
+      const past = (n) => order.indexOf(n) < at, press = (n) => ph.name === n && ph.p > 0.35 && ph.p < 0.6;
+      const on = past("press1") || (ph.name === "press1" && ph.p > 0.45);
+      const cool = past("press2") || (ph.name === "press2" && ph.p > 0.45);
+      const bright = ph.name === "turn2" ? 1 - 0.6 * Math.sin(Math.PI * ph.p) : on ? 1 : 0;
+      panel(F, 32, 45, 31, 39, sc, (i, j) => j === 31 ? "#64748b" : (i === 32 || i === 45 || j === 39) ? "#1e293b" : "#334155");
+      if (sc > 0.9) {
+        knob(F.prop, 35, 34, ph.name === "turn1" ? ph.e * 3 : past("turn1") ? 3 : 0);
+        knob(F.prop, 40, 34, ph.name === "turn2" ? 6 - 3 * Math.sin(Math.PI * ph.p) : 6);
+        for (const i of [34, 35]) F.prop.set(37 * COLS + i, press("press1") ? "#14532d" : on ? "#4ade80" : "#166534");
+        for (const i of [38, 39]) F.prop.set(37 * COLS + i, press("press2") ? "#1e3a8a" : cool ? "#93c5fd" : "#1e40af");
+        for (const i of [42, 43]) F.prop.set(37 * COLS + i, "#7f1d1d");
+      }
+      // the lamp: a stand and a shade, lit when on, its glow floating around the shade
+      if (sc > 0.5) {
+        for (let j = 27; j <= 30; j++) F.prop.set(j * COLS + 43, "#94a3b8");
+        const shade = bright > 0.1 ? (cool ? "#e0f2fe" : "#fde68a") : "#64748b";
+        for (const [j, a, z] of [[23, 42, 44], [24, 41, 45], [25, 41, 45]]) for (let i = a; i <= z; i++) F.prop.set(j * COLS + i, shade);
+        if (bright > 0.1) {
+          F.prop.set(26 * COLS + 43, cool ? "#ffffff" : "#facc15");
+          const rgb = cool ? [224, 242, 254] : [250, 204, 21];
+          for (let j = 20; j <= 30; j++) for (let i = 37; i <= 45; i++) {
+            const d = Math.hypot(i - 43, (j - 25) * 1.2);
+            if (d < 2.6 || d > 5.2 || (i + j) % 2 || F.prop.has(j * COLS + i)) continue;
+            F.overlay.push({x: i, y: j, rgb, a: bright * 0.5 * (1 - (d - 2.6) / 2.6)});
+          }
+        }
+      }
+      const spot = ph.name === "turn1" || ph.name === "grab" ? {x: 35.6, y: 32.6}
+        : ph.name === "press1" ? {x: 34.8, y: 35.8 + (press("press1") ? 0.6 : 0)} : ph.name === "press2" ? {x: 38.8, y: 35.8 + (press("press2") ? 0.6 : 0)}
+        : ph.name === "look" ? {x: 34.8, y: 35.4} : {x: 40.6, y: 32.6};
+      hands(F, ph, null, spot);
+      switch (ph.name) {
+        case "pop": F.face = {lookX: 0.9, lookY: 0.8, ears: 0.4}; break;
+        case "grab": F.face = {lookX: 0.9, lookY: 0.8}; break;
+        case "turn1": case "turn2": F.face = {lookX: 0.9, lookY: 0.8, tongue: 1}; break;
+        case "press1": case "press2": F.face = {lookX: 0.8, lookY: 0.9, tongue: ph.p < 0.5 ? 1 : 0, happy: ph.p > 0.5 ? 0.4 : 0}; break;
+        case "look": F.face = {lookX: 1, lookY: -0.2, happy: 0.75, glow: 0.8, ears: 0.5}; break;
+        case "proud": F.face = {happy: 0.8, glow: 1, dy: nod(ph.p), ears: 0.3}; break;
+      }
+      return F;
+    },
+  };
+
+  // a mixing desk on his lap, both paws: faders up, a knob; the windows of a small house above him light one by one
+  const HOUSE = ["...o...", "..o.o..", ".o...o.", "o.....o", ".o1.2o.", ".o...o.", ".o3d4o."];
+  const mixer = {
+    rounds: 1, intro: [["pop", 0.5], ["grab", 0.5]], outro: [["away", 0.5], ["fade", 0.5]],
+    core: [["fader1", 0.9], ["fader2", 0.9], ["knob", 1.0], ["fader3", 0.9], ["groove", 1.8]],
+    frame(ph, now) {
+      const F = blank(), sc = pop(ph), order = orderOf(this), at = order.indexOf(ph.name);
+      const level = (n) => ph.name === n ? ph.e : order.indexOf(n) < at ? 1 : 0;
+      const f = [level("fader1"), level("fader2"), level("fader3")], kn = level("knob"), FX = [15, 18, 21];
+      const capRow = (v) => Math.round(36 - v * 5);
+      panel(F, 12, 30, 29, 38, sc, (i, j) => j === 29 ? "#94a3b8" : (i === 12 || i === 30 || j === 38) ? "#334155" : "#64748b");
+      if (sc > 0.9) {
+        FX.forEach((x, n) => {
+          for (let j = 31; j <= 36; j++) F.prop.set(j * COLS + x, "#1e293b");
+          for (let i = x - 1; i <= x + 1; i++) F.prop.set(capRow(f[n]) * COLS + i, i === x ? "#ffffff" : "#e2e8f0");
+        });
+        knob(F.prop, 25, 33, kn * 4);
+        knob(F.prop, 28, 33, ph.name === "groove" ? Math.floor(ph.p * 10) % 3 : 2);
+        // the level meter: green, amber, red, dancing during the groove
+        const lit = Math.round((f[0] + f[1] + f[2] + kn) / 4 * 5 + (ph.name === "groove" ? Math.abs(Math.sin(now / 160)) * 1.5 : 0));
+        for (let k = 0; k < 6; k++) F.prop.set(36 * COLS + 24 + k, k < lit ? (k < 3 ? "#4ade80" : k < 5 ? "#fbbf24" : "#f87171") : "#1e293b");
+        const on = {"1": f[0] > 0.6, "2": f[1] > 0.6, "3": f[2] > 0.6, "4": f[2] > 0.6, d: kn > 0.6};
+        HOUSE.forEach((row, r) => [...row].forEach((ch, k) => {
+          if (ch === ".") return;
+          const lit2 = ch !== "o" && on[ch];
+          F.overlay.push({x: 37 + k, y: 1 + r, rgb: lit2 ? [250, 204, 21] : [56, 189, 248], a: ch === "o" ? 0.85 : lit2 ? 1 : 0.25});
+        }));
+      }
+      const cap = (n) => ({x: FX[n] - 0.2, y: capRow(f[n]) + 1.4});
+      const L = ph.name === "fader1" || ph.name === "grab" || ph.name === "pop" ? cap(0) : cap(1);
+      const R = ph.name === "fader3" || ph.name === "groove" ? cap(2) : {x: 25.6, y: 34.6};
+      hands(F, ph, L, R);
+      if (ph.name === "groove") {
+        const bob = Math.round(Math.abs(Math.sin(now / 320)) * 0.8);
+        F.pawL = {x: L.x, y: L.y + bob}; F.pawR = {x: R.x, y: R.y + bob};
+      }
+      if (ph.name === "pop" || ph.name === "grab") F.face = {lookY: 0.9, ears: 0.3};
+      else if (ph.name === "groove") F.face = {happy: 0.9, glow: 1, dy: 0.7 * Math.abs(Math.sin(now / 320)), tilt: 0.05 * Math.sin(now / 320), ears: 0.4};
+      else if (ph.name !== "away" && ph.name !== "fade") {
+        F.face = {lookX: ph.name === "knob" ? 0.4 : ph.name === "fader3" ? 0 : -0.4, lookY: ph.p > 0.7 ? -0.6 : 0.9,
+                  tongue: ph.p < 0.7 ? 1 : 0, happy: ph.p > 0.7 ? 0.4 : 0, ears: 0.2};
+      }
+      return F;
+    },
+  };
+
+  // a thermostat dial on the input box: turned from 18° to 21°, the needle from blue to orange, then the green OK button
+  const DIAL = {x: 39, y: 31};
+  const thermostat = {
+    rounds: 1, intro: [["pop", 0.6], ["grab", 0.5]], outro: [["away", 0.5], ["fade", 0.5]],
+    core: [["dial", 2.4], ["check", 0.7], ["press", 0.8], ["done", 1.2]],
+    frame(ph) {
+      const F = blank(), sc = pop(ph), order = orderOf(this), at = order.indexOf(ph.name);
+      const v = ph.name === "dial" ? ph.e : at > order.indexOf("dial") ? 1 : 0;              // 0 = 18°, 1 = 21°
+      const pressed = ph.name === "press" && ph.p > 0.35 && ph.p < 0.65;
+      const done = at > order.indexOf("press") || (ph.name === "press" && ph.p > 0.5);
+      const ang = Math.PI * (0.75 + 1.5 * lerp(0.15, 0.85, v));                              // lower left round to lower right
+      panel(F, 33, 45, 36, 39, sc, (i, j) => j === 36 ? "#64748b" : (i === 33 || i === 45 || j === 39) ? "#1e293b" : "#334155");
+      if (sc > 0.9) {
+        for (const i of [35, 36]) for (const j of [37, 38]) F.prop.set(j * COLS + i, pressed ? "#14532d" : done ? "#4ade80" : "#16a34a");
+        for (const i of [42, 43]) F.prop.set(37 * COLS + i, "#991b1b");
+        // a ring of ticks, a dark face tinted by the temperature, a needle from the centre
+        const face = "#" + [lerp(30, 120, v), lerp(58, 53, v), lerp(138, 15, v)].map((c) => Math.round(c).toString(16).padStart(2, "0")).join("");
+        for (let j = DIAL.y - 5; j <= DIAL.y + 4; j++) for (let i = DIAL.x - 5; i <= DIAL.x + 5; i++) {
+          const d = Math.hypot(i - DIAL.x, (j - DIAL.y) * 1.05);
+          if (d > 4.9) continue;
+          F.prop.set(j * COLS + i, d > 4 ? (Math.round(Math.atan2(j - DIAL.y, i - DIAL.x) / (Math.PI / 6)) % 2 ? "#cbd5e1" : "#94a3b8") : face);
+        }
+        for (let r = 0; r <= 3.4; r += 0.4) F.prop.set(Math.round(DIAL.y + Math.sin(ang) * r) * COLS + Math.round(DIAL.x + Math.cos(ang) * r), v > 0.5 ? "#fb923c" : "#60a5fa");
+        F.prop.set(DIAL.y * COLS + DIAL.x, "#e2e8f0");
+        if (ph.name !== "pop" && ph.name !== "fade") {
+          const rgb = v > 0.5 ? [251, 146, 60] : [96, 165, 250];
+          for (const d of textDots(`${Math.round(18 + 3 * v)}°`, 34, 19)) F.overlay.push({x: d.x, y: d.y, rgb, a: 0.95});
+        }
+      }
+      if (ph.name === "done") {
+        for (const [x, y, p0] of [[34, 30, 0], [44, 29, 0.35], [36, 35, 0.7]]) {
+          const a = Math.max(0, Math.sin(Math.PI * 2 * (ph.p * 2 + p0)));
+          if (a > 0.2) for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            F.overlay.push({x: x + dx, y: y + dy, rgb: dx || dy ? [74, 222, 128] : [255, 255, 255], a});
+          }
+        }
+        for (let i = 12; i <= 30; i += 2) F.overlay.push({x: i, y: 39 - Math.round(ph.p * 3) - (i % 4 ? 1 : 0), rgb: [251, 146, 60], a: 0.35 * Math.sin(Math.PI * ph.p)});
+      }
+      const rim = {x: DIAL.x + Math.cos(ang + Math.PI) * 4.6, y: DIAL.y + Math.sin(ang + Math.PI) * 4.6};
+      const spot = ph.name === "press" || ph.name === "done" ? {x: 35.6, y: 36 + (pressed ? 0.7 : 0)} : ph.name === "dial" || ph.name === "check" ? rim : {x: 34.6, y: 31};
+      hands(F, ph, null, spot);
+      switch (ph.name) {
+        case "pop": case "grab": F.face = {lookX: 0.9, lookY: 0.7, ears: 0.4}; break;
+        case "dial": F.face = {lookX: 0.9, lookY: 0.5, tongue: 1}; break;
+        case "check": F.face = {lookX: 0.8, lookY: -0.2, happy: 0.45, eye: 0.85}; break;
+        case "press": F.face = {lookX: 0.6, lookY: 0.9, tongue: ph.p < 0.5 ? 1 : 0}; break;
+        case "done": F.face = {happy: 0.85, glow: 1, dy: nod(ph.p), ears: 0.5}; break;
+      }
+      return F;
+    },
+  };
+
+  const WORKS = {blueprint, measure, cube, maths, lamp, mixer, thermostat};
   // which activities fit which work, with weights: the first is the usual one, the others come up some of the time.
   // "hard" is many failed tool calls; "long" is a long think with no kind of work recognised (only 1 round in 3)
   const POOLS = {
@@ -610,7 +778,19 @@ const RayFace = (() => {
     if (toolName != null && (RE_CODE_TOOL.test(toolName) || RE_CODE_FILE.test(text))) return "code";
     return null;
   }
-  const task = {at: 0, tools: 0, errors: 0, kind: null};
+  const task = {at: 0, tools: 0, errors: 0, kind: null, homeCalls: 0, homeShown: false};
+  // Home Assistant: the panel for a call, from its action; null for a call that is not Home Assistant's
+  const RE_HA_TOOL = /^(homeassistant|home_assistant|hass)__/i;
+  function homePanel(name, args) {
+    if (!RE_HA_TOOL.test(name)) return null;
+    let text = "";
+    try { text = JSON.stringify(args || {}); } catch (e) { /* args that do not serialise */ }
+    if (/\b(climate|water_heater|thermostat|temperature|heat\w*|hvac)\b/i.test(text)) return "thermostat";
+    if (/\b(scene|script|automation)\b/i.test(text) || /"entity_id":\s*\[/.test(text) || task.homeCalls >= 3) return "mixer";
+    if (/\b(light|switch|lamp)\b/i.test(text) || /^\w+__toggle$/.test(name)) return "lamp";
+    return ["lamp", "mixer", "thermostat"][Math.floor(Math.random() * 3)];
+  }
+  let homeDue = null;
   let lastWork = "", lastWorkRuns = 0, workRestUntil = 0;
 
   // the next round's activity: a weighted pick from what fits, never the same one three times running
@@ -628,13 +808,13 @@ const RayFace = (() => {
     return name;
   }
 
-  // the phase of a round at time b (intro, the core twice, outro), or null once the round is over
+  // the phase of a round at time b (intro, the core twice or `rounds` times, outro), or null once the round is over
   function workPhase(W, b) {
     const len = (list) => list.reduce((t, [, d]) => t + d, 0);
-    const I = len(W.intro), K = len(W.core);
+    const I = len(W.intro), K = len(W.core), n = W.rounds || 2;
     let t = b, list = W.intro;
-    if (t >= I && t < I + 2 * K) { t = (t - I) % K; list = W.core; }
-    else if (t >= I + 2 * K) { t -= I + 2 * K; list = W.outro; }
+    if (t >= I && t < I + n * K) { t = (t - I) % K; list = W.core; }
+    else if (t >= I + n * K) { t -= I + n * K; list = W.outro; }
     for (const [name, d] of list) {
       if (t < d) return {name, p: t / d, e: ease(t / d)};
       t -= d;
@@ -792,7 +972,12 @@ const RayFace = (() => {
     // a long task: a round of work (instead of a cocoa break), then 20 s of plain thinking, then the next pick
     const due = think && !calmMotion() && task.at > 0 && (now - task.at >= WORK_AFTER || task.tools >= WORK_TOOLS);
     if (!think) work = null;
-    else if (due && !brk && !work && now >= workRestUntil) {
+    else if (homeDue && !calmMotion()) {
+      if (brk && sip) mugOut = {cup: sip.cup, t0: now};               // the mug goes, the panel comes
+      brk = null; sip = null;
+      work = {name: homeDue, t0: now};
+      homeDue = null;
+    } else if (due && !brk && !work && now >= workRestUntil) {
       const name = pickWork();
       if (name) work = {name, t0: now};
       else workRestUntil = now + WORK_REST * 1000;                   // not this time: a cocoa break may come instead
@@ -1022,7 +1207,7 @@ const RayFace = (() => {
   // the break stops early (he speaks, the answer arrives, the turn ends): the mug is taken away quickly
   function dropBreak() {
     breakDue = Infinity;
-    work = null; wf = null;
+    work = null; wf = null; homeDue = null;
     if (brk && sip) mugOut = {cup: sip.cup, t0: performance.now()};
     brk = null; sip = null;
   }
@@ -1105,18 +1290,27 @@ const RayFace = (() => {
   // start a cocoa break now while he is thinking (for trying it out): cocoa("classic" | "savour" | "hot" | "thinking")
   // what the Code tab tells him about the turn: a new prompt, each tool call, a failed tool call
   function taskStart(prompt) {
-    Object.assign(task, {at: performance.now(), tools: 0, errors: 0, kind: kindOf(String(prompt || ""), null)});
+    Object.assign(task, {at: performance.now(), tools: 0, errors: 0, kind: kindOf(String(prompt || ""), null), homeCalls: 0, homeShown: false});
+    homeDue = null;
     workRestUntil = 0;
   }
   function taskTool(name, args) {
     task.tools++;
+    // a Home Assistant call: a control panel, about 1 time in 2, once a turn (it plays as soon as he is thinking)
+    const home = homePanel(String(name || ""), args);
+    if (home) {
+      task.homeCalls++;
+      if (!task.homeShown && Math.random() < 0.5) { homeDue = home; task.homeShown = true; }
+      else if (homeDue) homeDue = home;
+    }
     let text = String(name || "");
     try { text += " " + JSON.stringify(args || {}).slice(0, 400); } catch (e) { /* args that do not serialise */ }
     task.kind = kindOf(text, String(name || "")) || task.kind;
   }
   function taskError() { task.errors++; }
 
-  // start an activity now while he is thinking (for trying it out): work("blueprint" | "measure" | "cube" | "maths")
+  // start an activity now while he is thinking (for trying it out): work("blueprint" | "measure" | "cube" | "maths"), or a
+  // Home Assistant panel: work("lamp" | "mixer" | "thermostat")
   function startWork(name) {
     if (mode !== "think" || !WORKS[name]) return false;
     brk = null; sip = null;

@@ -257,6 +257,15 @@ Added 2026-10-28 in serve/web/rayface.js (commit 616ec4c6). Choices made with th
 - **Trying it:** `RayFace.work("blueprint" | "measure" | "cube" | "maths")` while he is thinking.
 - **Verified:** Node with stubs (triggers, pools, kinds from tool names, interruptions) and frames rendered from the app code. Two bugs found that way: a missing `lerp`, and tool names with `__` not matching. Not yet seen in the real app.
 
+## Home Assistant control panel (2026-10-29)
+
+- **The user's request:** sometimes, when Home Assistant is called, Ray turns knobs and presses buttons on a control panel. Three studies were drawn first (private page `https://claude.ai/artifact/8rw5EweDLdZD4DjNtqMriA`); the user took all three.
+- **Panels (`lamp`, `mixer`, `thermostat` in `WORKS`, `serve/web/rayface.js`, `rounds: 1`):** lamp (a panel on the input box with a lamp: a knob, a button turns it on, dimmed and back, warm to cool white); mixer (a mixing desk on his lap, both paws: three faders and a knob light the windows and door of a little house floating above him, then a head bob to the meter); thermostat (a dial turned from 18° to 21°, the needle blue to orange, the green OK button sparkles).
+- **When:** a tool call whose name starts `homeassistant__` (also `home_assistant__`, `hass__`), 1 time in 2, at most once a turn; it starts at once (no 30 s wait), one round of 6 to 8 s, and takes over from a cocoa break (the mug shrinks away) or a long-task round.
+- **Which:** from the call's arguments: climate, water heater, temperature or heat → thermostat; a scene, script or automation, a list of entities, or the 4th Home Assistant call in the turn → mixer; a light, switch or lamp, or `toggle` → lamp; anything else → one of the three at random.
+- **README:** `home-<panel>.gif` from `tools/make_ray_media.py`. Re-running the script re-encodes the other GIFs with a few frames different (random blinks); they were restored rather than committed.
+- **Verified:** Node with stubs (12 checks: the choice per action, once a turn, the 1 in 2, taking over from the mug, gone when the answer starts) and frames rendered from the app code. Not yet seen in the real app.
+
 ## Sources
 
 - User, chat, 2026-10-28: brand the project with the red panda; images of his states and emotions in the repo description

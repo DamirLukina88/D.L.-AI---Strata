@@ -120,9 +120,28 @@ blueprints to measuring between rounds. He only ever holds one prop.
 | A hard problem (3 failed tool calls) | Rubik's cube 3, plus the usual one for the work 1 |
 | A long think with no kind of work recognised | a Rubik's cube in 1 round of 3 |
 
-With *reduced motion* set in the system, he takes no cocoa breaks and does no long-task activities. To see them
+**At the control panel.** When Ray calls Home Assistant, about 1 time in 2 (once a turn), he works a little control
+panel straight away: one round of 6 to 8 s, turning knobs and pressing buttons. The panel follows the action: lights
+get the lamp, scenes or several devices at once get the mixing desk, and heating gets the thermostat. It takes over
+from a cocoa break or a long-task round, and it goes as soon as the answer starts.
+
+<table>
+<tr>
+<td align="center"><img src="docs/media/ray/home-lamp.gif" alt="Ray turning on a lamp at a control panel" width="200"><br><b>Desk panel and lamp</b></td>
+<td align="center"><img src="docs/media/ray/home-mixer.gif" alt="Ray working a mixing desk that lights a house's windows" width="200"><br><b>Mixing desk</b></td>
+<td align="center"><img src="docs/media/ray/home-thermostat.gif" alt="Ray turning a thermostat dial from 18 to 21 degrees" width="200"><br><b>Thermostat dial</b></td>
+</tr>
+<tr>
+<td>He turns a knob and presses a button, and the lamp comes on. He dims it and brings it back up, then switches it from warm to cool white.</td>
+<td>With both paws he pushes up faders and turns a knob. Each one lights a window of a little house above him, then he bobs his head to the meter.</td>
+<td>He turns the dial from 18° to 21°, and the needle goes from blue to orange. He checks it, then presses the green button, which sparkles.</td>
+</tr>
+</table>
+
+With *reduced motion* set in the system, he takes no cocoa breaks and plays none of these animations. To see them
 without waiting, run `RayFace.cocoa("classic" | "savour" | "hot" | "thinking")` or
-`RayFace.work("blueprint" | "measure" | "cube" | "maths")` in the browser console while he is thinking.
+`RayFace.work("blueprint" | "measure" | "cube" | "maths" | "lamp" | "mixer" | "thermostat")` in the browser
+console while he is thinking.
 
 He has no talking mouth on purpose. Every mouth that copied the speech looked uncanny, so he speaks through motion,
 and his mouth opens only on the strongest syllables. His voice is pitched up to 1.5 by default, a little cartoon-like

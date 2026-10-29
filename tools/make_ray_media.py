@@ -13,6 +13,7 @@ pictures show what the web app shows.  Writes into docs/media/ray/:
     goodbye.gif             the warm goodbye and the fade
     cocoa-<style>.gif       a cocoa break while thinking, in each of its four styles
     work-<activity>.gif     work on a long task: one round of each activity (its core once)
+    home-<panel>.gif        a Home Assistant control panel: one round of each
     social.png              1280 x 640 social preview for the repository page
 
 Needs node and Pillow; talking.gif also needs Piper (serve/speech.py).  Run it again after changing how Ray looks.
@@ -40,6 +41,7 @@ FPS = 15
 MOODS = ["neutral", "happy", "excited", "surprised", "curious", "thinking", "concerned", "warm"]
 COCOA = ["classic", "savour", "hot", "thinking"]
 WORK = ["blueprint", "measure", "cube", "maths"]
+HOME = ["lamp", "mixer", "thermostat"]
 LINES = ("Hi, I'm Ray! The build passed and everything works. "
          "Hmm, maybe we should check the printer first? "
          "Sorry, the camera is offline right now.")
@@ -150,6 +152,12 @@ for (const name of job.work) {
   out["work-" + name] = scene(I + K + O + 1800, "think", () => X.set({work: {name, t0: 0}, task: {at: 1, tools: 99, kind: "code"}}),
     null, (t) => { if (!jumped && t >= I + K) { jumped = true; X.set({work: {name, t0: -K}}); } });
 }
+// one round of each Home Assistant panel, as it plays (its core once), then a second of thinking
+for (const name of job.home) {
+  const W = X.WORKS[name];
+  out["home-" + name] = scene(len(W.intro) + len(W.core) + len(W.outro) + 1800, "think",
+    () => X.set({work: {name, t0: 0}, task: {at: 0, tools: 0, kind: null}}));
+}
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -252,7 +260,7 @@ def gif(frames, path: Path, cell: int = 6, alphas=None):
 
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
-    job = {"moods": MOODS, "cocoa": COCOA, "work": WORK}
+    job = {"moods": MOODS, "cocoa": COCOA, "work": WORK, "home": HOME}
     sp = speech()
     if sp:
         job.update(pcm=sp[0], sr=sp[1], dur=sp[2], text=LINES)
@@ -280,7 +288,7 @@ def main() -> int:
     if "talking" in res:
         gif(res["talking"], OUT / "talking.gif")
     gif([g for g, _ in res["goodbye"]], OUT / "goodbye.gif", alphas=[a for _, a in res["goodbye"]])
-    for name in [f"cocoa-{c}" for c in COCOA] + [f"work-{w}" for w in WORK]:
+    for name in [f"cocoa-{c}" for c in COCOA] + [f"work-{w}" for w in WORK] + [f"home-{h}" for h in HOME]:
         gif(res[name], OUT / f"{name}.gif")
 
     # social preview: Ray at the left, the name and a line at the right
