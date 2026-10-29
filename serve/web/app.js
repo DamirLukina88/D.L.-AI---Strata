@@ -327,9 +327,10 @@ const TTSController = {
       }
     }
 
-    // 1. Highest priority: Ray's voice (Piper HFC male), then other Piper neural voices (lessac / ryan)
+    // 1. Highest priority: Ray's voice (Piper HFC male), then Piper's other male voice (ryan), then any Piper voice
     const piper = voices.find((v) => /hfc_male/i.test(v.name || v.voiceURI)) ||
-                  voices.find((v) => /piper|lessac|ryan/i.test(v.name || v.voiceURI));
+                  voices.find((v) => /ryan/i.test(v.name || v.voiceURI)) ||
+                  voices.find((v) => /piper|lessac/i.test(v.name || v.voiceURI));
     if (piper) return piper;
 
     // Ray is male (since 2026-10-28): without Piper (a phone, Edge, macOS) each step below takes a male voice of its
@@ -360,7 +361,7 @@ const TTSController = {
   getCodeMode() { return store.get("tts_code_mode", "skip"); },
   // on unless turned off: a spoken prompt is answered aloud (typed ones never are)
   isAutoSpeak() { return store.get("tts_auto_speak", true) !== false; },
-  // on unless turned off in About: Ray's face while reading aloud, and the thinking circle (web/rayface.js)
+  // on unless turned off in About: Ray the red panda while reading aloud, and his thinking pose (web/rayface.js)
   isOrbOn() { return store.get("tts_orb", true) !== false; },
   // on unless turned off in About: Ray's thinking pose for every turn (typed, spoken or from the terminal), not only
   // for spoken prompts that will be read aloud
@@ -806,7 +807,7 @@ const TTSController = {
       testBtn.onclick = () => {
         const vSel = $("tts-voice-select");
         if (vSel && vSel.value) store.set("tts_voice", vSel.value);
-        this.speakText("Good day. I am Ray, running locally on this computer.", testBtn);
+        this.speakText("Hi, I'm Ray, the household's red panda, on the home server.", testBtn);
       };
     }
   },
@@ -2346,7 +2347,7 @@ async function codeSend(text) {
   const turn = fromVoice ? { text, voice: true } : { text };
   if (await codeOp("input", turn)) {
     if (ta && ta.value.trim() === text) { ta.value = ""; ta.style.height = "auto"; }
-    // the answer will be read aloud: the thinking circle shows until then
+    // the answer will be read aloud: Ray thinks, paw on his chin, until then
     if (fromVoice && TTSController.isAutoSpeak() && TTSController.orb()) RayFace.thinking();
   }
 }

@@ -11,7 +11,7 @@
 <meta name="theme-color" content="#0b0d10">
 <link rel="stylesheet" href="web/tokens.css">
 <link rel="stylesheet" href="web/components.css">
-<link rel="stylesheet" href="web/app.css?v=20261028-panda15">
+<link rel="stylesheet" href="web/app.css?v=20261029-panda16">
 <script>
   // the theme before the first paint: default dark for D.L. AI
   try {
@@ -96,7 +96,7 @@
             <div class="code-mobile-welcome-sub">Connecting&hellip; The same session is open in the terminal with <code>dl_cli.py --attach</code>.</div>
           </div>
         </div>
-        <!-- Ray, a red panda sitting on the input box while he thinks about a spoken prompt or reads a reply aloud (web/rayface.js) -->
+        <!-- Ray, a red panda sitting on the input box while the model works or he reads a reply aloud (web/rayface.js) -->
         <div class="ray-face" id="ray-face" hidden role="button" tabindex="0" title="Stop reading aloud" aria-label="Stop reading aloud"><canvas aria-hidden="true"></canvas></div>
         <div class="code-mobile-composer">
           <div class="code-mobile-chips">
@@ -242,9 +242,8 @@
       <div class="st-card" id="tts-settings-card">
         <div class="req-head">
           <span class="card-title">Voice &amp; Dictation (TTS &amp; STT)</span>
-          <span class="muted small" id="tts-status-badge">Native Engine</span>
         </div>
-        <p class="muted small">Uses your browser and operating system's native speech engines. 100% client-side, zero latency, completely private.</p>
+        <p class="muted small">Ray reads aloud with his own voice (Piper HFC male) from the home server, the same on every device. With the server voice off below, or if it fails, the browser's voice reads instead. Dictation uses local Whisper on the home server, or the browser's own recognition (engine below).</p>
 
         <div class="st-field">
           <label class="st-label" for="tts-voice-select">Read-aloud voice (TTS) <output id="tts-voice-count"></output></label>
@@ -502,7 +501,7 @@
 <div class="scrim" id="scrim" hidden></div>
 <div class="st-toasts" id="toasts" aria-live="polite"></div>
 <script src="web/site-config.js?v=20261020-logout1"></script>
-<script src="web/rayface.js?v=20261028-panda15"></script>
-<script src="web/app.js?v=20261028-panda15"></script>
+<script src="web/rayface.js?v=20261029-panda16"></script>
+<script src="web/app.js?v=20261029-panda16"></script>
 </body>
 </html>

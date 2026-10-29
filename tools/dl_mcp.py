@@ -460,7 +460,8 @@ class McpRegistry:
             lines.append(f"- {name}: {entry.description}" + (f" [{bad}]" if bad else ""))
         return {"type": "function", "function": {
             "name": META_NAME,
-            "description": "Turn MCP tool servers on or off. Their tools appear from your next step. Servers:\n"
+            "description": "Turn MCP tool servers on or off, when the user's request needs one (a greeting or a question "
+                           "about yourself does not). Their tools appear from your next step. Servers:\n"
                            + "\n".join(lines),
             "parameters": {"type": "object", "properties": {
                 "action": {"type": "string", "enum": ["list", "enable", "disable"]},

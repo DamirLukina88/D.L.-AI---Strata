@@ -5,16 +5,31 @@ description: "D.L. AI is now Ray; male (he/him) with the Piper HFC male voice si
 status: active
 tags: [ray, persona, tts, stt, branding, speech-dispatcher]
 created: 2026-10-22
-updated: 2026-10-28
-last_verified: 2026-10-28
+updated: 2026-10-29
+last_verified: 2026-10-29
 ---
 
 # Ray: Assistant Name, Voice and Persona
 
 ## Summary
 
-On 2026-10-22 the user renamed the assistant from D.L. AI to **Ray**: female voice, professional-butler manner, used
-hands-free (STT → model → TTS).
+**Ray** (renamed from D.L. AI on 2026-10-22) is the household's red panda and AI assistant: male (he/him) since
+2026-10-28, with the Piper HFC male voice at pitch 1.5 and a dot-matrix red panda avatar, used hands-free (STT → model
+→ TTS) and as the coding agent. The persona got a light red panda character on 2026-10-29 (see below). Until
+2026-10-28 Ray was female, with a professional-butler manner at first; those sections are history.
+
+## Red panda character and research (2026-10-29)
+
+- `RAY_ABOUT` got a light red panda character (curious, playful, good-natured; a panda touch in small talk and voice,
+  none in code), an honesty line, and one consistent place sentence ("the home server"; the model and its thinking stay there,
+  tools for online services such as Gmail, Drive, Proton, DeepL, web lookups and DeepSeek send what a task needs). Hardware and the device list moved to `tools/ray_identity_mcp.py`; the prompt does not name that server.
+- Measured: no quality difference on the quick bench with or without the persona (25/25 each); "this machine" and
+  owner naming in introductions fixed; introductions call tools more often (7 of 10 runs against 3 of 8). Keeping it
+  is open. Details: [Ray Persona Research and A/B](../artifacts/ray-persona-research-and-ab-2026-10-29.md).
+- Kept (user's choices, 2026-10-29): the red panda character with "curious"; 🐾 is his emoji (no red panda emoji
+  exists); the place sentence says what goes online (Gmail, Drive, Proton, DeepL, web lookups, DeepSeek), corrected
+  by the user from "nothing leaves it except DeepSeek". A small-talk guard in `tools/dl_cli.py` answers tool calls
+  in greetings and introductions instead of running them (persona bench 94/97, no unneeded tool ran).
 
 ## Ray is male (2026-10-28)
 

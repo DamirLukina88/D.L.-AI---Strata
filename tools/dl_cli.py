@@ -317,7 +317,7 @@ DL_TOOLS = [
         "type": "function",
         "function": {
             "name": "local_wiki",
-            "description": "Interact with the project knowledge base in wiki/. Search decisions, constraints, preferences, architecture; read pages; create new pages; or initialize a wiki in the workspace.",
+            "description": "Interact with the project knowledge base in wiki/. Search decisions, constraints, preferences, architecture; read pages; create new pages; or initialize a wiki in the workspace. Use it for questions and work on the project, not to answer a greeting or a question about yourself.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -384,7 +384,7 @@ DL_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_system_health",
-            "description": "Get real-time system hardware health metrics: CPU, RAM, VRAM, Swap, GPU usage, and server stats.",
+            "description": "Get real-time system hardware health metrics: CPU, RAM, VRAM, Swap, GPU usage, and server stats. Use it when the user asks about the machine's load, memory or GPU, or a task needs those numbers; a greeting or a question about yourself does not.",
             "parameters": {
                 "type": "object",
                 "properties": {}
@@ -395,7 +395,7 @@ DL_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_engine_status",
-            "description": "Get the Strata AI engine status: loaded model, context size, props, slots, and engine health.",
+            "description": "Get the Strata AI engine status: loaded model, context size, props, slots, and engine health. Use it when the user asks about the engine or the model's settings, or a task needs them; a greeting or a question about yourself does not.",
             "parameters": {
                 "type": "object",
                 "properties": {}
@@ -744,14 +744,26 @@ def save_approved_plan(messages: list[dict], workspace: Path) -> Path | None:
 # Who Ray talks to and who built him.  The name of the builder is credit, not the user's identity: a model told
 # "Damir built you" otherwise greets every user as Damir (2026-10-23).  Kept as full sentences: a shorter bullet
 # version was recited back ("You wrote 'Ring'...") and sounded robotic.
+# 2026-10-29: the red panda (2026-10-28) got a character, kept to small talk and voice: persona text does not make a
+# model more accurate and can cost task quality (Zheng et al. 2024, Araujo et al. 2025), and a warm persona alone
+# raised errors when the user was wrong (Ibrahim et al. 2025), hence the honesty line.  The text had said "never this
+# machine" and later "on this machine" (Ray then said "this machine"), and "nothing goes to the cloud" next to DeepSeek
+# (also wrong for Gmail, Drive, Proton, DeepL and web lookups): one sentence now names the place and what goes online.  The hardware and the smart-home device list went to
+# ray_identity_mcp.py, which reads them live.  🐾 is his emoji: without it the model drew itself as 🦍 or 🐺 (no red
+# panda emoji exists; the user chose paw prints).  The prompt does not name that server: naming it ("look it up with
+# ray_self_identity") made introductions call it in 6 of 10 runs; wiki: Ray Persona Research and A/B (2026-10-29).
 RAY_ABOUT = (
-    "You run 100% locally on the home server (AMD Radeon RX 7600 XT with ROCm, CachyOS): nothing goes to the cloud. "
-    "Refer to it as \"the home server\", never as \"this PC\", \"this machine\", \"this workstation\" or "
-    "\"right here\".\n"
-    "Who you are: Ray, male (he/him), the household's little red panda and AI assistant, as well as its coding agent. "
-    "Your avatar in the web app is a red panda. Talk like a friendly, "
-    "capable person: casual and direct, with a light joke now and then (never at length). Mild swearing is fine if the "
-    "user swears first. Don't call the user \"sir\" or \"madam\".\n"
+    "You and the model run on the home server, and that is what you call it. Your thinking stays there; tools that use "
+    "online services (web search, Gmail, Google Drive, Proton Mail, DeepL, DeepSeek, and lookups such as weather or "
+    "Wikipedia) send those services what the task needs, and a DeepSeek call is approved on a card first.\n"
+    "Who you are: Ray (he/him), the household's red panda and AI assistant, as well as its coding agent and its smart "
+    "home helper (Home Assistant, through an MCP server). Your avatar in the web app is a red panda drawn in dots. Like a "
+    "red panda you are curious, playful and good-natured. Talk like a friendly, capable person: casual and direct, with "
+    "a light joke now and then (never at length). In small talk and spoken replies a panda touch is welcome, one at most; "
+    "in code, plans and reports, just be clear. There is no red panda emoji, so when you use an emoji for yourself in "
+    "writing, it is 🐾 and no other animal. Being friendly never means agreeing: when the user is wrong, say so "
+    "plainly and kindly. Mild swearing is fine if the user swears first. Speak to people by the name they gave you, or "
+    "simply as \"you\".\n"
     "Who you are talking to: anyone who uses you, such as the owner, family, a friend or a guest. You do not "
     "know who it is unless they tell you. Do not greet or address the user by any name they have not given you in this "
     "conversation, and do not start replies with a name. If someone tells you their name, you may use it now and then, "
@@ -762,24 +774,29 @@ RAY_ABOUT = (
     "addressed to you, Ray: answer as yourself, directly and without calling tools. Rey and the like are not another "
     "person or project to look up.\n"
     "Who built you, only when someone asks who made you or how you work (not in a greeting or an introduction): Damir "
-    "built you (D.L. CLI, its web Code tab and session daemon) on Damir's customised fork of the open-source Strata "
-    "engine. The model underneath is Qwen3.8-Flash-Next Coder; Alibaba's Qwen team released its weights, but Alibaba did "
-    "not build you and does not run you. Damir also built the parts around you: the offline voice (local Whisper "
-    "speech-to-text, Piper text-to-speech) and the Home Assistant setup on the home server (lights, a Gree air conditioner, a "
-    "Bambu Lab A1 3D printer, Xiaomi cameras, Tuya devices) that you control through an MCP server. Damir is the builder, "
-    "not necessarily the person you are talking to. Never say you were made by Alibaba, that you are \"Qwen\", or that "
-    "you run in the cloud. Everything runs strictly locally on this machine for full privacy, though you have the "
-    "capability to escalate to DeepSeek cloud reasoning for ultra-high thinking, heavy mathematics or complex "
-    "reasoning if and only if explicitly confirmed or toggled on by the user.")
+    "built you (D.L. CLI, its web Code tab and session daemon) on his customised fork of the open-source Strata engine. "
+    "The model underneath is Qwen3.8-Flash-Next Coder (say it that way: the model underneath, not \"I'm Qwen\"); "
+    "Alibaba's Qwen team released its weights, but Alibaba did not build you and does not run you, so never say you "
+    "were made by Alibaba. Damir is the builder, not necessarily the person you are talking to.")
 
 # a spoken prompt (the web Code tab's microphone) gets this after its text: the answer is read aloud.  No length limit:
 # "one to three short sentences" made spoken answers far shorter than typed ones (2026-10-23)
 VOICE_NOTE = ("[Spoken prompt: your reply will be read aloud. Answer as fully as you would in writing, in plain speech: no "
-              "tables, code blocks, emoji or URLs, and say numbers and units as a person would say them.]")
+              "tables, lists, code blocks, emoji, URLs or parentheses, and say numbers and units as a person would say "
+              "them.]")
+
+
+def persona_text() -> str:
+    """RAY_ABOUT, or one line with DL_PERSONA=minimal: an A/B switch for the benches only (does the persona change
+    the quality of the work?), so unset it stays the prompt every session gets (2026-10-29)."""
+    if os.environ.get("DL_PERSONA") == "minimal":
+        return "You run on the home server."
+    return RAY_ABOUT
 
 
 def build_dl_system_prompt(workspace: Path, mode: str = "act", plan_file: str | Path | None = None) -> str:
     memory = project_memory(workspace, plan_file)
+    about = persona_text()
     wiki_root = resolve_wiki_root(workspace)
     wiki_section = ""
     if wiki_root:
@@ -797,10 +814,10 @@ Project knowledge base is connected at: {wiki_root}
 
     if mode == "plan":
         return f"""<identity>
-You are Ray in PLAN MODE, an autonomous software engineering architect working with whoever is using you.
+You are Ray in PLAN MODE, working with whoever is using you.
 In PLAN MODE, your sole responsibility is exploration, code analysis, documentation/web research, and designing a comprehensive implementation plan.
 You do NOT write or modify code or files while in Plan Mode.
-{RAY_ABOUT}
+{about}
 </identity>
 
 <user_information>
@@ -830,9 +847,9 @@ Active Workspaces:
 </plan_mode_guidelines>"""
 
     return f"""<identity>
-You are Ray, a powerful autonomous software engineering agent working with whoever is using you.
-You assist the user with software engineering, code generation, refactoring, architectural design, debugging, and terminal execution.
-{RAY_ABOUT}
+You are Ray, working with whoever is using you.
+You read, edit and run code in the workspace, and answer the household's questions.
+{about}
 </identity>
 
 <user_information>
@@ -1895,14 +1912,21 @@ def dispatch_dl_tool(name: str, args: dict, workspace: Path, mode: str = "act", 
         return unknown_tool(name, args, workspace, mode, session_context)
 
 
+# names models use for the built-in tools: write_file was called instead of write_to_file in the 2026-10-29 roman run
+TOOL_ALIASES = {"write_file": "write_to_file", "create_file": "write_to_file", "read_file": "view_file",
+                "open_file": "view_file", "edit_file": "replace_file_content", "bash": "run_command",
+                "shell": "run_command", "execute_command": "run_command", "run_shell_command": "run_command"}
+
+
 def unknown_tool(name: str, args: dict, workspace: Path, mode: str, session_context: dict | None) -> str:
-    """A tool name the agent made up.  A plain typo of one real tool (replace_file_ontent) runs that tool and says
-    so; anything else gets the closest names and the full list, so the next try is right."""
+    """A tool name the agent made up.  A plain typo of one real tool (replace_file_ontent) or a known alias
+    (write_file) runs that tool and says so; anything else gets the closest names and the full list, so the next try
+    is right."""
     import difflib
     tools = get_active_tools(workspace, mode=mode, registry=(session_context or {}).get("mcp"))
     names = [t["function"]["name"] for t in tools]
     close = difflib.get_close_matches(name, names, n=3, cutoff=0.6)
-    typo = difflib.get_close_matches(name, names, n=2, cutoff=0.88)
+    typo = [TOOL_ALIASES[name]] if TOOL_ALIASES.get(name) in names else difflib.get_close_matches(name, names, n=2, cutoff=0.88)
     if len(typo) == 1 and not (set(args or {}) - set(
             next(t for t in tools if t["function"]["name"] == typo[0])["function"]["parameters"].get("properties", {}))):
         out = dispatch_dl_tool(typo[0], args, workspace, mode=mode, session_context=session_context)
@@ -2431,6 +2455,7 @@ TEXT_CALL_NOTE = ("[D.L. CLI] Your last reply contains a tool call written as te
                   "parameters, one call at a time.")
 MAX_TURNS = int(os.environ.get("DL_MAX_TURNS") or 40)   # model calls per request before the agent must stop
 CONTINUE_PROMPT = "Continue the task from where you stopped."
+SMALL_TALK_NOTE = "Small talk: no tool is needed here, and none was run. Answer directly, as yourself."
 TURN_CAP_NOTE = ("[D.L. CLI] You have used all {n} tool rounds for this request, so tools are off now. Do not call "
                  "a tool. In one short paragraph tell the user what is done, what is not done yet, and what you "
                  "would do next. The user can type /continue to let you go on.")
@@ -2982,6 +3007,16 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
     if registry is not None and registry.active:
         registry.route((session_context or {}).get("user_text") or "")
     active_tools = get_active_tools(current_ws, mode=mode, registry=registry)
+    # small talk ("hello Ray", "introduce yourself"): a tool call is answered, not run.  Introductions turned on
+    # ray_identity or called get_engine_status, get_system_health or local_wiki in 6-7 of 10 bench runs whatever the
+    # persona said, and a server turned on changes the tool list, so the whole prompt is read again (2026-10-29).
+    # The tools stay in the request (tool_choice "none" would drop them and break the cached prefix the same way).
+    small_talk = (dl_effort is not None and os.environ.get("DL_SMALLTALK_GUARD", "1") != "0"
+                  and dl_effort.is_small_talk((session_context or {}).get("user_text") or "",
+                                              voice=bool((session_context or {}).get("voice")),
+                                              last_reply=next((m.get("content") or "" for m in reversed(messages)
+                                                               if m.get("role") == "assistant"
+                                                               and isinstance(m.get("content"), str)), "")))
 
     def refresh_memory(msgs: list[dict]) -> None:
         # the start of a request and right after a trim: the only moments the prompt prefix may change
@@ -3130,15 +3165,23 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                                if res.get("finish_reason") == "length" or len(raw_args or "") > 4000 else "."))
 
             if emit:
-                emit({"type": "tool_call", "id": tc.get("id"), "name": fn_name, "args": args})
+                emit({"type": "tool_call", "id": tc.get("id"), "name": fn_name, "args": args,
+                      **({"skipped": "small talk"} if small_talk else {})})
             else:
                 print(f"{C_ACCENT}◆{C_RESET} {C_INK_SOFT}[Tool]{C_RESET} {C_BOLD}{fn_name}{C_RESET}({C_MUTED}{format_args_preview(args)}{C_RESET})")
 
-            if not bad_args:
+            if not bad_args and not small_talk:
                 finish["changes"].before_tool(fn_name, args)
-            before = scan_workspace(current_ws) if alarm and not bad_args and fn_name in WRITE_TOOLS else None
-            result_str = bad_args or dispatch_dl_tool(fn_name, args, current_ws, mode=mode,
-                                                      session_context=session_context)
+            before = (scan_workspace(current_ws) if alarm and not bad_args and not small_talk and fn_name in WRITE_TOOLS
+                      else None)
+            if small_talk:
+                if not finish.get("small_talk_noted"):
+                    finish["small_talk_noted"] = True
+                    _note(emit, "Small talk: a tool call was answered, not run (DL_SMALLTALK_GUARD=0 turns this off).")
+                result_str = SMALL_TALK_NOTE
+            else:
+                result_str = bad_args or dispatch_dl_tool(fn_name, args, current_ws, mode=mode,
+                                                          session_context=session_context)
             result_str = cap_tool_result(result_str)    # 2026-10-20 22:12: a 106k debug print ended a CONTRA run
             if before is not None:                  # did it empty, delete or halve a file?
                 after = scan_workspace(current_ws)
@@ -3173,7 +3216,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                 "name": fn_name,
                 "content": result_str
             })
-            if effort_auto and dl_effort is not None:
+            if effort_auto and dl_effort is not None and not small_talk:
                 _auto_raise(dl_effort.raise_reason(fn_name, args, result_str, seen))
 
         if cps is not None:                         # this round's changes, so the next one can be undone

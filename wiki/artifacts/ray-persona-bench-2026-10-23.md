@@ -84,7 +84,7 @@ trimmed prompts. The restored prompt has not been benchmarked: the user tests it
 
 ## Related
 
-- [Ray: Assistant Name, Female Voice and Persona](../decisions/ray-assistant-persona.md)
+- [Ray: Assistant Name, Voice and Persona](../decisions/ray-assistant-persona.md)
 
 ## Sources
 

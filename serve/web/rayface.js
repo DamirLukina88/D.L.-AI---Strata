@@ -1,5 +1,5 @@
 // serve/web/rayface.js - Ray as a little red panda drawn in dots, sitting at the left on the top edge of the Code tab's input box
-// while he thinks about a spoken prompt or reads a reply aloud.  There is no window around him: only his own dots are
+// while the model works or he reads a reply aloud.  There is no window around him: only his own dots are
 // drawn, and he fades in quickly and out slowly.
 //
 // A few colours only: oranges, browns, a warm white and a dark navy for the eyes and nose.  The gaps between his dots
@@ -466,7 +466,8 @@ const RayFace = (() => {
 
   // --- what the web app calls ---
 
-  // a spoken prompt is being answered: he appears in his thinking pose until he speaks (or the turn ends)
+  // the model is working (every prompt, or only spoken ones with "Show Ray thinking on every prompt" off): he appears
+  // in his thinking pose until he speaks (or the turn ends)
   function thinking() {
     if (mode === "audio" || mode === "text") return;   // already speaking
     if (mode === "think" && visible) return;           // already thinking: keep his pose going

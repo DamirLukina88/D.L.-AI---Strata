@@ -694,7 +694,7 @@ class Session:
                "effort_auto": effort_auto,
                "reasoning_budget_tokens": resolved_budget,
                "emit": self.emit, "cancel": self.cancel, "approve": self.approve, "mcp": self.mcp, "user_text": prompt,
-               "session": self}
+               "voice": voice, "session": self}
         new_ws = cli.execute_agent_loop(messages=self.messages, url=cli.DEFAULT_URL, api_key=cli.DEFAULT_API_KEY,
                                         workspace=self.workspace, mode=self.mode,
                                         session_context=ctx)

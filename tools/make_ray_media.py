@@ -265,7 +265,7 @@ def main() -> int:
     d.text((x, 190), "Ray", fill=TEXT, font=font(120, bold=True))
     d.text((x, 345), "The household's little red panda", fill=(244, 164, 110), font=font(36))
     d.text((x, 395), "and private AI assistant.", fill=(244, 164, 110), font=font(36))
-    d.text((x, 470), "One PC, no cloud. Built on Strata.", fill=MUTED, font=font(28))
+    d.text((x, 470), "One PC, a local model. Built on Strata.", fill=MUTED, font=font(28))
     soc.save(OUT / "social.png", optimize=True)
 
     print("wrote", ", ".join(sorted(p.name for p in OUT.iterdir())), "in", OUT.relative_to(ROOT))

@@ -1200,7 +1200,7 @@ body.is-resizing .view { pointer-events: none; }      /* the drag keeps going ov
 .cs-edit-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; flex-wrap: wrap; }
 
 /* Ray (web/rayface.js): a little red panda drawn in dots, with nothing around him, sitting at the left on the top edge
-   of the input box while he thinks about a spoken prompt or reads a reply aloud. Quick in, slow out. */
+   of the input box while the model works or he reads a reply aloud. Quick in, slow out. */
 .ray-face {
   position: absolute;
   left: 14px;

@@ -508,7 +508,8 @@ def drive(live: Live, text: str, ws: Path, timeout: float, nudge: bool = False,
         if t == "turn_end":
             break
         if t == "tool_call":
-            rec["tool_calls"].append({"name": ev.get("name", ""), "args": ev.get("args") or {}})
+            rec["tool_calls"].append({"name": ev.get("name", ""), "args": ev.get("args") or {},
+                                      **({"skipped": ev["skipped"]} if ev.get("skipped") else {})})
             texts = []
         elif t == "tool_result":
             rec["tool_results"].append({"name": ev.get("name", ""), "text": ev.get("text", "")[:2000]})

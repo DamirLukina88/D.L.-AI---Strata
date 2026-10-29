@@ -146,6 +146,22 @@ class TestDlEffortPick(unittest.TestCase):
         self.assertEqual(dl_effort.pick("Hi Ray, turn on the living room lights"), ("none", "home command"))
 
 
+class TestDlEffortSmallTalkGuard(unittest.TestCase):
+    """is_small_talk: only greetings and talk about Ray, never a request after a greeting (the guard skips tools)."""
+
+    def test_small_talk(self):
+        for t in ("Please introduce yourself.", "hello Rey, how are you", "Wray, what can you do?",
+                  "Hello Ring, introduce yourself to my friend.", "Who are you and what you do?", "Good evening.",
+                  "Hello Ray introduce yourself to my friend Nikolayna please.", "thanks Ray", "hi"):
+            self.assertTrue(dl_effort.is_small_talk(t), t)
+
+    def test_requests_are_not(self):
+        for t in ("Hello Ray, please check the printer", "hi Ray, what's the weather tomorrow?", "hello, read the README",
+                  "Hey Ray, turn on the lights", "Hi Ray, send me the report", "What time is it?",
+                  "Is the 3D printer printing anything right now?", "hello, fix the failing test in app.py"):
+            self.assertFalse(dl_effort.is_small_talk(t), t)
+
+
 class TestDlEffortRaiseReason(unittest.TestCase):
     def test_tool_error(self):
         seen = set()

@@ -49,6 +49,25 @@ BUDGET_TIERS: dict[str, int] = {
 }
 
 
+# what may be left of a small-talk prompt besides the greetings, phrases and Ray's names ("to my friend Nikolayna please")
+SMALL_TALK_FILLER = frozenset("please to my friend friends and you your me us there again today all everyone nice meet "
+                              "so oh ok okay the a what do doing up is it going".split())
+
+
+def is_small_talk(prompt: str, *, voice: bool = False, last_reply: str = "") -> bool:
+    """Small talk and nothing else, for the coding agent's small-talk guard: pick() says small talk, and once the
+    greetings, small-talk phrases, Ray's names and filler words are taken out, at most one word is left (a friend's
+    name, or "Ring" for Ray).  "Hello Ray, check the printer" is small talk to pick() (for the thinking level) but a
+    request here, so its tools still run."""
+    if pick(prompt, voice=voice, last_reply=last_reply, semantic=False)[1] != "small talk":
+        return False
+    rest = (prompt or "").lower()
+    for phrase in sorted(SMALL_TALK, key=len, reverse=True):
+        rest = re.sub(rf"\b{re.escape(phrase)}\b", " ", rest)
+    left = [w for w in re.findall(r"[^\W\d_]+(?:'[^\W\d_]+)?", rest) if w not in RAY_NAMES and w not in SMALL_TALK_FILLER]
+    return len(left) <= 1
+
+
 def budget_for(level: str, custom_caps: dict[str, int] | None = None) -> int:
     """Return maximum thinking tokens allocated for this effort level (0: no budget / uncapped)."""
     caps = custom_caps if custom_caps is not None else BUDGET_TIERS

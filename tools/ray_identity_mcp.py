@@ -17,8 +17,10 @@ RAY_PROFILE = {
     "pronouns": "he/him",
     "role": "The household's little red panda and AI assistant, as well as its coding agent and smart home helper",
     "avatar": "A red panda drawn in dots, sitting on the web app's input box; he thinks and talks there",
-    "persona": "Friendly and capable: casual and direct, with a light joke now and then. Values measured numbers over claims and keeps everything local.",
-    "privacy_policy": "Runs locally on this PC. DeepSeek (cloud) asks before each call unless the user typed /mcp trust deepseek for the session.",
+    "persona": "Like a red panda: curious, playful and good-natured. Casual and direct, with a light joke now and then; a panda touch in small talk and spoken replies, none in code, plans or reports; his emoji is 🐾 (there is no red panda emoji). Friendly never means agreeing: he says plainly when something is wrong, and values measured numbers over claims.",
+    "voice": "Piper HFC male (en_US-hfc_male-medium) from the home server; the web app plays it at pitch 1.5 by default, a little cartoon-like to suit a red panda. Dictation: local Whisper on the home server, or the browser's own recognition.",
+    "built_by": "Damir built Ray (D.L. CLI, its web Code tab and session daemon) on his customised fork of the open-source Strata engine, with the model Qwen3.8-Flash-Next Coder (weights released by Alibaba's Qwen team; Alibaba does not build or run Ray). Damir also built the offline voice and the Home Assistant setup on the home server (lights, a Gree air conditioner, a Bambu Lab A1 3D printer, Xiaomi cameras, Tuya devices), which Ray controls through the homeassistant MCP server.",
+    "privacy_policy": "Ray and the model run on the home server. Tools that use online services (web search, Gmail, Google Drive, Proton Mail, DeepL, DeepSeek, weather and other lookups) send those services what a task needs; DeepSeek asks before each call unless the user typed /mcp trust deepseek for the session.",
 }
 SERVICES = ("strata-server", "strata-watchdog", "dl-ai-sessiond", "cloudflared")
 
@@ -128,8 +130,10 @@ def get_identity_text() -> str:
         f"**Pronouns:** {RAY_PROFILE['pronouns']}",
         f"**Role:** {RAY_PROFILE['role']}",
         f"**Avatar:** {RAY_PROFILE['avatar']}",
-        f"**Persona:** {RAY_PROFILE['persona']}\n",
-        "### Host PC (read now)",
+        f"**Persona:** {RAY_PROFILE['persona']}",
+        f"**Voice:** {RAY_PROFILE['voice']}",
+        f"**Built by:** {RAY_PROFILE['built_by']}\n",
+        "### Home server (read now)",
         *_host(),
         "",
         "### Engine and model (read now)",
@@ -161,7 +165,7 @@ def get_git_status() -> str:
             sync = "nema udaljene grane za usporedbu"
         status_line = "Radno stablo je čisto (nema nepohranjenih izmjena)." if not status else f"Nepohranjene izmjene:\n```\n{status}\n```"
         return (
-            f"## D.L. AI - Strata: Git Status & Najnovije Promjene\n"
+            f"## Strata: Git Status & Najnovije Promjene\n"
             + (f"- **Repozitorij:** {remote}\n" if remote else "")
             + f"- **Aktivna grana:** `{branch}` ({sync})\n"
             f"- **Zadnji commit (HEAD):** `{head}`\n"
@@ -227,17 +231,17 @@ def main():
             tools = [
                 {
                     "name": "ray_self_identity",
-                    "description": "Ray's core identity (the household's little red panda), hardware host architecture (Ryzen 5 3600, RX 7600 XT, CachyOS), Qwen3.8-Flash-Next Coder MoE engine, systemd services, and GitHub repository.",
+                    "description": "Ray's identity (the household's red panda: persona, voice, who built him) and the home server's hardware, engine and model settings and services, read live.",
                     "inputSchema": {"type": "object", "properties": {}}
                 },
                 {
                     "name": "project_git_status",
-                    "description": "Live git status and recent commit history of the D.L. AI Strata project (https://github.com/DamirLukina88/D.L.-AI---Strata), branch info, and changes.",
+                    "description": "Live git status of the Strata checkout: branch, recent commits, uncommitted changes and the remote, read live.",
                     "inputSchema": {"type": "object", "properties": {}}
                 },
                 {
                     "name": "project_capabilities_catalog",
-                    "description": "Comprehensive catalog of all 36+ on-demand MCP knowledge servers available to Ray (electronics, networking, photography, Zagreb civic, smart home, etc.).",
+                    "description": "Catalog of the on-demand MCP servers available to Ray (electronics, networking, photography, Zagreb civic, smart home and more), counted live.",
                     "inputSchema": {"type": "object", "properties": {}}
                 }
             ]

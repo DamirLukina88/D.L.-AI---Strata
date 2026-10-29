@@ -133,6 +133,19 @@ class Memory(unittest.TestCase):
         (self.ws / "AGENTS.md").write_text("y" * 20000)
         self.assertIn("more chars - view_file AGENTS.md", cli.build_dl_system_prompt(self.ws, "act"))
 
+    def test_persona_switch(self):
+        os.environ.pop("DL_PERSONA", None)
+        full = cli.build_dl_system_prompt(self.ws, "act")
+        self.assertIn(cli.RAY_ABOUT, full)
+        os.environ["DL_PERSONA"] = "minimal"
+        try:
+            minimal = cli.build_dl_system_prompt(self.ws, "act")
+        finally:
+            os.environ.pop("DL_PERSONA")
+        self.assertNotIn(cli.RAY_ABOUT, minimal)
+        self.assertIn("You run on the home server.", minimal)
+        self.assertEqual(full, cli.build_dl_system_prompt(self.ws, "act"))   # unset again: the same bytes
+
     def test_no_memory_files_no_section(self):
         self.assertNotIn("<project_memory>", cli.build_dl_system_prompt(self.ws, "act"))
 

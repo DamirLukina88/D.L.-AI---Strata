@@ -3,7 +3,7 @@
 <h1 align="center">Ray</h1>
 
 <p align="center"><b>The household's little red panda: a private AI assistant and coding agent built on <a href="https://github.com/Niko1221/Strata">Strata</a></b><br>
-One desktop PC, no cloud model, nothing sent anywhere. Your own model, your own rules.</p>
+One desktop PC, no cloud model. Your own model, your own rules.</p>
 
 Ray is the household's little red panda and AI assistant, and he runs entirely on one desktop PC: the 125-billion-parameter Qwen3.8-Flash-Next
 Coder model on an AMD RX 7600 XT with 16 GB, plus 32 GB of system RAM. This fork, by
@@ -317,8 +317,10 @@ Separate from Ray, Strata has its own MCP server for installing and running the 
 - **No secrets in the repository.** Keys live in `~/.config/dl-ai/secrets.env`, and the pre-commit hook blocks a
   commit that contains one. It also blocks added lines that carry this machine's home path, the folder the checkout
   sits in, or the profile's email address; it reads those at run time, so the hook names none of them.
-- **Cloud calls ask first.** DeepSeek is the only tool that sends your text off the PC, and it asks on a card before
-  every call unless you typed `/mcp trust deepseek` for the session.
+- **What goes online.** The model and its thinking stay on the PC. Tools that use online services send those services
+  what a task needs: web search, Gmail, Google Drive, Proton Mail, DeepL, DeepSeek, and lookups such as weather or
+  Wikipedia. DeepSeek, which gets your text for cloud reasoning, asks on a card before every call unless you typed
+  `/mcp trust deepseek` for the session.
 - **Browser requests** need a valid Cloudflare Access token (signature, issuer, audience and expiry are checked)
   or the API key. Keys are never accepted in URLs.
 - **The session daemon** listens only on a Unix socket in your runtime directory (mode 600).

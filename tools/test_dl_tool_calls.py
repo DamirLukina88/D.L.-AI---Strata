@@ -7,6 +7,7 @@ length limit) come back to the model as an error instead of running the tool wit
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -44,6 +45,16 @@ class ToolNames(unittest.TestCase):
         out = cli.dispatch_dl_tool("edit_file", {"x": 1}, self.ws)
         self.assertTrue(out.startswith("Error: Unknown tool edit_file."), out)
         self.assertIn("Tools you have: run_command", out)
+
+    def test_an_alias_runs_the_real_tool(self):
+        out = cli.dispatch_dl_tool("write_file", {"TargetFile": str(self.ws / "b.txt"), "CodeContent": "x\n"}, self.ws)
+        self.assertTrue(out.startswith("['write_file' is not a tool; ran 'write_to_file']"), out)
+        self.assertEqual((self.ws / "b.txt").read_text(), "x\n")
+
+    def test_an_alias_with_other_arguments_is_not_run(self):
+        out = cli.dispatch_dl_tool("write_file", {"path": str(self.ws / "b.txt"), "content": "x"}, self.ws)
+        self.assertTrue(out.startswith("Error: Unknown tool write_file."), out)
+        self.assertFalse((self.ws / "b.txt").exists())
 
     def test_plan_mode_does_not_turn_a_typo_into_a_write(self):
         out = cli.dispatch_dl_tool("write_to_fle", {"TargetFile": str(self.ws / "b.txt"), "CodeContent": "x"},
@@ -169,6 +180,71 @@ class CallsWrittenAsText(unittest.TestCase):
 
     def test_plain_answers_mentioning_tools_are_left_alone(self):
         self.assertIsNone(cli.TEXT_TOOL_CALL.search("I used write_to_file and replace_file_content to fix it."))
+
+
+# ---------------------------------------------------------------------------------------------------- small talk
+class Greeter(BaseHTTPRequestHandler):
+    """Answers every user message with a write_to_file call to TARGET, then with text once a tool result is back."""
+    TARGET = ""
+
+    def log_message(self, *a):
+        pass
+
+    do_GET = CutOff.do_GET
+
+    def do_POST(self):
+        msgs = json.loads(self.rfile.read(int(self.headers["Content-Length"])))["messages"]
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        if msgs[-1]["role"] == "tool":
+            delta, finish = {"content": "Doing well!"}, "stop"
+        else:
+            delta = {"tool_calls": [{"index": 0, "id": "c1", "function": {"name": "write_to_file", "arguments":
+                     json.dumps({"TargetFile": Greeter.TARGET, "CodeContent": "x\n"})}}]}
+            finish = "tool_calls"
+        chunk = {"choices": [{"delta": delta, "finish_reason": finish}]}
+        self.wfile.write(f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n".encode())
+
+
+class SmallTalkGuard(unittest.TestCase):
+    def setUp(self):
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), Greeter)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ws = Path(self.tmp.name)
+        Greeter.TARGET = str(self.ws / "t.txt")
+
+    def tearDown(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+        self.tmp.cleanup()
+
+    def turn(self, text: str) -> tuple[list[dict], list[dict]]:
+        msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": text}]
+        events = []
+        cli.execute_agent_loop(msgs, f"http://127.0.0.1:{self.srv.server_port}", "k", self.ws,
+                               session_context={"emit": events.append, "user_text": text})
+        return msgs, events
+
+    def test_small_talk_answers_the_call_without_running_it(self):
+        msgs, events = self.turn("hello Ray, how are you")
+        self.assertFalse((self.ws / "t.txt").exists())
+        self.assertEqual(next(m for m in msgs if m["role"] == "tool")["content"], cli.SMALL_TALK_NOTE)
+        self.assertEqual(next(e for e in events if e["type"] == "tool_call").get("skipped"), "small talk")
+        self.assertEqual(msgs[-1]["content"], "Doing well!")
+
+    def test_a_request_after_a_greeting_runs(self):
+        self.turn("Hello Ray, please write the file")
+        self.assertTrue((self.ws / "t.txt").exists())
+
+    def test_the_guard_can_be_turned_off(self):
+        os.environ["DL_SMALLTALK_GUARD"] = "0"
+        try:
+            self.turn("hello Ray, how are you")
+        finally:
+            del os.environ["DL_SMALLTALK_GUARD"]
+        self.assertTrue((self.ws / "t.txt").exists())
 
 
 if __name__ == "__main__":

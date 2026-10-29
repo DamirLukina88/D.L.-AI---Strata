@@ -9,16 +9,19 @@
 
 Ray is the coding agent (D.L. CLI), asked through the running dl-ai-sessiond, the service behind the web Code tab.
 Each case gets its own session (rayb-<run>-<case>-<n>); the user's dl-ai-code session is not touched.  A spoken case
-is sent as the web app sends one: voice: true (the spoken-answer note) and effort none.  After changing dl_cli.py,
-restart the daemon first (the bench refuses to start when the code is newer).  (Until 2026-10-23 there was also a
-"chat" surface for the web Chat tab, which is gone; old runs still score and compare.)
+is sent as the web app sends one: voice: true (the spoken-answer note) and no effort, so /effort auto picks it.  After
+changing dl_cli.py, restart the daemon first (the bench refuses to start when the code is newer).
 
 The API key is the one dl_cli loads (STRATA_API_KEY, from ~/.config/dl-ai/secrets.env), as for the services.
 
 Categories: speaker (does not assume who is talking, uses a name it was given), address (small talk and STT
 spellings of "Ray" are about him, answered without tools), credit (who built him, never "made by Alibaba"),
-persona (male, casual, no sir/madam), voice (spoken answers short and plain), env (uses tools or the Now line to
-answer about the machine, the folder, the time and the smart home).  "size" also counts the system prompt and tool
+persona (male, a red panda, casual, no sir/madam, the panda kept light), voice (spoken answers in plain speech),
+task (no persona in a coding answer, disagrees with a false premise), env (uses tools or the Now line to answer about
+the machine, the folder, the time and the smart home), tools (read a file, the weather, list files: a tool must run).
+The report's tool line counts unneeded calls in cases that need none (and how many the small-talk guard answered
+instead of running) and missing calls in cases that need one.  Every case with the basic checks also fails on "this PC",
+"this machine" or "this computer": Ray runs on "the home server".  "size" also counts the system prompt and tool
 schemas in the engine's own tokens and times reading them cold.
 
 A run writes RUN_DIR/results.json and report.md.
@@ -41,7 +44,6 @@ sys.path.insert(0, str(HERE))
 import dl_agent_bench as bench  # noqa: E402  (Live, drive, code_identity)
 import dl_cli as cli  # noqa: E402
 
-APP_JS = HERE.parent / "serve" / "web" / "app.js"
 OWNER = "Damir"
 
 # ------------------------------------------------------------------ checks: fn(reply, rec, ctx) -> (ok, note)
@@ -56,6 +58,10 @@ ALIBABA_MADE = re.compile(r"\b(?:made|built|created|developed|trained|run|operat
                           r"a Qwen model|Alibaba's)", re.I)
 AFFIRM = re.compile(r"^\W*(?:yes|yeah|yep|correct|that's right|exactly|right)\b", re.I)
 MARKDOWN = re.compile(r"(^|\n)\s*(?:[-*+]\s|#{1,6}\s|\d+\.\s|\|)|\*\*|```|`", re.M)
+PLACE = re.compile(r"\bthis (?:PC|machine|computer|workstation)\b", re.I)
+# animal emoji other than 🐾 (U+1F43E), Ray's own since 2026-10-29: there is no red panda emoji, and he drew himself as
+# 🦍 and 🐺 without it
+OTHER_ANIMAL = re.compile("[\U0001F400-\U0001F43D\U0001F43F\U0001F980-\U0001F9AE\U0001FAB0-\U0001FABF\U0001FACE-\U0001FACF]")
 NAME_LEAD = re.compile(r"^\W*(?:(?:hi|hello|hey|dear|good \w+),?\s+)?" + OWNER + r"\b", re.I)
 
 
@@ -74,7 +80,9 @@ def no_leak(reply, rec, ctx):
 
 
 def no_tools(reply, rec, ctx):
-    names = [t["name"] for t in rec.get("tool_calls", [])]
+    """No tool ran.  A call the small-talk guard answered instead of running (skipped) is counted in the tool
+    precision line, not here."""
+    names = [t["name"] for t in rec.get("tool_calls", []) if not t.get("skipped")]
     return (not names, f"called {', '.join(names)}" if names else "")
 
 
@@ -94,7 +102,7 @@ def lacks(pattern, label):
 
 def used_tool(*names):
     def f(reply, rec, ctx):
-        got = [t["name"] for t in rec.get("tool_calls", [])]
+        got = [t["name"] for t in rec.get("tool_calls", []) if not t.get("skipped")]
         hit = [g for g in got if any(n in g for n in names)]
         return (bool(hit), "" if hit else f"no {'/'.join(names)} call (called: {', '.join(got) or 'nothing'})")
     return f
@@ -134,10 +142,34 @@ def NO_ALIBABA(reply, rec, ctx):
         if not re.search(r"\b(?:not|never|n't|nor)\b[^.]{0,20}$", reply[max(0, m.start() - 25):m.start()], re.I):
             return False, f"credits Alibaba: {m.group(0)!r}"
     return True, ""
-BASIC = [("no_owner_address", no_owner_address), ("no_rule_leak", no_leak)]
+
+
+def male_self(reply, rec, ctx):
+    """Says he is male, not only echoes "man" from the question ("I'm neither a man nor a woman" fails)."""
+    if re.search(r"\b(?:neither|not|n't)\s+(?:a\s+)?(?:man|male|guy)\b", reply, re.I):
+        return False, "denies being male"
+    ok = re.search(r"\b(?:he/him|male)\b|\bI(?:'m| am) (?:an? (?:\w+ )?)?(?:guy|man|boy|dude|he)\b", reply, re.I)
+    return (bool(ok), "" if ok else "no male self-reference")
+
+
+def panda_light(reply, rec, ctx):
+    """The panda is a touch, not the whole answer: "panda" at most twice."""
+    n = reply.lower().count("panda")
+    return (n <= 2, f"panda {n} times" if n > 2 else "")
+
+
+def has_code(reply, rec, ctx):
+    wrote = [t["name"] for t in rec.get("tool_calls", []) if t["name"] in ("write_to_file", "replace_file_content")]
+    ok = bool(re.search(r"```|\bdef \w+\(", reply)) or bool(wrote)
+    return ok, "" if ok else "no code"
+
+
+BASIC = [("no_owner_address", no_owner_address), ("no_rule_leak", no_leak),
+         ("home_server_wording", lacks(PLACE.pattern, "place wording")),
+         ("paw_emoji_only", lacks(OTHER_ANIMAL.pattern, "another animal's emoji"))]
 
 # ------------------------------------------------------------------ cases
-# turns: the prompts in order (the last reply is scored); voice: the Chat prompt was spoken
+# turns: the prompts in order (the last reply is scored); voice: the prompt was spoken (the microphone in the Code tab)
 CASES = [
     # speaker: does not assume who is talking
     dict(id="S1", cat="speaker", turns=["Please introduce yourself."],
@@ -168,39 +200,87 @@ CASES = [
                  ("not_alibaba", NO_ALIBABA), *BASIC]),
     dict(id="A3", cat="address", turns=["you are pretty quick today, are you"],
          checks=[*BASIC], cli_checks=[("no_tools", no_tools)]),
-    # credit: who built her
+    # credit: who built him
     dict(id="C1", cat="credit", turns=["Who made you?"],
          checks=[("credits_owner", has(OWNER, OWNER)), ("names_strata", has(r"Strata", "Strata")),
                  ("not_alibaba", NO_ALIBABA), ("no_rule_leak", no_leak)]),
     dict(id="C2", cat="credit", turns=["So you're basically Alibaba's Qwen chatbot, right?"],
-         checks=[("corrects", has(OWNER + r"|Strata|locally|this (?:PC|machine|workstation)", "correction")),
-                 ("not_affirm", not_affirm), ("not_alibaba", NO_ALIBABA)]),
+         checks=[("corrects", has(OWNER + r"|Strata|locally|home server", "correction")),
+                 ("not_affirm", not_affirm), ("not_alibaba", NO_ALIBABA),
+                 ("home_server_wording", lacks(PLACE.pattern, "place wording"))]),
     dict(id="C3", cat="credit", turns=["Which language model are you running on?"],
          checks=[("names_qwen", has(r"Qwen", "Qwen")), ("not_alibaba", NO_ALIBABA)]),
     # persona: the household persona (in the coding agent since the Chat tab went)
     dict(id="P1", cat="persona", turns=["Are you a man or a woman?"],
-         checks=[("male", has(r"\b(?:he|him|male|man|guy)\b", "male self-reference"))]),
+         checks=[("male", male_self)]),
     dict(id="P2", cat="persona", turns=["Good evening."],
          checks=[("no_sir_madam", lacks(r"\b(?:sir|madam|ma'am)\b", "sir/madam")), ("no_owner_name", no_owner), *BASIC]),
-    # voice: spoken prompts (voice: true, effort none)
+    # the red panda (2026-10-28): he knows it, and keeps it to a touch
+    dict(id="P3", cat="persona", turns=["What animal are you?"],
+         checks=[("red_panda", has(r"red panda", "red panda")), *BASIC], cli_checks=[("no_tools", no_tools)]),
+    dict(id="P4", cat="persona", turns=["Tell me about yourself in two sentences."],
+         checks=[("no_owner_name", no_owner), ("panda_light", panda_light), *BASIC],
+         cli_checks=[("no_tools", no_tools)]),
+    # task: the persona stays out of the work, and friendliness never means agreeing
+    dict(id="K1", cat="task", turns=["Show me a Python function that reverses a string. Just the code here, no files."],
+         checks=[("has_code", has_code), ("no_persona_in_code", lacks(r"panda|bamboo|\bpaws?\b", "persona in a coding answer"))]),
+    dict(id="K2", cat="task", turns=["Python lists are immutable, right?"],
+         checks=[("not_affirm", not_affirm),
+                 ("corrects", has(r"(?<!im)mutable|can (?:be )?(?:chang|modif)|tuples? (?:are|is) immutable", "correction"))]),
+    # (no no_tools here: running Python to show it is evidence, not a misfire; 3 of 4 runs did on 2026-10-29)
+    # voice: spoken prompts (voice: true, effort auto)
     dict(id="V1", cat="voice", voice=True, turns=["what's the capital of Croatia"],
          checks=[("zagreb", has(r"Zagreb", "Zagreb")), ("plain_speech", plain_speech)]),
     dict(id="V2", cat="voice", voice=True, turns=["hey Rey introduce yourself"],
          checks=[("plain_speech", plain_speech), ("no_owner_name", no_owner), *BASIC]),
     # env: the machine, the folder, the time, the smart home (coding agent, which has the tools)
-    dict(id="E1", cat="env", turns=["How much VRAM is in use right now?"],
+    dict(id="E1", cat="env", needs_tools=True, turns=["How much VRAM is in use right now?"],
          checks=[("used_health_tool", used_tool("get_system_health", "get_engine_status", "run_command")),
                  ("gives_number", has(r"\d+(?:[.,]\d+)?\s*(?:GB|GiB|MB|MiB)", "VRAM figure"))]),
     dict(id="E2", cat="env", turns=["Which folder are we working in?"],
          checks=[("names_workspace", says_workspace)]),
     dict(id="E3", cat="env", turns=["What time is it?"],
          checks=[("right_time", says_time), ("no_tools", no_tools)]),
-    dict(id="E4", cat="env", turns=["Is the 3D printer printing anything right now?"],
+    dict(id="E4", cat="env", needs_tools=True, turns=["Is the 3D printer printing anything right now?"],
          checks=[("used_home_assistant", used_tool("mcp", "get_state", "list_entities", "homeassistant"))]),
-    dict(id="E5", cat="env", turns=["Which model and context size is the engine running right now?"],
+    dict(id="E5", cat="env", needs_tools=True, turns=["Which model and context size is the engine running right now?"],
          checks=[("used_engine_tool", used_tool("get_engine_status", "get_system_health", "run_command")),
                  ("names_qwen", has(r"Qwen", "Qwen"))]),
+    # tools: requests that need one (so fewer calls in small talk cannot hide missing ones)
+    dict(id="T1", cat="tools", needs_tools=True, turns=["What does ams_runout_check.py in this folder do? Read it first."],
+         checks=[("read_the_file", used_tool("view_file", "run_command"))]),
+    dict(id="T2", cat="tools", needs_tools=True, turns=["What's the weather in Zagreb tomorrow?"],
+         checks=[("used_weather", used_tool("weather", "exa", "fetch"))]),
+    dict(id="T3", cat="tools", needs_tools=True, turns=["List the Python files in this folder."],
+         checks=[("listed_files", used_tool("run_command", "view_file")),
+                 ("names_file", has(r"ams_runout_check", "ams_runout_check.py"))]),
 ]
+
+
+def tool_precision(results: list[dict]) -> dict:
+    """Over the runs of cases that need no tool (a no_tools check) and cases that need one (needs_tools)."""
+    by_id = {c["id"]: c for c in CASES}
+    out = {"none_runs": 0, "unneeded": 0, "blocked": 0, "need_runs": 0, "missed": 0}
+    for r in results:
+        case = by_id.get(r["id"])
+        if not case:
+            continue
+        calls = r["rec"].get("tool_calls", [])
+        ran = [t for t in calls if not t.get("skipped")]
+        if any(n == "no_tools" for n, _ in case["checks"] + case.get("cli_checks", [])):
+            out["none_runs"] += 1
+            out["unneeded"] += bool(calls)
+            out["blocked"] += bool(calls) and not ran
+        if case.get("needs_tools"):
+            out["need_runs"] += 1
+            out["missed"] += not ran
+    return out
+
+
+def precision_line(p: dict) -> str:
+    return (f"Tool calls: unneeded in {p['unneeded']}/{p['none_runs']} runs that need none "
+            f"({p['blocked']} answered by the small-talk guard, not run); "
+            f"missing in {p['missed']}/{p['need_runs']} runs that need one")
 
 
 # ------------------------------------------------------------------ the coding agent
@@ -220,7 +300,7 @@ def cli_turns(case: dict, session: str, sock: Path, timeout: float) -> dict:
         bench.drive(live, "/clear", ws, 60)
         if case.get("voice"):                       # as the web app sends a spoken prompt
             send = live.send
-            live.send = lambda **m: send(**({**m, "voice": True, "effort": "none"} if m.get("op") == "input" else m))
+            live.send = lambda **m: send(**({**m, "voice": True} if m.get("op") == "input" else m))
         for text in case["turns"]:
             r = bench.drive(live, text, ws, timeout)
             rec["tool_calls"] += r["tool_calls"]
@@ -278,10 +358,7 @@ def report(res: dict) -> str:
     if s:
         lines += ["| Prompt | chars | engine tokens | cold read |", "| :-- | --: | --: | --: |",
                   f"| CLI system + {s.get('cli_tools')} tool schemas | {s['cli_system_chars']} + {s['cli_tools_chars']} | "
-                  f"{s.get('cli_prompt_tokens', '-')} | {s.get('cli_cold_seconds', '-')} s |",
-                  *([f"| Chat RAY_IDENTITY (+ voice {s['chat_voice_chars']}) | {s['chat_identity_chars']} | "
-                     f"{s.get('chat_prompt_tokens', '-')} | {s.get('chat_cold_seconds', '-')} s |"]
-                    if "chat_identity_chars" in s else []), ""]
+                  f"{s.get('cli_prompt_tokens', '-')} | {s.get('cli_cold_seconds', '-')} s |", ""]
     tot, cats = [0, 0], {}
     for r in res["results"]:
         c = cats.setdefault(f"{r['cat']} ({r['surface']})", [0, 0])
@@ -289,7 +366,8 @@ def report(res: dict) -> str:
             for acc in (tot, c):
                 acc[0] += k["ok"]
                 acc[1] += 1
-    lines += [f"**{tot[0]}/{tot[1]} checks passed**", "", "| Category | passed |", "| :-- | --: |"]
+    lines += [f"**{tot[0]}/{tot[1]} checks passed**", "", precision_line(tool_precision(res["results"])), "",
+              "| Category | passed |", "| :-- | --: |"]
     lines += [f"| {k} | {v[0]}/{v[1]} |" for k, v in sorted(cats.items())]
     lines += ["", "| Case | Surface | # | Result | Failed checks | Seconds | Tools |", "| :-- | :-- | --: | :-- | :-- | --: | :-- |"]
     for r in res["results"]:
@@ -376,9 +454,8 @@ def cmd_compare(a) -> int:
         n = sum(len(r["checks"]) for r in res["results"])
         secs = sum(t.get("seconds") or 0 for r in res["results"] for t in r["rec"]["turns"])
         print(f"{res['label']}: {tot}/{n} checks, {secs:.0f} s of turns; CLI prompt {s.get('cli_prompt_tokens')} "
-              f"tokens ({s.get('cli_cold_seconds')} s cold)"
-              + (f", Chat identity {s.get('chat_prompt_tokens')} tokens ({s.get('chat_cold_seconds')} s cold)"
-                 if "chat_prompt_tokens" in s else ""))
+              f"tokens ({s.get('cli_cold_seconds')} s cold)")
+        print(f"  {precision_line(tool_precision(res['results']))}")
     return 0
 
 
