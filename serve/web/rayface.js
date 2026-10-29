@@ -17,6 +17,9 @@
 //     white mug of hot chocolate appears beside him on the input box; he holds it in both paws and sips with closed eyes,
 //     in one of four styles picked at random (never the same twice running): classic, slow savour, too hot, sips while
 //     thinking.  Speech or the answer arriving takes the mug away at once
+//   - on a long task (30 s into the turn, or 6 tool calls) he works at something, picked at random for each round from
+//     what fits the work (weights in POOLS): a blueprint, calipers on a printed cube, a notepad of equations, a Rubik's
+//     cube.  The newest kind of work counts; there is only ever one prop, and a round always finishes before the next
 // Server voice (Web Audio): the motion follows the voice's loudness, read about 50 ms before it is heard
 // (TTSController delays the output).  Browser voice: a loudness estimated from the text.  Clicking stops (onStop).
 "use strict";
@@ -28,7 +31,7 @@ const RayFace = (() => {
     rim: "rgba(56,189,248,0.45)",
     orange: "#e8834e", light: "#f4a46e", shade: "#c8673a", paw: "#9a6038", brown: "#7a4a2e", dark: "#4a2c1d",
     white: "#f6efe4", navy: "#17213b", blush: "#e9967a", edge: "#3a2216",
-    cocoa: "#5a3220", mugShade: "#d8c9b6", mugRim: "#fffaf2", mugHi: "#ffffff",
+    cocoa: "#5a3220", mugShade: "#d8c9b6", mugRim: "#fffaf2", mugHi: "#ffffff", tongue: "#f08a9a",
   };
 
   // moods: eye size, happy squint (0-1), ear lift (+ up, - droop), head tilt, gaze; used at 60% and held 2 s
@@ -73,7 +76,7 @@ const RayFace = (() => {
   //   for the usual arms)
   const newPose = () => ({dy: 0, rot: 0, sx: 1, sy: 1, blink: 0, eye: 1, happy: 0.1, lookX: 0, lookY: 0,
                           ears: 0, earL: 0, earR: 0, mouth: 0, paw: 0, tilt: 0, breath: 0, tail: 0, glow: 0,
-                          cup: null, pawL: null, pawR: null});
+                          cup: null, pawL: null, pawR: null, tongue: 0, work: null});
   const inEll = (x, y, cx, cy, rx, ry) => ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2;
 
   // the head, in its own coordinates: centre (22, 14.6), chin near y 24
@@ -105,6 +108,8 @@ const RayFace = (() => {
         if (hy >= 18.9 && hy < 20 && Math.abs(Math.abs(hx - 22) - 1.5) < 0.6) return C.navy;
       }
       // white muzzle, white cheek patches at the sides, a dusky blush between eye and cheek
+      // concentration: the tip of his tongue at the corner of his mouth
+      if (s.tongue > 0.5 && inEll(hx, hy, 23.6, 20.6, 0.95, 0.8) < 1) return C.tongue;
       if (inEll(hx, hy, 22, 18.7, 5.6, 4.5) < 1) return C.white;
       for (const side of [-1, 1]) {
         if (inEll(hx, hy, 22 + side * 12.4, 18.6, 3.6, 4.2) < 1) return C.white;
@@ -152,16 +157,24 @@ const RayFace = (() => {
   // the whole panda: head (with its own nod, tilt and squash about the neck), body, arms, feet and tail
   function pandaCell(x, y, s) {
     // during a cocoa break: dark paws, then the mug, then the forearms, all in front of him
-    if (s.pawL || s.pawR || s.cup) {
+    if (s.pawL || s.pawR || s.cup || s.work) {
       for (const p of [s.pawL, s.pawR]) {
         if (!p) continue;
         const pd = inEll(x, y, p.x, p.y + s.dy * 0.3, 2.4, 2.1);
         if (pd < 1) return pd > 0.5 ? C.dark : C.brown;
       }
+      const key = Math.floor(y) * COLS + Math.floor(x), w = s.work;
+      if (w && w.front.has(key)) return w.front.get(key);           // a pencil or calipers in his paw
       const mug = mugCell(x, y, s.cup);
       if (mug) return mug;
-      const arm = (s.pawL && armCell(x, y, SH_L, s.pawL)) || (s.pawR && armCell(x, y, SH_R, s.pawR));
+      const r = w ? 1.8 : 2.2;                                       // slimmer while he works, so the work shows
+      const arm = (s.pawL && armCell(x, y, SH_L, s.pawL, r)) || (s.pawR && armCell(x, y, SH_R, s.pawR, r));
       if (arm) return arm;
+      if (w && w.prop.has(key)) return w.prop.get(key);             // a sheet, a notepad, a cube, a printed part
+      if (w && !s.pawL) {                                            // his other paw stays on his chin
+        const pd = inEll(x, y, CHIN.x, CHIN.y + 0.8 + s.dy * 0.5, 2.8, 2.2);
+        if (pd < 1) return pd > 0.6 ? C.brown : C.paw;
+      }
     }
     // the raised paw is in front of everything
     const pawX = 15.6 + s.paw * 2.6, pawY = 31.8 - s.paw * 8.8;
@@ -223,11 +236,11 @@ const RayFace = (() => {
     return null;
   }
   const SH_L = {x: 14.6, y: 29.6}, SH_R = {x: 27.4, y: 29.6};
-  function armCell(x, y, sh, p) {
+  function armCell(x, y, sh, p, r = 2.2) {
     const vx = p.x - sh.x, vy = p.y - sh.y, len2 = vx * vx + vy * vy || 1;
     const t = Math.max(0, Math.min(1, ((x - sh.x) * vx + (y - sh.y) * vy) / len2));
     const d = Math.hypot(x - sh.x - vx * t, y - sh.y - vy * t);
-    return d < 2.2 ? (d > 1.45 ? C.dark : C.paw) : null;
+    return d < r ? (d > r - 0.7 ? C.dark : C.paw) : null;
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -238,6 +251,7 @@ const RayFace = (() => {
   const CTRL = {x: 33, y: 25}, CHIN = {x: 18.2, y: 23}, PAW_R_REST = {x: 27.4, y: 31.4};
   const NEAR = {x: -5, y: 0.5}, UNDER = {x: 0.3, y: 4.8}, LEFT = {x: -5.3, y: 0.6}, RIGHT = {x: 5.3, y: 0.6};
   const ease = (t) => t * t * (3 - 2 * t);
+  const lerp = (a, b, t) => a + (b - a) * t;
   const lerpP = (p, q, t) => ({x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t});
   const add = (p, o) => ({x: p.x + o.x, y: p.y + o.y});
   const bez = (p, c, q, t) => ({x: (1 - t) ** 2 * p.x + 2 * (1 - t) * t * c.x + t * t * q.x, y: (1 - t) ** 2 * p.y + 2 * (1 - t) * t * c.y + t * t * q.y});
@@ -315,6 +329,319 @@ const RayFace = (() => {
     return out;
   }
 
+  // ---------------------------------------------------------------------------------------------------------------
+  // work on a long task.  Each activity: an intro, a core played twice, an outro, then 20 s of plain thinking, again
+  // and again while the turn runs.  frame(ph, now) gives the props as maps of whole cells, the paws, the face and the
+  // floating things (readings, a light bulb, sparkles)
+  const WORK_AFTER = 30000, WORK_TOOLS = 6, WORK_REST = 20;
+  const GLYPH = {
+    "0": ["111", "101", "101", "101", "111"], "1": ["010", "110", "010", "010", "111"], "2": ["111", "001", "111", "100", "111"],
+    "3": ["111", "001", "111", "001", "111"], "7": ["111", "001", "010", "010", "010"], "8": ["111", "101", "111", "101", "111"],
+    "9": ["111", "101", "111", "001", "111"], "x": ["000", "101", "010", "101", "000"], "+": ["000", "010", "111", "010", "000"],
+    "=": ["000", "111", "000", "111", "000"], ".": ["000", "000", "000", "000", "010"],
+  };
+  const BULB = ["..r.r..", "r.yyy.r", ".yyhyy.", ".yyyyy.", ".yyyyy.", "..yyy..", "..ggg..", "..ggg.."];
+  const clamp01 = (v) => Math.max(0, Math.min(1, v));
+  const pop = (ph) => ph.name === "pop" ? Math.min(1.15, Math.max(0, backOut(ph.p))) : ph.name === "fade" ? 1 - ph.e : 1;
+  // the dots of a text in writing order, from cell (x, y); cells along segments, in drawing order, no repeats
+  function textDots(text, x, y) {
+    const out = [];
+    [...text].forEach((ch, n) => {
+      const gl = GLYPH[ch];
+      for (let r = 0; r < 5; r++) for (let c = 0; c < 3; c++) if (gl[r][c] === "1") out.push({x: x + n * 4 + c, y: y + r});
+    });
+    return out;
+  }
+  function lineCells(segs) {
+    const out = [], seen = new Set();
+    for (const [x0, y0, x1, y1] of segs) {
+      const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) * 2 || 1;
+      for (let k = 0; k <= n; k++) {
+        const x = Math.round(x0 + (x1 - x0) * k / n), y = Math.round(y0 + (y1 - y0) * k / n);
+        if (!seen.has(y * COLS + x)) { seen.add(y * COLS + x); out.push({x, y}); }
+      }
+    }
+    return out;
+  }
+  const PENCIL_HOLD = {x: 2.3, y: -1.6};
+  function pencil(map, tip) {
+    const tx = Math.round(tip.x), ty = Math.round(tip.y);
+    map.set(ty * COLS + tx, "#334155");
+    map.set((ty - 1) * COLS + tx + 1, "#facc15");
+    map.set((ty - 2) * COLS + tx + 2, "#eab308");
+    map.set((ty - 3) * COLS + tx + 3, "#f9a8d4");
+  }
+  const blank = () => ({prop: new Map(), front: new Map(), overlay: [], face: null, pawL: null, pawR: null});
+  // the hands for a prop held from `grab` to `away`: the left paw at L, the right at R
+  function hands(F, ph, L, R) {
+    if (ph.name === "grab") { F.pawL = L && lerpP(CHIN, L, ph.e); F.pawR = lerpP(PAW_R_REST, R, ph.e); }
+    else if (ph.name === "away") { F.pawL = L && lerpP(L, CHIN, ph.e); F.pawR = lerpP(R, PAW_R_REST, ph.e); }
+    else if (ph.name !== "pop" && ph.name !== "fade") { F.pawL = L; F.pawR = R; }
+  }
+  const nod = (p) => 0.7 * Math.sin(Math.PI * 2 * Math.min(1, p * 1.5)) * (p < 0.66 ? 1 : 0);
+
+  // a blue sheet on his lap: a box with a dimension line, wiped, then a gear with its centre line
+  const SHEET = {x0: 12, x1: 30, y0: 28, y1: 38};
+  const BOX = lineCells([[15, 31, 21, 31], [21, 31, 21, 37], [21, 37, 15, 37], [15, 37, 15, 31], [15, 31, 18, 29], [18, 29, 24, 29],
+    [24, 29, 21, 31], [24, 29, 24, 35], [24, 35, 21, 37], [27, 29, 27, 35], [26, 29, 28, 29], [26, 35, 28, 35]]);
+  const GEAR = (() => {
+    const out = [], seen = new Set();
+    for (let a = -Math.PI / 2; a < Math.PI * 1.5; a += 0.04) {
+      const r = 3.4 + (Math.cos(a * 8) > 0.2 ? 1.1 : 0);
+      const x = Math.round(20 + r * Math.cos(a)), y = Math.round(33 + r * Math.sin(a) * 0.9);
+      if (!seen.has(y * COLS + x)) { seen.add(y * COLS + x); out.push({x, y}); }
+    }
+    out.push({x: 20, y: 32}, {x: 21, y: 33}, {x: 20, y: 34}, {x: 19, y: 33});                         // the shaft hole
+    for (let x = 13; x <= 28; x += 2) if (x < 15 || x > 25) out.push({x, y: 33});                     // the centre line
+    return out;
+  })();
+  const blueprint = {
+    intro: [["pop", 0.6], ["grab", 0.5]], outro: [["away", 0.5], ["fade", 0.5]],
+    core: [["draw1", 4.5], ["admire1", 1.2], ["clear1", 0.6], ["draw2", 4.2], ["admire2", 1.0], ["clear2", 0.6]],
+    frame(ph) {
+      const F = blank(), sc = pop(ph), cx = (SHEET.x0 + SHEET.x1) / 2, cy = (SHEET.y0 + SHEET.y1) / 2;
+      for (let j = SHEET.y0; j <= SHEET.y1; j++) for (let i = SHEET.x0; i <= SHEET.x1; i++) {
+        if (Math.abs(i - cx) > (SHEET.x1 - cx) * sc + 0.01 || Math.abs(j - cy) > (SHEET.y1 - cy) * sc + 0.01) continue;
+        const edge = i === SHEET.x0 || i === SHEET.x1 || j === SHEET.y0 || j === SHEET.y1;
+        F.prop.set(j * COLS + i, edge ? "#0b4a75" : (i % 3 === 0 && j % 3 === 0) ? "#2b7fb8" : "#16629a");
+      }
+      const gear = /2$/.test(ph.name), path = gear ? GEAR : BOX;
+      const n = /^draw/.test(ph.name) ? Math.floor(path.length * ph.p) : /^clear/.test(ph.name) ? Math.floor(path.length * (1 - ph.e))
+        : /^admire/.test(ph.name) ? path.length : 0;
+      for (let k = 0; k < n; k++) F.prop.set(path[k].y * COLS + path[k].x, "#e0f2fe");
+      const drawing = /^draw/.test(ph.name), tip = drawing ? path[Math.max(0, n - 1)] : {x: 24, y: 27};
+      hands(F, ph, {x: 12.6, y: 33}, add(tip, PENCIL_HOLD));
+      if (F.pawR && ph.name !== "away") pencil(F.front, tip);
+      if (drawing) F.face = {lookX: Math.max(-1, Math.min(1, (tip.x - 21) / 9)), lookY: 0.95, tongue: 1, happy: 0.1};
+      else if (/^admire/.test(ph.name)) F.face = {happy: 0.75, glow: 0.8, dy: nod(ph.p), ears: 0.3};
+      else if (ph.name !== "away" && ph.name !== "fade") F.face = {lookY: 0.9, ears: 0.3};
+      return F;
+    },
+  };
+
+  // a blue printed cube on the input box; calipers slide in, he closes the jaw on it, squints, reads 20.0, then 19.9: hmm?
+  const PART = {x0: 35, x1: 40, y0: 34, y1: 39};
+  const measure = {
+    intro: [["pop", 0.7], ["grab", 0.5]], outro: [["away", 0.5], ["fade", 0.6]],
+    core: [["open1", 0.6], ["close1", 1.1], ["squint", 0.8], ["read1", 1.4], ["open2", 0.5], ["close2", 0.8], ["read2", 1.2], ["hmm", 1.0]],
+    frame(ph) {
+      const F = blank(), sc = pop(ph), pcx = (PART.x0 + PART.x1) / 2;
+      for (let j = PART.y0; j <= PART.y1; j++) for (let i = PART.x0; i <= PART.x1; i++) {
+        if (Math.abs(i - pcx) > 3 * sc || PART.y1 - j > 6 * sc - 0.5) continue;
+        F.prop.set(j * COLS + i, j === PART.y0 ? "#7dd3fc" : i === PART.x1 ? "#0369a1" : (j % 2 ? "#38bdf8" : "#0ea5e9"));
+      }
+      // calipers: a beam on row 30, a fixed jaw at 41 and a sliding one; they slide in from the right edge and out again
+      const open = ph.name === "open1" ? 30 : 31;
+      const jx = Math.round(/^open/.test(ph.name) ? lerp(34, open, ph.e) : /^close/.test(ph.name) ? lerp(open, 34, ph.e) : 34);
+      const slide = ph.name === "pop" ? Math.round((1 - ph.e) * 14) : ph.name === "fade" ? Math.round(ph.e * 14) : 0;
+      const set = (i, j, col) => { if (i + slide < COLS) F.front.set(j * COLS + i + slide, col); };
+      for (let i = jx; i <= 44; i++) { set(i, 30, "#e2e8f0"); if (i % 2 === 0 && i > jx + 2) set(i, 29, "#94a3b8"); }
+      for (let j = 31; j <= 37; j++) { set(41, j, "#cbd5e1"); set(jx, j, "#cbd5e1"); }
+      for (let i = jx; i <= jx + 2; i++) set(i, 29, "#64748b");
+      hands(F, ph, null, {x: jx + 1.2, y: 28.2});
+      // the reading in the display blue, blinking as it comes up
+      const reading = ph.name === "read1" ? "20.0" : ph.name === "read2" || ph.name === "hmm" ? "19.9" : null;
+      if (reading && !(/^read/.test(ph.name) && ph.p < 0.3 && Math.floor(ph.p * 13) % 2)) {
+        for (const d of textDots(reading, 30, 22)) F.overlay.push({x: d.x, y: d.y, rgb: [56, 189, 248], a: 0.95});
+      }
+      if (ph.name === "hmm") {
+        const a = Math.sin(Math.PI * ph.p), oy = Math.round(4 - ph.p * 2);
+        for (let r = 0; r < 7; r++) for (let k = 0; k < 5; k++) if (QMARK[r][k] === "1") F.overlay.push({x: 39 + k, y: oy + r, rgb: [56, 189, 248], a});
+      }
+      if (ph.name === "pop" || ph.name === "grab" || /^open/.test(ph.name)) F.face = {lookX: 0.9, lookY: 0.9, ears: ph.name === "pop" ? 0.4 : 0.15};
+      else if (/^close/.test(ph.name)) F.face = {lookX: 0.9, lookY: 0.9, tongue: 1};
+      else if (ph.name === "squint") F.face = {lookX: 0.9, lookY: 0.9, happy: 0.45, eye: 0.85, tongue: 1};
+      else if (ph.name === "read1") F.face = {lookX: 0.8, lookY: 0.4, happy: ph.p > 0.4 ? 0.7 : 0.2, glow: 0.6, dy: ph.p > 0.4 ? 0.6 * Math.sin(Math.PI * 2 * (ph.p - 0.4) / 0.6) : 0};
+      else if (ph.name === "read2") F.face = {lookX: 0.8, lookY: 0.4, eye: 1.1};
+      else if (ph.name === "hmm") F.face = {lookX: 0.5, lookY: -0.3, tilt: 0.09, mouth: 0.25, ears: 0.3};
+      return F;
+    },
+  };
+
+  // a Rubik's cube at his chest: rows and columns turn until the front face is all blue, a hop and sparkles, a scramble
+  const CUBE_COLS = ["#ef4444", "#fb923c", "#facc15", "#22c55e", "#38bdf8", "#f6efe4"];
+  const CUBE = (() => {
+    let seed = 7;
+    const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280, pick = () => Math.floor(rnd() * 6);
+    const states = [[[0, 3, 4], [5, 4, 1], [2, 4, 0]]], moves = [];
+    for (let m = 0; m < 4; m++) {
+      const f = states[states.length - 1].map((r) => r.slice()), col = m % 2 === 1, k = Math.floor(rnd() * 3);
+      for (let n = 0; n < 3; n++) { if (col) f[n][k] = pick(); else f[k][n] = pick(); }
+      moves.push({col, k, dir: rnd() < 0.5 ? -1 : 1}); states.push(f);
+    }
+    for (let k = 0; k < 3; k++) {
+      const f = states[states.length - 1].map((r) => r.slice());
+      for (let n = 0; n < 3; n++) f[k][n] = 4;
+      moves.push({col: false, k, dir: k % 2 ? 1 : -1}); states.push(f);
+    }
+    return {states, moves, gaps: [0.5, 0.3, 0.7, 0.35, 0.45, 0.3, 0.25], turn: 0.34};
+  })();
+  const cube = {
+    intro: [["pop", 0.5], ["grab", 0.4]], outro: [["away", 0.5], ["fade", 0.5]],
+    core: [["turns", CUBE.moves.length * CUBE.turn + CUBE.gaps.reduce((a, b) => a + b, 0)], ["solved", 1.8], ["scramble", 0.6]],
+    frame(ph) {
+      const F = blank(), sc = pop(ph);
+      let state = CUBE.states[0], move = null, q = 0, lookX = 0;
+      if (ph.name === "turns") {
+        let t = ph.p * this.core[0][1], n = 0;
+        for (; n < CUBE.moves.length; n++) {
+          if (t < CUBE.turn) { move = CUBE.moves[n]; q = t / CUBE.turn; break; }
+          t -= CUBE.turn;
+          if (t < CUBE.gaps[n]) break;
+          t -= CUBE.gaps[n];
+        }
+        state = CUBE.states[Math.min(n + (move && q >= 0.5 ? 1 : 0), CUBE.states.length - 1)];
+        const m = CUBE.moves[Math.min(n, CUBE.moves.length - 1)];
+        lookX = m.col ? (m.k - 1) * 0.5 : 0;
+      } else if (ph.name === "solved" || (ph.name === "scramble" && ph.p < 0.5)) state = CUBE.states[CUBE.states.length - 1];
+      const lift = ph.name === "solved" ? Math.round(-2 * Math.sin(Math.PI * Math.min(1, ph.p * 1.4))) : 0;
+      const shake = ph.name === "scramble" ? (Math.floor(ph.p * 8) % 2 ? 1 : -1) : 0;
+      const ox = 17 + shake, oy = 26 + lift, half = 4.5;
+      for (let j = 0; j < 10; j++) for (let i = 0; i < 10; i++) {
+        if (Math.abs(i - half) > (half + 0.5) * sc || Math.abs(j - half) > (half + 0.5) * sc) continue;
+        let col = "#111827";
+        const si = i - 1, sj = j - 1;
+        if (i > 0 && i < 9 && j > 0 && j < 9 && si % 3 !== 2 && sj % 3 !== 2) {
+          let r = Math.floor(sj / 3), c = Math.floor(si / 3), gap = false;
+          // the turning row or column is shown one dot along its way for the first half of the move
+          if (move && q < 0.5) {
+            if (!move.col && r === move.k) { const v = si - move.dir; gap = v < 0 || v > 7 || v % 3 === 2; c = Math.floor(v / 3); }
+            if (move.col && c === move.k) { const v = sj - move.dir; gap = v < 0 || v > 7 || v % 3 === 2; r = Math.floor(v / 3); }
+          }
+          if (!gap) col = CUBE_COLS[state[r][c]];
+        }
+        F.prop.set((oy + j) * COLS + ox + i, col);
+      }
+      hands(F, ph, {x: 16.2 + shake, y: 31 + lift}, {x: 27.6 + shake, y: 31 + lift});
+      if (ph.name === "solved") {
+        for (const [x, y, p0] of [[14, 24, 0], [30, 25, 0.3], [12, 31, 0.55], [32, 31, 0.8]]) {
+          const a = Math.max(0, Math.sin(Math.PI * 2 * (ph.p * 2 + p0)));
+          if (a > 0.2) for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            F.overlay.push({x: x + dx, y: y + dy + lift, rgb: dx || dy ? [250, 204, 21] : [255, 255, 255], a});
+          }
+        }
+      }
+      if (ph.name === "pop" || ph.name === "grab" || ph.name === "scramble") F.face = {lookY: 0.8, ears: 0.3};
+      else if (ph.name === "turns") F.face = {lookX, lookY: 0.8, tongue: 1, ears: move ? 0.35 : 0.15};
+      else if (ph.name === "solved") F.face = {happy: ph.p < 0.25 ? 0 : 0.8, eye: ph.p < 0.25 ? 1.25 : 1, ears: 0.8, glow: 1,
+        dy: -1.2 * Math.sin(Math.PI * Math.min(1, ph.p * 2.5)), mouth: ph.p < 0.3 ? 0.5 : 0};
+      return F;
+    },
+  };
+
+  // a notepad on his lap: 2x+1 = 7, the pencil tapping his chin, a light bulb, a fresh page: x=3, underlined
+  const PAD = {x0: 13, x1: 29, y0: 26, y1: 39};
+  const LINE1 = textDots("2x+1", 14, 28), LINE2 = textDots("=7", 14, 34), ANSWER = textDots("x=3", 15, 29);
+  const UNDERLINE = lineCells([[15, 35, 25, 35]]);
+  const maths = {
+    intro: [["pop", 0.5], ["grab", 0.5]], outro: [["away", 0.5], ["fade", 0.5]],
+    core: [["write1", 2.4], ["write2", 1.2], ["ponder", 1.6], ["aha", 1.1], ["flip1", 0.5], ["write3", 1.8], ["underline", 0.5],
+      ["proud", 1.1], ["flip2", 0.5]],
+    frame(ph) {
+      const F = blank(), sc = pop(ph), cx = (PAD.x0 + PAD.x1) / 2, ink = "#1e3a8a";
+      for (let j = PAD.y0; j <= PAD.y1; j++) for (let i = PAD.x0; i <= PAD.x1; i++) {
+        if (Math.abs(i - cx) > (PAD.x1 - cx) * sc + 0.01 || PAD.y1 - j > (PAD.y1 - PAD.y0) * sc + 0.01) continue;
+        F.prop.set(j * COLS + i, j === PAD.y0 ? (i % 2 ? "#64748b" : "#cbd5e1") : i === PAD.x1 ? "#e2d6c6" : "#fbf7f0");
+      }
+      const page1 = ["write1", "write2", "ponder", "aha", "flip1"].includes(ph.name);
+      const page2 = ["write3", "underline", "proud", "flip2"].includes(ph.name);
+      // a page turn: the writing disappears from the top down
+      const cut = /^flip/.test(ph.name) ? PAD.y0 + 1 + ph.e * 13 : 0;
+      const ink1 = (dots, n, col = ink) => { for (let k = 0; k < n; k++) if (dots[k].y >= cut) F.prop.set(dots[k].y * COLS + dots[k].x, col); };
+      let tip = null;
+      if (page1) {
+        const n1 = ph.name === "write1" ? Math.floor(LINE1.length * ph.p) : LINE1.length;
+        const n2 = ph.name === "write1" ? 0 : ph.name === "write2" ? Math.floor(LINE2.length * ph.p) : LINE2.length;
+        ink1(LINE1, n1); ink1(LINE2, n2);
+        if (ph.name === "write1") tip = LINE1[Math.max(0, n1 - 1)];
+        if (ph.name === "write2") tip = LINE2[Math.max(0, n2 - 1)];
+      }
+      if (page2) {
+        const n3 = ph.name === "write3" ? Math.floor(ANSWER.length * ph.p) : ANSWER.length;
+        const nu = ph.name === "write3" ? 0 : ph.name === "underline" ? Math.floor(UNDERLINE.length * ph.e) : UNDERLINE.length;
+        ink1(ANSWER, n3); ink1(UNDERLINE, nu, "#2563eb");
+        if (ph.name === "write3") tip = ANSWER[Math.max(0, n3 - 1)];
+        if (ph.name === "underline") tip = UNDERLINE[Math.max(0, nu - 1)];
+      }
+      // the pencil: on the paper while writing, tapping his chin while he ponders, hovering otherwise
+      const pTip = tip || (ph.name === "ponder" ? {x: 24.5, y: 21.5 + (Math.floor(ph.p * 8) % 2)} : {x: 24, y: 25});
+      hands(F, ph, {x: 13.2, y: 32}, add(pTip, PENCIL_HOLD));
+      if (F.pawR && ph.name !== "away") pencil(F.front, pTip);
+      if (ph.name === "aha" || ph.name === "flip1") {
+        const a = ph.name === "aha" ? Math.min(1, ph.p * 3) : 1 - ph.p;
+        BULB.forEach((row, r) => [...row].forEach((ch, k) => {
+          const rgb = {y: [250, 204, 21], h: [255, 255, 255], g: [148, 163, 184], r: [253, 224, 71]}[ch];
+          if (rgb && (ch !== "r" || Math.floor(ph.p * 6) % 2 === 0)) F.overlay.push({x: 37 + k, y: 1 + r, rgb, a});
+        }));
+      }
+      if (ph.name === "pop" || ph.name === "grab") F.face = {lookY: 0.9, ears: 0.3};
+      else if (tip) F.face = {lookX: Math.max(-1, Math.min(1, (tip.x - 21) / 9)), lookY: 0.95, tongue: 1};
+      else if (ph.name === "ponder") F.face = {lookX: 0.7, lookY: -0.75, tilt: -0.05, ears: 0.15};
+      else if (ph.name === "aha") F.face = {eye: 1.25, ears: 0.9, mouth: ph.p < 0.5 ? 0.5 : 0, lookX: 0.6, lookY: -0.6, dy: -0.8 * Math.sin(Math.PI * Math.min(1, ph.p * 2))};
+      else if (/^flip/.test(ph.name)) F.face = {lookY: 0.9, happy: 0.3};
+      else if (ph.name === "proud") F.face = {happy: 0.8, glow: 1, dy: nod(ph.p), ears: 0.3};
+      return F;
+    },
+  };
+  const WORKS = {blueprint, measure, cube, maths};
+  // which activities fit which work, with weights: the first is the usual one, the others come up some of the time.
+  // "hard" is many failed tool calls; "long" is a long think with no kind of work recognised (only 1 round in 3)
+  const POOLS = {
+    code: {blueprint: 3, maths: 1, cube: 1},
+    model: {blueprint: 3, measure: 1},
+    print: {measure: 3, blueprint: 1},
+    maths: {maths: 3, cube: 1},
+    hard: {cube: 3},
+    long: {cube: 1},
+  };
+  const MAIN = {code: "blueprint", model: "blueprint", print: "measure", maths: "maths"};
+
+  // what kind of work a turn is, from its prompt and tool calls; the newest signal wins, many failures make it a puzzle
+  const RE_PRINT = /\b(3d[- ]?print\w*|printer|printing|bambu|prusa|octoprint|klipper|moonraker|g-?code|filament|slicer|nozzle)\b|\.(gcode|3mf)\b/i;
+  const RE_MODEL = /\b(solidcraft|cad|3d model\w*|mesh|openscad|build123d|cadquery|fillet|extrude|stl)\b|\.(stl|step|stp|scad|obj)\b/i;
+  const RE_MATHS = /\b(math\w*|equations?|integral|derivative|algebra|calculus|matri(x|ces)|proof|solve for|probability|statistics?)\b|\d\s*[+*\/^=]\s*\d/i;
+  const RE_CODE_TOOL = /^(write_to_file|replace_file_content|multi_replace\w*|create_file|edit_file|run_command)$/;
+  const RE_CODE_FILE = /\.(py|js|mjs|ts|tsx|jsx|rs|go|c|cc|cpp|h|hpp|java|kt|swift|rb|php|cs|sh|html|css|cu|hip|json|toml|yaml|yml)\b/i;
+  function kindOf(text, toolName) {
+    text = text.replace(/_+/g, " ");                                 // tool names like bambu__print_status
+    if (RE_PRINT.test(text)) return "print";
+    if (RE_MODEL.test(text)) return "model";
+    if (RE_MATHS.test(text)) return "maths";
+    if (toolName != null && (RE_CODE_TOOL.test(toolName) || RE_CODE_FILE.test(text))) return "code";
+    return null;
+  }
+  const task = {at: 0, tools: 0, errors: 0, kind: null};
+  let lastWork = "", lastWorkRuns = 0, workRestUntil = 0;
+
+  // the next round's activity: a weighted pick from what fits, never the same one three times running
+  function pickWork() {
+    const k = task.errors >= 3 ? "hard" : task.kind || "long";
+    if (k === "long" && Math.random() >= 1 / 3) return null;
+    const pool = {...POOLS[k]};
+    if (k === "hard" && MAIN[task.kind]) pool[MAIN[task.kind]] = 1;
+    if (lastWorkRuns >= 2 && Object.keys(pool).length > 1) delete pool[lastWork];
+    const names = Object.keys(pool), sum = names.reduce((t, n) => t + pool[n], 0);
+    let r = Math.random() * sum;
+    const name = names.find((n) => (r -= pool[n]) < 0) || names[names.length - 1];
+    lastWorkRuns = name === lastWork ? lastWorkRuns + 1 : 1;
+    lastWork = name;
+    return name;
+  }
+
+  // the phase of a round at time b (intro, the core twice, outro), or null once the round is over
+  function workPhase(W, b) {
+    const len = (list) => list.reduce((t, [, d]) => t + d, 0);
+    const I = len(W.intro), K = len(W.core);
+    let t = b, list = W.intro;
+    if (t >= I && t < I + 2 * K) { t = (t - I) % K; list = W.core; }
+    else if (t >= I + 2 * K) { t -= I + 2 * K; list = W.outro; }
+    for (const [name, d] of list) {
+      if (t < d) return {name, p: t / d, e: ease(t / d)};
+      t -= d;
+    }
+    return null;
+  }
+
   // a small "?" (5 x 7 dots) for the thinking pose
   const QMARK = ["01110", "10001", "00001", "00110", "00100", "00000", "00100"];
   function qmarkCell(x, y, ox, oy) {
@@ -334,6 +661,8 @@ const RayFace = (() => {
   let speed = 1, thinkAt = 0;
   // the cocoa break: when it may start in this think, the one playing, the mug being taken away, and what came before
   let breakDue = Infinity, brk = null, mugOut = null, lastHadBreak = false, lastStyle = "", sip = null;
+  // work on a long task: the activity running ({name, t0}) and this frame's props
+  let work = null, wf = null;
   const calmMotion = () => !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
   let mood = "neutral", moodAt = 0;
   const mem = {lastLoud: 0, wasTalking: false, stressAt: -1e9, prevL: 0, blinkAt: -1e9, nextIdleBlink: 0,
@@ -460,7 +789,18 @@ const RayFace = (() => {
     // thinking: paw to the chin, eyes up and to the side, drifting; a small slow tilt
     let tgt = think ? {...target, lookX: 0.7 + 0.25 * Math.sin(t / 2.4), lookY: -0.75, tilt: -0.06 + 0.03 * Math.sin(t / 3.1)} : target;
     // a cocoa break, once its time has come in this think
-    if (think && !brk && now >= breakDue) startBreak(now);
+    // a long task: a round of work (instead of a cocoa break), then 20 s of plain thinking, then the next pick
+    const due = think && !calmMotion() && task.at > 0 && (now - task.at >= WORK_AFTER || task.tools >= WORK_TOOLS);
+    if (!think) work = null;
+    else if (due && !brk && !work && now >= workRestUntil) {
+      const name = pickWork();
+      if (name) work = {name, t0: now};
+      else workRestUntil = now + WORK_REST * 1000;                   // not this time: a cocoa break may come instead
+    }
+    let wp = work && workPhase(WORKS[work.name], (now - work.t0) / 1000);
+    if (work && !wp) { work = null; workRestUntil = now + WORK_REST * 1000; }
+    wf = wp ? WORKS[work.name].frame(wp, now) : null;
+    if (think && !brk && !work && now >= breakDue) startBreak(now);
     sip = brk ? breakAt(STYLES[brk.style], brk.phases, (now - brk.t0) / 1000, now) : null;
     if (brk && !sip) brk = null;
     if (sip) {
@@ -472,9 +812,14 @@ const RayFace = (() => {
       pose.pawL = pose.pawR = null;
       if (k <= 0) mugOut = null;
     } else {
-      pose.cup = pose.pawL = pose.pawR = null;
+      pose.cup = null;
+      pose.pawL = wf ? wf.pawL : null;
+      pose.pawR = wf ? wf.pawR : null;
+      if (wf && wf.face) tgt = {...calm("neutral"), lookX: 0, lookY: 0, tilt: 0, ears: 0.15, ...wf.face};
     }
-    const f = (sip && sip.face) || {};
+    pose.work = wf;
+    const f = (sip && sip.face) || (wf && wf.face) || {};
+    pose.tongue = f.tongue || 0;
     spring(pose, "paw", think ? 1 : 0, 0.08, 0.75);
 
     // squash and stretch (volume kept), the nod, the settle
@@ -509,6 +854,30 @@ const RayFace = (() => {
     }
     return shadeCache[hex];
   }
+  // the floating dots, with no backing: steam from the mug (two wisps of dashes rising from the rim, swaying and fading
+  // with height; a puff when it is too hot, bent away when he blows on it) and the work's readings, light bulb and
+  // sparkles.  On a light page white turns warm grey or amber, which would otherwise vanish
+  function floaters(now, light) {
+    const out = [];
+    if (pose.cup && pose.cup.sc > 0.3) {
+      const ts = now / 1000, top = pose.cup.y - 5 * pose.cup.sc;
+      const heat = Math.min(1, (pose.cup.sc - 0.3) / 0.7) * (1 + 0.6 * (sip ? sip.puff : 0)), wind = sip ? sip.wind : 0;
+      const rgb = light ? [150, 130, 115] : [246, 239, 228];
+      for (let w = 0; w < 2; w++) {
+        for (let h = 0; h < 9; h++) {
+          const gap = (h + ts * 3.2 + w * 1.7) % 3.4;
+          if (gap > 2.1) continue;
+          const x = Math.floor(pose.cup.x + (w ? 1 : -1) + Math.sin(h * 0.8 - ts * 2.6 + w * 2) * (0.5 + h * 0.08) + wind * h * 0.9);
+          out.push({x, y: Math.floor(top - h), rgb, a: Math.min(0.9, heat * 0.62) * (1 - h / 9) * (gap < 0.4 ? gap / 0.4 : 1)});
+        }
+      }
+    }
+    if (wf) {
+      for (const o of wf.overlay) out.push({...o, rgb: light && o.rgb[0] > 240 && o.rgb[1] > 240 ? [180, 140, 20] : o.rgb});
+    }
+    return out.filter((o) => o.a >= 0.05 && o.x >= 0 && o.x < COLS && o.y >= 0 && o.y < ROWS);
+  }
+
   const cells = new Array(COLS * ROWS);
   function draw(now) {
     if (now - bgAt > 500) {
@@ -560,29 +929,14 @@ const RayFace = (() => {
       }
       g.stroke();
     }
-    // steam from the mug: two wisps of dashes rising from the rim, swaying and fading with height (no backing); a puff
-    // when it is too hot, bent away when he blows on it.  On a light page it is a warm grey, white would vanish
-    if (pose.cup && pose.cup.sc > 0.3) {
-      const ts = now / 1000, top = pose.cup.y - 5 * pose.cup.sc;
-      const heat = Math.min(1, (pose.cup.sc - 0.3) / 0.7) * (1 + 0.6 * (sip ? sip.puff : 0)), wind = sip ? sip.wind : 0;
-      const rgb = lightPage ? "150,130,115" : "246,239,228";
-      for (let w = 0; w < 2; w++) {
-        for (let h = 0; h < 9; h++) {
-          const gap = (h + ts * 3.2 + w * 1.7) % 3.4;
-          if (gap > 2.1) continue;
-          const i = Math.floor(pose.cup.x + (w ? 1 : -1) + Math.sin(h * 0.8 - ts * 2.6 + w * 2) * (0.5 + h * 0.08) + wind * h * 0.9);
-          const j = Math.floor(top - h);
-          const a = Math.min(0.9, heat * 0.62) * (1 - h / 9) * (gap < 0.4 ? gap / 0.4 : 1);
-          if (i < 0 || i >= COLS || j < 0 || a < 0.05) continue;
-          g.fillStyle = `rgba(${rgb},${a.toFixed(3)})`;
-          g.beginPath();
-          g.arc(geo.offX + (i + 0.5) * P, geo.offY + (j + 0.5) * P, rad * 0.85, 0, Math.PI * 2);
-          g.fill();
-        }
-      }
+    for (const o of floaters(now, lightPage)) {
+      g.fillStyle = `rgba(${o.rgb[0]},${o.rgb[1]},${o.rgb[2]},${o.a.toFixed(3)})`;
+      g.beginPath();
+      g.arc(geo.offX + (o.x + 0.5) * P, geo.offY + (o.y + 0.5) * P, rad * 0.88, 0, Math.PI * 2);
+      g.fill();
     }
     // while thinking, a question mark every 2.6 s rises beside his head and fades (no outline, no backing)
-    const thinkingNow = pose.paw > 0.5 && (sip ? sip.q : !mugOut);
+    const thinkingNow = pose.paw > 0.5 && (sip ? sip.q : !mugOut) && !wf;
     const qt = ((now - thinkAt) / 1000 % 2.6) / 2.6, qa = thinkingNow ? Math.sin(Math.PI * qt) : 0, qy = 3 - qt * 2;
     if (qa > 0.25) {
       g.fillStyle = qa > 0.6 ? C.white : C.rim;
@@ -668,6 +1022,7 @@ const RayFace = (() => {
   // the break stops early (he speaks, the answer arrives, the turn ends): the mug is taken away quickly
   function dropBreak() {
     breakDue = Infinity;
+    work = null; wf = null;
     if (brk && sip) mugOut = {cup: sip.cup, t0: performance.now()};
     brk = null; sip = null;
   }
@@ -748,14 +1103,38 @@ const RayFace = (() => {
 
   window.addEventListener("resize", () => { if (visible) { place(); layout(); } });
   // start a cocoa break now while he is thinking (for trying it out): cocoa("classic" | "savour" | "hot" | "thinking")
+  // what the Code tab tells him about the turn: a new prompt, each tool call, a failed tool call
+  function taskStart(prompt) {
+    Object.assign(task, {at: performance.now(), tools: 0, errors: 0, kind: kindOf(String(prompt || ""), null)});
+    workRestUntil = 0;
+  }
+  function taskTool(name, args) {
+    task.tools++;
+    let text = String(name || "");
+    try { text += " " + JSON.stringify(args || {}).slice(0, 400); } catch (e) { /* args that do not serialise */ }
+    task.kind = kindOf(text, String(name || "")) || task.kind;
+  }
+  function taskError() { task.errors++; }
+
+  // start an activity now while he is thinking (for trying it out): work("blueprint" | "measure" | "cube" | "maths")
+  function startWork(name) {
+    if (mode !== "think" || !WORKS[name]) return false;
+    brk = null; sip = null;
+    task.at = performance.now() - WORK_AFTER;
+    work = {name, t0: performance.now()};
+    return true;
+  }
+
   function cocoa(style) {
     if (mode !== "think" || brk) return false;
     startBreak(performance.now(), style);
     return true;
   }
 
-  return {thinking, speakAudio, speakText, boundary, chunkEnd, pause, end, leave, moodOf, cocoa,
+  return {thinking, speakAudio, speakText, boundary, chunkEnd, pause, end, leave, moodOf, cocoa, taskStart, taskTool, taskError,
+          work: startWork,
           get visible() { return visible; },
-          get state() { return {...pose, mode, level, mood, cocoa: brk && brk.style, phase: sip && sip.name}; },
+          get state() { return {...pose, mode, level, mood, cocoa: brk && brk.style, phase: sip && sip.name,
+            work: work && work.name, task: {...task}}; },
           set onStop(fn) { onStop = fn; }};
 })();

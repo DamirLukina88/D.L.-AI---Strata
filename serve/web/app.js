@@ -2091,6 +2091,12 @@ function codeEvent(ev, replay) {
     if (ev.type === "text" && ev.text && ev.text.trim()) RayFace.leave();
     else if (ev.type === "thinking" || ev.type === "tool_call") RayFace.thinking();   // thinks again after a tool
   }
+  // what the turn is about, so on a long task he works at something that matches it (a blueprint, calipers, maths…)
+  if (!replay && typeof RayFace !== "undefined") {
+    if (ev.type === "user") RayFace.taskStart(ev.text);
+    else if (ev.type === "tool_call") RayFace.taskTool(ev.name, ev.args);
+    else if (ev.type === "tool_result" && /^(Error|Denied|SECURITY ERROR|SYNTAX ERROR)/.test(ev.text || "")) RayFace.taskError();
+  }
   switch (ev.type) {
     case "thinking": {
       const c = codeAssistant();

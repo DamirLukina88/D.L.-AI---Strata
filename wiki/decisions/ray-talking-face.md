@@ -247,6 +247,16 @@ Added 2026-10-28 in serve/web/rayface.js (commit 616ec4c6). Choices made with th
 - **Trying it:** `RayFace.cocoa("classic" | "savour" | "hot" | "thinking")` while he is thinking; `RayFace.state.cocoa` and `.phase` show it.
 - **Verified:** Node with stubs: a break starts 8 s into a think and runs every phase, the paw is back on the chin after, no break on the next think, speech mid-break shrinks the mug away. Not yet seen in the real app.
 
+## Work on long tasks (2026-10-29)
+
+- **The user's request:** on long coding, 3D-model, 3D-print and maths tasks, an animation that matches the work. Four studies were drawn first (private page `https://claude.ai/artifact/C1sb1f7dX3VpDT7r53CVg3`); the user took all four, randomised like the mug styles.
+- **Activities (`WORKS` in `serve/web/rayface.js`):** blueprint (a blue sheet on his lap: a box with a dimension line, wiped, then a gear), measure (calipers on a blue printed cube: 20.0, then 19.9 and "hmm?"; his other paw stays on his chin), cube (a Rubik's cube at his chest turned until the front is all blue, a hop and sparkles), maths (a notepad: 2x+1 = 7, pencil tapping his chin, a light bulb, a fresh page with x=3 underlined). Tongue tip out while concentrating.
+- **When:** 30 s into the turn or after 6 tool calls. A round is the intro, the core twice and the outro (about 35 s), then 20 s of plain thinking, then a new pick. No cocoa break while a round plays; long thinks with nothing to do may still get one.
+- **Which one (`POOLS`, weights):** code: blueprint 3, maths 1, cube 1; CAD/3D model: blueprint 3, measure 1; 3D print: measure 3, blueprint 1; maths: maths 3, cube 1; 3 failed tool calls: cube 3 plus the work's usual one; a long think with no kind of work: a cube in 1 round of 3. Never the same activity three rounds running (not "never twice" as with the mug, which would make the two-item pools strictly alternate).
+- **Kind of work:** from the prompt and each tool call's name and arguments (`taskStart`, `taskTool`, `taskError`, called by `codeEvent` in `serve/web/app.js`); the newest signal wins, so a turn that models and then prints moves from blueprints to measuring between rounds. Only one prop ever shows.
+- **Trying it:** `RayFace.work("blueprint" | "measure" | "cube" | "maths")` while he is thinking.
+- **Verified:** Node with stubs (triggers, pools, kinds from tool names, interruptions) and frames rendered from the app code. Two bugs found that way: a missing `lerp`, and tool names with `__` not matching. Not yet seen in the real app.
+
 ## Sources
 
 - User, chat, 2026-10-28: brand the project with the red panda; images of his states and emotions in the repo description

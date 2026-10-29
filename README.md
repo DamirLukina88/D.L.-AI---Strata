@@ -68,6 +68,62 @@ or "hmm" makes him thoughtful, and so on.
 
 <p align="center"><img src="docs/media/ray/moods.png" alt="Ray's eight moods: neutral, happy, excited, surprised, curious, thinking, concerned, goodbye" width="760"></p>
 
+**Cocoa breaks.** Now and then, while the model works, Ray takes a break with a mug of hot chocolate. Once a
+think has gone on for 8 s there is a 1 in 3 chance, and it never happens on two thinks in a row. The mug pops up
+beside him on the input box, steaming. He picks it up, holds it in both paws and sips with his eyes closed, then
+puts it back. Each break picks one of four styles at random, never the same one twice running. If he starts
+speaking or the answer arrives, the mug goes away at once.
+
+<table>
+<tr>
+<td align="center"><img src="docs/media/ray/cocoa-classic.gif" alt="Ray's classic cocoa sip" width="200"><br><b>Classic sip</b></td>
+<td align="center"><img src="docs/media/ray/cocoa-savour.gif" alt="Ray savouring his cocoa" width="200"><br><b>Slow savour</b></td>
+<td align="center"><img src="docs/media/ray/cocoa-hot.gif" alt="Ray finding his cocoa too hot" width="200"><br><b>Too hot!</b></td>
+<td align="center"><img src="docs/media/ray/cocoa-thinking.gif" alt="Ray sipping cocoa while he thinks" width="200"><br><b>Sips while thinking</b></td>
+</tr>
+<tr>
+<td>One long sip, an "ahh" with an ear wiggle and a short cosy hold.</td>
+<td>He cradles the mug under his chin, breathes in the steam and sways gently. Two slow sips with a happy sigh between them.</td>
+<td>He blows on it and takes a careful test sip, then jolts: eyes wide, ears up, the mug pulled away. He blows again, then takes the real sip.</td>
+<td>He keeps thinking with the mug in both paws, eyes up and question marks rising, and sips now and then.</td>
+</tr>
+</table>
+
+**At work on long tasks.** When a turn runs long (30 s, or 6 tool calls), Ray works at something that fits the task.
+The Code tab tells him the prompt and every tool call, so he knows the kind of work: code, a CAD model, a 3D print or
+maths. Three failed tool calls in a turn make it a hard problem. A round is about 35 s, followed by 20 s of plain
+thinking, then a new pick at random. The usual activity for each kind of work comes up most often, and none plays
+three rounds running. The newest kind of work counts, so a turn that models a part and then prints it moves from
+blueprints to measuring between rounds. He only ever holds one prop.
+
+<table>
+<tr>
+<td align="center"><img src="docs/media/ray/work-blueprint.gif" alt="Ray drawing a blueprint" width="200"><br><b>Drawing a blueprint</b></td>
+<td align="center"><img src="docs/media/ray/work-measure.gif" alt="Ray measuring a 3D print with calipers" width="200"><br><b>Measuring a print</b></td>
+<td align="center"><img src="docs/media/ray/work-cube.gif" alt="Ray solving a Rubik's cube" width="200"><br><b>Solving a Rubik's cube</b></td>
+<td align="center"><img src="docs/media/ray/work-maths.gif" alt="Ray working out an equation" width="200"><br><b>Working out equations</b></td>
+</tr>
+<tr>
+<td>A blue sheet on his lap. He draws a box with a dimension line dot by dot, nods, wipes the sheet, then draws a gear.</td>
+<td>Calipers on a 3D-printed cube. He squints and reads 20.0, measures again, gets 19.9, and a question mark pops up.</td>
+<td>He turns rows and columns until the front is all blue, then hops with the cube held up, and it sparkles.</td>
+<td>He writes 2x+1 = 7 and taps the pencil on his chin. A light bulb comes on, and on a fresh page he writes x=3 and underlines it.</td>
+</tr>
+</table>
+
+| Kind of work | What he does (how often) |
+| :-- | :-- |
+| Code | blueprint 3, equations 1, Rubik's cube 1 |
+| CAD and 3D models | blueprint 3, measuring 1 |
+| 3D printing | measuring 3, blueprint 1 |
+| Maths | equations 3, Rubik's cube 1 |
+| A hard problem (3 failed tool calls) | Rubik's cube 3, plus the usual one for the work 1 |
+| A long think with no kind of work recognised | a Rubik's cube in 1 round of 3 |
+
+With *reduced motion* set in the system, he takes no cocoa breaks and does no long-task activities. To see them
+without waiting, run `RayFace.cocoa("classic" | "savour" | "hot" | "thinking")` or
+`RayFace.work("blueprint" | "measure" | "cube" | "maths")` in the browser console while he is thinking.
+
 He has no talking mouth on purpose. Every mouth that copied the speech looked uncanny, so he speaks through motion,
 and his mouth opens only on the strongest syllables. His voice is pitched up to 1.5 by default, a little cartoon-like
 to suit him. Click him to stop him talking. Two switches in About turn him off: *Show Ray while speaking* and
@@ -177,7 +233,7 @@ Listen to responses hands-free without third-party audio streaming:
 - **Voice-Gated Auto-Speak:** *"Automatically read new answers aloud"* (on by default) speaks replies only when the input was dictated via STT, preserving silence when typing.
 - **20 US Neural Piper Voices:** high-quality local Piper speech synthesis integrated via Linux Speech Dispatcher and Web Speech API. Ray's voice, `en_US-hfc_male-medium` (male since 2026-10-28), is the default on the server, in the browser and on the desktop; any other voice can be picked in Settings. Where the server voice is off and Piper is missing (Edge, macOS), *Auto* picks a male voice by name (Edge's Andrew or Guy, Chrome's Google UK English Male); Android names voices by language only, so there it is the local US English voice.
 - **Ray's voice from the server:** `POST /v1/audio/speech` (OpenAI-style `input`, `voice`, `speed`; WAV, `serve/speech.py`) runs Piper on the home server, so phones hear the same voice as the PC (measured 0.39 s for 3.4 s of speech). The web app uses it by default (About: *Use Ray's voice from the server*) and falls back to the browser voice if it fails.
-- **Ray's avatar:** a little red panda sitting on the input box who thinks while the model works and moves with his voice while he reads a reply aloud ([Meet Ray](#meet-ray)). Click him to stop the speech. Turn him off in About.
+- **Ray's avatar:** a little red panda sitting on the input box who thinks while the model works and moves with his voice while he reads a reply aloud ([Meet Ray](#meet-ray)). Now and then he takes a cocoa break, and on long tasks he works at something that fits: a blueprint, calipers on a 3D print, a Rubik's cube or equations. Click him to stop the speech. Turn him off in About.
 - **Speed and pitch:** the sliders in About work for the server voice and the browser voice. Piper has no pitch setting, so pitch is made by playing the speech faster, which was asked from the server that much slower, so the pace stays at the Speed setting. The default pitch is 1.5.
 - **Natural Speech Cleaner (`cleanForSpeech`):** strips markdown, emojis, code blocks, box borders, and converts math, units, and symbols to natural spoken words.
 - **Mobile Keep-Alive & Controls:** Android Screen WakeLock and MediaSession notification drawer controls (play, pause, stop).

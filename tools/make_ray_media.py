@@ -11,6 +11,8 @@ pictures show what the web app shows.  Writes into docs/media/ray/:
     thinking.gif            the thinking pose: paw on his chin, question marks rising
     talking.gif             reading a reply aloud, moved by the loudness of real Piper speech (needs Piper)
     goodbye.gif             the warm goodbye and the fade
+    cocoa-<style>.gif       a cocoa break while thinking, in each of its four styles
+    work-<activity>.gif     work on a long task: one round of each activity (its core once)
     social.png              1280 x 640 social preview for the repository page
 
 Needs node and Pillow; talking.gif also needs Piper (serve/speech.py).  Run it again after changing how Ray looks.
@@ -36,6 +38,8 @@ MUTED = (140, 150, 160)
 RIM = (56, 189, 248)              # the question marks' blue
 FPS = 15
 MOODS = ["neutral", "happy", "excited", "surprised", "curious", "thinking", "concerned", "warm"]
+COCOA = ["classic", "savour", "hot", "thinking"]
+WORK = ["blueprint", "measure", "cube", "maths"]
 LINES = ("Hi, I'm Ray! The build passed and everything works. "
          "Hmm, maybe we should check the printer first? "
          "Sorry, the camera is offline right now.")
@@ -53,8 +57,10 @@ global.document = {getElementById: () => null};
 global.performance = {now: () => 0};
 global.requestAnimationFrame = noop;
 const R = new Function(src.replace("return {thinking, speakAudio",
-  `return {__x: {pandaCell, qmarkCell, step, pose, newPose, calm, EXPR,
+  `return {__x: {pandaCell, qmarkCell, step, pose, newPose, calm, EXPR, floaters, startBreak, WORKS, STYLES,
      set(o) {
+       if ("work" in o) work = o.work;
+       if ("task" in o) Object.assign(task, o.task);
        if ("mode" in o) mode = o.mode;
        if ("target" in o) target = o.target;
        if ("thinkAt" in o) thinkAt = o.thinkAt;
@@ -75,7 +81,8 @@ const analyser = {fftSize: 1024, getFloatTimeDomainData(buf) {
   for (let i = 0; i < buf.length; i++) { const k = at - buf.length + i; buf[i] = k >= 0 && k < pcm.length ? pcm[k] : 0; }
 }};
 
-function grid(qa, qy) {
+// one frame: a colour per cell; "q1"/"q0" for the question mark, "f:r,g,b,a" for steam and other floating dots
+function grid(qa, qy, t) {
   const rows = [];
   for (let j = 0; j < 40; j++) {
     const r = [];
@@ -86,6 +93,7 @@ function grid(qa, qy) {
     }
     rows.push(r);
   }
+  for (const o of X.floaters(t || 0, false)) rows[o.y][o.x] = `f:${o.rgb.join(",")},${o.a.toFixed(2)}`;
   return rows;
 }
 
@@ -103,7 +111,7 @@ for (const m of job.moods) {
 }
 
 // a scene: run step() at 60 Hz from 0 to `ms`, keep every fourth frame (15 fps)
-function scene(ms, mode, setup, extra) {
+function scene(ms, mode, setup, extra, before) {
   reset();
   X.set({mode, target: X.calm("neutral"), thinkAt: 0, moodAt: -1e9, mem: {...quiet, blinkAt: -1e9, nextIdleBlink: 2600, twitchAt: 1800}});
   if (setup) setup();
@@ -111,14 +119,15 @@ function scene(ms, mode, setup, extra) {
   let n = 0;
   for (let t = 0; t < ms; t += 1000 / 60, n++) {
     ctx.currentTime = t / 1000;
+    if (before) before(t);
     X.step(t);
     if (n % 4) continue;
     let qa = 0, qy = 0;
-    if (mode === "think") {
+    if (mode === "think" && !X.pose.cup && !X.pose.work) {
       const qt = (t / 1000 % 2.6) / 2.6;
       qa = X.pose.paw > 0.5 ? Math.sin(Math.PI * qt) : 0; qy = 3 - qt * 2;
     }
-    frames.push(extra ? [grid(qa, qy), extra(t)] : grid(qa, qy));
+    frames.push(extra ? [grid(qa, qy, t), extra(t)] : grid(qa, qy, t));
   }
   return frames;
 }
@@ -127,6 +136,20 @@ if (pcm.length) out.talking = scene(job.dur * 1000 + 400, "audio", () => X.set({
 // the goodbye: the warm look and a nod for 1.8 s, then a 0.7 s fade (as RayFace.end)
 out.goodbye = scene(2900, "warm", () => { X.set({target: {...X.EXPR.warm}, mem: {stressAt: 0}}); },
                     (t) => t < 1800 ? 1 : Math.max(0, 1 - (t - 1800) / 700));
+// a cocoa break in each style: a second of thinking, the break, a second of thinking
+const len = (list) => list.reduce((a, [, d]) => a + d, 0) * 1000;
+for (const style of job.cocoa) {
+  let started = false;
+  out["cocoa-" + style] = scene(len(X.STYLES[style].script) + 2000, "think", null, null,
+    (t) => { if (!started && t >= 1000) { started = true; X.startBreak(t, style); } });
+}
+// one round of each activity, with its core once: intro and core, then a jump to the outro, then a second of thinking
+for (const name of job.work) {
+  const W = X.WORKS[name], I = len(W.intro), K = len(W.core), O = len(W.outro);
+  let jumped = false;
+  out["work-" + name] = scene(I + K + O + 1800, "think", () => X.set({work: {name, t0: 0}, task: {at: 1, tools: 99, kind: "code"}}),
+    null, (t) => { if (!jumped && t >= I + K) { jumped = true; X.set({work: {name, t0: -K}}); } });
+}
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -160,6 +183,9 @@ def rgb(c: str) -> tuple[int, int, int]:
 
 
 def colour(c: str) -> tuple[int, int, int]:
+    if c.startswith("f:"):                                      # a floating dot, see-through, over the surface
+        *v, a = (float(x) for x in c[2:].split(","))
+        return tuple(int(s + (r - s) * a) for s, r in zip(SURFACE, v))
     if c == "q1":
         return (246, 239, 228)
     if c == "q0":                                               # rgba(56,189,248,0.45) over the surface
@@ -187,7 +213,7 @@ def tile(grid, cell: int, pad: int = 2, alpha: float = 1.0, radius: float = 0.12
                 continue
             x0, y0 = (i + pad) * P, (j + pad) * P
             col = colour(c)
-            if not c.startswith("q"):
+            if not c.startswith(("q", "f:")):
                 d.rectangle([x0, y0, x0 + P, y0 + P], fill=mix(tuple(int(v * 0.8) for v in col), alpha))
             r = P * 0.47
             d.ellipse([x0 + P / 2 - r, y0 + P / 2 - r, x0 + P / 2 + r, y0 + P / 2 + r], fill=mix(col, alpha))
@@ -226,7 +252,7 @@ def gif(frames, path: Path, cell: int = 6, alphas=None):
 
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
-    job = {"moods": MOODS}
+    job = {"moods": MOODS, "cocoa": COCOA, "work": WORK}
     sp = speech()
     if sp:
         job.update(pcm=sp[0], sr=sp[1], dur=sp[2], text=LINES)
@@ -254,6 +280,8 @@ def main() -> int:
     if "talking" in res:
         gif(res["talking"], OUT / "talking.gif")
     gif([g for g, _ in res["goodbye"]], OUT / "goodbye.gif", alphas=[a for _, a in res["goodbye"]])
+    for name in [f"cocoa-{c}" for c in COCOA] + [f"work-{w}" for w in WORK]:
+        gif(res[name], OUT / f"{name}.gif")
 
     # social preview: Ray at the left, the name and a line at the right
     W, H = 1280, 640
