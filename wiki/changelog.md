@@ -5,7 +5,7 @@ description: "Record of every change the agent made to this wiki"
 status: active
 tags: [meta, changelog]
 created: 2026-10-05
-updated: 2026-10-29
+updated: 2026-10-30
 last_verified: 2026-10-05
 ---
 
@@ -15,7 +15,9 @@ Newest entries first.
 
 ## Log
 
-- **2026-10-29:** Update. decisions/ray-talking-face.md, decisions/github-fork-and-sanitization.md. (Agent: Claude Code)
+- **2026-10-30:** Update. artifacts/upstream-v0-2-8-review-2026-10-29.md. (Agent: Claude Code)
+- **2026-10-29:** Ingestion. artifacts/upstream-v0-2-8-review-2026-10-29.md. (Agent: Claude Code)
+- **2026-10-29:** Update. decisions/ray-talking-face.md, decisions/github-fork-and-sanitization.md, decisions/desktop-piper-voice-switching-and-stt-auto-speak.md. (Agent: Claude Code)
 - **2026-10-29:** Ingestion. artifacts/ray-persona-research-and-ab-2026-10-29.md. (Agent: Claude Code)
 - **2026-10-29:** Update. artifacts/ray-persona-bench-2026-10-23.md, decisions/ray-assistant-persona.md. (Agent: Claude Code)
 - **2026-10-28:** Update. Ray's pictures and animations (tools/make_ray_media.py, docs/media/ray), README Meet Ray section, panda in the web app header. (Agent: Claude Code)

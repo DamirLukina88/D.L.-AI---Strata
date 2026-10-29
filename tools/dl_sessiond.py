@@ -687,7 +687,8 @@ class Session:
             resolved_effort = turn_effort
             resolved_budget = 0
         self.messages.append({"role": "user", "dl_turn": getattr(self, "_turn_seq", None),
-                              "content": cli.build_user_message_content(prompt, self.workspace, voice=voice)})
+                              "content": cli.build_user_message_content(prompt, self.workspace, voice=voice,
+                                                                        thinking=resolved_effort != "none")})
         ctx = {"workspace": self.workspace, "messages": self.messages, "mode": self.mode, "yolo": self.yolo,
                "plan_file": self.plan_file,
                "effort": resolved_effort,

@@ -366,6 +366,8 @@ const TTSController = {
   // on unless turned off in About: Ray's thinking pose for every turn (typed, spoken or from the terminal), not only
   // for spoken prompts that will be read aloud
   isThinkAllOn() { return store.get("tts_think_all", true) !== false; },
+  // a spoken prompt's reply is read sentence by sentence while it is written (web/speakstream.js), not after the turn
+  isStreamOn() { return store.get("tts_stream", true) !== false; },
   orb() { return typeof RayFace !== "undefined" && this.isOrbOn() && !(this.activeBtn && this.activeBtn.id === "tts-test-btn"); },
   // Ray's Piper voice made by the server (POST v1/audio/speech): on unless turned off, when the server has it.  The
   // audio plays through Web Audio, so the face's waveform follows the voice; a failure falls back to the browser voice.
@@ -389,7 +391,7 @@ const TTSController = {
     let lastIndex = this.currentIndex;
     let stuckCount = 0;
     this.watchdogTimer = setInterval(() => {
-      if (!this.speaking || this.paused || this.useServer() || window.speechSynthesis?.paused) return;
+      if (!this.speaking || this.paused || this.waiting || this.useServer() || window.speechSynthesis?.paused) return;
       if (this.currentIndex === lastIndex) {
         stuckCount++;
         if (stuckCount >= 4) { // 4 ticks of 5s = 20s stuck on the same chunk
@@ -500,6 +502,9 @@ const TTSController = {
     this.updateButtonState(false);
     this.speaking = false;
     this.paused = false;
+    this.streamOpen = false;
+    this.waiting = false;
+    clearTimeout(this.waitTimer);
     this.queue = [];
     this.currentIndex = 0;
     this.currentUtterance = null;
@@ -563,7 +568,62 @@ const TTSController = {
     this.speakNext();
   },
 
+  // --- a reply read while it is written: streamStart, then streamSay per piece, streamDrop to cut a note, streamEnd ---
+  streamStart(btn = null) {
+    if (this.speaking) this.stop();
+    this.queue = [];
+    this.prefetch = [];
+    this.currentIndex = 0;
+    this.speaking = true;
+    this.paused = false;
+    this.streamOpen = true;
+    this.waiting = true;                            // nothing to say yet
+    this.activeBtn = btn;
+    this.activeMsg = null;
+    this.updateButtonState(true);
+    this.acquireWakeLock();
+    this.startAudioKeepAlive();
+    this.updateMediaSession("Reading response...");
+    this.startWatchdog();
+    return this.queue;
+  },
+
+  streamSay(rawText) {
+    if (!this.speaking || !this.streamOpen) return false;           // stopped meanwhile
+    const clean = this.clean(rawText);
+    if (!clean) return false;
+    this.queue.push(...this.chunk(clean));
+    if (this.useServer() && this.queue.length - 1 <= this.currentIndex + 1) this.fetchChunk(this.queue.length - 1);
+    if (this.waiting) {
+      this.waiting = false;
+      clearTimeout(this.waitTimer);
+      this.speakNext();
+    }
+    return true;
+  },
+
+  // keep the first `keep` pieces of the queue (never the one playing)
+  streamDrop(keep) {
+    const n = Math.max(keep, this.currentIndex + 1);
+    if (this.queue.length > n) { this.queue.length = n; this.prefetch.length = Math.min(this.prefetch.length, n); }
+  },
+
+  streamEnd() {
+    if (!this.streamOpen) return;
+    this.streamOpen = false;
+    if (this.waiting) this.stop();
+  },
+
   speakNext() {
+    if (this.speaking && this.streamOpen && this.currentIndex >= this.queue.length) {
+      // the reply is still being written: wait for its next sentence, and think meanwhile if that takes a while
+      this.waiting = true;
+      clearTimeout(this.waitTimer);
+      this.waitTimer = setTimeout(() => {
+        if (this.waiting && this.orb()) RayFace.thinking(true);
+      }, 700);
+      return;
+    }
     if (!this.speaking || this.currentIndex >= this.queue.length) {
       this.stop();
       return;
@@ -790,6 +850,15 @@ const TTSController = {
         thinkToggle.setAttribute("aria-checked", String(next));
         store.set("tts_think_all", next);
         if (!next && typeof RayFace !== "undefined" && RayFace.state.mode === "think") RayFace.end(false);
+      };
+    }
+    const streamToggle = $("tts-stream-toggle");
+    if (streamToggle) {
+      streamToggle.setAttribute("aria-checked", String(this.isStreamOn()));
+      streamToggle.onclick = () => {
+        const next = streamToggle.getAttribute("aria-checked") !== "true";
+        streamToggle.setAttribute("aria-checked", String(next));
+        store.set("tts_stream", next);
       };
     }
     const orbToggle = $("tts-orb-toggle");
@@ -1946,8 +2015,40 @@ function codeEnd() {                                      // close the open repl
   code.cur = null;
 }
 
+// the turn's SpeakStream (web/speakstream.js): started by the reply's first text, it queues pieces on TTSController
+function codeSpeech() {
+  if (code.speech) return code.speech;
+  const queue = TTSController.streamStart();
+  let segStart = 0;
+  const ss = new SpeakStream({
+    say: (text) => {
+      if (queue !== TTSController.queue) return;                 // stopped, or another reading took over
+      if (ss.segSpoken === 0) segStart = queue.length;
+      TTSController.streamSay(text);
+    },
+    drop: (keep) => { if (queue === TTSController.queue) TTSController.streamDrop(segStart + keep); },
+  });
+  ss.timer = setInterval(() => ss.tick(), 1000);
+  code.speech = ss;
+  return ss;
+}
+
+function codeSpeechEnd() {
+  const ss = code.speech;
+  if (!ss) return false;
+  code.speech = null;
+  clearInterval(ss.timer);
+  ss.end();
+  TTSController.streamEnd();
+  return true;
+}
+
 function codeOnTurnEnd() {
-  if (TTSController.isAutoSpeak() && code.turnFromVoice && !code.replaying) {
+  if (codeSpeechEnd()) {                                         // read while it was written
+    const cards = codeFeed() ? codeFeed().querySelectorAll(".code-mobile-card--assistant") : [];
+    const last = cards.length && cards[cards.length - 1].querySelector(".cs-text, .code-mobile-card-body");
+    if (last) code.lastSpokenText = (last.innerText || last.textContent || "").trim();
+  } else if (TTSController.isAutoSpeak() && code.turnFromVoice && !code.replaying) {
     const cards = codeFeed() ? codeFeed().querySelectorAll(".code-mobile-card--assistant") : [];
     if (cards.length) {
       const lastCard = cards[cards.length - 1];
@@ -2091,6 +2192,11 @@ function codeEvent(ev, replay) {
     if (ev.type === "text" && ev.text && ev.text.trim()) RayFace.leave();
     else if (ev.type === "thinking" || ev.type === "tool_call") RayFace.thinking();   // thinks again after a tool
   }
+  // a spoken prompt's reply is read sentence by sentence as it arrives
+  if (!replay && code.turnFromVoice && TTSController.isAutoSpeak() && TTSController.isStreamOn()) {
+    if (ev.type === "text" && ev.text) codeSpeech().push(ev.text);
+    else if (ev.type === "tool_call" && code.speech) code.speech.tool();
+  }
   // what the turn is about, so on a long task he works at something that matches it (a blueprint, calipers, maths…)
   if (!replay && typeof RayFace !== "undefined") {
     if (ev.type === "user") RayFace.taskStart(ev.text);
@@ -2154,6 +2260,7 @@ function codeEvent(ev, replay) {
     case "error":
       codeEnd();
       codeCard("cs-notice cs-notice--error", esc(ev.text));
+      codeSpeechEnd();
       code.turnFromVoice = false;
       if (!replay && typeof RayFace !== "undefined" && !TTSController.speaking) RayFace.end(false);
       break;
@@ -2335,6 +2442,7 @@ async function codeSend(text) {
   code.turnFromVoice = fromVoice;
   STTController.lastInputWasVoice = false;
   STTController.lastTranscribedText = "";
+  codeSpeechEnd();                                 // a reading still open from the last turn
 
   if (text === "/speak") {
     if (ta && ta.value.trim() === text) { ta.value = ""; ta.style.height = "auto"; }

@@ -195,6 +195,13 @@ The coding agent is Ray, in the web app's Code tab and in the terminal (the sepa
   correcting the spelling, and greetings and small talk get an answer without tool calls. A spoken prompt gets a note
   to answer in plain speech (no tables, code blocks, emoji or URLs, numbers said as words) at full length, and the
   answer is read back in the male Piper HFC voice. A typed prompt gets a normal written answer.
+- **He speaks while he writes:** a spoken prompt's answer is read sentence by sentence as the model writes it
+  (`serve/web/speakstream.js`), not after the whole turn. When he thinks before answering and then uses a tool, he
+  first says in one short sentence what he is about to do ("Let me check the live weather for Zagreb."), so you hear
+  him while the tool runs. Measured on three spoken prompts on this PC: his first word came 3 to 67 s sooner (for
+  example 15 s instead of 82 s); most of the rest of the wait is the model thinking. Canned filler lines, a soft
+  "thinking" sound and Piper "hmm" sounds were tried and dropped as unnatural. About > *Speak while Ray writes*
+  turns it off ([details](wiki/decisions/desktop-piper-voice-switching-and-stt-auto-speak.md)).
 - **Fast spoken answers:** with default automatic thinking (`/effort auto`), greetings, wake words, and household commands answer right away with thinking off, while deep questions and coding turns get appropriate reasoning automatically.
 - **Checked with a benchmark:** `tools/ray_persona_bench.py` asks him 22 fixed questions (who is talking, being
   addressed, who made him, persona, spoken answers, and the machine, folder, time and smart home through his tools)
@@ -276,6 +283,12 @@ A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) ex
 - `mcp` turns the servers below on and off.
 
 Plan mode (`/plan`) gets the read-only ones.
+
+**Slightly broken calls still count.** The server reads a tool call the model wrote with a small slip as the call it
+meant (ported from upstream Strata 0.2.8): a JSON argument with a trailing comma, single quotes or an unclosed bracket,
+a missing `</function>` (also inside the thinking), a stray `</think>` before the call, and a tool call quoted inside a
+text argument kept exactly. What was repaired is counted in `/metrics/prometheus` (`strata:tool_args_repaired_total`);
+the details are in [DETAILS](docs/DETAILS.md).
 
 **On demand.** Every tool description is sent again with every turn, and the local model pays for it in prompt time.
 So the 38 MCP servers in `~/.config/dl-ai/mcp.json` stay off until a request needs them (`tools/dl_mcp.py`):

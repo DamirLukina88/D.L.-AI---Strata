@@ -11,7 +11,7 @@
 <meta name="theme-color" content="#0b0d10">
 <link rel="stylesheet" href="web/tokens.css">
 <link rel="stylesheet" href="web/components.css">
-<link rel="stylesheet" href="web/app.css?v=20261029-panda20">
+<link rel="stylesheet" href="web/app.css?v=20261029-panda25">
 <script>
   // the theme before the first paint: default dark for D.L. AI
   try {
@@ -282,6 +282,12 @@
         </div>
 
         <div class="toggle-row">
+          <span>Speak while Ray writes<br><span class="muted small">He reads a spoken prompt's answer sentence by sentence as it is written, and says in a short sentence what he is about to do before he uses a tool; off waits for the whole answer</span></span>
+          <button class="st-toggle" id="tts-stream-toggle" role="switch" aria-checked="true" aria-label="Speak while Ray writes"></button>
+        </div>
+
+
+        <div class="toggle-row">
           <span>Show Ray while speaking<br><span class="muted small">A little red panda on the input box who moves with his voice, and puts a paw to his chin while he thinks about a spoken prompt</span></span>
           <button class="st-toggle" id="tts-orb-toggle" role="switch" aria-checked="true" aria-label="Show Ray's face while speaking"></button>
         </div>
@@ -501,7 +507,8 @@
 <div class="scrim" id="scrim" hidden></div>
 <div class="st-toasts" id="toasts" aria-live="polite"></div>
 <script src="web/site-config.js?v=20261020-logout1"></script>
-<script src="web/rayface.js?v=20261029-panda20"></script>
-<script src="web/app.js?v=20261029-panda20"></script>
+<script src="web/speakstream.js?v=20261029-panda25"></script>
+<script src="web/rayface.js?v=20261029-panda25"></script>
+<script src="web/app.js?v=20261029-panda25"></script>
 </body>
 </html>

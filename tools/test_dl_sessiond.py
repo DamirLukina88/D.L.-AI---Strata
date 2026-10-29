@@ -346,6 +346,34 @@ class TurnEffort(unittest.TestCase):
         self.assertIn(dl_sessiond.cli.VOICE_NOTE, seen[0])
         self.assertNotIn("Spoken prompt", seen[1])
 
+    def test_preamble_only_when_the_model_thinks(self):
+        """"hello Ray" is small talk (thinking off): no preamble sentence, which made the model answer only that it
+        needed no tool.  A spoken question that thinks gets it."""
+        sys.path.insert(0, str(HERE))
+        import dl_sessiond
+        seen = []
+        orig = dl_sessiond.cli.execute_agent_loop
+        dl_sessiond.cli.execute_agent_loop = lambda **kw: (seen.append((kw["session_context"]["effort"],
+                                                                         kw["messages"][-1]["content"])), kw["workspace"])[1]
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                s = dl_sessiond.Session("t", Path(tmp))
+                s.save = lambda: None
+                s.effort = "auto"
+                for prompt in ("hello Ray", "how warm is it in Zagreb right now and should I take a jacket"):
+                    s.submit(prompt, voice=True)
+                    for _ in range(200):
+                        if not s.busy:
+                            break
+                        time.sleep(0.01)
+        finally:
+            dl_sessiond.cli.execute_agent_loop = orig
+        preamble = dl_sessiond.cli.VOICE_PREAMBLE.strip()
+        self.assertEqual(seen[0][0], "none")
+        self.assertNotIn(preamble, seen[0][1])
+        self.assertNotEqual(seen[1][0], "none")
+        self.assertIn(preamble, seen[1][1])
+
 
 class SavedSessions(unittest.TestCase):
     """/clear and /new keep the conversation they end; /sessions lists and searches, /resume brings one back (the

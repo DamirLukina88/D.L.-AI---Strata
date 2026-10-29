@@ -1131,8 +1131,8 @@ const RayFace = (() => {
 
   // the model is working (every prompt, or only spoken ones with "Show Ray thinking on every prompt" off): he appears
   // in his thinking pose until he speaks (or the turn ends)
-  function thinking() {
-    if (mode === "audio" || mode === "text") return;   // already speaking
+  function thinking(force = false) {
+    if ((mode === "audio" || mode === "text") && !force) return;   // already speaking (force: between spoken sentences)
     if (mode === "think" && visible) return;           // already thinking: keep his pose going
     show();
     mode = "think";

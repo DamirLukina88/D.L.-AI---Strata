@@ -784,6 +784,18 @@ RAY_ABOUT = (
 VOICE_NOTE = ("[Spoken prompt: your reply will be read aloud. Answer as fully as you would in writing, in plain speech: no "
               "tables, lists, code blocks, emoji, URLs or parentheses, and say numbers and units as a person would say "
               "them.]")
+# The preamble (2026-10-29): the web app reads a spoken reply sentence by sentence as it is written, so one short
+# sentence about the action before a tool call is heard while the tool runs, instead of silence.  It names the action,
+# not the reasoning, as OpenAI's realtime voice guidance advises; canned fillers ("Let me think...") sounded unnatural.
+# Only when the model thinks first: with thinking off (small talk) it answered "What can you do?" with nothing but
+# "No tools needed, I'll just answer that one directly." (2 of 2 turns), so those turns get VOICE_NOTE alone.
+VOICE_PREAMBLE = (" If you use a tool, first write one short sentence saying what you are about to do, the action and "
+                  "not your reasoning.")
+
+
+def voice_note(thinking: bool = True) -> str:
+    """the note added to a spoken prompt; with the preamble sentence when the model thinks before answering"""
+    return VOICE_NOTE[:-1] + VOICE_PREAMBLE + "]" if thinking else VOICE_NOTE
 
 
 def persona_text() -> str:
@@ -1114,16 +1126,17 @@ def resolve_prompt_and_images(prompt: str, workspace: Path) -> tuple[str, list[s
     return new_prompt, images
 
 
-def build_user_message_content(prompt: str, workspace: Path, voice: bool = False) -> str | list[dict]:
+def build_user_message_content(prompt: str, workspace: Path, voice: bool = False,
+                               thinking: bool = True) -> str | list[dict]:
     """Builds user message content. If attached images (or sampled video frames / PDF pages) exist,
     produces an OpenAI-compatible multimodal parts list (text + image_url blocks) for strata-vision;
-    otherwise returns a formatted text string."""
+    otherwise returns a formatted text string.  A spoken prompt gets voice_note(thinking)."""
     resolved_prompt, images = resolve_prompt_and_images(prompt, workspace)
     clean_user_text = re.sub(r"\[(Image|Video|PDF|Binary file):[^\]]*\]", "", resolved_prompt).strip()
     if images and not clean_user_text:
         resolved_prompt = f"{resolved_prompt.strip()}\nDescribe this media and identify its key elements."
 
-    base_text = with_now(resolved_prompt) + (f"\n\n{VOICE_NOTE}" if voice else "")
+    base_text = with_now(resolved_prompt) + (f"\n\n{voice_note(thinking)}" if voice else "")
     if not images:
         return base_text
 
