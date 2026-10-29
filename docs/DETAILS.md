@@ -844,6 +844,14 @@ print(r.choices[0].message.content)
   long prompt the stream sends keep-alives, so agents do not time out; the server window prints progress every
   15 s, and `GET /status` says what it is doing (`reading the prompt`, `answering`, tokens so far). Closing the
   connection or pressing stop in your app really stops the model, so the next request starts at once.
+- **What the parser repairs, and what it leaves** (ported from upstream 0.2.8, #4078 #4427 #4077). A string argument that quotes
+  a whole tool call, or repeats its own `</parameter><parameter=NAME>`, stays exact. A call whose `</function>` was left out is read
+  as the call, in the answer and inside the thinking. An argument the tool declares as an array or an object, or declares nothing
+  for, is read as written when it has a slip in it: a trailing or doubled comma, single quotes or `True`/`False`/`None`, a bare
+  string between two members of an object, brackets left open at the end. The server window says `N tool call argument(s)
+  repaired` and `/metrics/prometheus` counts them in `strata:tool_args_repaired_total`. Text that is not an array or an object, a
+  string cut short and a string-typed parameter are never touched. After the thinking has ended at a closing think tag, a second
+  one at the start of a line in the answer is dropped (the model quoted the tag while thinking): the call that follows is kept.
 - **Tool calls in other forms (opt-in).** `"tool_call_recovery": true` in `strata-<model>.json` reads a call of a
   tool the request declared also when the model writes it as `<parameter=NAME>` instead of `<function=NAME>`, as JSON
   (`{"name": ..., "arguments": ...}`) inside `<tool_call>`, as a `<function=NAME>` block at the start of a line
