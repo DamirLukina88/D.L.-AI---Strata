@@ -265,6 +265,7 @@ Added 2026-10-28 in serve/web/rayface.js (commit 616ec4c6). Choices made with th
 - **Which:** from the call's arguments: climate, water heater, temperature or heat → thermostat; a scene, script or automation, a list of entities, or the 4th Home Assistant call in the turn → mixer; a light, switch or lamp, or `toggle` → lamp; anything else → one of the three at random.
 - **README:** `home-<panel>.gif` from `tools/make_ray_media.py`. Re-running the script re-encodes the other GIFs with a few frames different (random blinks); they were restored rather than committed.
 - **Verified:** Node with stubs (12 checks: the choice per action, once a turn, the 1 in 2, taking over from the mug, gone when the answer starts) and frames rendered from the app code. Not yet seen in the real app.
+- **Thermostat removed (same day):** the user did not like the thermostat dial, so it is gone (code, `home-thermostat.gif`, README). Heating calls now count as "anything else": the lamp or the mixing desk at random.
 
 ## Sources
 

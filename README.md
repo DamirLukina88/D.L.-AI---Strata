@@ -122,25 +122,23 @@ blueprints to measuring between rounds. He only ever holds one prop.
 
 **At the control panel.** When Ray calls Home Assistant, about 1 time in 2 (once a turn), he works a little control
 panel straight away: one round of 6 to 8 s, turning knobs and pressing buttons. The panel follows the action: lights
-get the lamp, scenes or several devices at once get the mixing desk, and heating gets the thermostat. It takes over
+and switches get the lamp, scenes or several devices at once get the mixing desk, and anything else gets either one. It takes over
 from a cocoa break or a long-task round, and it goes as soon as the answer starts.
 
 <table>
 <tr>
 <td align="center"><img src="docs/media/ray/home-lamp.gif" alt="Ray turning on a lamp at a control panel" width="200"><br><b>Desk panel and lamp</b></td>
 <td align="center"><img src="docs/media/ray/home-mixer.gif" alt="Ray working a mixing desk that lights a house's windows" width="200"><br><b>Mixing desk</b></td>
-<td align="center"><img src="docs/media/ray/home-thermostat.gif" alt="Ray turning a thermostat dial from 18 to 21 degrees" width="200"><br><b>Thermostat dial</b></td>
 </tr>
 <tr>
 <td>He turns a knob and presses a button, and the lamp comes on. He dims it and brings it back up, then switches it from warm to cool white.</td>
 <td>With both paws he pushes up faders and turns a knob. Each one lights a window of a little house above him, then he bobs his head to the meter.</td>
-<td>He turns the dial from 18° to 21°, and the needle goes from blue to orange. He checks it, then presses the green button, which sparkles.</td>
 </tr>
 </table>
 
 With *reduced motion* set in the system, he takes no cocoa breaks and plays none of these animations. To see them
 without waiting, run `RayFace.cocoa("classic" | "savour" | "hot" | "thinking")` or
-`RayFace.work("blueprint" | "measure" | "cube" | "maths" | "lamp" | "mixer" | "thermostat")` in the browser
+`RayFace.work("blueprint" | "measure" | "cube" | "maths" | "lamp" | "mixer")` in the browser
 console while he is thinking.
 
 He has no talking mouth on purpose. Every mouth that copied the speech looked uncanny, so he speaks through motion,
@@ -252,7 +250,7 @@ Listen to responses hands-free without third-party audio streaming:
 - **Voice-Gated Auto-Speak:** *"Automatically read new answers aloud"* (on by default) speaks replies only when the input was dictated via STT, preserving silence when typing.
 - **20 US Neural Piper Voices:** high-quality local Piper speech synthesis integrated via Linux Speech Dispatcher and Web Speech API. Ray's voice, `en_US-hfc_male-medium` (male since 2026-10-28), is the default on the server, in the browser and on the desktop; any other voice can be picked in Settings. Where the server voice is off and Piper is missing (Edge, macOS), *Auto* picks a male voice by name (Edge's Andrew or Guy, Chrome's Google UK English Male); Android names voices by language only, so there it is the local US English voice.
 - **Ray's voice from the server:** `POST /v1/audio/speech` (OpenAI-style `input`, `voice`, `speed`; WAV, `serve/speech.py`) runs Piper on the home server, so phones hear the same voice as the PC (measured 0.39 s for 3.4 s of speech). The web app uses it by default (About: *Use Ray's voice from the server*) and falls back to the browser voice if it fails.
-- **Ray's avatar:** a little red panda sitting on the input box who thinks while the model works and moves with his voice while he reads a reply aloud ([Meet Ray](#meet-ray)). Now and then he takes a cocoa break, and on long tasks he works at something that fits: a blueprint, calipers on a 3D print, a Rubik's cube or equations. Click him to stop the speech. Turn him off in About.
+- **Ray's avatar:** a little red panda sitting on the input box who thinks while the model works and moves with his voice while he reads a reply aloud ([Meet Ray](#meet-ray)). Now and then he takes a cocoa break, and on long tasks he works at something that fits: a blueprint, calipers on a 3D print, a Rubik's cube or equations. When he calls Home Assistant, he sometimes works a little control panel: a lamp or a mixing desk. Click him to stop the speech. Turn him off in About.
 - **Speed and pitch:** the sliders in About work for the server voice and the browser voice. Piper has no pitch setting, so pitch is made by playing the speech faster, which was asked from the server that much slower, so the pace stays at the Speed setting. The default pitch is 1.5.
 - **Natural Speech Cleaner (`cleanForSpeech`):** strips markdown, emojis, code blocks, box borders, and converts math, units, and symbols to natural spoken words.
 - **Mobile Keep-Alive & Controls:** Android Screen WakeLock and MediaSession notification drawer controls (play, pause, stop).
@@ -265,6 +263,7 @@ A built-in Model Context Protocol (MCP) server (`tools/homeassistant_mcp.py`) ex
 - Jinja2 template rendering and entity state history lookups.
 - Interactive MCP tools explorer in the web GUI via `/mcp`.
 - Loads when it is needed, not by default: when your message mentions the smart home, or when the agent turns it on itself.
+- In the Code tab, a call sometimes shows Ray at a control panel: turning on a lamp for lights and switches, or a mixing desk for scenes and several devices ([At the control panel](#meet-ray)).
 
 ### 6. Tools and MCP Servers (38 servers)
 

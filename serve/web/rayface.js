@@ -21,7 +21,7 @@
 //     what fits the work (weights in POOLS): a blueprint, calipers on a printed cube, a notepad of equations, a Rubik's
 //     cube.  The newest kind of work counts; there is only ever one prop, and a round always finishes before the next
 //   - when he calls Home Assistant, about 1 time in 2 (once a turn) he works a control panel at once, picked by the
-//     action: a lamp for lights, a mixing desk for scenes or many devices, a thermostat dial for heating
+//     action: a lamp for lights, a mixing desk for scenes or many devices
 // Server voice (Web Audio): the motion follows the voice's loudness, read about 50 ms before it is heard
 // (TTSController delays the output).  Browser voice: a loudness estimated from the text.  Clicking stops (onStop).
 "use strict";
@@ -340,7 +340,7 @@ const RayFace = (() => {
     "0": ["111", "101", "101", "101", "111"], "1": ["010", "110", "010", "010", "111"], "2": ["111", "001", "111", "100", "111"],
     "3": ["111", "001", "111", "001", "111"], "7": ["111", "001", "010", "010", "010"], "8": ["111", "101", "111", "101", "111"],
     "9": ["111", "101", "111", "001", "111"], "x": ["000", "101", "010", "101", "000"], "+": ["000", "010", "111", "010", "000"],
-    "=": ["000", "111", "000", "111", "000"], ".": ["000", "000", "000", "000", "010"], "°": ["110", "110", "000", "000", "000"],
+    "=": ["000", "111", "000", "111", "000"], ".": ["000", "000", "000", "000", "010"],
   };
   const BULB = ["..r.r..", "r.yyy.r", ".yyhyy.", ".yyyyy.", ".yyyyy.", "..yyy..", "..ggg..", "..ggg.."];
   const clamp01 = (v) => Math.max(0, Math.min(1, v));
@@ -699,59 +699,7 @@ const RayFace = (() => {
     },
   };
 
-  // a thermostat dial on the input box: turned from 18° to 21°, the needle from blue to orange, then the green OK button
-  const DIAL = {x: 39, y: 31};
-  const thermostat = {
-    rounds: 1, intro: [["pop", 0.6], ["grab", 0.5]], outro: [["away", 0.5], ["fade", 0.5]],
-    core: [["dial", 2.4], ["check", 0.7], ["press", 0.8], ["done", 1.2]],
-    frame(ph) {
-      const F = blank(), sc = pop(ph), order = orderOf(this), at = order.indexOf(ph.name);
-      const v = ph.name === "dial" ? ph.e : at > order.indexOf("dial") ? 1 : 0;              // 0 = 18°, 1 = 21°
-      const pressed = ph.name === "press" && ph.p > 0.35 && ph.p < 0.65;
-      const done = at > order.indexOf("press") || (ph.name === "press" && ph.p > 0.5);
-      const ang = Math.PI * (0.75 + 1.5 * lerp(0.15, 0.85, v));                              // lower left round to lower right
-      panel(F, 33, 45, 36, 39, sc, (i, j) => j === 36 ? "#64748b" : (i === 33 || i === 45 || j === 39) ? "#1e293b" : "#334155");
-      if (sc > 0.9) {
-        for (const i of [35, 36]) for (const j of [37, 38]) F.prop.set(j * COLS + i, pressed ? "#14532d" : done ? "#4ade80" : "#16a34a");
-        for (const i of [42, 43]) F.prop.set(37 * COLS + i, "#991b1b");
-        // a ring of ticks, a dark face tinted by the temperature, a needle from the centre
-        const face = "#" + [lerp(30, 120, v), lerp(58, 53, v), lerp(138, 15, v)].map((c) => Math.round(c).toString(16).padStart(2, "0")).join("");
-        for (let j = DIAL.y - 5; j <= DIAL.y + 4; j++) for (let i = DIAL.x - 5; i <= DIAL.x + 5; i++) {
-          const d = Math.hypot(i - DIAL.x, (j - DIAL.y) * 1.05);
-          if (d > 4.9) continue;
-          F.prop.set(j * COLS + i, d > 4 ? (Math.round(Math.atan2(j - DIAL.y, i - DIAL.x) / (Math.PI / 6)) % 2 ? "#cbd5e1" : "#94a3b8") : face);
-        }
-        for (let r = 0; r <= 3.4; r += 0.4) F.prop.set(Math.round(DIAL.y + Math.sin(ang) * r) * COLS + Math.round(DIAL.x + Math.cos(ang) * r), v > 0.5 ? "#fb923c" : "#60a5fa");
-        F.prop.set(DIAL.y * COLS + DIAL.x, "#e2e8f0");
-        if (ph.name !== "pop" && ph.name !== "fade") {
-          const rgb = v > 0.5 ? [251, 146, 60] : [96, 165, 250];
-          for (const d of textDots(`${Math.round(18 + 3 * v)}°`, 34, 19)) F.overlay.push({x: d.x, y: d.y, rgb, a: 0.95});
-        }
-      }
-      if (ph.name === "done") {
-        for (const [x, y, p0] of [[34, 30, 0], [44, 29, 0.35], [36, 35, 0.7]]) {
-          const a = Math.max(0, Math.sin(Math.PI * 2 * (ph.p * 2 + p0)));
-          if (a > 0.2) for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
-            F.overlay.push({x: x + dx, y: y + dy, rgb: dx || dy ? [74, 222, 128] : [255, 255, 255], a});
-          }
-        }
-        for (let i = 12; i <= 30; i += 2) F.overlay.push({x: i, y: 39 - Math.round(ph.p * 3) - (i % 4 ? 1 : 0), rgb: [251, 146, 60], a: 0.35 * Math.sin(Math.PI * ph.p)});
-      }
-      const rim = {x: DIAL.x + Math.cos(ang + Math.PI) * 4.6, y: DIAL.y + Math.sin(ang + Math.PI) * 4.6};
-      const spot = ph.name === "press" || ph.name === "done" ? {x: 35.6, y: 36 + (pressed ? 0.7 : 0)} : ph.name === "dial" || ph.name === "check" ? rim : {x: 34.6, y: 31};
-      hands(F, ph, null, spot);
-      switch (ph.name) {
-        case "pop": case "grab": F.face = {lookX: 0.9, lookY: 0.7, ears: 0.4}; break;
-        case "dial": F.face = {lookX: 0.9, lookY: 0.5, tongue: 1}; break;
-        case "check": F.face = {lookX: 0.8, lookY: -0.2, happy: 0.45, eye: 0.85}; break;
-        case "press": F.face = {lookX: 0.6, lookY: 0.9, tongue: ph.p < 0.5 ? 1 : 0}; break;
-        case "done": F.face = {happy: 0.85, glow: 1, dy: nod(ph.p), ears: 0.5}; break;
-      }
-      return F;
-    },
-  };
-
-  const WORKS = {blueprint, measure, cube, maths, lamp, mixer, thermostat};
+  const WORKS = {blueprint, measure, cube, maths, lamp, mixer};
   // which activities fit which work, with weights: the first is the usual one, the others come up some of the time.
   // "hard" is many failed tool calls; "long" is a long think with no kind of work recognised (only 1 round in 3)
   const POOLS = {
@@ -785,10 +733,9 @@ const RayFace = (() => {
     if (!RE_HA_TOOL.test(name)) return null;
     let text = "";
     try { text = JSON.stringify(args || {}); } catch (e) { /* args that do not serialise */ }
-    if (/\b(climate|water_heater|thermostat|temperature|heat\w*|hvac)\b/i.test(text)) return "thermostat";
     if (/\b(scene|script|automation)\b/i.test(text) || /"entity_id":\s*\[/.test(text) || task.homeCalls >= 3) return "mixer";
     if (/\b(light|switch|lamp)\b/i.test(text) || /^\w+__toggle$/.test(name)) return "lamp";
-    return ["lamp", "mixer", "thermostat"][Math.floor(Math.random() * 3)];
+    return Math.random() < 0.5 ? "lamp" : "mixer";
   }
   let homeDue = null;
   let lastWork = "", lastWorkRuns = 0, workRestUntil = 0;
@@ -1310,7 +1257,7 @@ const RayFace = (() => {
   function taskError() { task.errors++; }
 
   // start an activity now while he is thinking (for trying it out): work("blueprint" | "measure" | "cube" | "maths"), or a
-  // Home Assistant panel: work("lamp" | "mixer" | "thermostat")
+  // Home Assistant panel: work("lamp" | "mixer")
   function startWork(name) {
     if (mode !== "think" || !WORKS[name]) return false;
     brk = null; sip = null;

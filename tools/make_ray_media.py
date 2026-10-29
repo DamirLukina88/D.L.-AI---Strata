@@ -41,7 +41,7 @@ FPS = 15
 MOODS = ["neutral", "happy", "excited", "surprised", "curious", "thinking", "concerned", "warm"]
 COCOA = ["classic", "savour", "hot", "thinking"]
 WORK = ["blueprint", "measure", "cube", "maths"]
-HOME = ["lamp", "mixer", "thermostat"]
+HOME = ["lamp", "mixer"]
 LINES = ("Hi, I'm Ray! The build passed and everything works. "
          "Hmm, maybe we should check the printer first? "
          "Sorry, the camera is offline right now.")

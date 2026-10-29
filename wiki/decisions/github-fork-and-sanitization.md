@@ -49,6 +49,7 @@ The customized Strata platform (featuring the authenticated Claude Code Web Term
 
 ### 1. Remote Layout
 - 2026-10-29: Pushed `9b890835..510141f2` (3 commits, fast-forward, `main` only, no force): the red panda persona and small-talk tool guard, the cocoa break, and the long-task work animations with their README GIFs. Before the commit, `scan_secrets_in_text` ran over the 6 changed text files (0 findings) and the added lines were checked for the home path, the data-disk path, the host name, the profile email and LAN IPs: 0 hits. Pushed from Claude Code after the user's "git commit and push".
+- 2026-10-29 (later): Pushed `510141f2..c7bf1d11` (1 commit, fast-forward, `main` only): the Home Assistant control panel animation and its README GIFs. `scan_secrets_in_text` over the 7 changed text files: 0 findings. The pre-commit privacy hook blocked the first try because this page named the data-disk path in a note; it was reworded. Pushed after the user's "Commit and push".
 - **Upstream:** `https://github.com/Niko1221/Strata.git` tracked under remote name `upstream`.
 - **Origin:** Personal fork `https://github.com/DamirLukina88/D.L.-AI---Strata.git` tracked under remote name `origin`.
 - **Branch Tracking:** Local `main` branch tracks `origin/main`.
