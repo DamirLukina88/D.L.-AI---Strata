@@ -852,6 +852,11 @@ print(r.choices[0].message.content)
   repaired` and `/metrics/prometheus` counts them in `strata:tool_args_repaired_total`. Text that is not an array or an object, a
   string cut short and a string-typed parameter are never touched. After the thinking has ended at a closing think tag, a second
   one at the start of a line in the answer is dropped (the model quoted the tag while thinking): the call that follows is kept.
+- **A call shown in a code block is a quote** (ported from upstream 0.2.9, #4702 #4703). A fence closes only with a fence of
+  at least as many of the same character as opened it, so a ```` block can show a ``` example with a call inside, and the
+  call stays text. A block indented by four spaces or a tab after a blank line is code too, and a call written in it is not
+  run. A call the model writes plainly, after a paragraph or after such a block has ended, is still a call. The other side:
+  a real call the model wraps in a fence is shown and not run.
 - **Tool calls in other forms (opt-in).** `"tool_call_recovery": true` in `strata-<model>.json` reads a call of a
   tool the request declared also when the model writes it as `<parameter=NAME>` instead of `<function=NAME>`, as JSON
   (`{"name": ..., "arguments": ...}`) inside `<tool_call>`, as a `<function=NAME>` block at the start of a line
