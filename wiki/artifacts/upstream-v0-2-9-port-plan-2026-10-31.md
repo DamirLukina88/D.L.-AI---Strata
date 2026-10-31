@@ -13,7 +13,7 @@ last_verified: 2026-10-31
 
 ## Summary
 
-Two items from the [v0.2.9 review](upstream-v0-2-9-review-2026-10-31.md). Status: item 1 ported and tested 2026-10-31, live check in the Code tab still open; item 2 not started (User, chat, 2026-10-31).
+Two items from the [v0.2.9 review](upstream-v0-2-9-review-2026-10-31.md). Status: item 1 ported, tested and live-checked 2026-10-31 (commit d9a56bb7 and the record after it); item 2 not started (User, chat, 2026-10-31).
 
 ## 1. Parser: tool calls inside code blocks are quotes (upstream 209dcadb, #4702 #4703)
 
@@ -32,7 +32,7 @@ Two items from the [v0.2.9 review](upstream-v0-2-9-review-2026-10-31.md). Status
 5. **Live check:** restart `strata-server`. Ask Ray in the Code tab "show me how a tool call to read_file looks, in a code block": no tool runs. Then "read notes.txt": the call still runs.
 6. README, `docs/DETAILS.md` ("What the parser repairs, and what it leaves"), the wiki, then commit and push to origin.
 
-**Result (2026-10-31):** ported by hand; upstream's frontend.py hunks matched our code once moved (our lines ~1092-1260). `serve/test_parser_markdown_code.py` taken as is plus one local case (`run_command` in a ```` block with an inner ``` block); `test_parser_track.py` patch applied cleanly. New tests, `test_parser_track` and `test_tool_corpus`: 16 passed. Full `serve/` suite (pytest via `uv run --with pytest`, no pytest in system Python): 886 passed, 11 skipped, 1 failed, the old `test_server.py::WebApp::test_page_and_files` cache-tag failure; `test_keepawake` passed this run. `docs/DETAILS.md` has a new bullet after "What the parser repairs"; README has no parser section, left alone. `strata-server` restarted; the live check needs the API key (`/v1` answers 401 without it) and was not done yet.
+**Result (2026-10-31):** ported by hand; upstream's frontend.py hunks matched our code once moved (our lines ~1092-1260). `serve/test_parser_markdown_code.py` taken as is plus one local case (`run_command` in a ```` block with an inner ``` block); `test_parser_track.py` patch applied cleanly. New tests, `test_parser_track` and `test_tool_corpus`: 16 passed. Full `serve/` suite (pytest via `uv run --with pytest`, no pytest in system Python): 886 passed, 11 skipped, 1 failed, the old `test_server.py::WebApp::test_page_and_files` cache-tag failure; `test_keepawake` passed this run. `docs/DETAILS.md` has a new bullet after "What the parser repairs"; README has no parser section, left alone. `strata-server` restarted. Live check over `/v1/chat/completions` with `read_file` declared (key `STRATA_API_KEY` from `~/.config/dl-ai/secrets.env`, read with the user's yes): "show me how a tool call to read_file looks, in a code block" came back as text in a ```xml block, no tool call (48 s with the lazy model load); "read notes.txt" came back as `read_file` `{"path":"notes.txt"}` (5 s). The quoted answer had no `<tool_call>` line and no closing fence; fed to `OutputParser` offline, the same text with both is returned whole, so that is what the model wrote, not the parser. Done over the API, not in the Code tab UI.
 
 **Risk:** a real call that the model wraps in a fence would now be shown and not run. Upstream accepted that; the corpus test shows whether any of our recorded calls are fenced.
 
