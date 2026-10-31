@@ -32,7 +32,7 @@ RX 7600 XT 16 GB (HIP), 31 GB RAM (about 3 GB available with the engine loaded),
 - **Tool-call parser fixes** `77794e34`, `b72f56e0`, `d7113273` (#4078 #4427 #4077), applied with `git cherry-pick -n`: `serve/frontend.py`, `serve/server.py` (the `strata:tool_args_repaired_total` metric), new `serve/test_quoted_call_values.py`, `serve/test_tool_corpus.py`, `serve/test_tool_routes.py`. One conflict, at the end of a streamed call whose `</tool_call>` is missing: our scanner calls upstream's `function_done` state `done` (and closes the arguments there), so upstream's logic was taken with that name; keeping ours sent such a call without its arguments (corpus case `qwen-wrapper-close-left-out`).
 - **Local differences in the tests:** `test_tool_corpus.py` skips the DeepSeek DSML specimens (this fork has no `serve/dsml.py`), and its `qwen-undeclared-name-is-text` case became `qwen-undeclared-name-is-a-call-here`, our local rule from the 0.2.7 port. `docs/DETAILS.md` describes the repairs; the README says so under the tools.
 - **Not ported: the server's leftover-engine wait** `01d6f7b9`. It builds on upstream's `strata_control/procs.py`, which this fork does not have, and the case cannot happen here: `strata-server` is a systemd user service with `KillMode=mixed`, so stopping or restarting it ends every process in it, and our server sends QUIT and waits for the engine before starting another. The engine's own RAM wait (`07d5ecfa`) still needs a HIP build; not done.
-- **Tests:** the three new files pass (11 tests, 66 subtests). The full `serve/` suite: see below. `serve/test_keepawake.py::test_service_holds_for_the_whole_request_including_early_close` fails before and after the port (not caused by it).
+- **Tests:** the three new files pass (11 tests, 66 subtests). The full `serve/` suite: 878 passed, 11 skipped, 2 failed; both fail before the port too (the keep-awake case below, and `test_server.py::WebApp::test_page_and_files`, broken since the cache tags `?v=` of `dd00118e`). Smoke test after restarting `strata-server`: a declared `read_file` call came back as a call with `{"path":"notes.txt"}` (46 s with the lazy model load). Committed `a001f91f`, pushed 2026-10-30. `serve/test_keepawake.py::test_service_holds_for_the_whole_request_including_early_close` fails before and after the port (not caused by it).
 
 ## Maybe later
 
@@ -44,6 +44,10 @@ RX 7600 XT 16 GB (HIP), 31 GB RAM (about 3 GB available with the engine loaded),
 - `3fcb2106` tool_call_recovery on by default: already on in our config.
 - `9d3c8c36` 16-row verify and batch windows on HIP: for `--batch` and multi-card pipelines; we run one slot.
 - `20a63cf0` route prior off on 12 GB NVIDIA; DeepSeek, Metal, DGX Spark, Arc/SYCL, Windows AMD Monitor readings, GUI/Control start waits, packaging.
+
+## Related
+
+- [Upstream Strata v0.2.9 Review (2026-10-31)](upstream-v0-2-9-review-2026-10-31.md) - the next release
 
 ## Sources
 

@@ -703,6 +703,31 @@ class ReviewSeesEverything(unittest.TestCase):
         shown = [e for e in events if e.get("type") == "output" and e.get("title") == "Review findings"]
         self.assertEqual(shown[0]["text"], "- gravity points the wrong way")
 
+    def test_the_reviewer_sees_what_tools_did_and_which_message_is_the_task(self):
+        # 2026-10-30: "Init the wiki" after "Create a folder TEST2": the wiki's .gitignore hid it from the diff, and
+        # the reviewer reported the folder and the wiki missing
+        msgs = [{"role": "user", "content": "[Now: x]\nCreate a folder TEST2"},
+                {"role": "assistant", "content": "Done."},
+                {"role": "user", "content": "[Now: x]\nInit the wiki"},
+                {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "function": {
+                    "name": "local_wiki", "arguments": '{"action": "init"}'}}]},
+                {"role": "tool", "tool_call_id": "c1", "name": "local_wiki",
+                 "content": "Wiki ready at wiki/ - created concepts/, index.md"}]
+        actions = cli.request_actions(msgs)
+        self.assertIn('local_wiki {"action": "init"} -> Wiki ready at wiki/', actions)
+        self.assertEqual(actions.count("\n"), 0)                 # only this request's calls
+        task = cli._latest_task(msgs)
+        self.assertTrue(task.startswith("EARLIER MESSAGE (context):\nCreate a folder TEST2"))
+        self.assertTrue(task.endswith("LATEST MESSAGE:\nInit the wiki"))
+        bodies = []
+        with patch.object(cli, "stream_chat_turn", side_effect=lambda m, *a, **k: bodies.append(m) or reply("NO PROBLEMS")):
+            self.assertEqual(cli.review_changes(msgs, cli.RequestChanges(self.ws), "done", "", "u", "k"), "")
+        self.assertIn("TOOL ACTIONS:\n- local_wiki", bodies[0][1]["content"])
+        self.assertIn("gitignore", bodies[0][0]["content"])
+        # 2026-10-31: a disclosed fix of a wrong test is right; a branch for the test's exact inputs is a fake pass
+        self.assertIn("special-cased to the inputs a test uses", cli.REVIEWER_SYSTEM)
+        self.assertIn("do not report that as a missed requirement", cli.REVIEWER_SYSTEM)
+
     def test_the_current_review_note_survives_a_trim(self):
         msgs = contra_like(0)
         msgs.append({"role": "user", "content": cli.REVIEW_NOTE.format(findings="- the audit cannot fail")})

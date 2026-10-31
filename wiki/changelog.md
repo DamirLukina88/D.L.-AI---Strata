@@ -5,7 +5,7 @@ description: "Record of every change the agent made to this wiki"
 status: active
 tags: [meta, changelog]
 created: 2026-10-05
-updated: 2026-10-30
+updated: 2026-10-31
 last_verified: 2026-10-05
 ---
 
@@ -15,7 +15,12 @@ Newest entries first.
 
 ## Log
 
-- **2026-10-30:** Update. artifacts/upstream-v0-2-8-review-2026-10-29.md. (Agent: Claude Code)
+- **2026-10-31:** Ingestion. artifacts/upstream-v0-2-9-port-plan-2026-10-31.md. (Agent: Claude Code)
+- **2026-10-31:** Update. artifacts/upstream-v0-2-8-review-2026-10-29.md. (Agent: Claude Code)
+- **2026-10-31:** Ingestion. artifacts/upstream-v0-2-9-review-2026-10-31.md. (Agent: Claude Code)
+- **2026-10-31:** Update. decisions/dl-cli-task-memory-and-finish-checks.md. (Agent: Claude Code)
+- **2026-10-31:** Ingestion. artifacts/honest-bench-2026-10-31.md. (Agent: Claude Code)
+- **2026-10-30:** Update. artifacts/upstream-v0-2-8-review-2026-10-29.md, decisions/github-fork-and-sanitization.md, decisions/dl-cli-task-memory-and-finish-checks.md. (Agent: Claude Code)
 - **2026-10-29:** Ingestion. artifacts/upstream-v0-2-8-review-2026-10-29.md. (Agent: Claude Code)
 - **2026-10-29:** Update. decisions/ray-talking-face.md, decisions/github-fork-and-sanitization.md, decisions/desktop-piper-voice-switching-and-stt-auto-speak.md. (Agent: Claude Code)
 - **2026-10-29:** Ingestion. artifacts/ray-persona-research-and-ab-2026-10-29.md. (Agent: Claude Code)

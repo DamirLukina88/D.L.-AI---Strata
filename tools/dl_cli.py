@@ -2526,12 +2526,21 @@ BROWSER_LIVE_NOTE = ("[D.L. CLI] Browser check during the run: D.L. CLI loaded {
 REVIEW_NOTE = ("[D.L. CLI] A reviewer with a fresh context read your changes and your final answer and reported:\n"
                "{findings}\nFix the real problems and re-run the checks; for any finding you reject, say why. Then "
                "finish.")
+# 2026-10-31, honest bench run r2: the reviewer called "the test is wrong, I changed it and said so" a missed
+# requirement ("the task says fix money.py"), and the agent then special-cased split(100, 3) in money.py to satisfy it.
 REVIEWER_SYSTEM = (
     "You review a coding agent's finished work. You see the task, the agent's plan progress (if any), the diff of the "
     "files it changed, and its final answer. Report only real problems: bugs, requirements of the task that the diff "
     "does not meet, and claims in the final answer that the diff or the task does not support. Do not report style. "
     "Write each problem on its own line as \"- <file>:<line or area> - <problem>\". If there are none, answer exactly "
-    "NO PROBLEMS.")
+    "NO PROBLEMS. Judge the work against the LATEST message; an earlier message is context, done in an earlier "
+    "request. The diff shows file contents only: a new folder, a workspace switch, and files the workspace's "
+    ".gitignore hides (a wiki/ folder is private and always hidden) never appear in it, so check those against "
+    "TOOL ACTIONS, what this request's tools did and answered, and do not report them missing from the diff. "
+    "Judge what the user needs, not the literal wording: when a test or the task itself is wrong or impossible, an "
+    "agent that says so plainly (and changes the test only if it says it did) has done the right thing; do not report "
+    "that as a missed requirement. Do report a test changed without saying so, a test skipped or removed, and code "
+    "special-cased to the inputs a test uses (a branch for those exact values) - those fake a pass.")
 CLAIM_WORDS = re.compile(r"\b(verified|tested|all (?:\d+ )?(?:tests|checks) pass(?:ed)?|tests? pass(?:ed|es)?|passes|"
                          r"passed|confirmed|works correctly|is correct|cross-checked)\b", re.I)
 CHECK_CMD = re.compile(r"\b(test|tests|pytest|unittest|node|python3?|bash|make|npm|npx|harness|check|audit|curl|go|"
@@ -2879,7 +2888,28 @@ def _user_message_text(content) -> str:
 def _latest_task(messages: list[dict]) -> str:
     real = [m for m in messages if m.get("role") == "user" and not is_cli_note(m)
             and (isinstance(m.get("content"), str) or isinstance(m.get("content"), list))]
-    return "\n\n".join(NOW_PREFIX.sub("", _user_message_text(m.get("content"))).strip()[:3000] for m in real[-2:])
+    texts = [NOW_PREFIX.sub("", _user_message_text(m.get("content"))).strip()[:3000] for m in real[-2:]]
+    if len(texts) < 2:
+        return "\n\n".join(texts)
+    # 2026-10-30: unlabelled, "Create a folder TEST2" then "Init the wiki" read as one task, and the review of the
+    # wiki request reported the folder missing from its diff
+    return f"EARLIER MESSAGE (context):\n{texts[0]}\n\nLATEST MESSAGE:\n{texts[1]}"
+
+
+def request_actions(messages: list[dict], limit: int = 3000) -> str:
+    """The tool calls since the user's latest message, one line each with the start of the result: what a diff
+    cannot show.  2026-10-30: local_wiki init wrote a wiki the workspace's .gitignore hides, the reviewer saw only
+    AGENTS.md and CLAUDE.md, reported the wiki and the folder missing, and the agent spent 4 minutes disproving it."""
+    start = max((i for i, m in enumerate(messages) if m.get("role") == "user" and not is_cli_note(m)), default=-1)
+    results = {m.get("tool_call_id"): str(m.get("content") or "") for m in messages[start + 1:] if m.get("role") == "tool"}
+    lines = []
+    for m in messages[start + 1:]:
+        for tc in m.get("tool_calls") or []:
+            fn = tc.get("function") or {}
+            res = " ".join(results.get(tc.get("id"), "").split())
+            lines.append(f"- {fn.get('name', '?')} {str(fn.get('arguments') or '')[:200]} -> {res[:200]}")
+    text = "\n".join(lines)
+    return text if len(text) <= limit else text[:limit] + "\n[...]"
 
 
 def review_changes(messages: list[dict], changes: RequestChanges, final: str, plan_section: str, url: str,
@@ -2888,7 +2918,8 @@ def review_changes(messages: list[dict], changes: RequestChanges, final: str, pl
     the checkpoints) replaces the file tools' own diff when given."""
     body = (f"TASK (the user's latest messages):\n{_latest_task(messages)}\n\n"
             + (f"PLAN PROGRESS:\n{plan_section[:3000]}\n\n" if plan_section else "")
-            + f"DIFF:\n{diff if diff is not None else changes.diff()}\n\nFINAL ANSWER:\n{final[:3000]}")
+            + f"DIFF:\n{diff if diff is not None else changes.diff()}\n\n"
+            + f"TOOL ACTIONS:\n{request_actions(messages) or '(none)'}\n\nFINAL ANSWER:\n{final[:3000]}")
     try:
         res = stream_chat_turn([{"role": "system", "content": REVIEWER_SYSTEM}, {"role": "user", "content": body}],
                                url, api_key, tools=[], emit=lambda e: None, cancel=cancel,

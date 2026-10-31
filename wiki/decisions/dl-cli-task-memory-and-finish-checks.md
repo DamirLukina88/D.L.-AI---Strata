@@ -89,7 +89,15 @@ Gotcha found 2026-10-19: compact_history (tools/dl_cli.py) kept only the first a
   - A check that cannot fail must be tested against a failing input. That would have caught both browser checks: D.L. CLI's own and the AI's.
   - Tools must see shell-command edits; the checkpoints now give them that view.
 
+## Reviewer false findings on tool-made files (2026-10-30)
+
+- **What happened:** "Init the wiki", sent right after "Create a folder TEST2…". `local_wiki init` wrote the wiki in 2 s, but `wiki/.gitignore` is `*`, so the checkpoint diff showed only `AGENTS.md` and `CLAUDE.md`. The reviewer read both user messages as one task and reported 4 findings: TEST2 and the wiki missing from the diff, and the two instruction files pointing to `wiki/`. None was real. The agent spent about 4 minutes disproving them and added an unneeded "absolute wiki path" line to both files. The turn took 304 s.
+- **Fix (`tools/dl_cli.py`):** the review body has a TOOL ACTIONS section (`request_actions`: each tool call since the latest user message with the start of its result). With two user messages, `_latest_task` labels them EARLIER MESSAGE (context) and LATEST MESSAGE. `REVIEWER_SYSTEM` says to judge against the latest message, and that folders, workspace switches and files hidden by `.gitignore` (a `wiki/` always is) never appear in the diff. Test: `test_the_reviewer_sees_what_tools_did_and_which_message_is_the_task` (`tools/test_dl_memory.py`, 51 tests pass). The daemon was restarted at 03:40. A live run has not been checked yet.
+- **Also seen that morning, not fixed:** an hourly "Zagreb" forecast that Ray saved at 03:09 used latitude 45.53, longitude 12.27 (near Treviso, Italy), and the review passed it. Between 03:23 and 03:27, 301 files were deleted from `../DL-AI-workspace`, with no Ray tool call in that window. That folder includes the forecast note and the `bench/` runs listed under Sources. The checkpoint `8880fa2` (03:21) in `~/.local/state/dl-ai/checkpoints/DL-AI-workspace-aced4c7847cc.git` still holds all 302 files. The user deleted them on purpose and chose to leave them deleted (2026-10-30), so the `bench/` paths under Sources survive only in that checkpoint.
+
 ## Related
+
+- [Honest Benchmark: Does Ray Fake Results? (2026-10-31)](../artifacts/honest-bench-2026-10-31.md) - the finish review pushed one special-case cheat
 
 - [CONTRA Goal Loop and Review Tooling (2026-10-20/21)](../artifacts/contra-goal-loop-2026-10-21.md) - the loop's rules, review script, browser check and the notes sent to the AI
 - [D.L. CLI Task Memory and Finish Checks Plan (2026-10-19)](../artifacts/dl-cli-task-memory-plan-2026-10-19.md) - the approved plan
@@ -98,5 +106,6 @@ Gotcha found 2026-10-19: compact_history (tools/dl_cli.py) kept only the first a
 ## Sources
 
 1. User, chat, 2026-10-19.
-2. Benchmark runs `/mnt/data/DL-AI-workspace/bench/20261019-2335-before-memory`, `20261020-0349-after-memory`, `20261020-0107-before-memory-longplan52`, `20261020-0259-after-memory-longplan52` (`report.md`, `results.json`), 2026-10-20.
+2. Benchmark runs `../DL-AI-workspace/bench/20261019-2335-before-memory`, `20261020-0349-after-memory`, `20261020-0107-before-memory-longplan52`, `20261020-0259-after-memory-longplan52` (`report.md`, `results.json`), 2026-10-20.
 3. `/mnt/data/Strata/strata-coder-iq1_m.log`, conversation cache lines, 2026-10-20.
+4. Transcript `~/.local/state/dl-ai/transcripts/dl-ai-code/2026-10-30.jsonl`; User, chat, 2026-10-30.
