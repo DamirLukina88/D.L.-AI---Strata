@@ -49,7 +49,7 @@ class Renderer:
         else:
             self._close()
             if t == "user":
-                if replay or ev.get("origin") != self.client_id:
+                if replay or ev.get("origin") != self.client_id or ev.get("queued"):
                     w(f"\n{C_ACCENT_BOLD}›{C_RESET} {C_BOLD}{ev['text']}{C_RESET}\n")
             elif t == "tool_call":
                 w(f"{C_ACCENT}◆{C_RESET} {C_INK_SOFT}[Tool]{C_RESET} {C_BOLD}{ev['name']}{C_RESET}"
@@ -79,7 +79,13 @@ class Renderer:
                 if not replay:
                     w(f"{C_MUTED}  {'approved' if ev['ok'] else 'denied'}{C_RESET}\n")
             elif t == "state":
+                old_ids = {q.get("id") for q in self.state.get("queued") or []}
                 self.state = ev
+                if not replay:
+                    for i, q in enumerate(ev.get("queued") or [], 1):
+                        if q.get("id") not in old_ids:
+                            w(f"{C_MUTED}⏳ Queued (#{i}, runs at next step; /queue clear to cancel): "
+                              f"{q.get('text', '')[:80]}{C_RESET}\n")
             elif t == "cleared":
                 w(f"{C_MUTED}── conversation cleared ──{C_RESET}\n")
             elif t == "rewound" and not replay and ev.get("origin") == self.client_id and ev.get("cmd") != "/edit":

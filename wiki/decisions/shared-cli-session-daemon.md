@@ -5,8 +5,8 @@ description: "One D.L. CLI agent session in dl-ai-sessiond, used from the web Co
 status: active
 tags: [cli, web-gui, mobile, architecture]
 created: 2026-10-13
-updated: 2026-10-13
-last_verified: 2026-10-13
+updated: 2026-11-01
+last_verified: 2026-11-01
 ---
 
 # Shared CLI Session Daemon for Web and Terminal
@@ -28,6 +28,12 @@ last_verified: 2026-10-13
 - 2026-10-17: Autonomous session management tools (`save_chat`, `get_system_health`, `get_engine_status`, `clear_conversation`) added to `DL_TOOLS` and `DL_PLAN_TOOLS`, allowing Qwen Coder to export sessions, inspect hardware/engine stats, and reset conversation memory autonomously. Conversational continuation phrases (`"continue"`, `"keep going"`, `"go on"`, `"proceed"`) in `dl_sessiond` and `dl_cli` automatically map to `/continue` after the tool-turn limit (`DL_MAX_TURNS`) is reached. In YOLO mode, reaching `DL_MAX_TURNS` automatically continues execution indefinitely without prompting the user. Tests in `tools/test_dl_session_tools.py` and `tools/test_dl_yolo_continue.py`.
 
 - 2026-10-27: Saved sessions: /clear and /new keep the conversation; /sessions, /resume, /rename, /delete and a Sessions drawer in the Code tab. See [Saved CLI Sessions](saved-cli-sessions.md).
+- 2026-11-01: Queued input while busy (`Session.queue` in `tools/dl_sessiond.py`, `poll_queued` in `tools/dl_cli.py`, `#code-queued-bar` in `serve/web/`):
+  - Submitting input while `self.busy` is `True` no longer rejects the turn with `"The session is working - wait for it, or interrupt it first."` (which caused `serve/web/app.js` to clear `#code-mobile-input` and lose the user's text). Instead, `Session.submit` appends the item to `self.queue` and exposes `queued` in `Session.state()`.
+  - `execute_agent_loop` calls `poll_queued()` right after each tool round's results and checkpoint are recorded, and right before (and after) `finish_checks` when `not res["tool_calls"]`, picking up queued `/yolo`, `/effort` and user prompts immediately on the next model call while preserving the prompt prefix cache and `dl_turn` rewind markers.
+  - Remaining queued items (such as `/commands`, `!shell`, or prompts queued right before an interrupt or turn end) are drained by the `while True:` loop in `Session._run` before `self.busy` becomes `False`.
+  - Web UI renders `#code-queued-bar` above the input bar with `Send now` (promotes and interrupts the current step), `✎` Edit (calls `queue_delete` and restores the text into `#code-mobile-input`), and `✕` Remove (`queue_delete`); `/queue [list | rm N | clear]` works immediately in both terminal and web even while busy.
+  - `Session.emit` preserves `self._open_block` across `"state"` events so mid-stream `emit_state()` calls never split streaming `thinking` or `text` blocks.
 
 ## Related
 

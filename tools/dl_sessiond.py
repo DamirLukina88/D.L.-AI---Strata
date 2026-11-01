@@ -239,6 +239,7 @@ class Session:
         self.lock = threading.RLock()
         self.busy = False
         self.cancel = threading.Event()
+        self.queue: list[dict] = []              # inputs sent while busy; picked up between tool rounds or turns
         self.pending: dict[str, dict] = {}       # approval id -> {"event", "ok", "kind", ...}
         self.plan_offer: str | None = None       # id of an open "Execute this plan?" offer
         self.plan_file: str | None = None        # the approved plan (PLAN.md) the done check holds the agent to
@@ -255,17 +256,17 @@ class Session:
         with self.lock:
             self.seq += 1
             ev = {**ev, "seq": self.seq, "ts": round(time.time(), 3)}
-            last = self.events[-1] if self.events else None
-            merge = bool(last and ev["type"] in ("thinking", "text") and last["type"] == ev["type"]
-                         and last is self._open_block)          # never grow a block already transcribed
+            open_blk = self._open_block
+            merge = bool(open_blk is not None and ev["type"] in ("thinking", "text")
+                         and open_blk["type"] == ev["type"])    # never grow a block already transcribed
             if ev["type"] in ("thinking", "text"):             # a stable id for the block, live and in replay
-                ev["block"] = last.get("block", last["seq"]) if merge else self.seq
+                ev["block"] = open_blk.get("block", open_blk["seq"]) if merge else self.seq
             if merge:
-                last["text"] += ev["text"]                     # replay keeps one block, live clients get deltas
-                last["seq"] = ev["seq"]
+                open_blk["text"] += ev["text"]                 # replay keeps one block, live clients get deltas
+                open_blk["seq"] = ev["seq"]
             else:
-                if self._open_block is not None:               # the block before this event is complete
-                    self._transcribe(self._open_block)
+                if open_blk is not None and ev["type"] != "state":   # the block before this event is complete
+                    self._transcribe(open_blk)
                     self._open_block = None
                 stored = dict(ev)
                 self.events.append(stored)
@@ -313,6 +314,8 @@ class Session:
                 "wiki": str(cli.resolve_wiki_root(self.workspace) or ""),
                 "mcp": [m for m in self.mcp.status() if m["on"]], "plan": self.plan_summary(),
                 "title": self.title or self.auto_title(), "saved": len(archive_list(self.name)),
+                "queued": [{"id": q["id"], "text": q["text"], "origin": q["origin"], "voice": q["voice"]}
+                           for q in self.queue],
                 "pending": [{"id": k, "kind": v["kind"], "summary": v["summary"], "reason": v["reason"]}
                             for k, v in self.pending.items()]}
 
@@ -542,6 +545,7 @@ class Session:
         self.messages = [{"role": "system", "content": cli.build_dl_system_prompt(self.workspace, self.mode)}]
         with self.lock:
             self.events = []
+            self.queue = []
         self.emit({"type": "cleared"})
         self.mcp.close()                         # a new conversation starts with only the default servers
 
@@ -614,7 +618,12 @@ class Session:
             p["event"].set()
         return True
 
-    def interrupt(self) -> None:
+    def interrupt(self, promote_id: str = "") -> None:
+        with self.lock:
+            if promote_id:
+                idx = next((i for i, q in enumerate(self.queue) if q["id"] == promote_id), None)
+                if idx:
+                    self.queue.insert(0, self.queue.pop(idx))
         if self.busy:
             self.cancel.set()
             with self.lock:
@@ -622,43 +631,205 @@ class Session:
                     p["event"].set()
 
     # ---------------------------------------------------------------- input
-    def submit(self, text: str, origin: str = "", effort: str | None = None, voice: bool = False) -> None:
+    def submit(self, text: str, origin: str = "", effort: str | None = None, voice: bool = False) -> dict:
         text = (text or "").strip()
         if not text:
-            return
+            return {"queued": False}
+        cmd_word, _, cmd_arg = text.partition(" ")
+        if cmd_word.lower() == "/queue":                  # /queue works right away even while a turn is running
+            self.emit({"type": "user", "text": text, "origin": origin, "voice": voice})
+            self._queue_command(cmd_arg.strip())
+            return {"queued": False}
         with self.lock:
             if self.busy:
-                self.notice("The session is working - wait for it, or interrupt it first.", "warn")
-                return
+                item = {"id": uuid.uuid4().hex[:8], "text": text, "origin": origin, "effort": effort,
+                        "voice": voice, "ts": time.time()}
+                self.queue.append(item)
+                pos = len(self.queue)
+                self.emit_state()
+                return {"queued": True, "id": item["id"], "position": pos}
             self.busy = True
             self.cancel.clear()
             if self.plan_offer:                       # a new prompt replaces the open "Execute this plan?"
                 self.emit({"type": "approval_resolved", "id": self.plan_offer, "ok": False})
                 self.plan_offer = None
         threading.Thread(target=self._run, args=(text, origin, effort, voice), daemon=True).start()
+        return {"queued": False}
+
+    def queue_remove(self, ref: str) -> dict | None:
+        """Remove a queued item by id or 1-based index ('all' clears all). Returns the removed item, or None."""
+        ref = (ref or "").strip()
+        if not ref:
+            return None
+        with self.lock:
+            if ref in ("all", "clear"):
+                if not self.queue:
+                    return None
+                first = dict(self.queue[0])
+                self.queue.clear()
+                self.emit_state()
+                return first
+            idx = next((i for i, q in enumerate(self.queue) if q["id"] == ref), None)
+            if idx is None and ref.isdigit() and 1 <= int(ref) <= len(self.queue):
+                idx = int(ref) - 1
+            if idx is None:
+                return None
+            removed = self.queue.pop(idx)
+            self.emit_state()
+            return removed
+
+    def _queue_command(self, arg: str) -> None:
+        sub, _, rest = arg.partition(" ")
+        sub, rest = sub.strip().lower(), rest.strip()
+        if sub in ("", "list"):
+            with self.lock:
+                items = list(self.queue)
+            if not items:
+                self.notice("No queued messages.")
+            else:
+                lines = [f"{i:>3}. {' '.join(q['text'].split())[:100]}  ·  {q['id']}"
+                         for i, q in enumerate(items, 1)]
+                self.output("/queue", "\n".join(lines) + "\n\n/queue rm N removes one · /queue clear removes all")
+            return
+        if sub in ("clear", "off"):
+            with self.lock:
+                n = len(self.queue)
+                self.queue.clear()
+            self.notice(f"Cleared {n} queued message(s)." if n else "No queued messages.")
+            self.emit_state()
+            return
+        if sub in ("rm", "del", "delete", "cancel") and rest:
+            removed = self.queue_remove(rest)
+            if removed:
+                self.notice(f"Removed from queue: {removed['text'][:80]}")
+            else:
+                self.notice(f"No queued message {rest!r}: /queue lists them.", "warn")
+            return
+        if sub.isdigit():
+            removed = self.queue_remove(sub)
+            if removed:
+                self.notice(f"Removed from queue: {removed['text'][:80]}")
+                return
+        self.notice("Usage: /queue [list | rm N | clear]", "warn")
+
+    def _take_queued(self, current_ws: Path, current_effort: str | None, ctx: dict) -> dict | None:
+        """Pick up queued /yolo, /effort or user prompts between tool rounds (or before finish checks)."""
+        with self.lock:
+            if self.cancel.is_set() or not self.queue:
+                return None
+            setting_items: list[dict] = []
+            while self.queue:
+                head = self.queue[0]["text"].strip()
+                cmd, _, _ = head.partition(" ")
+                if cmd.lower() not in ("/yolo", "/effort"):
+                    break
+                setting_items.append(self.queue.pop(0))
+            prompt_items: list[dict] = []
+            while self.queue:
+                head = self.queue[0]["text"].strip()
+                low = head.lower()
+                is_cont = (low in ("/continue", "continue", "keep going", "go on", "proceed")
+                           or low.startswith("/continue "))
+                if head.startswith(("/", "!")) and not is_cont:
+                    break
+                prompt_items.append(self.queue.pop(0))
+        if not setting_items and not prompt_items:
+            return None
+        for item in setting_items:
+            self.emit({"type": "user", "text": item["text"], "origin": item["origin"], "voice": item["voice"],
+                       "queued": True})
+            self._turn_seq = self.seq
+            self._turn_origin = item["origin"]
+            self._command(item["text"])
+            ctx["yolo"] = self.yolo
+            if item["text"].strip().lower().startswith("/effort"):
+                ctx["effort_auto"] = self.effort == "auto"
+                if self.effort != "auto":
+                    ctx["effort"] = self.effort
+                    ctx["reasoning_budget_tokens"] = 0
+        eff_rank = {"none": 0, "low": 1, "medium": 2, "high": 3}
+        for item in prompt_items:
+            text = item["text"]
+            low = text.strip().lower()
+            if low in ("/continue", "continue", "keep going", "go on", "proceed"):
+                prompt = cli.CONTINUE_PROMPT
+            elif low.startswith("/continue "):
+                prompt = text.partition(" ")[2].strip() or cli.CONTINUE_PROMPT
+            else:
+                prompt = text
+            self.emit({"type": "user", "text": text, "origin": item["origin"], "voice": item["voice"], "queued": True})
+            self._turn_seq = self.seq
+            self._turn_origin = item["origin"]
+            turn_effort = item["effort"] or self.effort
+            effort_auto = not item["effort"] and self.effort == "auto"
+            if effort_auto:
+                last_reply = next((m.get("content") or "" for m in reversed(self.messages)
+                                   if m.get("role") == "assistant" and isinstance(m.get("content"), str)), "")
+                level, reason = dl_effort.pick(prompt, voice=item["voice"], mode=self.mode, last_reply=last_reply)
+                if current_effort in eff_rank and eff_rank.get(level, 0) < eff_rank[current_effort]:
+                    level = current_effort
+                budget = dl_effort.budget_for(level)
+                self.last_auto = (level, reason)
+                resolved_effort = level
+                resolved_budget = budget
+            else:
+                resolved_effort = turn_effort
+                resolved_budget = 0
+            current_effort = resolved_effort
+            self.messages.append({"role": "user", "dl_turn": self._turn_seq,
+                                  "content": cli.build_user_message_content(prompt, current_ws, voice=item["voice"],
+                                                                            thinking=resolved_effort != "none")})
+            if self.mcp.active:
+                self.mcp.route(prompt)
+            if dl_mcp.call_context():
+                dl_mcp.CALL.ctx = {**dl_mcp.call_context(), "workspace": current_ws, "yolo": self.yolo,
+                                   "request_time": time.time()}
+            ctx["user_text"] = prompt
+            ctx["voice"] = item["voice"]
+            ctx["effort"] = resolved_effort
+            ctx["effort_auto"] = effort_auto
+            ctx["reasoning_budget_tokens"] = resolved_budget
+        self.emit_state()
+        return {"settings": bool(setting_items), "prompts": len(prompt_items)}
 
     def _run(self, text: str, origin: str, effort: str | None = None, voice: bool = False) -> None:
-        self.emit({"type": "user", "text": text, "origin": origin})
-        self._turn_seq = self.seq                     # this prompt's event: its user message carries it (/rewind)
-        self._turn_origin = origin
-        self.emit_state()
-        try:
-            prompt = self._command(text)
-            if prompt is not None:
-                self._agent(prompt, effort, voice)
-        except Exception as e:                        # a turn's failure never takes the daemon down
-            self.emit({"type": "error", "text": str(e)})
-            if self.messages and self.messages[-1].get("role") == "user":
-                self.messages.pop()
-        finally:
+        queued_turn = False
+        while True:
+            self.emit({"type": "user", "text": text, "origin": origin, "voice": voice,
+                       **({"queued": True} if queued_turn else {})})
+            self._turn_seq = self.seq                 # this prompt's event: its user message carries it (/rewind)
+            self._turn_origin = origin
+            self.emit_state()
+            try:
+                prompt = self._command(text)
+                if prompt is not None:
+                    self._agent(prompt, effort, voice)
+            except Exception as e:                    # a turn's failure never takes the daemon down
+                self.emit({"type": "error", "text": str(e)})
+                if self.messages and self.messages[-1].get("role") == "user":
+                    self.messages.pop()
             with self.lock:
-                self.busy = False
+                if not self.queue:
+                    self.busy = False
+                    break
+                nxt = self.queue.pop(0)
+                self.cancel.clear()
+                if self.plan_offer:                   # a queued prompt replaces the open "Execute this plan?"
+                    self.emit({"type": "approval_resolved", "id": self.plan_offer, "ok": False})
+                    self.plan_offer = None
             try:
                 self.save()
-            except OSError as e:
-                self.emit({"type": "error", "text": f"could not save the session: {e}"})
+            except OSError:
+                pass
             self.emit({"type": "turn_end"})
-            self.emit_state()
+            text, origin, effort, voice = nxt["text"], nxt["origin"], nxt["effort"], nxt["voice"]
+            queued_turn = True
+        try:
+            self.save()
+        except OSError as e:
+            self.emit({"type": "error", "text": f"could not save the session: {e}"})
+        self.emit({"type": "turn_end"})
+        self.emit_state()
 
     def _system(self) -> None:
         self.messages[0] = {"role": "system", "content": cli.build_dl_system_prompt(self.workspace, self.mode,
@@ -696,6 +867,7 @@ class Session:
                "reasoning_budget_tokens": resolved_budget,
                "emit": self.emit, "cancel": self.cancel, "approve": self.approve, "mcp": self.mcp, "user_text": prompt,
                "voice": voice, "session": self}
+        ctx["take_queued"] = lambda ws, eff: self._take_queued(ws, eff, ctx)
         new_ws = cli.execute_agent_loop(messages=self.messages, url=cli.DEFAULT_URL, api_key=cli.DEFAULT_API_KEY,
                                         workspace=self.workspace, mode=self.mode,
                                         session_context=ctx)
@@ -812,6 +984,9 @@ class Session:
             return None
         if cmd in ("/rewind", "/edit", "/branch"):
             return self.go_back(cmd, arg)
+        if cmd == "/queue":
+            self._queue_command(arg)
+            return None
         if cmd == "/prompts":
             ps = self.prompt_events()
             self.output("/prompts", "\n".join(f"{i:>3}. {' '.join((e.get('text') or '').split())[:100]}"
@@ -1045,6 +1220,7 @@ Session
 /resume N         Bring saved conversation N back (the current one is saved first)
 /rename [N] <t>   Name this conversation, or saved conversation N   /delete N  Remove N from the list
 /prompts          This conversation's prompts, numbered
+/queue [rm|clear] Messages queued while Ray is working; /queue rm N or /queue clear removes them
 /edit N <prompt>  Replace prompt N and run it again (what came after it is removed)
 /rewind N         Go back to just before prompt N (it and what followed are removed)
 /branch N [p]     Keep the whole conversation in /sessions, go on from before prompt N (with p, run it)
@@ -1312,14 +1488,28 @@ class Handler(socketserver.StreamRequestHandler):
                     continue
                 reply: dict = {"type": "ok"}
                 if op == "input":
-                    sess.submit(str(msg.get("text", "")), origin=msg.get("origin") or client_id,
-                                effort=msg.get("effort") if msg.get("effort") in EFFORTS else None,
-                                voice=msg.get("voice") is True)
+                    raw_text = str(msg.get("text", ""))
+                    if raw_text.startswith("/queue_delete "):
+                        removed = sess.queue_remove(raw_text.partition(" ")[2])
+                        reply = ({"type": "error", "text": "no such queued message"} if removed is None
+                                 else {"type": "ok", "item": removed})
+                    else:
+                        res = sess.submit(raw_text, origin=msg.get("origin") or client_id,
+                                          effort=msg.get("effort") if msg.get("effort") in EFFORTS else None,
+                                          voice=msg.get("voice") is True)
+                        if isinstance(res, dict):
+                            reply = {"type": "ok", **res}
                 elif op in ("approve", "deny"):
                     if not sess.answer(str(msg.get("id", "")), op == "approve"):
                         reply = {"type": "error", "text": "no such approval (already answered?)"}
                 elif op == "interrupt":
-                    sess.interrupt()
+                    sess.interrupt(promote_id=str(msg.get("id") or ""))
+                elif op in ("queue_delete", "queue_remove"):
+                    removed = sess.queue_remove(str(msg.get("id") or ""))
+                    if removed is None:
+                        reply = {"type": "error", "text": "no such queued message"}
+                    else:
+                        reply = {"type": "ok", "item": removed}
                 elif op == "export":
                     name, md = sess.export()
                     reply = {"type": "export", "filename": name, "markdown": md}

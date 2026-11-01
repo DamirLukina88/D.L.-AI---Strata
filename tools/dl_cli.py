@@ -3111,6 +3111,28 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             else:
                 messages.append({"role": "user", "content": nudge})
 
+    def poll_queued() -> bool:
+        # User input sent while the session was busy: pick it up right after a tool round finishes (or before finish
+        # checks) so the next model call sees it without losing the cached prompt prefix.
+        nonlocal effort, effort_auto, budget, active_tools, small_talk, turn, text_call_retries, loop_retries
+        take = (session_context or {}).get("take_queued")
+        if not take or (cancel is not None and cancel.is_set()):
+            return False
+        picked = take(current_ws, effort)
+        if not picked:
+            return False
+        effort = (session_context or {}).get("effort", effort)
+        effort_auto = bool((session_context or {}).get("effort_auto", effort_auto))
+        budget = int((session_context or {}).get("reasoning_budget_tokens") or 0)
+        active_tools = get_active_tools(current_ws, mode=mode, registry=registry)
+        if picked.get("prompts"):
+            small_talk = False
+            turn = text_call_retries = loop_retries = 0
+            for k in ("browser", "evidence", "review", "stalls"):
+                finish.pop(k, None)
+            return True
+        return False
+
     while turn < max_turns:
         turn += 1
         total_rounds += 1
@@ -3165,12 +3187,16 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
 
         # No tool calls: the model thinks it is done.  The finish checks may send it back once more.
         if not res["tool_calls"]:
+            if poll_queued():
+                continue
             back = finish_checks(finish, messages, res["content"] or "", mode, current_ws, session_context, url,
                                  api_key, emit=emit, cancel=cancel, effort=effort)
             if back:
                 messages.append({"role": "user", "content": back})
                 _auto_raise("sent back by the finish checks")
                 yolo_rollover()                 # a send-back must not run into the cap and end a YOLO run
+                continue
+            if poll_queued():
                 continue
 
         # If no tool calls, turn is complete
@@ -3269,6 +3295,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             cps.take(f"round {total_rounds}: " + ", ".join(
                 (tc.get("function") or {}).get("name", "?") for tc in res["tool_calls"]))
 
+        poll_queued()
         if turn >= max_turns and (session_context or {}).get("yolo") and cancel is not None and cancel.is_set():
             break
         yolo_rollover()

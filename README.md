@@ -223,6 +223,7 @@ and seamlessly inspect or continue it from your terminal:
   - `/rewind N` goes back to just before prompt N (it and what followed are removed).
   - `/branch N [text]` keeps the whole conversation in Sessions and goes on from before prompt N.
   - A prompt that context trimming already removed cannot be gone back to; the command says so and changes nothing.
+- **Queued messages while Ray works:** if you send a prompt or command while Ray is busy, it is queued instead of lost. Ray picks up queued prompts at the next step (right after the current tool round finishes, before the finish checks, or when the turn ends), keeping the prompt cache and rewind marks intact. The Code tab shows a queued bar above the input box with **Send now** (interrupts the current step and runs it at once), **✎** Edit (moves it back to the input box) and **✕** Remove; `/queue` lists or clears them from either client ([decision](wiki/decisions/shared-cli-session-daemon.md)).
 - **The feed lets you read:** while an answer streams, scrolling up (wheel, finger or PageUp) stops the feed from following, and scrolling back to the bottom resumes it. A message you send always scrolls into view.
 - **Stop and Clear respond at once:** Stop closes the model request immediately, also while the engine is still reading a long prompt or the request waits behind another one (measured 1.0 s against a silent test server; before, it waited for the server's next 10 s heartbeat). The Code tab reconnects a live stream that died silently (phone asleep, Wi-Fi or tunnel dropped), so Clear and Stop no longer look stuck until you switch tabs.
 - **Plan Mode:** `/plan` investigates read-only and presents an *Execute this plan?* prompt to transition cleanly into act mode.
@@ -394,6 +395,7 @@ Separate from Ray, Strata has its own MCP server for installing and running the 
   | `/resume N`, `/delete N` | bring a saved conversation back, or remove it from the list |
   | `/rename [N] <title>` | name this conversation, or saved conversation N |
   | `/prompts` | this conversation's prompts, numbered |
+  | `/queue [rm N\|clear]` | list or remove messages queued while Ray is working |
   | `/edit N <text>`, `/rewind N`, `/branch N [text]` | replace prompt N, go back to before it, or branch from before it |
   | `!<command>` | run a shell command |
 

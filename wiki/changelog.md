@@ -5,7 +5,7 @@ description: "Record of every change the agent made to this wiki"
 status: active
 tags: [meta, changelog]
 created: 2026-10-05
-updated: 2026-10-31
+updated: 2026-11-01
 last_verified: 2026-10-05
 ---
 
@@ -15,6 +15,9 @@ Newest entries first.
 
 ## Log
 
+- **2026-11-01:** Update. decisions/shared-cli-session-daemon.md (queued input while Ray is busy, mid-turn tool-round pickup, web queued bar), decisions/github-fork-and-sanitization.md. (Agent: Antigravity)
+- **2026-10-31:** Update. artifacts/upstream-v0-2-9-port-plan-2026-10-31.md (item 1 result). (Agent: Claude Code)
+- **2026-10-31:** Update. decisions/github-fork-and-sanitization.md. (Agent: Claude Code)
 - **2026-10-31:** Ingestion. artifacts/upstream-v0-2-9-port-plan-2026-10-31.md. (Agent: Claude Code)
 - **2026-10-31:** Update. artifacts/upstream-v0-2-8-review-2026-10-29.md. (Agent: Claude Code)
 - **2026-10-31:** Ingestion. artifacts/upstream-v0-2-9-review-2026-10-31.md. (Agent: Claude Code)

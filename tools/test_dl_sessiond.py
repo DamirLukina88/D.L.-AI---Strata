@@ -579,5 +579,174 @@ class RewindEditBranch(SavedSessions):
         self.assertEqual(sent.get("messages"), [{"role": "user", "content": "hi"}])
 
 
+class QueuedInput(unittest.TestCase):
+    """Input sent while Ray is working is queued instead of rejected, shown in state.queued, removable/editable, and
+    picked up at the next tool-round boundary, before finish checks, or when the current turn ends."""
+
+    def test_mid_loop_pickup_between_tool_rounds_and_rewind(self):
+        import threading
+        from unittest import mock
+        sys.path.insert(0, str(HERE))
+        import dl_sessiond
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            (ws / "a.txt").write_text("alpha\n", encoding="utf-8")
+            s = dl_sessiond.Session("q1", ws)
+            s.save = lambda: None
+            seen_states = []
+            q = __import__("queue").Queue()
+            s.clients.add(q)
+            tool_started = threading.Event()
+            allow_tool_finish = threading.Event()
+            rounds = []
+
+            def fake_turn(messages, *a, **kw):
+                rounds.append([m["role"] for m in messages])
+                if len(rounds) == 1:
+                    return {"content": "", "reasoning": "", "tokens": 5, "prompt_tokens": 20, "finish_reason": "tool_calls",
+                            "tool_calls": [{"id": "c1", "function": {"name": "view_file",
+                                                                     "arguments": json.dumps({"AbsolutePath": "a.txt"})}}]}
+                return {"content": "Both done.", "reasoning": "", "tokens": 5, "prompt_tokens": 30,
+                        "finish_reason": "stop", "tool_calls": []}
+
+            orig_dispatch = dl_sessiond.cli.dispatch_dl_tool
+
+            def slow_dispatch(fn_name, args, *a, **kw):
+                tool_started.set()
+                allow_tool_finish.wait(5)
+                return orig_dispatch(fn_name, args, *a, **kw)
+
+            with mock.patch.object(dl_sessiond.cli, "chat_turn_in_context", fake_turn), \
+                 mock.patch.object(dl_sessiond.cli, "dispatch_dl_tool", slow_dispatch), \
+                 mock.patch.dict(os.environ, {"DL_REVIEW": "0", "DL_BROWSER_CHECK": "0"}):
+                r1 = s.submit("read a.txt", origin="web")
+                self.assertEqual(r1, {"queued": False})
+                self.assertTrue(tool_started.wait(5))
+                # While the tool is running, user sends a second prompt and a /yolo toggle
+                r_yolo = s.submit("/yolo", origin="web")
+                r2 = s.submit("also check dark mode", origin="web")
+                self.assertTrue(r_yolo["queued"])
+                self.assertTrue(r2["queued"])
+                self.assertEqual([item["text"] for item in s.state()["queued"]], ["/yolo", "also check dark mode"])
+                allow_tool_finish.set()
+                for _ in range(200):
+                    if not s.busy:
+                        break
+                    time.sleep(0.01)
+                self.assertFalse(s.busy)
+
+            while not q.empty():
+                ev = q.get()
+                if ev["type"] == "state":
+                    seen_states.append(ev["queued"])
+                self.assertFalse(ev["type"] == "notice" and "The session is working" in ev.get("text", ""))
+            # Queue had the items while busy, then emptied when picked up
+            self.assertTrue(any(len(st) == 2 for st in seen_states))
+            self.assertEqual(s.state()["queued"], [])
+            self.assertTrue(s.yolo)
+            # Round 2 saw the tool result AND the queued user message right after it
+            self.assertEqual(rounds, [["system", "user"], ["system", "user", "assistant", "tool", "user"]])
+            # The picked-up prompt carries dl_turn so /prompts and /rewind work on it
+            self.assertEqual([e["text"] for e in s.prompt_events()], ["read a.txt", "also check dark mode"])
+            s. _command("/rewind 2")
+            self.assertEqual([e["text"] for e in s.prompt_events()], ["read a.txt"])
+            s.mcp.close()
+
+    def test_pickup_before_finish_checks_when_no_tool_calls(self):
+        import threading
+        from unittest import mock
+        sys.path.insert(0, str(HERE))
+        import dl_sessiond
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            s = dl_sessiond.Session("q2", ws)
+            s.save = lambda: None
+            in_turn = threading.Event()
+            release_turn = threading.Event()
+            calls = []
+
+            def fake_turn(messages, *a, **kw):
+                calls.append(len(messages))
+                if len(calls) == 1:
+                    in_turn.set()
+                    release_turn.wait(5)
+                    return {"content": "First answer.", "reasoning": "", "tokens": 4, "prompt_tokens": 10,
+                            "finish_reason": "stop", "tool_calls": []}
+                return {"content": "Second answer.", "reasoning": "", "tokens": 4, "prompt_tokens": 20,
+                        "finish_reason": "stop", "tool_calls": []}
+
+            with mock.patch.object(dl_sessiond.cli, "chat_turn_in_context", fake_turn), \
+                 mock.patch.dict(os.environ, {"DL_REVIEW": "0", "DL_BROWSER_CHECK": "0"}):
+                s.submit("first question")
+                self.assertTrue(in_turn.wait(5))
+                qres = s.submit("follow-up question")
+                self.assertTrue(qres["queued"])
+                release_turn.set()
+                for _ in range(200):
+                    if not s.busy:
+                        break
+                    time.sleep(0.01)
+                self.assertFalse(s.busy)
+            self.assertEqual(len(calls), 2)
+            self.assertEqual([m["role"] for m in s.messages], ["system", "user", "assistant", "user", "assistant"])
+            s.mcp.close()
+
+    def test_queue_delete_and_end_of_turn_drain(self):
+        import threading
+        sys.path.insert(0, str(HERE))
+        import dl_sessiond
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            s = dl_sessiond.Session("q3", ws)
+            s.save = lambda: None
+            hold = threading.Event()
+            started = threading.Event()
+            orig_cmd = s._command
+
+            def slow_cmd(text):
+                if text == "/status":
+                    started.set()
+                    hold.wait(5)
+                    s.output("Strata engine", "ok")
+                    return None
+                return orig_cmd(text)
+
+            s._command = slow_cmd
+            s.submit("/status")
+            self.assertTrue(started.wait(5))
+            q1 = s.submit("draft one")
+            q2 = s.submit("/plan")
+            self.assertEqual(len(s.state()["queued"]), 2)
+            # User clicks Edit/Remove on "draft one": queue_remove returns its text so the UI can restore it
+            removed = s.queue_remove(q1["id"])
+            self.assertEqual(removed["text"], "draft one")
+            self.assertEqual([x["id"] for x in s.state()["queued"]], [q2["id"]])
+            # /queue while busy works immediately without queuing itself
+            s.submit("/queue")
+            self.assertEqual([x["id"] for x in s.state()["queued"]], [q2["id"]])
+            hold.set()
+            for _ in range(200):
+                if not s.busy:
+                    break
+                time.sleep(0.01)
+            self.assertFalse(s.busy)
+            self.assertEqual(s.mode, "plan")
+            self.assertEqual(s.state()["queued"], [])
+            s.mcp.close()
+
+    def test_state_event_mid_stream_keeps_open_block_merged(self):
+        sys.path.insert(0, str(HERE))
+        import dl_sessiond
+        with tempfile.TemporaryDirectory() as tmp:
+            s = dl_sessiond.Session("q4", Path(tmp))
+            s.emit({"type": "text", "text": "Hello "})
+            s.emit_state()
+            s.emit({"type": "text", "text": "world!"})
+            texts = [e for e in s.events if e["type"] == "text"]
+            self.assertEqual(len(texts), 1)
+            self.assertEqual(texts[0]["text"], "Hello world!")
+            s.mcp.close()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2138,6 +2138,58 @@ function codePlanChip(plan) {
   return ` <span class="cs-mode cs-mode--progress${plan.blocked ? " cs-mode--blocked" : ""}" title="${esc(tip)}">${esc(label)}</span>`;
 }
 
+function codeRenderQueued(queued) {
+  const bar = $("code-queued-bar");
+  if (!bar) return;
+  const list = Array.isArray(queued) ? queued : [];
+  if (!list.length) {
+    bar.hidden = true;
+    bar.innerHTML = "";
+  } else {
+    bar.hidden = false;
+    bar.innerHTML = list.map((q, i) => {
+      const label = list.length > 1 ? `QUEUED ${i + 1}` : "QUEUED";
+      return `<div class="code-queued-item" data-queue-id="${esc(q.id)}">
+        <span class="cs-mode cs-mode--queued" title="Sent at the next step (after the current tool or turn)">${label}</span>
+        <span class="code-queued-text" title="${esc(q.text || "")}">${esc(q.text || "")}</span>
+        <div class="code-queued-actions">
+          <button type="button" class="st-btn st-btn--secondary st-btn--sm code-queued-btn" data-queue-now="${esc(q.id)}" title="Interrupt the current step and send this now">Send now</button>
+          <button type="button" class="st-btn st-btn--icon st-btn--sm code-card-action" data-queue-edit="${esc(q.id)}" data-queue-text="${esc(q.text || "")}" title="Edit (move back to the input box)" aria-label="Edit queued message">✎</button>
+          <button type="button" class="st-btn st-btn--icon st-btn--sm code-card-action" data-queue-del="${esc(q.id)}" title="Remove from queue" aria-label="Remove queued message">✕</button>
+        </div>
+      </div>`;
+    }).join("");
+  }
+  const rf = $("ray-face"), comp = document.querySelector(".code-mobile-composer");
+  if (rf && comp && !rf.hidden) rf.style.setProperty("--ray-face-bottom", `${comp.offsetHeight - 3}px`);
+}
+
+$("code-queued-bar")?.addEventListener("click", async (e) => {
+  const nowBtn = e.target.closest("[data-queue-now]");
+  if (nowBtn) {
+    await codeOp("interrupt", { id: nowBtn.dataset.queueNow });
+    return;
+  }
+  const editBtn = e.target.closest("[data-queue-edit]");
+  if (editBtn) {
+    const fallbackText = editBtn.dataset.queueText || "";
+    const res = await codeOp("input", { text: `/queue_delete ${editBtn.dataset.queueEdit}` });
+    if (!res) return;
+    const ta = $("code-mobile-input");
+    if (ta) {
+      const restored = res.item?.text || fallbackText;
+      ta.value = ta.value.trim() ? `${restored}\n${ta.value}` : restored;
+      ta.dispatchEvent(new Event("input"));
+      ta.focus();
+    }
+    return;
+  }
+  const delBtn = e.target.closest("[data-queue-del]");
+  if (delBtn) {
+    await codeOp("input", { text: `/queue_delete ${delBtn.dataset.queueDel}` });
+  }
+});
+
 function codeSetState(st) {
   code.state = st || {};
   const meta = $("code-scaffold-meta");
@@ -2151,6 +2203,7 @@ function codeSetState(st) {
       (code.state.mcp || []).map((m) => ` <span class="cs-mode cs-mode--mcp" title="${esc(m.description)} (${esc(m.why || "on")})">${esc(m.name)}</span>`).join("") +
       ` <code title="${esc(code.state.workspace || "")}">${esc((code.state.workspace || "").split("/").slice(-2).join("/"))}</code>`;
   }
+  codeRenderQueued(code.state.queued);
   const busy = !!code.state.busy;
   if ($("code-stop-btn")) $("code-stop-btn").hidden = !busy;
   // Ray thinks while the session works on a turn: he appears when it gets busy. A typed turn's answer sends him away
@@ -2217,6 +2270,13 @@ function codeEvent(ev, replay) {
     case "text": codeAssistant().text += ev.text; codeQueueRender(); break;
     case "user":
       codeEnd();
+      if (!replay && ev.voice != null) {
+        code.turnFromVoice = Boolean(ev.voice);
+        codeSpeechEnd();
+        if (code.turnFromVoice && TTSController.isAutoSpeak() && TTSController.orb() && typeof RayFace !== "undefined") {
+          RayFace.thinking();
+        }
+      }
       {
         const prompt = ev.seq != null && ev.text && !/^[\/!]/.test(ev.text);   // a prompt: it can be gone back to
         const card = codeCard("code-mobile-card--user", `<div class="code-mobile-card-body">${esc(ev.text)}</div>` + (prompt ? `
@@ -2439,10 +2499,12 @@ async function codeSend(text) {
       fromVoice = true;
     }
   }
-  code.turnFromVoice = fromVoice;
   STTController.lastInputWasVoice = false;
   STTController.lastTranscribedText = "";
-  codeSpeechEnd();                                 // a reading still open from the last turn
+  if (!code.state.busy) {
+    code.turnFromVoice = fromVoice;
+    codeSpeechEnd();                               // a reading still open from the last turn
+  }
 
   if (text === "/speak") {
     if (ta && ta.value.trim() === text) { ta.value = ""; ta.style.height = "auto"; }
@@ -2459,10 +2521,11 @@ async function codeSend(text) {
   }
   // spoken prompt: answered in plain speech (voice: true); thinking level is selected automatically (/effort auto)
   const turn = fromVoice ? { text, voice: true } : { text };
-  if (await codeOp("input", turn)) {
+  const res = await codeOp("input", turn);
+  if (res) {
     if (ta && ta.value.trim() === text) { ta.value = ""; ta.style.height = "auto"; }
     // the answer will be read aloud: Ray thinks, paw on his chin, until then
-    if (fromVoice && TTSController.isAutoSpeak() && TTSController.orb()) RayFace.thinking();
+    if (!res.queued && fromVoice && TTSController.isAutoSpeak() && TTSController.orb()) RayFace.thinking();
   }
 }
 

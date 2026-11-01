@@ -6307,9 +6307,9 @@ def make_handler(svc: Service):
                     req = {}
                 op = req.get("op")
                 if op not in ("input", "approve", "deny", "interrupt", "export", "state", "archives", "archive_rename",
-                              "archive_delete"):
+                              "archive_delete", "queue_delete", "queue_remove"):
                     self._json(400, {"error": {"message": "op must be input, approve, deny, interrupt, export, state, "
-                                                          "archives, archive_rename or archive_delete"}})
+                                                          "archives, archive_rename, archive_delete or queue_delete"}})
                     return
                 msg = {k: req[k] for k in ("op", "session", "text", "id", "origin", "effort", "voice", "query", "title")
                        if k in req}
