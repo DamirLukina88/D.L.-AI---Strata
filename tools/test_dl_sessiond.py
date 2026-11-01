@@ -573,10 +573,34 @@ class RewindEditBranch(SavedSessions):
             raise OSError("stop here")
         with mock.patch.object(dl_cli.urllib.request, "urlopen", fake):
             try:
-                dl_cli.stream_chat_turn([{"role": "user", "content": "hi", "dl_turn": 5}], "http://127.0.0.1:9", "x")
+                dl_cli.stream_chat_turn(
+                    [{"role": "user", "content": "hi", "dl_turn": 5, "dl_handoff": 1, "dl_handoff_seq": 3}],
+                    "http://127.0.0.1:9", "x")
             except Exception:
                 pass
         self.assertEqual(sent.get("messages"), [{"role": "user", "content": "hi"}])
+
+    def test_post_handoff_rewind_edit_branch_and_help(self):
+        from unittest import mock
+        self.assertIn("/handoff", self.notices(self.cmd("/help")))
+        self.three()
+        with mock.patch.object(self.sd.cli, "generate_handoff_diary",
+                               return_value="### Objective & Acceptance Criteria\n- Test"):
+            self.cmd("/handoff")
+        self.assertEqual(self.s.state().get("handoff"), 1)
+        saved_before = len(self.sd.archive_list("t"))
+        for bad in ("/rewind 1", "/edit 2 retry", "/branch 3"):
+            evs = self.cmd(bad)
+            self.assertIn("before session handoff #1", self.notices(evs))
+            self.assertIn("use /sessions and /resume", self.notices(evs))
+        self.assertEqual(len(self.sd.archive_list("t")), saved_before)  # failed /branch did not add a duplicate snapshot
+        self.turn("fourth prompt", "fourth answer")
+        self.turn("fifth prompt", "fifth answer")
+        evs = self.cmd("/rewind 5")
+        self.assertEqual([e["text"] for e in evs if e["type"] == "rewound"], ["fifth prompt"])
+        self.assertEqual(self.sd.cli._prior_handoff(self.s.messages)[0], 1)
+        self.assertEqual(self.s.messages[-2]["content"], "fourth prompt")
+        self.assertEqual(self.s.messages[-1]["content"], "fourth answer")
 
 
 class QueuedInput(unittest.TestCase):

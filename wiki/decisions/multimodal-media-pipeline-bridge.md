@@ -27,12 +27,12 @@ The unified media ingestion pipeline inspects file extensions referenced by `@pa
    - Processed by Strata's `Vision.normalize()` and embedded by `strata-vision` via 2D M-RoPE ViT.
 
 2. **Video Clips (`.mp4`, `.mov`, `.mkv`, `.webm`, `.avi`, `.m4v`)**:
-   - Uses `/usr/bin/ffmpeg` and `/usr/bin/ffprobe` to compute duration and extract up to 4 evenly spaced JPEG keyframes into `~/.local/state/dl-ai/media_cache/videos/<hash>/`.
+   - Uses `/usr/bin/ffmpeg` and `/usr/bin/ffprobe` to compute duration and extract up to 4 evenly spaced JPEG keyframes into `~/.local/state/dl-ai/media_cache/videos/` (`<hash>/`).
    - In text: `[Video: path (4 frames @ 1.5s, 3.0s, ...)]`.
    - In request payload: Injected as sequential `image_url` parts, allowing the model to visually inspect the temporal sequence.
 
 3. **PDF Documents (`.pdf`)**:
-   - Uses `/usr/bin/pdftoppm` to render the first 4 pages into crisp 150 DPI PNGs in `~/.local/state/dl-ai/media_cache/pdfs/<hash>/`.
+   - Uses `/usr/bin/pdftoppm` to render the first 4 pages into crisp 150 DPI PNGs in `~/.local/state/dl-ai/media_cache/pdfs/` (`<hash>/`).
    - In text: `[PDF: path (N pages rendered)]`.
    - In request payload: Injected as sequential `image_url` parts so the vision encoder reads page layouts, tables, and diagrams.
 

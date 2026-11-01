@@ -54,4 +54,4 @@ In `/effort auto`, the thinking level is chosen per turn without an extra model 
 
 1. User, chat, 2026-10-23.
 2. `reports/Automatic thinking level selection.md` and `research_notes/Automatic thinking level selection/` — written 2026-10-23.
-3. `~/.cache/strata/bench/weather_reasoning/20261017-190322-sweep/report.md`, `/mnt/data/DL-AI-workspace/bench/sweep-20261015-1911-quick-low.md` — read 2026-10-23.
+3. `~/.cache/strata/bench/weather_reasoning/20261017-190322-sweep/report.md` and `bench/sweep-20261015-1911-quick-low.md` (in `DL-AI-workspace`) — read 2026-10-23.

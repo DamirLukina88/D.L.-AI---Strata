@@ -1,7 +1,7 @@
 ---
 title: "Upstream Strata 0.2.2 Review (2026-10-21)"
 type: artifact
-description: "Which 0.2.2 changes fit this install (RX 7600 XT, Linux, 32 GB RAM, one NUMA node): the HIP verify-hang fix and a few server fixes; most of the release does not apply"
+description: "Which 0.2.2 changes fit this install (RX 7600 XT, Linux, 32 GB RAM, 1 NUMA node): HIP verify-hang fix and server fixes; most of 0.2.2 does not apply"
 status: active
 tags: [upstream, release, review, gfx1102, engine, speculative, server]
 created: 2026-10-21

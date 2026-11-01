@@ -309,10 +309,12 @@ class Session:
             self.emit_state()
 
     def state(self) -> dict:
+        handoff_part, _, _, _ = cli._prior_handoff(self.messages)
         return {"type": "state", "session": self.name, "workspace": str(self.workspace), "mode": self.mode,
                 "settings": cli.chat_settings_summary(), "effort": self.effort, "yolo": self.yolo, "busy": self.busy,
                 "wiki": str(cli.resolve_wiki_root(self.workspace) or ""),
                 "mcp": [m for m in self.mcp.status() if m["on"]], "plan": self.plan_summary(),
+                "handoff": handoff_part,
                 "title": self.title or self.auto_title(), "saved": len(archive_list(self.name)),
                 "queued": [{"id": q["id"], "text": q["text"], "origin": q["origin"], "voice": q["voice"]}
                            for q in self.queue],
@@ -471,9 +473,20 @@ class Session:
             return prompts[int(ref) - 1]
         return None
 
-    def cut_before(self, ev: dict) -> str | None:
+    def cut_before(self, ev: dict, dry_run: bool = False) -> str | None:
         """Go back to just before prompt event `ev`: it and everything after it leave the conversation, the
         model's messages included.  Returns why it cannot (None when done)."""
+        handoff_part, _, _, _ = cli._prior_handoff(self.messages)
+        if handoff_part > 0:
+            handoff_seq = max((m.get("dl_handoff_seq") or 0 for m in self.messages if isinstance(m, dict)), default=0)
+            if not handoff_seq:
+                handoff_seq = max((e.get("seq") or 0 for e in self.events
+                                   if e.get("type") == "notice" and "handoff #" in (e.get("text") or "").lower()),
+                                  default=0)
+            if isinstance(ev.get("seq"), int) and ev["seq"] <= handoff_seq:
+                return (f"that prompt is from before session handoff #{handoff_part} "
+                        f"(archived in /sessions as \"handoff #{handoff_part}\"); "
+                        f"use /sessions and /resume to go back to the full pre-handoff conversation")
         at = next((i for i, m in enumerate(self.messages) if m.get("role") == "user" and m.get("dl_turn") == ev["seq"]),
                   None)
         if at is None:
@@ -492,6 +505,8 @@ class Session:
         if at is None or at < 1:
             return ("that prompt is no longer in the model's context (trimmed from a long conversation), so the "
                     "session cannot go back to it")
+        if dry_run:
+            return None
         with self.lock:
             self.messages = self.messages[:at]
             k = next(i for i, e in enumerate(self.events) if e is ev)
@@ -523,6 +538,10 @@ class Session:
         old = ev.get("text") or ""
         kept = None
         if cmd == "/branch":                          # the whole conversation stays in /sessions as it is
+            why = self.cut_before(ev, dry_run=True)
+            if why:
+                self.notice(f"Cannot {cmd[1:]}: {why}.", "warn")
+                return None
             kept = self.archive_current()
         why = self.cut_before(ev)
         if why:
@@ -1246,6 +1265,7 @@ Session
 /continue         Go on after the agent stopped at its tool-round limit (DL_MAX_TURNS)
 /save [file]      Save the chat as Markdown in the workspace (also /export)
 /save full [file] The same with the whole run since /clear from the transcript, thinking included
+/handoff [p]      Write a wiki handoff brief and reload a clean session (with p, run it next)
 /clear            Start a new conversation; the current one is saved (also /new, /reset)
 /sessions [words] Saved conversations, newest first; words search their titles and messages
 /resume N         Bring saved conversation N back (the current one is saved first)

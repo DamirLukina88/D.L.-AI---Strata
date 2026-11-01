@@ -1,7 +1,7 @@
 ---
 title: "Engine Port Check Scripts (2026-10-21)"
 type: artifact
-description: "The greedy answer check, A/B bench wrapper and streamed-timings check used to verify the 0.2.2 engine port on the RX 7600 XT, plus the serve tests that already failed before it"
+description: "Greedy answer check, A/B bench wrapper, and streamed-timings check used to verify the 0.2.2 engine port on RX 7600 XT, plus pre-existing test notes"
 status: active
 tags: [benchmark, identity-check, engine, testing, gfx1102, scripts]
 created: 2026-10-21

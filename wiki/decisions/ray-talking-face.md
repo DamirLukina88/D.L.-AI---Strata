@@ -1,7 +1,7 @@
 ---
 title: "Ray's Avatar: Red Panda on the Input Box (Thinking and Talking)"
 type: decision
-description: "Dot-matrix red panda sitting on the Code tab input box: thinks while the model works, animates to Piper server audio, About switches; history of the face iterations"
+description: "Dot-matrix red panda on the Code tab input box: thinks while the model works, animates to Piper server audio, About switches, and avatar history"
 status: active
 tags: [web, tts, ray, code-tab]
 created: 2026-10-28
@@ -201,7 +201,7 @@ Added 2026-10-28 in serve/web/rayface.js (commit 616ec4c6). Choices made with th
     - `icon-192.png` and `icon-512.png` (solid-dot style on the dark surface `#12161b`, with rounded corners).
   - `manifest.webmanifest` sets `display: "browser"`, so a shortcut opens the normal browser view, as before.
   - `index.html` links them; the manifest uses `crossorigin="use-credentials"` so it loads behind Cloudflare Access.
-  - The server's `/web/` route also serves `.png` and `.webmanifest` (the server was restarted).
+  - The server's `GET /web/*` route also serves `.png` and `.webmanifest` (the server was restarted).
   - **Rerun the tool after changing his head.** A phone keeps an existing shortcut's icon: remove and add the shortcut again to see the panda.
 
 ## Thinking on every prompt (2026-10-28)

@@ -1984,8 +1984,9 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str, tools: list[d
     active_tools = DL_TOOLS if tools is None else tools
     payload = {
         "model": "strata",
-        # dl_turn: the session daemon's mark of which prompt a user message came from (/rewind); not the model's
-        "messages": [{k: v for k, v in m.items() if k != "dl_turn"} if "dl_turn" in m else m for m in messages],
+        # dl_turn / dl_*: the session daemon's marks (/rewind, handoff boundary); not the model's
+        "messages": [{k: v for k, v in m.items() if not k.startswith("dl_")}
+                     if any(k.startswith("dl_") for k in m) else m for m in messages],
         "tools": active_tools,
         "stream": True,
     }
@@ -2396,7 +2397,8 @@ def compact_history(messages: list[dict], tools: list[dict] | None, limit: int, 
                     d_rel = diary_m.group(1) if diary_m else "wiki/handoffs/latest.md"
                     arch_m = re.search(r"full stretch log: `([^`]+)`", existing_content)
                     a_rel = arch_m.group(1) if arch_m else ""
-                    note_msg = {"role": "user", "content": HANDOFF_NOTE.format(
+                    h_seq = max((m.get("dl_handoff_seq") or 0 for m in messages if isinstance(m, dict)), default=0)
+                    note_msg = {"role": "user", "dl_handoff_seq": h_seq, "content": HANDOFF_NOTE.format(
                         part=h_part, removed=h_removed + len(gone_idx), diary_rel=d_rel,
                         archive_rel=a_rel, diary=h_diary, base_tokens=b_tok
                     )}
@@ -2877,8 +2879,10 @@ def handoff_session(messages: list[dict], tools: list[dict] | None, limit: int, 
     stats = {"before": before, "reasoning": 0, "file_contents": 0, "tool_results": 0,
              "removed": len(gone_idx), "handoff": part, "diary": diary_rel, "archive": archive_rel,
              "diary_path": str(diary_path), "in_session": in_session}
+    pre_msgs = messages[:-1] if messages and messages[-1].get("role") == "user" else messages
+    handoff_seq = max((m.get("dl_turn") for m in pre_msgs if isinstance(m.get("dl_turn"), int)), default=0)
     kept = [m for i, m in enumerate(messages) if i not in gone_idx]
-    note_msg = {"role": "user", "content": HANDOFF_NOTE.format(
+    note_msg = {"role": "user", "dl_handoff_seq": handoff_seq, "content": HANDOFF_NOTE.format(
         part=part, removed=total_removed, diary_rel=diary_rel, archive_rel=archive_rel, diary=diary,
         base_tokens=0
     )}

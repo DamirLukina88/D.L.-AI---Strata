@@ -26,7 +26,7 @@ last_verified: 2026-10-15
 - **Keeping the daemon up:** drop-in `dl-ai-sessiond.service.d/restart.conf` sets `Restart=always`; the watchdog starts it when it is not running and restarts it after 3 failed `{"op": "state"}` probes on its socket.
 - **Live check (2026-10-15 21:14):** `/schedule in 1m …` ran on time; the answer appeared in the Code tab and the job ended `ok`.
 
-- 2026-10-15 (later), after the weather-email session (`~/Desktop/dl-ai-code-chat-2026-10-15-21-44.md`):
+- 2026-10-15 (later), after the weather-email session (`dl-ai-code-chat-2026-10-15-21-44.md` on `~/Desktop`):
   - **A time that passed while the agent worked runs at once**, never tomorrow: `parse_when` takes `anchor` = when the user asked (set per turn in `dl_mcp.CALL`). A time still ahead then but past now becomes `{"at": now, "planned": <asked time>}`; the result says "planned 21:30, already passed: runs at once, 7 min late". A bare HH:MM already past when the user asked still means tomorrow; a past date is an error. The rule is also in the `schedule__add` description, so the model does not deliberate over it.
   - **Late scheduled emails say so** (the user's choice): `add_late_note` puts "Planned for 21:30, sent at 21:37 (7 min later than planned)." at the top of the body and the HTML, translated by DeepL into the email's own language (detected); English if DeepL is unreachable.
   - **Croatian date format** in listings and input: `pet 16.10.2026. 21:30`; input also takes `16.10.2026. 21:30`, `16.10. 21:30`, `sutra`, `danas`, `za 2h`, `pon`…`ned`.
