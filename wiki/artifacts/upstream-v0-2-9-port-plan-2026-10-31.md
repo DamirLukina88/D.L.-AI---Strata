@@ -13,7 +13,7 @@ last_verified: 2026-10-31
 
 ## Summary
 
-Two items from the [v0.2.9 review](upstream-v0-2-9-review-2026-10-31.md). Status: item 1 ported, tested and live-checked 2026-10-31 (commit d9a56bb7 and the record after it); item 2 not started (User, chat, 2026-10-31).
+Two items from the [v0.2.9 review](upstream-v0-2-9-review-2026-10-31.md). Status: item 1 ported, tested and live-checked 2026-10-31 (commit d9a56bb7 and the record after it); item 2 measured 2026-10-31: chunked GDN fails quality on gfx1102 and stays off (User, chat, 2026-10-31).
 
 ## 1. Parser: tool calls inside code blocks are quotes (upstream 209dcadb, #4702 #4703)
 
@@ -51,6 +51,30 @@ Two items from the [v0.2.9 review](upstream-v0-2-9-review-2026-10-31.md). Status
 4. **Agent check, about 30 min:** `tools/dl_agent_bench.py --tasks quick` (bugfix, roman, intervals) with the switch on, compared with the last quick run. No task should get worse.
 5. **If it passes:** add `STRATA_GDN_CHUNKED=1` to `strata-coder-iq1_m.json` `env`, restart the server, and use it for a day. Document the measured numbers in `docs/DETAILS.md` and the wiki. As a contribution upstream it would be a hardware report for gfx11 under `docs/COMMUNITY_BENCHMARKS.md`, with the same-day comparison and what was not tested.
 6. **If it fails:** record the numbers in the wiki and leave it off.
+
+**Step 1 result (2026-10-31):** the plan's premise was wrong: our engine had only the CUDA chunked path (inside `#if !defined(__HIPCC__)`), so on the HIP build `STRATA_GDN_CHUNKED=1` did nothing. The gfx11 kernels are upstream `1b1bd4b4` (2026-10-14, after our sync base `296b59d2`); `git show 1b1bd4b4 | git apply` applied cleanly (not committed yet). Built `hip_gdn_chunked` and `hip_gdn_rec_head` in `build-hip` (12 s); `ctest -R 'hip_gdn_(chunked|rec_head)'`: 4 of 4 passed on gfx1102. One layer's recurrence and norm, `--bench-default` (PP=2, NOY=1) against `--bench`, three alternating runs each, medians: 256 tokens 0.893 -> 0.469 ms, 2K 4.20 -> 1.72 ms, 16K 34.9 -> 13.9 ms, 32K 67.8 -> 27.3 ms (about 2.4x; upstream's gfx1151 was 1.6x). Not yet measured: a whole prompt, quality, the agent check; the deployed `engine/strata` is not rebuilt.
+
+**Gotcha:** running these GPU benchmarks while the server had the model loaded made the kernel OOM-kill `strata-server` (12:15:45, engine anon RSS 20.8 GB; systemd restarted it 7 s later, model unloaded). Stop the server, or make sure the model is unloaded, before any GPU test. Second gotcha the same day: `tools/strata_bench.py` started from Claude Code's shell runs its engine inside the Claude app's cgroup, with swap allowed; the group reached 24.7 GB with 18.6 GB in swap and systemd-oomd killed the whole Claude app scope at 12:30:24 (the bench died with it). Run a model benchmark as its own unit like the server: `systemd-run --user --unit=strata-bench -p MemorySwapMax=0 <script>`, with `strata-server` stopped, `"lazy_load": false` in the bench config (else the bench waits for a load that never starts) and `env -u STRATA_API_KEY` (the user manager's environment has the key, and the bench then gets 401).
+
+**Step 2 result (2026-10-31, 12:32-13:05):** `engine/strata` rebuilt with `1b1bd4b4` (old binary kept as `engine/strata.bak-pre-gdnchunked-20261031`). `tools/strata_bench.py`, Ray's config with `lazy_load` false, four runs in order off, on, off, on, each a fresh server, 3 prompts per size, medians:
+
+| | off 1 | on 1 | off 2 | on 2 | on / off (means) |
+|---|---:|---:|---:|---:|---:|
+| 4K prompt tok/s | 295.1 | 306.6 | 302.1 | 308.0 | +2.9% |
+| 16K prompt tok/s | 335.9 | 334.5 | 335.0 | 339.9 | +0.5% |
+| 16K first token, s | 47.86 | 48.05 | 47.98 | 47.29 | -0.5% |
+| decode tok/s, chat | 23.5 | 25.0 | 26.1 | 25.1 | no change |
+
+At 4K both runs with the switch are above both without, by little (off's range goes up to 306.4); at 16K the difference is inside run-to-run noise. The layer timing predicted about 0.75 s at 16K (21 ms x 36 layers, 1.6%); the whole prompt shows at most 0.5 s. Quality (step 3) and the agent check (step 4) not run. The switch stays off; the web app shows errors while a bench runs because `strata-server` is stopped and the bench's own server restarts between runs.
+
+**Step 3 result (2026-10-31, 13:12-13:20): fails.** The planned `quant_quality.py run` cannot see this switch: it reads every segment through the decode windows (`--short-read seg_tokens+64`), never the prompt path. Used `quant_quality.py prompt` instead (20 prompts, the first 256/512/768/1000 tokens of each segment, the batched prompt path with `--prefill auto`, full-vocabulary next-token logits), then `pcompare`, each run as its own unit (`systemd-run --user -p MemorySwapMax=0`, about 2.5 min a run, Ray's model unloaded). Against the switch off:
+
+| run | top-1 | KL mean | median | max |
+|---|---:|---:|---:|---:|
+| off again | 100% | 0.00000 | 0.00000 | 0.00000 |
+| on | 90% (18/20) | 0.02875 | 0.00150 | 0.37603 |
+
+Off is bit-repeatable, so all of it is the switch. Upstream's gfx1151 first-token KL was 0.0039-0.0067 mean with the same top token everywhere; ours is 4-7x that with 2 of 20 top tokens changed, on short prompts (upstream: 1.5K-24K), on IQ1_M (upstream: IQ4_XS, Q4_K_XL; a lower-bit quant may be more sensitive, not tested). Below the plan's bar (top-1 >= 99%, KL mean <= ~0.005) for at most +2.9% prompt speed: `STRATA_GDN_CHUNKED` stays off on the RX 7600 XT. The agent check (step 4) was not run. Files: `reports/gdn-quality-2026-10-31/`.
 
 **Total model time:** about 1.5-2.5 h, all of it asked for before it starts (the long-benchmark rule). Ray is slow or unavailable while it runs.
 

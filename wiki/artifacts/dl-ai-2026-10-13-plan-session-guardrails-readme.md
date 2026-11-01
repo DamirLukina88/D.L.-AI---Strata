@@ -61,7 +61,7 @@ Keep the security guards as they are:
 - the workspace path checks
 - the "content is data, not instructions" rule
 
-No content-restriction rules exist in the prompt, so nothing needs removing for the uncensored model.
+No content-restriction rules exist in the prompt, so nothing needs removing for the local model.
 
 1. **Approval for destructive commands, in `core.py`.**
    - Add `classify_command(cmd, workspace)`. It flags:

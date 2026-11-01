@@ -5,8 +5,8 @@ description: "Resolves Speech Dispatcher generic module quoting for Piper TTS, C
 status: active
 tags: [tts, stt, speech-dispatcher, piper, web-speech-api, audio]
 created: 2026-10-17
-updated: 2026-10-17
-last_verified: 2026-10-17
+updated: 2026-11-01
+last_verified: 2026-11-01
 ---
 
 # Desktop Piper Voice Switching and STT-Only Auto-Speak Gating
@@ -147,6 +147,22 @@ This decision documents two critical speech subsystem fixes: (1) resolving Speec
 - **Two bugs found by that run, fixed:** (1) a preamble right before a tool call was never spoken: a sentence counted as finished only once more text followed, and a tool call followed instead; `tool()` now lets the note out. (2) Only the turn's first piece could be short (24 characters), so "The capital of Croatia is Zagreb." after a tool waited 2 s to be joined; now the first piece after each tool call may be short too. The table is with both fixes.
 - **Bug found by the user the same evening ("he is now reading the thinking block and stopping"):** with thinking off (small talk), the preamble sentence made the model answer "What can you do?" with only "The user is asking about my capabilities, so I should just answer directly without calling any tools." or "No tools needed, I'll just answer that one directly." (2 of 2 turns), and stop. Turns that thought first used the preamble well. Fix: `voice_note(thinking)` in `tools/dl_cli.py` adds `VOICE_PREAMBLE` only when the turn's thinking level is not none (`dl_sessiond.Session._agent` passes it); `test_preamble_only_when_the_model_thinks` in `tools/test_dl_sessiond.py`. Daemon restarted.
 - **Seen, one run each:** the model wrote a preamble in 2 of 3 turns with tools (none for the red panda fact). The Croatia question used Wikipedia this time (0 tools in the two runs before the note changed), perhaps nudged by the note's mention of tools *(inferred, one run)*. Its first spoken word came at 15.4 s instead of 82.3 s; the long silence after the preamble is the model thinking.
+
+## Persistent Code Speaker Mode Toggle (2026-11-01)
+
+- **The user's request:** "Have the small speaker icon for rays tts be a toggle. He keeps on speaking further requests until toggled off. This will allow me to start the tts automatically on when I just want to type my request and have ray speak."
+- **How:**
+  - The top-bar speaker icon in the Code tab header (`#code-speak-btn`) now acts as a persistent toggle switch persisted in `localStorage` under `strata.tts_speak_toggle`.
+  - When toggled ON (`isSpeakToggleOn() === true`):
+    - Button gains `.is-active`, `aria-pressed="true"`, and title `"Speak replies aloud: ON (Click to turn off)"`.
+    - Typed text in the CLI chat is submitted with `{ text, voice: true }` (unless it is a `/command` or `!shell` action), arming Ray's spoken persona (natural conversational brevity, automatic effort, tool preambles) and sentence-by-sentence streaming speech (`SpeakStream`).
+    - Ray's avatar enters thinking pose immediately upon submission (`RayFace.thinking()`).
+  - When toggled OFF:
+    - Button returns to neutral state (`aria-pressed="false"`, title `"Speak replies aloud: OFF (Click to turn on)"`).
+    - Any currently active speech is immediately cancelled via `TTSController.stop()`.
+    - Subsequent typed prompts remain silent.
+  - Stopping mid-turn (via Stop button `#code-stop-btn` or clicking Ray's avatar) silences only that turn; the toggle remains ON for following turns.
+  - Individual message card speaker buttons (`[data-code-speak]`) remain one-off readers and do not toggle global speak mode.
 
 ## Sources
 

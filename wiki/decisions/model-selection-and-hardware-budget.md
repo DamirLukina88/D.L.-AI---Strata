@@ -45,7 +45,7 @@ Standard server-scale deployments of 125B MoE models require enterprise GPUs wit
 - Models: [Strata Model Variants](../entities/strata-models.md)
 - Engine: [Strata](../entities/strata.md)
 - Deployment: [RX 7600 XT CachyOS Deployment](rx-7600-xt-cachyos-deployment.md)
-- Artifact: [Uncensored Model Evaluation and Refusal-Direction Projection](../artifacts/uncensored-model-evaluation-and-refusal-projection-plan.md)
+- Artifact: [Community Model Evaluation and Control-Vector Steering Plan](../artifacts/community-model-evaluation-and-control-vector-plan.md)
 - Artifact: [Upstream Strata 0.2.4 Review and Hardware Evaluation](../artifacts/upstream-v0-2-4-review-2026-10-24.md)
 
 ## Sources

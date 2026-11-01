@@ -143,7 +143,7 @@ console while he is thinking.
 
 He has no talking mouth on purpose. Every mouth that copied the speech looked uncanny, so he speaks through motion,
 and his mouth opens only on the strongest syllables. His voice is pitched up to 1.5 by default, a little cartoon-like
-to suit him. Click him to stop him talking. Two switches in About turn him off: *Show Ray while speaking* and
+to suit him. On light themes, his dot-matrix border is rendered with a bold dark outline so his white cheeks and ears stay crisp and clear. Click him to stop him talking. Two switches in About turn him off: *Show Ray while speaking* and
 *Show Ray thinking on every prompt*. The same panda is the app icon and the browser tab icon.
 
 ## How fast is it?
@@ -256,9 +256,10 @@ Dictate prompts privately with 100% offline speech recognition:
 ### 4. Native Browser Text-to-Speech (TTS) & Neural Piper
 Listen to responses hands-free without third-party audio streaming:
 - **Voice-Gated Auto-Speak:** *"Automatically read new answers aloud"* (on by default) speaks replies only when the input was dictated via STT, preserving silence when typing.
+- **Persistent Speaker Mode Toggle:** clicking the header speaker icon in the Code tab arms persistent speak mode (`strata.tts_speak_toggle`). When enabled, typed prompts are also answered aloud in Ray's spoken persona (with tool preambles and streaming speech), allowing you to type and listen hands-free. Stopping mid-reply silences only that turn.
 - **20 US Neural Piper Voices:** high-quality local Piper speech synthesis integrated via Linux Speech Dispatcher and Web Speech API. Ray's voice, `en_US-hfc_male-medium` (male since 2026-10-28), is the default on the server, in the browser and on the desktop; any other voice can be picked in Settings. Where the server voice is off and Piper is missing (Edge, macOS), *Auto* picks a male voice by name (Edge's Andrew or Guy, Chrome's Google UK English Male); Android names voices by language only, so there it is the local US English voice.
 - **Ray's voice from the server:** `POST /v1/audio/speech` (OpenAI-style `input`, `voice`, `speed`; WAV, `serve/speech.py`) runs Piper on the home server, so phones hear the same voice as the PC (measured 0.39 s for 3.4 s of speech). The web app uses it by default (About: *Use Ray's voice from the server*) and falls back to the browser voice if it fails.
-- **Ray's avatar:** a little red panda sitting on the input box who thinks while the model works and moves with his voice while he reads a reply aloud ([Meet Ray](#meet-ray)). Now and then he takes a cocoa break, and on long tasks he works at something that fits: a blueprint, calipers on a 3D print, a Rubik's cube or equations. When he calls Home Assistant, he sometimes works a little control panel: a lamp or a mixing desk. Click him to stop the speech. Turn him off in About.
+- **Ray's avatar:** a little red panda sitting on the input box who thinks while the model works and moves with his voice while he reads a reply aloud ([Meet Ray](#meet-ray)). He features a bold, dark outline on light themes for crisp contrast. Now and then he takes a cocoa break, and on long tasks he works at something that fits: a blueprint, calipers on a 3D print, a Rubik's cube or equations. When he calls Home Assistant, he sometimes works a little control panel: a lamp or a mixing desk. Click him to stop the speech. Turn him off in About.
 - **Speed and pitch:** the sliders in About work for the server voice and the browser voice. Piper has no pitch setting, so pitch is made by playing the speech faster, which was asked from the server that much slower, so the pace stays at the Speed setting. The default pitch is 1.5.
 - **Natural Speech Cleaner (`cleanForSpeech`):** strips markdown, emojis, code blocks, box borders, and converts math, units, and symbols to natural spoken words.
 - **Mobile Keep-Alive & Controls:** Android Screen WakeLock and MediaSession notification drawer controls (play, pause, stop).

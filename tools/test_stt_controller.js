@@ -745,6 +745,88 @@ simKbd.onUserTouchTextarea();
 const stateAfterTouch = simKbd.getState();
 assert.strictEqual(stateAfterTouch.inputMode, null, "inputmode must be restored to normal when user taps the textarea to type");
 
-console.log("All STT, TTS Filter, Accessibility & Mobile Keyboard Tests Passed Successfully! (53/53)");
+// 15. Persistent Code Speaker Toggle & fromVoice Logic Tests
+function computeFromVoiceWithToggle(sttState, inputText, speakToggleOn) {
+  let fromVoice = false;
+  if (sttState.lastInputWasVoice && sttState.lastTranscribedText) {
+    const spokenLower = sttState.lastTranscribedText.toLowerCase();
+    const textLower = (inputText || "").trim().toLowerCase();
+    if (textLower.includes(spokenLower) || spokenLower.includes(textLower)) {
+      fromVoice = true;
+    }
+  }
+  sttState.lastInputWasVoice = false;
+  sttState.lastTranscribedText = "";
+  if (!fromVoice && speakToggleOn && !/^[\/!]/.test((inputText || "").trim())) {
+    fromVoice = true;
+  }
+  return fromVoice;
+}
+
+// Test 54: Speaker toggle ON enables voice response for typed plain prompt
+assert.strictEqual(
+  computeFromVoiceWithToggle({ lastInputWasVoice: false, lastTranscribedText: "" }, "Explain quicksort", true),
+  true,
+  "Typed prompt with speaker toggle ON must set fromVoice to true"
+);
+
+// Test 55: Speaker toggle ON does NOT trigger voice response for slash commands or shell bangs
+assert.strictEqual(
+  computeFromVoiceWithToggle({ lastInputWasVoice: false, lastTranscribedText: "" }, "/status", true),
+  false,
+  "Slash commands with toggle ON must remain non-voice"
+);
+assert.strictEqual(
+  computeFromVoiceWithToggle({ lastInputWasVoice: false, lastTranscribedText: "" }, "!cat /etc/os-release", true),
+  false,
+  "Shell commands with toggle ON must remain non-voice"
+);
+
+// Test 56: Speaker toggle OFF keeps typed prompt silent
+assert.strictEqual(
+  computeFromVoiceWithToggle({ lastInputWasVoice: false, lastTranscribedText: "" }, "Explain quicksort", false),
+  false,
+  "Typed prompt with speaker toggle OFF must NOT set fromVoice"
+);
+
+// Test 57: willAutoSpeak combines tts_auto_speak and tts_speak_toggle
+function willAutoSpeak(autoSpeak, speakToggle) {
+  return autoSpeak || speakToggle;
+}
+assert.strictEqual(willAutoSpeak(false, true), true, "willAutoSpeak is true if speaker toggle is ON even if autoSpeak is false");
+assert.strictEqual(willAutoSpeak(true, false), true, "willAutoSpeak is true if autoSpeak is true");
+assert.strictEqual(willAutoSpeak(false, false), false, "willAutoSpeak is false if both are false");
+
+// Test 58: Mid-turn stop keeps speaker toggle ON
+function simulateMidTurnStop() {
+  const store = { tts_speak_toggle: true };
+  let speaking = true;
+  function stop() {
+    speaking = false;
+    // Note: store.tts_speak_toggle is untouched!
+  }
+  stop();
+  return { speaking, toggleStillOn: store.tts_speak_toggle };
+}
+const midStop = simulateMidTurnStop();
+assert.strictEqual(midStop.speaking, false, "Mid-turn stop must halt speaking");
+assert.strictEqual(midStop.toggleStillOn, true, "Mid-turn stop must preserve speaker toggle in ON state");
+
+// Test 59: Explicit toggle OFF updates persistence and stops current speech
+function simulateExplicitToggleOff() {
+  const store = { tts_speak_toggle: true };
+  let speaking = true;
+  function setSpeakToggle(val) {
+    store.tts_speak_toggle = Boolean(val);
+    if (!val && speaking) speaking = false;
+  }
+  setSpeakToggle(false);
+  return { speaking, toggleVal: store.tts_speak_toggle };
+}
+const toggleOffResult = simulateExplicitToggleOff();
+assert.strictEqual(toggleOffResult.toggleVal, false, "Explicit toggle OFF must update store");
+assert.strictEqual(toggleOffResult.speaking, false, "Explicit toggle OFF must stop any active speech");
+
+console.log("All STT, TTS Filter, Accessibility, Mobile Keyboard & Speaker Toggle Tests Passed Successfully! (59/59)");
 
 

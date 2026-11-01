@@ -683,6 +683,11 @@ body.is-resizing .view { pointer-events: none; }      /* the drag keeps going ov
 .code-action-btn {
   height: 30px;
 }
+.code-action-btn.is-active {
+  color: var(--st-accent) !important;
+  background: var(--st-accent-tint) !important;
+  border-color: var(--st-accent) !important;
+}
 .code-terminal-body {
   flex: 1;
   min-height: 0;

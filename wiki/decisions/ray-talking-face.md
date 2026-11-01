@@ -5,8 +5,8 @@ description: "Dot-matrix red panda sitting on the Code tab input box: thinks whi
 status: active
 tags: [web, tts, ray, code-tab]
 created: 2026-10-28
-updated: 2026-10-29
-last_verified: 2026-10-28
+updated: 2026-11-01
+last_verified: 2026-11-01
 ---
 
 # Ray's Avatar: Red Panda on the Input Box (Thinking and Talking)
@@ -266,6 +266,11 @@ Added 2026-10-28 in serve/web/rayface.js (commit 616ec4c6). Choices made with th
 - **README:** `home-<panel>.gif` from `tools/make_ray_media.py`. Re-running the script re-encodes the other GIFs with a few frames different (random blinks); they were restored rather than committed.
 - **Verified:** Node with stubs (12 checks: the choice per action, once a turn, the 1 in 2, taking over from the mug, gone when the answer starts) and frames rendered from the app code. Not yet seen in the real app.
 - **Thermostat removed (same day):** the user did not like the thermostat dial, so it is gone (code, `home-thermostat.gif`, README). Heating calls now count as "anything else": the lamp or the mixing desk at random.
+
+## Thicker white-theme outline (2026-11-01)
+
+- **The user's request:** "The Rey avatar border on white is to thin. Thicken it up."
+- **How:** In `serve/web/rayface.js`, light-theme detection (`lightPage`) renders an outline around lit and dark dots for contrast against bright backgrounds. The stroke width was increased from `Math.max(1.5, P * 0.32)` to `Math.max(2.5, P * 0.78)` of dot pitch `P` (with minimum 2.5px), providing crisp, bold contrast and clear definition on white and light themes.
 
 ## Sources
 

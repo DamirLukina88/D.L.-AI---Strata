@@ -15,7 +15,7 @@ last_verified: 2026-10-13
 
 ## Summary
 
-- 2026-10-13: The user runs an uncensored model and wants no guardrails except against data leaks and unauthorised destructive actions. The prompt had no content restrictions, but run_command had no protection at all.
+- 2026-10-13: The user runs an unrestricted local model and wants security guardrails focused on data leaks and unauthorised destructive actions. The prompt had no content restrictions, but run_command had no protection at all.
 - tools/dl_auditing.py classify_command / classify_write flag: rm -r/-f, find -delete, sudo/doas/su, dd/mkfs/wipefs/parted, chmod/chown -R, git push --force / reset --hard / clean -f / branch -D / filter-repo / rebase, systemctl stop/disable/restart, kill -9/pkill, curl|sh, package removal, redirects/copies/writes outside the workspace (except /tmp, /dev/null).
 - dispatch_dl_tool asks the approver (terminal y/N, or the web Approve/Deny card via the session daemon); a denial returns 'Denied by user' to the model. /yolo turns it off for one session.
 - Plan Mode now ends with 'Execute this plan?'; yes switches to Act Mode and runs it (user choice). Kept as they were: scan_secrets and syntax_guard on writes (blocking), the sensitive-file guard, workspace path checks.

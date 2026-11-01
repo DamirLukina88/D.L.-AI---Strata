@@ -46,7 +46,7 @@ The repo is clean at `20142315` and in sync with `origin/main`, so none of these
 
 1. **12 Oct 08:19** — Downloading a large `.zip` from the server workspace with "download to browser" doesn't work (an `.md` file works). → Agent was reading `/api/workspace/download` in `serve/server.py` when it hit `RESOURCE_EXHAUSTED (429)`. **Not fixed.**
 2. **11 Oct 23:20** — Rewrite the README on the app repo (DamirLukina88/D.L.-AI---Strata): remove the upstream Strata header, language links, pagoda video and upstream description; add our benchmark info; ask me questions. → Agent asked its questions, then "Development is paused". **README is still the upstream one.**
-3. **11 Oct 23:15** — I use an uncensored model: list the guardrail types in the CLI system prompt with a description of each, so I can drop the ones that aren't about security (data leaks, unauthorised destructive actions). Ask me questions. → Agent listed them (in `tools/dl_cli.py` and `serve/frontend.py`); **no change made.**
+3. **11 Oct 23:15** — I use an unrestricted model: list the guardrail types in the CLI system prompt with a description of each, so I can drop the ones that aren't about security (data leaks, unauthorised destructive actions). Ask me questions. → Agent listed them (in `tools/dl_cli.py` and `serve/frontend.py`); **no change made.**
 
 ## 11 Oct (evening) — upstream v0.1.43, performance, CLI consolidation
 
@@ -78,7 +78,7 @@ The repo is clean at `20142315` and in sync with `origin/main`, so none of these
 26. **12:32** — Claude Code CLI is too slow: use the Fable 5.1 system prompt, stripped of what can't work locally; review and ask me questions.
 27. **12:29** — The project has changed a lot from upstream: update the project descriptions in the wiki; ask me questions; commit and push.
 28. **12:09** — Show Claude Code CLI thinking the same way DeepSeek and D.L. CLI show it.
-29. **12:10** — (side chat) Add the uncensored model `jimmy31chen/RVN-Qwen3.8-Flash-Next-Abliterated-Uncensored-IQ3_S-Strata` to both of my models in Strata.
+29. **12:10** — (side chat) Add the community model `jimmy31chen/RVN-Qwen3.8-Flash-Next-Community-IQ3_S-Strata` to both of my models in Strata.
 
 ## 11 Oct (morning) — CLIs in the Code tab
 

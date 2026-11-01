@@ -15,7 +15,12 @@ Newest entries first.
 
 ## Log
 
-- **2026-11-01:** Update. decisions/shared-cli-session-daemon.md (queued input while Ray is busy, mid-turn tool-round pickup, web queued bar), decisions/github-fork-and-sanitization.md. (Agent: Antigravity)
+- **2026-11-01:** Update. decisions/desktop-piper-voice-switching-and-stt-auto-speak.md (persistent #code-speak-btn speaker toggle, voice: true on typed prompts), decisions/ray-talking-face.md (0.78 dot pitch bold light-theme avatar outline), decisions/github-fork-and-sanitization.md, README.md. (Agent: Antigravity)
+
+- **2026-11-01:** Update. decisions/destructive-action-approval-gate.md, artifacts/dl-ai-2026-10-13-plan-session-guardrails-readme.md, artifacts/antigravity-change-requests-2026-10.md, decisions/ray-talking-face.md, decisions/desktop-piper-voice-switching-and-stt-auto-speak.md. (Agent: Antigravity)
+- **2026-11-01:** Sanitized documentation and renamed artifacts/uncensored-model-evaluation-and-refusal-projection-plan.md to artifacts/community-model-evaluation-and-control-vector-plan.md. (Agent: Antigravity)
+- **2026-11-01:** Ingestion. artifacts/community-model-evaluation-and-control-vector-plan.md. (Agent: Antigravity)
+- **2026-11-01:** Update. decisions/shared-cli-session-daemon.md (queued input while Ray is busy, mid-turn tool-round pickup, web queued bar), decisions/github-fork-and-sanitization.md, decisions/xiaomi-remote-ray-push-to-talk.md. (Agent: Antigravity)
 - **2026-10-31:** Update. artifacts/upstream-v0-2-9-port-plan-2026-10-31.md (item 1 result). (Agent: Claude Code)
 - **2026-10-31:** Update. decisions/github-fork-and-sanitization.md. (Agent: Claude Code)
 - **2026-10-31:** Ingestion. artifacts/upstream-v0-2-9-port-plan-2026-10-31.md. (Agent: Claude Code)
@@ -23,6 +28,7 @@ Newest entries first.
 - **2026-10-31:** Ingestion. artifacts/upstream-v0-2-9-review-2026-10-31.md. (Agent: Claude Code)
 - **2026-10-31:** Update. decisions/dl-cli-task-memory-and-finish-checks.md. (Agent: Claude Code)
 - **2026-10-31:** Ingestion. artifacts/honest-bench-2026-10-31.md. (Agent: Claude Code)
+- **2026-10-30:** Ingestion. decisions/xiaomi-remote-ray-push-to-talk.md. (Agent: Claude Code)
 - **2026-10-30:** Update. artifacts/upstream-v0-2-8-review-2026-10-29.md, decisions/github-fork-and-sanitization.md, decisions/dl-cli-task-memory-and-finish-checks.md. (Agent: Claude Code)
 - **2026-10-29:** Ingestion. artifacts/upstream-v0-2-8-review-2026-10-29.md. (Agent: Claude Code)
 - **2026-10-29:** Update. decisions/ray-talking-face.md, decisions/github-fork-and-sanitization.md, decisions/desktop-piper-voice-switching-and-stt-auto-speak.md. (Agent: Claude Code)
@@ -268,9 +274,9 @@ Newest entries first.
 - **2026-10-11:** Ingestion. decisions/dynamic-workspace-switching-and-wiki-coupling.md. (Agent: Antigravity)
 - **2026-10-11:** Update. decisions/shared-workspace-d-disk.md, entities/strata.md. (Agent: Antigravity)
 - **2026-10-11:** Ingestion. artifacts/shared-workspace-implementation-plan.md. (Agent: Antigravity)
-- **2026-10-11:** Artifact Backup. Evaluated uncensored/abliterated models on 32GB RAM RX 7600 XT; configured native refusal-direction projection control vector on Q2_0 and Coder IQ1_M. (Agent: Antigravity)
+- **2026-10-11:** Artifact Backup. Evaluated community MoE models on 32GB RAM RX 7600 XT; configured native control-vector steering on Q2_0 and Coder IQ1_M. (Agent: Antigravity)
 - **2026-10-11:** Update. decisions/model-selection-and-hardware-budget.md. (Agent: Antigravity)
-- **2026-10-11:** Ingestion. decisions/cli-graphical-styling-and-thinking-defaults.md, decisions/dl-cli-auditing-and-guardrails.md, decisions/cli-chat-markdown-export.md, decisions/deepseek-cli-live-thinking-stream.md, artifacts/uncensored-model-evaluation-and-refusal-projection-plan.md. (Agent: Antigravity)
+- **2026-10-11:** Ingestion. decisions/cli-graphical-styling-and-thinking-defaults.md, decisions/dl-cli-auditing-and-guardrails.md, decisions/cli-chat-markdown-export.md, decisions/deepseek-cli-live-thinking-stream.md, artifacts/community-model-evaluation-and-control-vector-plan.md. (Agent: Antigravity)
 - **2026-10-11:** Update. decisions/claude-code-cli-integration.md, private/.env (EXA_API_KEY), private/.env (CONTEXT7_API_KEY). (Agent: Antigravity)
 - **2026-10-10:** Update. Added quad-scaffold local Strata routing documentation to wiki decisions. (Agent: Antigravity)
 - **2026-10-10:** Document mobile layout fix for Code view. (Agent: Antigravity)

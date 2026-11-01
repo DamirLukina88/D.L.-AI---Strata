@@ -361,6 +361,27 @@ const TTSController = {
   getCodeMode() { return store.get("tts_code_mode", "skip"); },
   // on unless turned off: a spoken prompt is answered aloud (typed ones never are)
   isAutoSpeak() { return store.get("tts_auto_speak", true) !== false; },
+  // persistent speaker toggle on the Code tab header: arms TTS for all subsequent requests (typed & spoken)
+  isSpeakToggleOn() { return store.get("tts_speak_toggle", false) === true; },
+  willAutoSpeak() { return this.isAutoSpeak() || this.isSpeakToggleOn(); },
+
+  updateSpeakToggleBtn(on = this.isSpeakToggleOn()) {
+    const btn = $("code-speak-btn");
+    if (!btn) return;
+    btn.classList.toggle("is-active", on);
+    btn.setAttribute("aria-pressed", String(on));
+    btn.title = `Speak replies aloud: ${on ? "ON (Click to turn off)" : "OFF (Click to turn on)"}`;
+  },
+
+  setSpeakToggle(val) {
+    const on = Boolean(val);
+    store.set("tts_speak_toggle", on);
+    this.updateSpeakToggleBtn(on);
+    if (!on && this.speaking) {
+      this.stop();
+      if (typeof codeSpeechEnd === "function") codeSpeechEnd();
+    }
+  },
   // on unless turned off in About: Ray the red panda while reading aloud, and his thinking pose (web/rayface.js)
   isOrbOn() { return store.get("tts_orb", true) !== false; },
   // on unless turned off in About: Ray's thinking pose for every turn (typed, spoken or from the terminal), not only
@@ -879,6 +900,7 @@ const TTSController = {
         this.speakText("Hi, I'm Ray, the household's red panda, on the home server.", testBtn);
       };
     }
+    this.updateSpeakToggleBtn();
   },
 
   populateVoiceSelector() {
@@ -1736,6 +1758,39 @@ const STTController = {
     btn.addEventListener("click", onClick);
   },
 
+  // D.L. AI: the mic button's tap / hold on a key, for the Xiaomi remote's Assistant button (remapped to Pause by
+  // /etc/udev/hwdb.d/70-xiaomi-rc.hwdb). Hold 400 ms or more to talk while held; a shorter tap toggles listening.
+  bindKeyboardPTT(code, target) {
+    let pressTimer = null;
+    let isHold = false;
+    document.addEventListener("keydown", (e) => {
+      if (e.code !== code || e.repeat) return;
+      e.preventDefault();
+      isHold = false;
+      pressTimer = setTimeout(() => {
+        pressTimer = null;
+        isHold = true;
+        this.isPushToTalk = true;
+        this.cancelAutoSendTimer();
+        if (!this.isRecording && !this.isTranscribing) this.start(target);
+      }, 400);
+    });
+    document.addEventListener("keyup", (e) => {
+      if (e.code !== code) return;
+      e.preventDefault();
+      if (pressTimer) {
+        clearTimeout(pressTimer);
+        pressTimer = null;
+        this.isPushToTalk = false;
+        this.toggle(target);
+      } else if (isHold) {
+        isHold = false;
+        this.isPushToTalk = false;
+        if (this.isRecording && this.currentTarget === target) this.stop();
+      }
+    });
+  },
+
   async init() {
     this.autoSend = this.isAutoSend();
     this.setAutoSend(this.autoSend);
@@ -1810,6 +1865,7 @@ const STTController = {
 
     // Bind Dual-mode interaction to mic buttons
     this.bindDualMode($("code-mobile-mic-btn"), "code");
+    this.bindKeyboardPTT("Pause", "code");
 
     // Cancel auto-send timer when user interacts with text boxes (typing, clicking, tapping to edit)
     const cancelOnInteract = () => {
@@ -2048,12 +2104,12 @@ function codeOnTurnEnd() {
     const cards = codeFeed() ? codeFeed().querySelectorAll(".code-mobile-card--assistant") : [];
     const last = cards.length && cards[cards.length - 1].querySelector(".cs-text, .code-mobile-card-body");
     if (last) code.lastSpokenText = (last.innerText || last.textContent || "").trim();
-  } else if (TTSController.isAutoSpeak() && code.turnFromVoice && !code.replaying) {
+  } else if (TTSController.willAutoSpeak() && code.turnFromVoice && !code.replaying) {
     const cards = codeFeed() ? codeFeed().querySelectorAll(".code-mobile-card--assistant") : [];
     if (cards.length) {
       const lastCard = cards[cards.length - 1];
       const textEl = lastCard.querySelector(".cs-text") || lastCard.querySelector(".code-mobile-card-body");
-      const sp = lastCard.querySelector("[data-code-speak]") || $("code-speak-btn");
+      const sp = lastCard.querySelector("[data-code-speak]");
       if (textEl) {
         const textToSpeak = (textEl.innerText || textEl.textContent || "").trim();
         if (textToSpeak && textToSpeak !== code.lastSpokenText) {
@@ -2246,7 +2302,7 @@ function codeEvent(ev, replay) {
     else if (ev.type === "thinking" || ev.type === "tool_call") RayFace.thinking();   // thinks again after a tool
   }
   // a spoken prompt's reply is read sentence by sentence as it arrives
-  if (!replay && code.turnFromVoice && TTSController.isAutoSpeak() && TTSController.isStreamOn()) {
+  if (!replay && code.turnFromVoice && TTSController.willAutoSpeak() && TTSController.isStreamOn()) {
     if (ev.type === "text" && ev.text) codeSpeech().push(ev.text);
     else if (ev.type === "tool_call" && code.speech) code.speech.tool();
   }
@@ -2273,7 +2329,7 @@ function codeEvent(ev, replay) {
       if (!replay && ev.voice != null) {
         code.turnFromVoice = Boolean(ev.voice);
         codeSpeechEnd();
-        if (code.turnFromVoice && TTSController.isAutoSpeak() && TTSController.orb() && typeof RayFace !== "undefined") {
+        if (code.turnFromVoice && TTSController.willAutoSpeak() && TTSController.orb() && typeof RayFace !== "undefined") {
           RayFace.thinking();
         }
       }
@@ -2501,6 +2557,9 @@ async function codeSend(text) {
   }
   STTController.lastInputWasVoice = false;
   STTController.lastTranscribedText = "";
+  if (!fromVoice && typeof TTSController !== "undefined" && TTSController.isSpeakToggleOn() && !/^[\/!]/.test(text)) {
+    fromVoice = true;
+  }
   if (!code.state.busy) {
     code.turnFromVoice = fromVoice;
     codeSpeechEnd();                               // a reading still open from the last turn
@@ -2512,7 +2571,7 @@ async function codeSend(text) {
     if (cards.length) {
       const lastCard = cards[cards.length - 1];
       const textEl = lastCard.querySelector(".cs-text") || lastCard.querySelector(".code-mobile-card-body");
-      const sp = lastCard.querySelector("[data-code-speak]") || $("code-speak-btn");
+      const sp = lastCard.querySelector("[data-code-speak]");
       if (textEl) TTSController.speakText(textEl.innerText || textEl.textContent, sp);
     } else {
       toast("info", "No messages yet", "There is no assistant reply to speak.");
@@ -2525,7 +2584,7 @@ async function codeSend(text) {
   if (res) {
     if (ta && ta.value.trim() === text) { ta.value = ""; ta.style.height = "auto"; }
     // the answer will be read aloud: Ray thinks, paw on his chin, until then
-    if (!res.queued && fromVoice && TTSController.isAutoSpeak() && TTSController.orb()) RayFace.thinking();
+    if (!res.queued && fromVoice && TTSController.willAutoSpeak() && TTSController.orb()) RayFace.thinking();
   }
 }
 
@@ -2548,15 +2607,9 @@ if ($("code-stop-btn")) {
 }
 if ($("code-speak-btn")) {
   $("code-speak-btn").onclick = () => {
-    const cards = codeFeed() ? codeFeed().querySelectorAll(".code-mobile-card--assistant") : [];
-    if (cards.length) {
-      const lastCard = cards[cards.length - 1];
-      const textEl = lastCard.querySelector(".cs-text") || lastCard.querySelector(".code-mobile-card-body");
-      const sp = lastCard.querySelector("[data-code-speak]") || $("code-speak-btn");
-      if (textEl) TTSController.speakText(textEl.innerText || textEl.textContent, sp);
-    } else {
-      toast("info", "No messages yet", "There is no assistant reply to speak.");
-    }
+    const next = !TTSController.isSpeakToggleOn();
+    TTSController.setSpeakToggle(next);
+    toast("info", `Speak mode ${next ? "enabled" : "disabled"}`, next ? "Ray will read replies aloud automatically." : "Replies will be silent. Tap speaker icon on any message to listen.", 2500);
   };
 }
 if ($("code-export-btn")) {

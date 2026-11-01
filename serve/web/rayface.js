@@ -1042,11 +1042,11 @@ const RayFace = (() => {
         g.fill();
       }
     }
-    // on a light page, a thin dark line along his outer edge, so his whites keep an edge without a heavy outline
+    // on a light page, a bold dark line along his outer edge, so his whites stand out clearly against the page
     if (lightPage) {
       const lit = (i, j) => i >= 0 && i < COLS && j >= 0 && j < ROWS && !!cells[j * COLS + i];
       g.strokeStyle = C.edge;
-      g.lineWidth = Math.max(1.5, P * 0.32);
+      g.lineWidth = Math.max(2.5, P * 0.78);
       g.lineCap = "square";
       g.beginPath();
       for (let j = 0; j < ROWS; j++) {
