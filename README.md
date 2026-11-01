@@ -38,7 +38,10 @@ validation, 1-token health check speed guards, and stable GPU hardware telemetry
 - an MCP tool name written with `__` collapsed to `_` is read as the declared tool (#3796).
 
 Each was checked with tests and a short smoke test; no benchmark was run
-([review](wiki/artifacts/upstream-v0-2-7-review-2026-10-27.md)).
+([review](wiki/artifacts/upstream-v0-2-7-review-2026-10-27.md)). On 2026-11-01, an official community benchmark was run with `tools/strata_bench.py --long` against the live 64K context server with Two-Tier Wiki Handoff active ([report](wiki/artifacts/strata-benchmark-2026-11-01.md)):
+- **Chat Speed & Latency**: 24.7 tok/s decode, 1.54 s time-to-first-token (10.1% latency improvement over baseline).
+- **Prompt Prefill Throughput**: 308 tok/s at 4K, 337 tok/s at 16K, and 335 tok/s at 32K.
+- **Agent Conversation Caching**: 68.5% cache hit rate with only 4 re-read tokens/session (94.4% reduction from 72 tokens), delivering 27.5 tok/s decode across multi-turn sessions.
 
 ## Meet Ray
 

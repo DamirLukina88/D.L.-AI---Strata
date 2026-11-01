@@ -50,6 +50,7 @@ Replaces mechanical 30k context pruning with a 4-section Wiki Handoff Diary + ~4
 
 ## Related
 
+- [Strata Performance Benchmark Report (2026-11-01)](../artifacts/strata-benchmark-2026-11-01.md)
 - [Web App Split View: Code | Monitor](web-app-split-view.md) - split view layout hosting the Code terminal and Monitor UI
 - [D.L. CLI Keeps Its Task: Trim Protection, PLAN.md, Memory Files, Finish Checks](dl-cli-task-memory-and-finish-checks.md) - previous mechanical trim protection architecture
 
