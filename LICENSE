@@ -1,6 +1,7 @@
-MIT License
+MIT License with Attribution Requirement
 
 Copyright (c) 2026 Niko1221 and the Strata contributors
+Copyright (c) 2026 Damir Lukina and the D.L. AI - Strata contributors (https://github.com/DamirLukina88/D.L.-AI---Strata)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -9,8 +10,20 @@ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all
+The above copyright notices and this permission notice shall be included in all
 copies or substantial portions of the Software.
+
+Attribution Requirement:
+Any fork, redistribution, or derivative work of this software or repository,
+in whole or in part, must prominently credit both:
+1. Strata (https://github.com/Niko1221/Strata) and its contributors for the core
+   engine, server, and architecture development; and
+2. D.L. AI - Strata (https://github.com/DamirLukina88/D.L.-AI---Strata) and Damir Lukina
+   for the fork development, features, and modifications.
+
+This attribution must be clearly displayed in the documentation (including any
+repository README), license/notice files, and in any user-facing documentation
+or graphical interfaces accompanying the software or derivative works.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,

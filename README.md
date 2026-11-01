@@ -423,6 +423,8 @@ Separate from Ray, Strata has its own MCP server for installing and running the 
 Strata, the engine, the server and the installer, is by
 [Niko1221 and the Strata contributors](https://github.com/Niko1221/Strata), under the MIT license. The model weights
 are Qwen3.8-Flash-Next from Alibaba's Qwen team. Ray, D.L. CLI and the rest of this fork are by
-[Damir](https://github.com/DamirLukina88). This fork keeps
-that license ([LICENSE](LICENSE)). Upstream's own documentation is in [docs/](docs/), and its paper is in
-[docs/paper](docs/paper).
+[Damir](https://github.com/DamirLukina88). This fork is licensed under the
+[MIT License with Attribution Requirement](LICENSE). Any fork, redistribution, or derivative work of this
+repository must credit both upstream [Strata](https://github.com/Niko1221/Strata) (for core engine and architecture) and
+[D.L. AI - Strata](https://github.com/DamirLukina88/D.L.-AI---Strata) (for fork development and features). Upstream's own
+documentation is in [docs/](docs/), and its paper is in [docs/paper](docs/paper).

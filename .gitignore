@@ -74,3 +74,7 @@ strata-server.pid
 
 # this machine's web app settings (Cloudflare Access team logout URL)
 serve/web/site-config.js
+
+# Local benchmark reports and scratch research notes
+/reports/
+/research_notes/

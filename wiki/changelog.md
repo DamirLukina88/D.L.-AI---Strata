@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-11-01:** Commit fork-attribution license update and ignore local reports/ and research_notes/ folders. (Agent: Antigravity)
 - **2026-11-01:** Update handoff post-cut rules, trim 4 oversized descriptions, and resolve 16 stale path warnings. (Agent: Antigravity)
 - **2026-11-01:** Update. LICENSE, README.md, docs/HOW_IT_WORKS.md, docs/DETAILS.md: Added Attribution Requirement requiring forks to credit both upstream Strata and D.L. AI - Strata repository, artifacts/engine-port-check-scripts-2026-10-21.md, artifacts/upstream-v0-2-2-review-2026-10-21.md, decisions/saved-cli-sessions.md, decisions/auto-thinking-level.md, decisions/cloudflare-access-login-auth.md, decisions/dl-ai-scheduled-jobs.md, decisions/multimodal-media-pipeline-bridge.md, decisions/rx-7600-xt-cachyos-deployment.md. (Agent: Antigravity)
 - **2026-11-01:** Ingestion. decisions/fork-attribution-license-requirement.md. (Agent: Antigravity)
