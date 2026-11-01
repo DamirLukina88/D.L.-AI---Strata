@@ -58,6 +58,7 @@ Every page in this wiki is listed below. The list is generated; do not edit betw
 - [Strata v0.2.5 Sync, Web Ergonomics, and Server Reliability](decisions/strata-v0-2-5-sync-and-ergonomics.md) — Selective synchronization of upstream Strata v0.2.5 ergonomics, dynamic startup timeouts, and clean shard deletion on RX 7600 XT
 - [Weather Reasoning Benchmark for CLI Thinking Levels](decisions/weather-reasoning-benchmark.md) — Standalone benchmark tools/weather_reasoning_bench.py evaluating CLI thinking levels with location inference, table quality, and Proton Mail.
 - [Web App Split View: Code | Monitor](decisions/web-app-split-view.md) — From 1200 px wide the Code tab and Monitor sit side by side with a draggable divider; narrower screens keep the tabs
+- [Wiki Handoff Session Reset, Mid-Stream Recovery, and OOM Headroom](decisions/wiki-handoff-and-oom-fixes.md) — 4-section Wiki Handoff Diary + clean session reload, mid-stream error auto-retry, Monitor 50k/Show-all fixes, and 2.15 GiB RAM OOM headroom.
 
 ## Preferences
 

@@ -66,7 +66,8 @@ main { flex: 1; min-height: 0; min-width: 0; max-width: 100vw; overflow-x: hidde
   padding-inline: 8px;
 }
 .req-head { display: flex; align-items: center; justify-content: space-between; gap: var(--st-s-2); }
-.table-wrap.all { max-height: 420px; overflow-y: auto; }
+.table-wrap.all { max-height: 75vh; overflow-y: auto; }
+#req-wrap.all .st-table thead th { position: sticky; top: 0; background: var(--st-surface, #14171c); z-index: 1; }
 .req-totals { margin: 0; font-size: var(--st-fs-sm); }
 .req-totals:empty { display: none; }
 .cc-card { display: flex; flex-direction: column; gap: var(--st-s-3); }

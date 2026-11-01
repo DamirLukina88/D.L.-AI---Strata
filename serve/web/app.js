@@ -3161,16 +3161,19 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
   }
   spark("sp-disk", h.disk_read_mb);
 
-  // context fill: the running request, else the last one
+  // context fill: the running request, else the last one (against the 50k effective prompt limit when ctx > 20k)
   const ctx = eng.max_context || 0;
+  const effCtx = ctx > 20000 ? ctx - 16000 : ctx;
   let used = 0;
   if (live.state !== "idle" && isLoaded) used = (live.prompt_tokens || 0) + (live.generated || 0);
   else if (last && isLoaded) used = (last.prompt_tokens || 0) + (last.output_tokens || 0);
-  const frac = ctx && isLoaded ? Math.min(1, used / ctx) : 0;
+  const frac = effCtx && isLoaded ? Math.min(1, used / effCtx) : 0;
   $("ctx-fill").setAttribute("stroke-dasharray", `${(235.6 * frac).toFixed(1)} 314.2`);
   $("ctx-fill").style.opacity = 235.6 * frac >= 3 ? "1" : "0";         // a near-zero arc would draw just its round cap
   $("ctx-pct").textContent = isLoaded ? `${Math.round(frac * 100)}%` : "0%";
-  $("ctx-sub").textContent = isLoaded && ctx ? `${kfmt(used)} / ${ctxfmt(ctx)}` : "–";
+  $("ctx-sub").textContent = isLoaded && effCtx ? `${kfmt(used)} / ${kfmt(effCtx)}` : "–";
+  $("ctx-sub").title = isLoaded && ctx && effCtx !== ctx
+    ? `Effective prompt limit ${fmt(effCtx)} tokens (${ctxfmt(ctx)} KV window minus 16k output reserve)` : "";
   const cacheBytes = (eng.expert_cache_mib || 0) * 1048576;
   $("slots-text").textContent = isLoaded && eng.expert_slots ? `${fmt(eng.expert_slots)} · ${gb(cacheBytes)} GB` : "–";
   $("slots-bar").style.width = isLoaded && hw.gpu_mem_total ? `${Math.min(100, (100 * cacheBytes) / hw.gpu_mem_total)}%` : "0%";
@@ -3201,12 +3204,13 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
 
   // recent requests
   const body = $("req-body");
+  let rowsHtml;
   if (!requests.length) {
-    body.innerHTML = `<tr><td colspan="9" class="muted">No requests yet</td></tr>`;
+    rowsHtml = `<tr><td colspan="9" class="muted">No requests yet</td></tr>`;
   } else {
     const badge = {stop: ["", "Done"], length: ["", "Max tokens"], cancel: ["st-badge--queued", "Stopped"],
                    disconnect: ["st-badge--queued", "Closed"], error: ["st-badge--error", "Error"]};
-    body.innerHTML = requests.slice(0, reqShowAll ? requests.length : 12).map((r) => {
+    rowsHtml = requests.slice(0, reqShowAll ? requests.length : 12).map((r) => {
       const [cls, text] = badge[r.finish] || ["", r.finish || "–"];
       const t = new Date(r.time * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
       const proj = r.projection == null ? "" : ` <span class="st-badge${r.projection ? " st-badge--reading" : ""}" title="experimental speed projection ${r.projection ? "on" : "off"}">${r.projection ? "ESP" : "stock"}</span>`;
@@ -3220,6 +3224,10 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
         <td class="num">${fmt(r.reused)}</td><td class="num">${fmt(r.output_tokens)}</td><td class="num">${fmt(prefillRate)}</td><td class="num">${fmt(r.decode_tok_s, 1)}</td>
         <td class="num">${hit}</td><td class="num">${fmt(r.duration_s, 1)} s</td></tr>`;
     }).join("");
+  }
+  if (body._lastHtml !== rowsHtml) {
+    body.innerHTML = rowsHtml;
+    body._lastHtml = rowsHtml;
   }
   const all = $("req-all");
   kept = kept == null ? requests.length : kept;
@@ -3270,7 +3278,16 @@ document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-copy]");
   if (b) copyText(b.dataset.copy, b);
 });
-$("req-all").addEventListener("click", () => { reqShowAll = !reqShowAll; if (lastMetrics) render(lastMetrics); });
+$("req-all").addEventListener("click", async () => {
+  reqShowAll = !reqShowAll;
+  if (lastMetrics) render(lastMetrics);
+  if (reqShowAll) {
+    try {
+      const r = await fetch("metrics?requests=all", {headers: headers()});
+      if (r.ok) { lastMetrics = await r.json(); render(lastMetrics); }
+    } catch (e) {}
+  }
+});
 
 // ------------------------------------------------------------------ MCP servers (GET /mcp)
 // Tools from the MCP servers in the run config: the chat offers them to the model (opt-in per request,

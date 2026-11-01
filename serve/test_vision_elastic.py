@@ -117,6 +117,18 @@ class Elastic(unittest.TestCase):
         v = Vision({"exe": "e", "mmproj": "m", "model": "t"}, lazy=True)
         self.assertFalse(v.elastic)
         self.assertEqual((v.elastic_mib, v.elastic_idle_s), (2048, 120.0))
+        v_cpu = Vision({"exe": "e", "mmproj": "m", "model": "t", "elastic": True, "elastic_mib": 0}, lazy=False)
+        self.assertTrue(v_cpu.elastic and v_cpu.elastic_mib == 0 and not v_cpu.alive())
+
+    def test_cpu_elastic_encoder_takes_zero_vram(self):
+        self.vision.elastic_mib = 0
+        self.picture()
+        self.assertEqual(self.vision.starts, 1)
+        self.assertEqual(self.engine.calls, [])             # CPU encoder: no VRAM resize call needed
+        self.assertFalse(self.svc.vision_held)
+        self.svc.last_image_at = 0
+        self.assertEqual(self.svc._vision_idle_down(), "down")
+        self.assertFalse(self.vision.up)
 
 
 if __name__ == "__main__":

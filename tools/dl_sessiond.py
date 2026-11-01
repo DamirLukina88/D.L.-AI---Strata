@@ -443,6 +443,17 @@ class Session:
         archive_write(self.name, data)
         return aid
 
+    def snapshot_before_handoff(self, part: int) -> str | None:
+        """Save a pre-handoff snapshot of this stretch to /sessions while keeping the live conversation continuous."""
+        old_id, old_title = self.archive_id, self.title
+        base = self.title or self.auto_title() or "(untitled)"
+        try:
+            self.archive_id = uuid.uuid4().hex[:8]
+            self.title = f"{base} (handoff #{part})"
+            return self.archive_current()
+        finally:
+            self.archive_id, self.title = old_id, old_title
+
     # ---------------------------------------------------------------- rewind, edit, branch
     def prompt_events(self) -> list[dict]:
         """This conversation's prompts that can be gone back to: the user events that are not /commands or !shell,
@@ -866,7 +877,8 @@ class Session:
                "effort_auto": effort_auto,
                "reasoning_budget_tokens": resolved_budget,
                "emit": self.emit, "cancel": self.cancel, "approve": self.approve, "mcp": self.mcp, "user_text": prompt,
-               "voice": voice, "session": self}
+               "voice": voice, "session": self,
+               "on_handoff": lambda _msgs, part: self.snapshot_before_handoff(part)}
         ctx["take_queued"] = lambda ws, eff: self._take_queued(ws, eff, ctx)
         new_ws = cli.execute_agent_loop(messages=self.messages, url=cli.DEFAULT_URL, api_key=cli.DEFAULT_API_KEY,
                                         workspace=self.workspace, mode=self.mode,
@@ -973,6 +985,25 @@ class Session:
                         else "Approvals back on.", "warn" if self.yolo else "info")
             self.emit_state()
             return None
+        if cmd == "/handoff":
+            active_tools = cli.get_active_tools(self.workspace, mode=self.mode, registry=self.mcp)
+            stats = cli.handoff_session(
+                self.messages, active_tools, limit=0, target=12000, ws=self.workspace,
+                url=cli.DEFAULT_URL, api_key=cli.DEFAULT_API_KEY, plan_file=self.plan_file, force=True,
+                in_session=True, on_handoff=lambda _msgs, part: self.snapshot_before_handoff(part),
+            )
+            self._system()
+            self.save()
+            self.emit_state()
+            if stats and stats.get("handoff"):
+                self.notice(
+                    f"Wiki handoff #{stats['handoff']} saved to {stats['diary']}: "
+                    f"{stats['before'] / 1000:.0f}k → {stats['after'] / 1000:.0f}k tokens "
+                    f"({stats['removed']} earlier messages archived into clean session)."
+                )
+            else:
+                self.notice("Session is already short; nothing needed to hand off.")
+            return arg or None
         if cmd in ("/clear", "/reset", "/new"):
             title = self.title or self.auto_title()
             kept = self.archive_current()

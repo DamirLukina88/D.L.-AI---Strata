@@ -97,6 +97,7 @@ Gotcha found 2026-10-19: compact_history (tools/dl_cli.py) kept only the first a
 
 ## Related
 
+- [Wiki Handoff Session Reset, Mid-Stream Recovery, and OOM Headroom](wiki-handoff-and-oom-fixes.md) - replacement of mechanical context trimming with Two-Tier Wiki Handoff (2026-11-01)
 - [Honest Benchmark: Does Ray Fake Results? (2026-10-31)](../artifacts/honest-bench-2026-10-31.md) - the finish review pushed one special-case cheat
 
 - [CONTRA Goal Loop and Review Tooling (2026-10-20/21)](../artifacts/contra-goal-loop-2026-10-21.md) - the loop's rules, review script, browser check and the notes sent to the AI

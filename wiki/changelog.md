@@ -15,6 +15,9 @@ Newest entries first.
 
 ## Log
 
+- **2026-11-01:** Empirical hardware verification on RX 7600 XT: retired mechanical context trimming in favor of Two-Tier Wiki Handoff (`DL_HANDOFF=1`). Updated `decisions/wiki-handoff-and-oom-fixes.md`, `decisions/dl-cli-task-memory-and-finish-checks.md`, `decisions/github-fork-and-sanitization.md`, and `README.md`. (Agent: Antigravity)
+- **2026-11-01:** Added Wiki Handoff clean-session reload, mid-stream auto-retry, Monitor 50k/Show-all fixes, and 2.15 GiB OOM headroom. (Agent: Antigravity)
+- **2026-11-01:** Ingestion. decisions/wiki-handoff-and-oom-fixes.md. (Agent: Antigravity)
 - **2026-11-01:** Update. decisions/desktop-piper-voice-switching-and-stt-auto-speak.md (persistent #code-speak-btn speaker toggle, voice: true on typed prompts), decisions/ray-talking-face.md (0.78 dot pitch bold light-theme avatar outline), decisions/github-fork-and-sanitization.md, README.md. (Agent: Antigravity)
 
 - **2026-11-01:** Update. decisions/destructive-action-approval-gate.md, artifacts/dl-ai-2026-10-13-plan-session-guardrails-readme.md, artifacts/antigravity-change-requests-2026-10.md, decisions/ray-talking-face.md, decisions/desktop-piper-voice-switching-and-stt-auto-speak.md. (Agent: Antigravity)
