@@ -31,6 +31,7 @@ last_verified: 2026-10-31
 
 ## Related
 
+- [Upstream Strata v0.2.8 Review (2026-10-29)](upstream-v0-2-8-review-2026-10-29.md) - previous release review covering 0.2.7.1 and 0.2.8
 - [Plan: Code-Fence Parser Fix and gfx11 Chunked GDN (2026-10-31)](upstream-v0-2-9-port-plan-2026-10-31.md) - how both items get ported and measured
 
 ## Sources

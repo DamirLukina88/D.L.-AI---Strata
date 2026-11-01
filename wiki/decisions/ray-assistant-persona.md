@@ -142,6 +142,7 @@ last_verified: 2026-10-29
 
 ## Related
 
+- [Ray MCP Audit Fixes (2026-10-27)](ray-mcp-audit-fixes-2026-10-27.md) - DeepSeek approval card, identity and fuel data, Code stream watchdog
 - [Ray Persona Bench and Prompt Trim (2026-10-23)](../artifacts/ray-persona-bench-2026-10-23.md)
 - [Desktop Piper Voice Switching and STT-Only Auto-Speak Gating](desktop-piper-voice-switching-and-stt-auto-speak.md)
 

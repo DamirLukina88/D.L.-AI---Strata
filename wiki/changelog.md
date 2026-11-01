@@ -15,6 +15,8 @@ Newest entries first.
 
 ## Log
 
+- **2026-11-01:** Linting. Resolved 3 orphan pages (upstream-v0-2-8-review, ray-mcp-audit-fixes, web-app-split-view) by adding Related links and refreshed index. (Agent: Antigravity)
+- **2026-11-01:** Update. artifacts/upstream-v0-2-9-review-2026-10-31.md, decisions/ray-assistant-persona.md. (Agent: Antigravity)
 - **2026-11-01:** Empirical hardware verification on RX 7600 XT: retired mechanical context trimming in favor of Two-Tier Wiki Handoff (`DL_HANDOFF=1`). Updated `decisions/wiki-handoff-and-oom-fixes.md`, `decisions/dl-cli-task-memory-and-finish-checks.md`, `decisions/github-fork-and-sanitization.md`, and `README.md`. (Agent: Antigravity)
 - **2026-11-01:** Added Wiki Handoff clean-session reload, mid-stream auto-retry, Monitor 50k/Show-all fixes, and 2.15 GiB OOM headroom. (Agent: Antigravity)
 - **2026-11-01:** Ingestion. decisions/wiki-handoff-and-oom-fixes.md. (Agent: Antigravity)

@@ -48,6 +48,11 @@ Replaces mechanical 30k context pruning with a 4-section Wiki Handoff Diary + ~4
   - **Two-Tier Wiki Handoff (`DL_HANDOFF=1`):** Appending the diary generation turn directly to history achieved a **~100% KV cache hit rate** (e.g., 9,744 of 9,749 tokens reused in <1s). The subsequent clean session reloaded with a lean ~4,000-token prompt that prefills in **~1.5–2.0 seconds** while preserving complete execution state in `wiki/handoffs/latest.md`.
   - **Conclusion:** Two-Tier Wiki Handoff (`DL_HANDOFF=1`) is adopted as the sole production default, and further comparative testing of trimming was retired.
 
+## Related
+
+- [Web App Split View: Code | Monitor](web-app-split-view.md) - split view layout hosting the Code terminal and Monitor UI
+- [D.L. CLI Keeps Its Task: Trim Protection, PLAN.md, Memory Files, Finish Checks](dl-cli-task-memory-and-finish-checks.md) - previous mechanical trim protection architecture
+
 ## Sources
 
 1. User, chat, 2026-11-01.
