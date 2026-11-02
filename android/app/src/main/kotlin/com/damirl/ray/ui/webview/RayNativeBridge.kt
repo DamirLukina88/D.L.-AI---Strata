@@ -53,6 +53,10 @@ class RayNativeBridge(
         }
     }
 
+    // Polled by the web app's TTSController so it speaks the next chunk only after this one finishes
+    @JavascriptInterface
+    fun isSpeaking(): Boolean = AudioPlaybackService.isSpeakingState.value
+
     @JavascriptInterface
     fun stopSpeaking() {
         Log.d(TAG, "stopSpeaking")

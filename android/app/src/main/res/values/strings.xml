@@ -4,4 +4,6 @@
     <string name="tile_subtitle_ready">Tap to talk</string>
     <string name="tile_subtitle_speaking">Speaking...</string>
     <string name="accessibility_service_description">Allows Ray Assistant to read screen content when requested.</string>
+    <string name="shortcut_setup_short">Setup</string>
+    <string name="shortcut_setup_long">Setup &amp; permissions</string>
 </resources>

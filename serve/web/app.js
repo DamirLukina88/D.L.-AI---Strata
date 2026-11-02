@@ -412,7 +412,7 @@ const TTSController = {
     let lastIndex = this.currentIndex;
     let stuckCount = 0;
     this.watchdogTimer = setInterval(() => {
-      if (!this.speaking || this.paused || this.waiting || this.useServer() || window.speechSynthesis?.paused) return;
+      if (!this.speaking || this.paused || this.waiting || this.useServer() || this.nativeTimer || window.speechSynthesis?.paused) return;
       if (this.currentIndex === lastIndex) {
         stuckCount++;
         if (stuckCount >= 4) { // 4 ticks of 5s = 20s stuck on the same chunk
@@ -511,16 +511,18 @@ const TTSController = {
   },
 
   stop() {
-    if (typeof window !== "undefined" && window.RayAndroid && typeof window.RayAndroid.stopSpeaking === "function") {
-      window.RayAndroid.stopSpeaking();
-    }
-    if (!window.speechSynthesis) return;
+    // the phone's own voice, only when it is in use (each call starts the app's playback service)
+    let phoneBusy = !!this.nativeTimer;
+    try { phoneBusy = phoneBusy || (this.native() && typeof window.RayAndroid.isSpeaking === "function" && window.RayAndroid.isSpeaking()); } catch (e) {}
+    if (phoneBusy && typeof window.RayAndroid.stopSpeaking === "function") window.RayAndroid.stopSpeaking();
+    clearInterval(this.nativeTimer);
+    this.nativeTimer = null;
     if (typeof RayFace !== "undefined") RayFace.end(this.speaking && this.currentIndex >= this.queue.length);
     this.stopWatchdog();
     this.releaseWakeLock();
     this.stopAudioKeepAlive();
     this.clearMediaSession();
-    try { window.speechSynthesis.cancel(); } catch (e) {}
+    if (window.speechSynthesis) { try { window.speechSynthesis.cancel(); } catch (e) {} }
     const src = this.currentSource;
     this.currentSource = null;
     if (src) { try { src.stop(); } catch (e) {} }
@@ -540,8 +542,8 @@ const TTSController = {
   },
 
   pause() {
-    if (!window.speechSynthesis || !this.speaking) return;
-    try { window.speechSynthesis.pause(); } catch (e) {}
+    if (!this.speaking) return;
+    if (window.speechSynthesis) { try { window.speechSynthesis.pause(); } catch (e) {} }
     if (this.currentSource && this.audioCtx) { try { this.audioCtx.suspend(); } catch (e) {} }
     this.paused = true;
     if (typeof RayFace !== "undefined") RayFace.pause(true);
@@ -549,8 +551,8 @@ const TTSController = {
   },
 
   resume() {
-    if (!window.speechSynthesis || !this.speaking) return;
-    try { window.speechSynthesis.resume(); } catch (e) {}
+    if (!this.speaking) return;
+    if (window.speechSynthesis) { try { window.speechSynthesis.resume(); } catch (e) {} }
     if (this.currentSource && this.audioCtx) { try { this.audioCtx.resume(); } catch (e) {} }
     this.paused = false;
     if (typeof RayFace !== "undefined") RayFace.pause(false);
@@ -558,17 +560,7 @@ const TTSController = {
   },
 
   speakText(rawText, btn = null, msgObj = null) {
-    if (typeof window !== "undefined" && window.RayAndroid && typeof window.RayAndroid.speak === "function") {
-      const clean = this.clean ? this.clean(rawText) : rawText;
-      if (!clean) return;
-      this.speaking = true;
-      this.activeBtn = btn;
-      this.activeMsg = msgObj;
-      this.updateButtonState(true);
-      window.RayAndroid.speak(clean);
-      return;
-    }
-    if (!window.speechSynthesis) {
+    if (!window.speechSynthesis && !this.useServer() && !this.native()) {
       toast("error", "TTS not supported", "Your browser does not support the Web Speech API.");
       return;
     }
@@ -668,6 +660,12 @@ const TTSController = {
 
     const chunk = this.queue[this.currentIndex];
     if (this.useServer()) { this.playServerChunk(this.currentIndex); return; }
+    if (typeof SpeechSynthesisUtterance === "undefined") {
+      if (this.native()) { this.speakNative(chunk); return; }
+      this.stop();
+      toast("error", "TTS not supported", "Your browser does not support the Web Speech API.");
+      return;
+    }
     const u = new SpeechSynthesisUtterance(chunk);
     this.currentUtterance = u; // Anchor to avoid V8 GC mid-speech
 
@@ -731,6 +729,30 @@ const TTSController = {
       this.stop();
       toast("warn", "Speech blocked", "Click the speaker button to start audio playback.");
     }
+  },
+
+  // the Android companion app's own voice (RayAndroid.speak), when the server voice is off or failed: one chunk at a
+  // time, the next once the phone reports it has stopped speaking (or never started within 4 s)
+  native() { return !!(window.RayAndroid && typeof window.RayAndroid.speak === "function"); },
+  nativeTimer: null,
+  speakNative(chunk) {
+    const queue = this.queue, orb = this.orb(), t0 = Date.now();
+    let started = false;
+    window.RayAndroid.speak(chunk);
+    if (orb) RayFace.speakText(chunk, this.getRate());
+    clearInterval(this.nativeTimer);
+    this.nativeTimer = setInterval(() => {
+      if (!this.speaking || this.queue !== queue) { clearInterval(this.nativeTimer); this.nativeTimer = null; return; }
+      let busy = false;
+      try { busy = typeof window.RayAndroid.isSpeaking === "function" ? window.RayAndroid.isSpeaking() : false; } catch (e) {}
+      if (busy) { started = true; return; }
+      if (!started && Date.now() - t0 < 4000) return;
+      clearInterval(this.nativeTimer);
+      this.nativeTimer = null;
+      if (orb) RayFace.chunkEnd();
+      this.currentIndex++;
+      this.speakNext();
+    }, 250);
   },
 
   audio() {
@@ -819,16 +841,16 @@ const TTSController = {
   },
 
   init() {
-    if (!window.speechSynthesis) {
+    if (window.speechSynthesis) {
+      const updateVoices = () => this.populateVoiceSelector();
+      window.speechSynthesis.onvoiceschanged = updateVoices;
+      updateVoices();
+    } else {
+      // Android WebView: no browser voice, but Ray's server voice and the phone's own voice still read aloud
       const card = $("tts-settings-card");
-      if (card) {
-        card.querySelector(".muted.small").textContent = "Web Speech API is not supported in this browser.";
-      }
-      return;
+      const note = card && card.querySelector(".muted.small");
+      if (note) note.textContent = "No browser voice here: Ray's server voice reads aloud" + (this.native() ? ", or the phone's voice." : ".");
     }
-    const updateVoices = () => this.populateVoiceSelector();
-    window.speechSynthesis.onvoiceschanged = updateVoices;
-    updateVoices();
 
     const vSel = $("tts-voice-select");
     if (vSel) {
