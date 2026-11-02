@@ -27,7 +27,6 @@ import argparse
 import contextlib
 import collections
 import base64
-import datetime
 import hashlib
 import hmac
 import codecs

@@ -19,7 +19,6 @@ import os
 import re
 import subprocess
 import sys
-import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -93,7 +92,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
                 },
                 "level": {
                     "type": "integer",
-                    "description": "Target volume level (0-100 or 0-15)."
+                    "description": "Target volume in percent, 0-100."
                 }
             },
             "required": ["stream", "level"]
@@ -186,13 +185,13 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_camera_snap",
-        "description": "Snap a photo using the phone camera and return/inspect it with Ray.",
+        "description": "Open the phone's camera so the user can take a photo. The photo stays on the phone: it is not sent back to you, so you cannot see it.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "prompt": {
                     "type": "string",
-                    "description": "What to inspect or look for in the captured image."
+                    "description": "What the photo is for (kept with the request; not analysed yet)."
                 }
             }
         }
@@ -470,7 +469,7 @@ class PhoneMcpServer:
                 "-a", "com.damirl.ray.ACTION_CAMERA_SNAP",
                 "--es", "prompt", prompt
             ])
-            return f"Camera capture triggered. Prompt context: '{prompt or 'Full scene'}'."
+            return "Opened the camera on the phone. The photo stays on the phone: you can't see it yet."
 
         elif name == "phone_get_screen":
             out = self._run_adb_cmd(["shell", "uiautomator", "dump", "/dev/stdout"])

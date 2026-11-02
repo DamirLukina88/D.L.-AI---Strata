@@ -40,34 +40,26 @@ from typing import Optional
 # Auditing & Debugging Suite Integration
 try:
     from tools.dl_auditing import (
-        AUDITING_TOOL_DEFINITIONS,
-        audit_git_diff,
         format_health_card,
         get_system_health,
-        run_smart_tests,
         scan_secrets_in_text,
         tool_git_diff_audit,
         tool_scan_secrets,
         tool_smart_test_runner,
         tool_syntax_guard,
-        tool_system_health,
         validate_syntax,
         classify_command,
         classify_write,
     )
 except ImportError:
     from dl_auditing import (
-        AUDITING_TOOL_DEFINITIONS,
-        audit_git_diff,
         format_health_card,
         get_system_health,
-        run_smart_tests,
         scan_secrets_in_text,
         tool_git_diff_audit,
         tool_scan_secrets,
         tool_smart_test_runner,
         tool_syntax_guard,
-        tool_system_health,
         validate_syntax,
         classify_command,
         classify_write,

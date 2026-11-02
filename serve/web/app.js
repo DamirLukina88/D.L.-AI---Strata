@@ -124,17 +124,6 @@ async function copyText(text, btn) {
   return done;
 }
 
-/** Robust decimal parser supporting commas, dots, and partial editing (#3736). */
-function parseDecimal(text) {
-  const t = String(text ?? "").trim().replace(",", ".");
-  if (!/^-?(\d+\.?\d*|\.\d+)$/.test(t) || t.endsWith(".")) return null;
-  const n = Number(t);
-  return Number.isFinite(n) ? n : null;
-}
-function partialDecimal(text) {
-  return /^-?\d*[.,]?\d*$/.test(String(text ?? "").trim());
-}
-
 // ------------------------------------------------------------------ Text-to-Speech (TTS) Engine
 function cleanForSpeech(rawText, codeMode = "skip") {
   if (!rawText) return "";
@@ -845,11 +834,6 @@ const TTSController = {
     if (i + 1 < this.queue.length) this.fetchChunk(i + 1);
   },
 
-  toggleMessage(msg, btn) {
-    if (!msg || !msg.text) return;
-    this.speakText(msg.text, btn, msg);
-  },
-
   init() {
     if (window.speechSynthesis) {
       const updateVoices = () => this.populateVoiceSelector();
@@ -1084,13 +1068,6 @@ const STTController = {
   hasWhisper: false,
   whisperModel: null,
 
-  isSupported() {
-    return Boolean(
-      (navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder) ||
-      window.SpeechRecognition ||
-      window.webkitSpeechRecognition
-    );
-  },
 
   getLang() {
     return store.get("stt_lang", "") || navigator.language || "en-US";
@@ -1188,10 +1165,6 @@ const STTController = {
       clearTimeout(this.autoSendTimer);
       this.autoSendTimer = null;
     }
-  },
-
-  cancelAutoSendCountdown() {
-    this.cancelAutoSendTimer();
   },
 
   scheduleAutoSend(target) {
@@ -1642,6 +1615,7 @@ const STTController = {
       try { window.RayAndroid.stopListening(); } catch (_) {}
       this.isRecording = false;
       this.updateMicUI(false);
+      this.restoreKeyboard(this.currentTarget);
     }
     if (this.maxTimer) {
       clearTimeout(this.maxTimer);
@@ -1678,6 +1652,8 @@ const STTController = {
     if (isFinal) {
       this.isRecording = false;
       this.updateMicUI(false);
+      // the phone's recognizer has no cleanup() of its own: give the keyboard back (dismissKeyboard took it away)
+      this.restoreKeyboard(target);
       if (this.autoSend) {
         this.scheduleAutoSend(target);
       }
@@ -4394,6 +4370,16 @@ function checkRayAndroidCompanion() {
   window.onRayAndroidSpeechResult = (text, isFinal) => {
     if (typeof STTController !== "undefined" && typeof STTController.handleNativeSpeechResult === "function") {
       STTController.handleNativeSpeechResult(text, isFinal);
+    }
+  };
+  // the phone heard nothing or its recognizer failed: the mic button and the keyboard come back
+  window.onRayAndroidSpeechError = (message) => {
+    if (typeof STTController === "undefined") return;
+    STTController.isRecording = false;
+    STTController.updateMicUI(false);
+    STTController.restoreKeyboard(STTController.currentTarget);
+    if (!/no speech|didn't catch|no match|timeout/i.test(String(message || ""))) {
+      toast("warn", "Voice input stopped", String(message || ""), 3000);
     }
   };
   startPhoneCompanionBridge();

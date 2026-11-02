@@ -63,12 +63,13 @@ class CameraVisionManager(private val context: Context) {
         if (pair != null) {
             try {
                 context.startActivity(pair.first)
-                return "Camera capture launched. After taking the photo, Ray will analyze it with prompt: '${prompt.ifBlank { "Describe what you see" }}'."
+                // the photo is saved on the phone but not sent back yet, so Ray must not claim to have seen it
+                return "Opened the camera on the phone. The photo stays on the phone: Ray can't see it yet, so ask the user to describe it if needed."
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start camera activity", e)
             }
         }
-        return "Camera capture initiated for prompt: '$prompt'."
+        return "Error: the camera could not be opened."
     }
 
     /**

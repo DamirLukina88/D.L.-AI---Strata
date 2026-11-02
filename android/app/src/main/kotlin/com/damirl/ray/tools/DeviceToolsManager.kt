@@ -121,12 +121,9 @@ class DeviceToolsManager(private val context: Context) {
         }
 
         val maxVolume = audioManager.getStreamMaxVolume(streamType)
-        val targetVolume = if (level > maxVolume) {
-            // Scale percentage 0-100 to 0-maxVolume
-            (level * maxVolume / 100).coerceIn(0, maxVolume)
-        } else {
-            level.coerceIn(0, maxVolume)
-        }
+        // always a percentage (the tool says 0-100): before, a level up to the stream's maximum (often 15) was taken
+        // as a step, so "10" meant 10 of 15 and not 10%
+        val targetVolume = ((level.coerceIn(0, 100) * maxVolume + 50) / 100).coerceIn(0, maxVolume)
 
         audioManager.setStreamVolume(streamType, targetVolume, AudioManager.FLAG_SHOW_UI)
         Log.d(TAG, "set_volume: stream=$stream, target=$targetVolume / $maxVolume")

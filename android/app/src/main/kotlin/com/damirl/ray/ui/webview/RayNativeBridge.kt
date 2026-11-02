@@ -110,6 +110,12 @@ class RayNativeBridge(
                     },
                     onError = { err ->
                         Log.w(TAG, "Speech error: $err")
+                        // the page's mic button would otherwise stay on "recording" with the keyboard hidden
+                        webViewProvider()?.let { wv ->
+                            val js = "if (typeof window.onRayAndroidSpeechError === 'function') " +
+                                "window.onRayAndroidSpeechError(${JSONObject.quote(err)});"
+                            wv.post { wv.evaluateJavascript(js, null) }
+                        }
                     }
                 )
             } catch (e: Exception) {
