@@ -4280,6 +4280,14 @@ function checkRayAndroidCompanion() {
     if (logoutBtn) logoutBtn.style.display = "none";
     const fullscreenBtn = document.getElementById("code-fullscreen-btn");
     if (fullscreenBtn) fullscreenBtn.style.display = "none";
+    // the phone's setup screen (permissions) as the first card in About; an older app without openSetup keeps it hidden
+    const settingsCard = document.getElementById("android-settings-card");
+    if (settingsCard && typeof window.RayAndroid.openSetup === "function") {
+      settingsCard.hidden = false;
+      document.getElementById("android-settings-btn").addEventListener("click", () => {
+        try { window.RayAndroid.openSetup(); } catch (_) {}
+      });
+    }
   }
   if (typeof showTab === "function") {
     showTab("code");

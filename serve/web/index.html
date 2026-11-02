@@ -217,6 +217,15 @@
   <!-- ============================ About ============================ -->
   <section class="view view--about" id="view-about" role="tabpanel" aria-labelledby="tab-btn-about" hidden>
     <div class="about">
+      <!-- only in the Ray Android app (checkRayAndroidCompanion shows it); never on the website -->
+      <div class="st-card" id="android-settings-card" hidden>
+        <div class="req-head">
+          <span class="card-title">Ray on this phone</span>
+          <button type="button" class="st-btn st-btn--primary st-btn--sm" id="android-settings-btn">
+            <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-settings"/></svg>Android settings</button>
+        </div>
+        <p class="muted small">Microphone, Autostart, battery, notification access and screen reading: what Ray needs on the phone and which of it is ready</p>
+      </div>
       <div class="st-card">
         <span class="card-title">Model and engine</span>
         <dl class="facts" id="facts-engine"></dl>
@@ -510,6 +519,6 @@
 <script src="web/site-config.js?v=20261020-logout1"></script>
 <script src="web/speakstream.js?v=20261029-panda25"></script>
 <script src="web/rayface.js?v=20261029-panda25"></script>
-<script src="web/app.js?v=20261102-android-companion"></script>
+<script src="web/app.js?v=20261102-android-setup"></script>
 </body>
 </html>

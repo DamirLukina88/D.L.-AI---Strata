@@ -147,6 +147,15 @@ class RayNativeBridge(
         }
     }
 
+    // The "Android settings" button in the web app's About tab: the setup screen with Ray's permissions
+    @JavascriptInterface
+    fun openSetup() {
+        Log.d(TAG, "openSetup")
+        context.startActivity(android.content.Intent(context, com.damirl.ray.OnboardingActivity::class.java).apply {
+            if (context !is android.app.Activity) addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    }
+
     @JavascriptInterface
     fun getApiKey(): String {
         return try {
