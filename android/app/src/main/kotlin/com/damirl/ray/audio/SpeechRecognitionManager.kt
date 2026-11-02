@@ -19,6 +19,7 @@ class SpeechRecognitionManager(private val context: Context) {
     }
 
     private var speechRecognizer: SpeechRecognizer? = null
+    private val bluetoothMic = BluetoothMic(context)
 
     private val _isListening = MutableStateFlow(false)
     val isListening: StateFlow<Boolean> = _isListening.asStateFlow()
@@ -43,7 +44,15 @@ class SpeechRecognitionManager(private val context: Context) {
         }
 
         stopListening()
+        // a Bluetooth headset's mic (helmet intercom, earbuds) when one is connected, else the phone's
+        bluetoothMic.acquire { begin(onFinalResult, onError, onNoSpeech) }
+    }
 
+    private fun begin(
+        onFinalResult: (String) -> Unit,
+        onError: (String) -> Unit,
+        onNoSpeech: (() -> Unit)?
+    ) {
         try {
             val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
             var heardSpeech = false
@@ -132,12 +141,14 @@ class SpeechRecognitionManager(private val context: Context) {
             recognizer.startListening(intent)
         } catch (e: Exception) {
             Log.e(TAG, "Error starting speech recognition", e)
+            bluetoothMic.release()
             _isListening.value = false
             onError(e.message ?: "Failed to start listening")
         }
     }
 
     fun stopListening() {
+        if (speechRecognizer == null) bluetoothMic.release()   // stopped while the headset link was still coming up
         try {
             speechRecognizer?.stopListening()
         } catch (_: Exception) {}
@@ -151,6 +162,7 @@ class SpeechRecognitionManager(private val context: Context) {
     }
 
     private fun destroyRecognizer() {
+        bluetoothMic.release()
         try {
             speechRecognizer?.destroy()
         } catch (_: Exception) {}

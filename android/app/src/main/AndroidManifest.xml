@@ -51,19 +51,9 @@
                 <action android:name="android.intent.action.ASSIST" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.VOICE_COMMAND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.VOICE" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.speech.action.VOICE_SEARCH_HANDS_FREE" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.VOICE_ASSIST" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
+            <!-- VOICE_COMMAND (a Bluetooth headset's voice button), VOICE_SEARCH_HANDS_FREE and VOICE_ASSIST belong to
+                 RayAssistTrampolineActivity alone, which opens the voice drawer.  Declared here too, they reached this
+                 activity instead: android:priority on activity filters is ignored for apps that aren't system apps -->
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
                 <category android:name="android.intent.category.DEFAULT" />
