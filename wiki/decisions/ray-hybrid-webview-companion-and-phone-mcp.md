@@ -73,6 +73,12 @@ Found and fixed during validation (`fbbb5ebb`):
 - Lock screen: both the helmet button and holding power opened the drawer while locked on HyperOS (no `supportsLaunchVoiceAssistFromKeyguard` needed). The user tested and kept this (chat, 2026-11-02). Risk: anyone holding the locked phone can talk to Ray, whose CLI session may be in YOLO mode.
 - Open: about 1 in 4 assistant triggers (22:38, 22:49) got `showSessionForActiveService()` but Ray's session never showed, with no app log lines. Not yet explained.
 
+**Helmet replies and the drawer fallback (2026-11-02, `46473396`):**
+- The Sena helmet did not play Ray's answers sent over the music link (A2DP) after a voice session, and once kept music muted while the phone was streaming it (Brave PLAYING, A2DP started, volume 76/150). Since then, after you speak through a headset, Ray answers over its call link (SCO) for 2 min, from both the native voice and the web app's voice (`RayAndroid.holdHeadsetForSpeech`). `BluetoothMic` is one app-wide link held by name (`listen`, `reply`, `web-reply`).
+- Gotcha: the call-link volume (`STREAM_VOICE_CALL` for `bt_sco_hs`) was 1 of 11 on this phone, and Android sends it to the headset when the link opens. Raise it with the helmet's volume buttons while Ray speaks.
+- Gotcha: `RayVoiceInteractionService.instance` exists only in the process Android bound the service to. After HyperOS's swipe-away kill (`SwipeUpClean`) the next process had no binding (`onBindingDied`), so the trampoline's `showSession` failed. The trampoline now opens `RayVoiceActivity`, the same drawer as an activity (shown over the lock screen). Not reproducible over adb: `am kill` leaves the process alive while the service is bound, and force-stop makes Android rebind at once.
+- Drawer show steps are logged (`RayAssistService: onPrepareToShowSession` / `onShowSessionFailed`, `RaySessionService`, `RayVoiceSession: onCreate/onPrepareShow/onShow`) to explain the triggers that opened nothing.
+
 Debugging recipe: debug builds expose `webview_devtools_remote_<pid>`; `adb forward tcp:9333 localabstract:webview_devtools_remote_$(adb shell pidof com.damirl.ray)` then `curl localhost:9333/json` lists every live page (one per WebView) for measuring layout with `Runtime.evaluate`.
 
 ## Related
