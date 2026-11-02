@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -16,6 +17,29 @@ import okhttp3.Response
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
+
+/** One piece of Ray's streamed reply: the answer, the model's thinking, or a tool he calls. */
+sealed class ChatDelta {
+    data class Text(val text: String) : ChatDelta()
+    data class Thinking(val text: String) : ChatDelta()
+    data class Tool(val name: String) : ChatDelta()
+}
+
+/**
+ * The pieces in one SSE data line of /v1/ray/chat: delta.content (the answer), delta.reasoning_content (thinking)
+ * and ray_tool.name (a tool call).  Empty for [DONE], keep-alives and anything unreadable.
+ */
+fun parseChatChunk(json: Json, data: String): List<ChatDelta> {
+    if (data.isBlank() || data.trim() == "[DONE]") return emptyList()
+    val root = runCatching { json.parseToJsonElement(data).jsonObject }.getOrNull() ?: return emptyList()
+    val out = mutableListOf<ChatDelta>()
+    val delta = root["choices"]?.jsonArray?.firstOrNull()?.jsonObject?.get("delta")?.jsonObject
+    delta?.get("reasoning_content")?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotEmpty() }?.let { out += ChatDelta.Thinking(it) }
+    delta?.get("content")?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotEmpty() }?.let { out += ChatDelta.Text(it) }
+    (root["ray_tool"] as? JsonObject)?.get("name")?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotEmpty() }
+        ?.let { out += ChatDelta.Tool(it) }
+    return out
+}
 
 sealed class SessionEvent {
     data object Cleared : SessionEvent()
@@ -37,7 +61,7 @@ class RayChatRepository(private val networkClient: NetworkClient) {
         encodeDefaults = true
     }
 
-    fun streamChat(messages: List<ChatMessage>, isVoice: Boolean = false): Flow<String> = callbackFlow {
+    fun streamChat(messages: List<ChatMessage>, isVoice: Boolean = false): Flow<ChatDelta> = callbackFlow {
         // Ensure route is active before request
         val baseUrl = networkClient.getActiveBaseUrl()
         Log.d(TAG, "Starting chat stream to $baseUrl/v1/ray/chat (voice=$isVoice)")
@@ -67,19 +91,7 @@ class RayChatRepository(private val networkClient: NetworkClient) {
                     return
                 }
 
-                try {
-                    val root = json.parseToJsonElement(data).jsonObject
-                    val choices = root["choices"]?.jsonArray
-                    if (!choices.isNullOrEmpty()) {
-                        val delta = choices[0].jsonObject["delta"]?.jsonObject
-                        val content = delta?.get("content")?.jsonPrimitive?.content
-                        if (!content.isNullOrEmpty()) {
-                            trySend(content)
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to parse SSE chunk: $data", e)
-                }
+                for (piece in parseChatChunk(json, data)) trySend(piece)
             }
 
             override fun onClosed(eventSource: EventSource) {

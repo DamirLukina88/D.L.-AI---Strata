@@ -41,6 +41,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,6 +54,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -66,7 +69,10 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.damirl.ray.audio.AudioPlaybackService
 import com.damirl.ray.ui.components.RayAvatar
+import com.damirl.ray.ui.components.RayFaceView
+import com.damirl.ray.ui.components.RayMood
 import com.damirl.ray.ui.theme.RayTheme
 import com.damirl.ray.ui.theme.StrataAccent
 import com.damirl.ray.ui.theme.StrataAccentText
@@ -190,7 +196,25 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
 // The drawer bound to its controller (the system overlay and RayVoiceActivity both show this)
 @Composable
 fun VoiceDrawer(drawer: VoiceDrawerController, onDismiss: () -> Unit, onExpand: () -> Unit) {
+    val speaking by AudioPlaybackService.isSpeakingState.collectAsState()
+    val mood = when {
+        speaking -> RayMood.TALKING
+        drawer.phase == VoicePhase.LISTENING -> RayMood.LISTENING
+        drawer.phase == VoicePhase.THINKING || drawer.phase == VoicePhase.ANSWERING -> RayMood.THINKING
+        else -> RayMood.IDLE
+    }
     AssistantOverlayScreen(
+        face = {
+            RayFaceView(
+                mood = mood,
+                speech = drawer.assistantResponse,
+                prompt = drawer.userPrompt,
+                toolCalls = drawer.toolCalls,
+                lastTool = drawer.lastTool
+            )
+        },
+        thinking = drawer.thinkingText,
+        thoughtSeconds = drawer.thoughtSeconds,
         phase = drawer.phase,
         status = drawer.status,
         prompt = drawer.userPrompt,
@@ -208,6 +232,9 @@ fun VoiceDrawer(drawer: VoiceDrawerController, onDismiss: () -> Unit, onExpand: 
 // answer, and the mic.  Strata's dark surfaces with the orange accent, like the web app's Code tab
 @Composable
 fun AssistantOverlayScreen(
+    face: @Composable () -> Unit = { RayAvatar(size = 44.dp) },
+    thinking: String = "",
+    thoughtSeconds: Int? = null,
     phase: VoicePhase,
     status: String,
     prompt: String,
@@ -261,7 +288,7 @@ fun AssistantOverlayScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                RayAvatar(size = 44.dp)
+                face()
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Ray", color = StrataInk, fontWeight = FontWeight.Bold, fontSize = 18.sp)
@@ -326,11 +353,15 @@ fun AssistantOverlayScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
+                if (thinking.isNotBlank()) {
+                    ThinkingBlock(thinking, thoughtSeconds)
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
                 when {
                     response.isNotBlank() -> Text(text = response, fontSize = 15.sp, lineHeight = 22.sp,
                         color = if (phase == VoicePhase.ERROR) StrataDanger else StrataInk)
                     listening && said.isBlank() -> Text("Say something…", fontSize = 15.sp, color = StrataInkMuted)
-                    phase == VoicePhase.THINKING -> ThinkingDots()
+                    phase == VoicePhase.THINKING && thinking.isBlank() -> ThinkingDots()
                     phase == VoicePhase.IDLE && said.isBlank() ->
                         Text("Tap the mic and speak.", fontSize = 15.sp, color = StrataInkMuted)
                 }
@@ -354,6 +385,51 @@ fun AssistantOverlayScreen(
                 modifier = Modifier
                     .padding(end = 8.dp)
                     .align(Alignment.CenterHorizontally)
+            )
+        }
+    }
+}
+
+// The model's thinking, like the web app's: streamed live in a small muted box that follows the newest line while he
+// thinks; once the answer starts it folds to "Thought for N s", which opens again on a tap.  Never read aloud
+@Composable
+private fun ThinkingBlock(thinking: String, thoughtSeconds: Int?) {
+    var open by remember(thoughtSeconds == null) { mutableStateOf(thoughtSeconds == null) }
+    val scroll = rememberScrollState()
+    LaunchedEffect(thinking, open) { if (open && thoughtSeconds == null) scroll.scrollTo(scroll.maxValue) }
+    Column {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { open = !open }
+                .padding(vertical = 2.dp)
+        ) {
+            Text(
+                text = if (thoughtSeconds == null) "Thinking" else "Thought for $thoughtSeconds s",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = StrataInkMuted
+            )
+            Text(
+                text = if (open) "  ⌄" else "  ›",
+                fontSize = 12.sp,
+                color = StrataInkMuted
+            )
+        }
+        if (open) {
+            Text(
+                text = thinking.trim(),
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+                fontStyle = FontStyle.Italic,
+                color = StrataInkMuted,
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .fillMaxWidth()
+                    .heightIn(max = 140.dp)
+                    .verticalScroll(scroll)
+                    .padding(start = 10.dp)
             )
         }
     }

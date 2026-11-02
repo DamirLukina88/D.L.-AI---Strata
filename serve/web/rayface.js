@@ -781,6 +781,7 @@ const RayFace = (() => {
   const geo = {pitch: 3, cols: COLS, rows: ROWS, offX: 0, offY: 0, laidW: 0, laidH: 0};
   const pose = newPose();
   let target = calm("neutral");
+  let stay = false;                          // see the stay setter at the end
   let level = 0, paused = false, mode = "idle";   // "think" | "audio" | "text" | "warm" | "leave" | "idle"
   let analyser = null, tbuf = null;
   let line = null;                            // the chunk being spoken: {text, times[], amp[], sentences[], total, …}
@@ -1207,6 +1208,12 @@ const RayFace = (() => {
     mem.stressAt = performance.now();          // the nod
     clearTimeout(warmTimer); clearTimeout(hideTimer);
     warmTimer = setTimeout(() => {
+      if (stay) {                              // the Android drawer keeps him: back to a calm idle, still there
+        mode = "idle";
+        mood = "neutral";
+        target = calm("neutral");
+        return;
+      }
       el.classList.remove("is-on");
       hideTimer = setTimeout(() => {
         el.hidden = true;
@@ -1215,6 +1222,16 @@ const RayFace = (() => {
         makeRoom(false);
       }, FADE_OUT);
     }, finished ? WARM_MS : WARM_MS / 2);
+  }
+
+  // he listens (the Android voice drawer while it hears you): there, attentive, a curious tilt, nothing in his paws
+  function listen() {
+    dropBreak();
+    line = null; analyser = null; audioText = null;
+    show();
+    mode = "idle";
+    mood = "curious"; moodAt = performance.now();
+    target = calm("curious");
   }
 
   // the answer of a typed prompt starts: he stops thinking and fades out at once, without the goodbye
@@ -1272,8 +1289,10 @@ const RayFace = (() => {
     return true;
   }
 
-  return {thinking, speakAudio, speakText, boundary, chunkEnd, pause, end, leave, moodOf, cocoa, taskStart, taskTool, taskError,
-          work: startWork,
+  return {thinking, speakAudio, speakText, boundary, chunkEnd, pause, end, leave, listen, moodOf, cocoa, taskStart, taskTool,
+          taskError, work: startWork,
+          // the Android voice drawer sets this: he stays after speaking instead of fading out (the website never does)
+          set stay(on) { stay = !!on; },
           get visible() { return visible; },
           get state() { return {...pose, mode, level, mood, cocoa: brk && brk.style, phase: sip && sip.name,
             work: work && work.name, task: {...task}}; },

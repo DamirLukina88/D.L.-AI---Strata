@@ -198,9 +198,11 @@ class MainScreenViewModel(
                     _messages.value = _messages.value + ChatMessage(role = "assistant", content = errorReply)
                     _currentStreamingText.value = ""
                 }
-                .collect { token ->
-                    accumulated += token
-                    _currentStreamingText.value = accumulated
+                .collect { piece ->
+                    if (piece is com.damirl.ray.network.ChatDelta.Text) {
+                        accumulated += piece.text
+                        _currentStreamingText.value = accumulated
+                    }
                 }
 
             if (accumulated.isNotBlank()) {

@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import com.damirl.ray.audio.AudioPlaybackService
 import com.damirl.ray.audio.SpeechRecognitionManager
 import com.damirl.ray.audio.VoiceOutput
+import com.damirl.ray.network.ChatDelta
 import com.damirl.ray.network.ChatMessage
 import com.damirl.ray.network.NetworkClient
 import com.damirl.ray.network.RayChatRepository
@@ -53,6 +54,15 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
         private set
     var activeToolNote by mutableStateOf<String?>(null)
         private set
+    /** The model's thinking for this answer, streamed; shown in the drawer, never read aloud. */
+    var thinkingText by mutableStateOf("")
+        private set
+    /** How long he thought, once the answer started (null while still thinking or with no thinking). */
+    var thoughtSeconds by mutableStateOf<Int?>(null)
+        private set
+    /** How many tools he called in this answer (the panda reacts to each). */
+    var toolCalls by mutableStateOf(0)
+        private set
 
     init {
         // the live transcript and the mic level drive the drawer while it listens
@@ -68,6 +78,8 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
         userPrompt = ""
         assistantResponse = ""
         activeToolNote = null
+        thinkingText = ""
+        thoughtSeconds = null
         noSpeechRetries = 0
         scope.launch { networkClient.probeAndSelectRoute() }
         listen()
@@ -144,6 +156,21 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
         )
     }
 
+    /** The last tool Ray called in this answer (the panda picks his work prop from it). */
+    var lastTool: String? = null
+        private set
+
+    // "Using a phone tool…", "Using Home Assistant…": MCP tools arrive as server__tool
+    private fun toolNote(name: String): String {
+        val server = name.substringBefore("__", "")
+        return when {
+            name.startsWith("phone_") || server == "phone" -> "Using a phone tool…"
+            server == "homeassistant" -> "Using Home Assistant…"
+            server.isNotEmpty() -> "Using $server…"
+            else -> "Using a tool…"
+        }
+    }
+
     private fun ask(text: String) {
         if (text.isBlank()) return
 
@@ -151,8 +178,12 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
         status = "Thinking…"
         assistantResponse = ""
         activeToolNote = null
+        thinkingText = ""
+        thoughtSeconds = null
+        lastTool = null
 
         val messages = listOf(ChatMessage(role = "user", content = text))
+        val askedAt = System.currentTimeMillis()
 
         askJob = scope.launch {
             var accumulated = ""
@@ -164,14 +195,26 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
                     assistantResponse = "Error: ${error.message}"
                     status = "Can't reach the server"
                 }
-                .collect { token ->
-                    phase = VoicePhase.ANSWERING
-                    status = "Answering…"
-                    accumulated += token
-                    if (token.contains("phone_") || token.contains("[Tool]")) {
-                        activeToolNote = "Using a phone tool…"
+                .collect { piece ->
+                    when (piece) {
+                        is ChatDelta.Thinking -> thinkingText += piece.text
+                        is ChatDelta.Tool -> {
+                            lastTool = piece.name
+                            toolCalls++
+                            activeToolNote = toolNote(piece.name)
+                        }
+                        is ChatDelta.Text -> {
+                            if (phase != VoicePhase.ANSWERING) {
+                                phase = VoicePhase.ANSWERING
+                                status = "Answering…"
+                                if (thinkingText.isNotBlank()) {
+                                    thoughtSeconds = ((System.currentTimeMillis() - askedAt) / 1000).toInt().coerceAtLeast(1)
+                                }
+                            }
+                            accumulated += piece.text
+                            assistantResponse = accumulated
+                        }
                     }
-                    assistantResponse = accumulated
                 }
 
             if (failed) return@launch

@@ -7076,22 +7076,27 @@ def make_handler(svc: Service):
                     except Exception:
                         continue
                     ev_type = ev.get("type")
+                    # the answer as content; the model's thinking as reasoning_content (the voice drawer shows it,
+                    # never reads it aloud); a tool call as ray_tool (the drawer's "Using a tool" note)
                     if ev_type == "text":
-                        delta_text = ev.get("text", "")
-                        chunk = {
-                            "id": "chatcmpl-ray",
-                            "object": "chat.completion.chunk",
-                            "model": svc.model,
-                            "choices": [{
-                                "index": 0,
-                                "delta": {"content": delta_text},
-                                "finish_reason": None
-                            }]
-                        }
-                        self.wfile.write(b"data: " + json.dumps(chunk, ensure_ascii=False).encode() + b"\n\n")
-                        self.wfile.flush()
+                        delta, extra = {"content": ev.get("text", "")}, {}
+                    elif ev_type == "thinking":
+                        delta, extra = {"reasoning_content": ev.get("text", "")}, {}
+                    elif ev_type == "tool_call":
+                        delta, extra = {}, {"ray_tool": {"name": ev.get("name") or ""}}
                     elif ev_type == "turn_end":
                         break
+                    else:
+                        continue
+                    chunk = {
+                        "id": "chatcmpl-ray",
+                        "object": "chat.completion.chunk",
+                        "model": svc.model,
+                        "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+                        **extra,
+                    }
+                    self.wfile.write(b"data: " + json.dumps(chunk, ensure_ascii=False).encode() + b"\n\n")
+                    self.wfile.flush()
                 self.wfile.write(b"data: [DONE]\n\n")
                 self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, OSError):

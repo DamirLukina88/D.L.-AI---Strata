@@ -64,6 +64,30 @@ kotlin {
   jvmToolchain(17)
 }
 
+// Ray's animated panda in the voice drawer is the web app's own drawing code: serve/web/rayface.js is copied into the
+// app's assets at build time (assets/rayface/, next to src/main/assets/rayface/index.html), so there is one source
+abstract class CopyRayFace : DefaultTask() {
+  @get:InputFile abstract val script: RegularFileProperty
+  @get:OutputDirectory abstract val outputDir: DirectoryProperty
+
+  @TaskAction
+  fun copy() {
+    val dir = outputDir.get().asFile.resolve("rayface")
+    dir.mkdirs()
+    script.get().asFile.copyTo(dir.resolve("rayface.js"), overwrite = true)
+  }
+}
+
+val copyRayFace = tasks.register<CopyRayFace>("copyRayFace") {
+  script.set(rootProject.file("../serve/web/rayface.js"))
+}
+
+androidComponents {
+  onVariants { variant ->
+    variant.sources.assets?.addGeneratedSourceDirectory(copyRayFace, CopyRayFace::outputDir)
+  }
+}
+
 dependencies {
   val composeBom = platform(libs.androidx.compose.bom)
   implementation(composeBom)
