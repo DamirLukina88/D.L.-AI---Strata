@@ -4364,6 +4364,19 @@ function checkRayAndroidCompanion() {
         try { window.RayAndroid.openSetup(); } catch (_) {}
       });
     }
+    // "Ok Ray" on the phone (an app with the wake word only)
+    const wakeRow = document.getElementById("wake-word-row"), wakeBtn = document.getElementById("wake-word-toggle");
+    if (wakeRow && typeof window.RayAndroid.setWakeWord === "function") {
+      const show = (on) => wakeBtn.setAttribute("aria-checked", String(on));
+      try { show(!!window.RayAndroid.isWakeWordOn()); } catch (_) {}
+      wakeRow.hidden = false;
+      wakeBtn.addEventListener("click", () => {
+        const on = wakeBtn.getAttribute("aria-checked") !== "true";
+        try { window.RayAndroid.setWakeWord(on); show(on); } catch (_) {}
+        toast(on ? "success" : "info", on ? "Listening for “Ok Ray”" : "“Ok Ray” is off",
+              on ? "Say it near the phone to open the voice drawer" : "", 3000);
+      });
+    }
   }
   if (typeof showTab === "function") {
     showTab("code");

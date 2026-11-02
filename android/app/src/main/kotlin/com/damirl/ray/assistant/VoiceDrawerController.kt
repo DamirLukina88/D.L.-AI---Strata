@@ -75,6 +75,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
     /** The drawer was opened: start over and listen. */
     fun start() {
         closed = false
+        WakeWord.hold("drawer")
         userPrompt = ""
         assistantResponse = ""
         activeToolNote = null
@@ -102,6 +103,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
         if (closed) return
         closed = true
         Log.d(TAG, "Drawer closed: stopping listening and speech")
+        WakeWord.release("drawer")
         retryJob?.cancel()
         askJob?.cancel()
         speechManager?.cancel()

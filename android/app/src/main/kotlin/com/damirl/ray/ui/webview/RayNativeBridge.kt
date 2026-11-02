@@ -151,6 +151,15 @@ class RayNativeBridge(
     @JavascriptInterface
     fun downloadFile(url: String, fileName: String): Boolean = Downloads.enqueue(context, url, fileName)
 
+    // "Ok Ray" on or off (the switch in the web app's About card); see WakeWord
+    @JavascriptInterface
+    fun isWakeWordOn(): Boolean = com.damirl.ray.assistant.WakeWord.isOn(context)
+
+    @JavascriptInterface
+    fun setWakeWord(on: Boolean) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post { com.damirl.ray.assistant.WakeWord.set(context, on) }
+    }
+
     // The "Android settings" button in the web app's About tab: the setup screen with Ray's permissions
     @JavascriptInterface
     fun openSetup() {

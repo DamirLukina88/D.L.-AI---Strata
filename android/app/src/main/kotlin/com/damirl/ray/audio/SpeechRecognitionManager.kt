@@ -46,6 +46,7 @@ class SpeechRecognitionManager(private val context: Context) {
         // never while Ray is talking: he would hear himself
         VoiceOutput.stopAll(context)
         // a Bluetooth headset's mic (helmet intercom, earbuds) when one is connected, else the phone's
+        com.damirl.ray.assistant.WakeWord.hold("listen")           // "Ok Ray" lets go of the mic
         BluetoothMic.acquire(context, "listen") { begin(onFinalResult, onError, onNoSpeech) }
     }
 
@@ -142,14 +143,17 @@ class SpeechRecognitionManager(private val context: Context) {
             recognizer.startListening(intent)
         } catch (e: Exception) {
             Log.e(TAG, "Error starting speech recognition", e)
-            BluetoothMic.release("listen")
+            BluetoothMic.release("listen"); com.damirl.ray.assistant.WakeWord.release("listen")
             _isListening.value = false
             onError(e.message ?: "Failed to start listening")
         }
     }
 
     fun stopListening() {
-        if (speechRecognizer == null) BluetoothMic.release("listen")   // stopped while the headset link was still coming up
+        if (speechRecognizer == null) {                // stopped while the headset link was still coming up
+            BluetoothMic.release("listen")
+            com.damirl.ray.assistant.WakeWord.release("listen")
+        }
         try {
             speechRecognizer?.stopListening()
         } catch (_: Exception) {}
@@ -163,7 +167,7 @@ class SpeechRecognitionManager(private val context: Context) {
     }
 
     private fun destroyRecognizer() {
-        BluetoothMic.release("listen")
+        BluetoothMic.release("listen"); com.damirl.ray.assistant.WakeWord.release("listen")
         try {
             speechRecognizer?.destroy()
         } catch (_: Exception) {}

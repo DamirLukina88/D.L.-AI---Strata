@@ -29,6 +29,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleIntent(intent)
+        com.damirl.ray.assistant.WakeWord.startIfOn(this)     // "Ok Ray", if it is switched on
 
         enableEdgeToEdge(
             statusBarStyle = androidx.activity.SystemBarStyle.dark(

@@ -13,3 +13,4 @@ secrets.properties
 /captures
 .externalNativeBuild
 .cxx
+/.vosk-cache

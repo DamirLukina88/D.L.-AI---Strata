@@ -146,6 +146,7 @@ class AudioPlaybackService : Service() {
                     requestAudioFocus()
 
                     _isSpeakingState.value = true
+                    com.damirl.ray.assistant.WakeWord.hold("speak")     // "Ok Ray" mustn't hear Ray
                     val play = {
                         serviceScope.launch {
                             piperPlayer?.speak(text) {
@@ -240,6 +241,7 @@ class AudioPlaybackService : Service() {
 
     private fun finishPlayback() {
         _isSpeakingState.value = false
+        com.damirl.ray.assistant.WakeWord.release("speak")
         BluetoothMic.release("reply")
         updateMediaPlaybackState(PlaybackStateCompat.STATE_STOPPED)
         piperPlayer?.stop()
@@ -311,6 +313,7 @@ class AudioPlaybackService : Service() {
         Log.d(TAG, "AudioPlaybackService destroyed")
         serviceScope.cancel()
         BluetoothMic.release("reply")
+        com.damirl.ray.assistant.WakeWord.release("speak")
         piperPlayer?.release()
         piperPlayer = null
         mediaSession?.isActive = false

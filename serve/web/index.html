@@ -225,6 +225,10 @@
             <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-settings"/></svg>Android settings</button>
         </div>
         <p class="muted small">Microphone, Autostart, battery, notification access and screen reading: what Ray needs on the phone and which of it is ready</p>
+        <div class="toggle-row" id="wake-word-row" hidden>
+          <span>Listen for “Ok Ray”<br><span class="muted small">Say “Ok Ray” near the phone to open the voice drawer, also with the screen off. Recognised on the phone, offline; a small notification shows while it listens, and it uses some battery</span></span>
+          <button class="st-toggle" id="wake-word-toggle" role="switch" aria-checked="false" aria-label="Listen for Ok Ray"></button>
+        </div>
       </div>
       <div class="st-card">
         <span class="card-title">Model and engine</span>
@@ -523,6 +527,6 @@
 <script src="web/site-config.js?v=20261020-logout1"></script>
 <script src="web/speakstream.js?v=20261029-panda25"></script>
 <script src="web/rayface.js?v=20261102-panda26"></script>
-<script src="web/app.js?v=20261102-ws-download"></script>
+<script src="web/app.js?v=20261103-okray"></script>
 </body>
 </html>

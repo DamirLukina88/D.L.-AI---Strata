@@ -1,4 +1,6 @@
+import java.net.URI
 import java.util.Properties
+import java.util.zip.ZipFile
 
 plugins {
   alias(libs.plugins.android.application)
@@ -22,6 +24,9 @@ android {
     targetSdk = 35
     versionCode = 1
     versionName = "1.0"
+
+    // 64-bit ARM phones only: Vosk's native libraries for every other CPU added ~30 MB
+    ndk { abiFilters += "arm64-v8a" }
 
     val lanUrl = secrets.getProperty("STRATA_LAN_URL", "http://192.168.1.100:8080")
     val remoteUrl = secrets.getProperty("STRATA_REMOTE_URL", "https://your-server.example.com")
@@ -82,9 +87,54 @@ val copyRayFace = tasks.register<CopyRayFace>("copyRayFace") {
   script.set(rootProject.file("../serve/web/rayface.js"))
 }
 
+// The "Ok Ray" wake word's Vosk model (small English, ~40 MB): downloaded once into android/.vosk-cache (git-ignored)
+// and bundled into assets/vosk-model/ with a version file, which HotwordListenerService unpacks on first use
+abstract class DownloadVoskModel : DefaultTask() {
+  @get:Input abstract val url: Property<String>
+  @get:Input abstract val modelName: Property<String>
+  @get:Internal abstract val cacheDir: DirectoryProperty
+  @get:OutputDirectory abstract val outputDir: DirectoryProperty
+
+  @TaskAction
+  fun fetch() {
+    val cache = cacheDir.get().asFile.apply { mkdirs() }
+    val zip = cache.resolve("${modelName.get()}.zip")
+    if (!zip.exists() || zip.length() < 1_000_000) {
+      logger.lifecycle("Downloading the Vosk model ${modelName.get()}")
+      val part = cache.resolve("${modelName.get()}.zip.part")
+      URI(url.get()).toURL().openStream().use { input -> part.outputStream().use { input.copyTo(it) } }
+      part.renameTo(zip)
+    }
+    val out = outputDir.get().asFile.resolve("vosk-model")
+    out.deleteRecursively()
+    out.mkdirs()
+    ZipFile(zip).use { z ->
+      for (e in z.entries().asSequence()) {
+        val rel = e.name.substringAfter('/', "")                      // drop the zip's top folder
+        if (rel.isEmpty() || rel.contains("..")) continue
+        val f = out.resolve(rel)
+        if (e.isDirectory) {
+          f.mkdirs()
+        } else {
+          f.parentFile.mkdirs()
+          z.getInputStream(e).use { input -> f.outputStream().use { input.copyTo(it) } }
+        }
+      }
+    }
+    out.resolve("VERSION").writeText(modelName.get())
+  }
+}
+
+val downloadVoskModel = tasks.register<DownloadVoskModel>("downloadVoskModel") {
+  modelName.set("vosk-model-small-en-us-0.15")
+  url.set("https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip")
+  cacheDir.set(rootProject.layout.projectDirectory.dir(".vosk-cache"))
+}
+
 androidComponents {
   onVariants { variant ->
     variant.sources.assets?.addGeneratedSourceDirectory(copyRayFace, CopyRayFace::outputDir)
+    variant.sources.assets?.addGeneratedSourceDirectory(downloadVoskModel, DownloadVoskModel::outputDir)
   }
 }
 
@@ -116,6 +166,10 @@ dependencies {
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
   implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")
   implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+
+  // "Ok Ray" wake word: Vosk, offline, with its small English model (see downloadVoskModel)
+  implementation(libs.vosk.android) { exclude(group = "net.java.dev.jna") }
+  implementation(libs.jna) { artifact { type = "aar" } }
 
   // Tooling
   debugImplementation(libs.androidx.compose.ui.tooling)
