@@ -66,6 +66,13 @@ Found and fixed during validation (`fbbb5ebb`):
 - **Rotation reloaded the web app** (lost drafts and scroll). The activity now declares `configChanges` for orientation, screen size and keyboard; the same page survives rotating.
 - `env(safe-area-inset-*)` is 0 in this WebView, so the native padding is the only inset (no double padding).
 
+**Bluetooth headset / helmet (2026-11-02, D.L. SENA intercom):**
+- A headset's voice button sends HFP voice recognition, which Android delivers as `VOICE_COMMAND`; only `RayAssistTrampolineActivity` may declare it (opens the drawer). Gotcha: `android:priority` on activity intent filters is ignored for non-system apps, so a duplicate filter on `MainActivity` won.
+- Gotcha: Google's `HandsFreeActivity` also handles `VOICE_COMMAND`. The phone keeps a saved "Always" choice (`dumpsys package preferred-xml`); after a filter moves, Android shows a chooser once and the user must pick Ray > Always again.
+- The headset mic works only over SCO. `BluetoothMic` makes the SCO device the communication device before listening (checked: `bt_sco_hs`, `SCO_STATE_ACTIVE_INTERNAL`) and releases it 1 s after, so replies play over A2DP. Without it HFP waits 5 s for SCO and the phone mic is used.
+- Lock screen: both the helmet button and holding power opened the drawer while locked on HyperOS (no `supportsLaunchVoiceAssistFromKeyguard` needed). The user tested and kept this (chat, 2026-11-02). Risk: anyone holding the locked phone can talk to Ray, whose CLI session may be in YOLO mode.
+- Open: about 1 in 4 assistant triggers (22:38, 22:49) got `showSessionForActiveService()` but Ray's session never showed, with no app log lines. Not yet explained.
+
 Debugging recipe: debug builds expose `webview_devtools_remote_<pid>`; `adb forward tcp:9333 localabstract:webview_devtools_remote_$(adb shell pidof com.damirl.ray)` then `curl localhost:9333/json` lists every live page (one per WebView) for measuring layout with `Runtime.evaluate`.
 
 ## Related
@@ -74,6 +81,7 @@ Debugging recipe: debug builds expose `webview_devtools_remote_<pid>`; `adb forw
 ## Sources
 - `tools/phone_mcp.py`
 - `tools/make_ray_icons.py`
+- `android/app/src/main/kotlin/com/damirl/ray/audio/BluetoothMic.kt`
 - `android/app/src/main/kotlin/com/damirl/ray/assistant/RayVoiceSession.kt`
 - `android/app/src/main/kotlin/com/damirl/ray/audio/SpeechRecognitionManager.kt`
 - `android/app/src/main/AndroidManifest.xml`
