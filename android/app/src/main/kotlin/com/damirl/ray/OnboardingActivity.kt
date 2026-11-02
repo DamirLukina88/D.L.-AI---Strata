@@ -113,29 +113,35 @@ fun PermissionsDashboard(
     fun micGranted() = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
         PackageManager.PERMISSION_GRANTED
     fun notificationsGranted() = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+    // from Android's list of switched-on services, so it reads right even while the service isn't running
+    fun screenReadingOn() = (Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: "")
+        .split(':').any { it.equals(ComponentName(context, RayAccessibilityService::class.java).flattenToString(), ignoreCase = true) } ||
+        RayAccessibilityService.isRunning()
 
     var isMicGranted by remember { mutableStateOf(micGranted()) }
     var isBatteryIgnored by remember {
         mutableStateOf(powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true)
     }
     var isNotificationAccess by remember { mutableStateOf(notificationsGranted()) }
-    var isAccessibilityActive by remember {
-        mutableStateOf(RayAccessibilityService.isRunning())
-    }
+    var isAccessibilityActive by remember { mutableStateOf(screenReadingOn()) }
+    var autostart by remember { mutableStateOf(xiaomiAutostart(context)) }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         isMicGranted = micGranted()
         isBatteryIgnored = powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true
         isNotificationAccess = notificationsGranted()
-        isAccessibilityActive = RayAccessibilityService.isRunning()
+        isAccessibilityActive = screenReadingOn()
+        autostart = xiaomiAutostart(context)
     }
 
     val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         isMicGranted = granted
     }
 
-    // HyperOS does not report Autostart to apps, so only the other four count
-    val ready = listOf(isMicGranted, isBatteryIgnored, isNotificationAccess, isAccessibilityActive).count { it }
+    // Autostart counts where the phone lets Ray read it (Xiaomi); elsewhere only the other four
+    val checks = listOfNotNull(isMicGranted, autostart, isBatteryIgnored, isNotificationAccess, isAccessibilityActive)
+    val total = checks.size
+    val ready = checks.count { it }
 
     Column(
         modifier = Modifier
@@ -164,19 +170,19 @@ fun PermissionsDashboard(
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             LinearProgressIndicator(
-                progress = { ready / 4f },
+                progress = { ready / total.toFloat() },
                 modifier = Modifier
                     .weight(1f)
                     .height(6.dp)
                     .clip(CircleShape),
-                color = if (ready == 4) StrataOk else StrataAccent,
+                color = if (ready == total) StrataOk else StrataAccent,
                 trackColor = StrataSurface2,
                 strokeCap = StrokeCap.Round,
                 gapSize = 0.dp,
                 drawStopIndicator = {}
             )
             Spacer(modifier = Modifier.width(12.dp))
-            Text("$ready of 4 ready", color = if (ready == 4) StrataOk else StrataAccentText, fontSize = 13.sp,
+            Text("$ready of $total ready", color = if (ready == total) StrataOk else StrataAccentText, fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold)
         }
 
@@ -193,9 +199,14 @@ fun PermissionsDashboard(
 
         PermissionCard(
             title = "Autostart",
-            desc = "Lets Ray start in the background for earbud buttons and wake-up. HyperOS doesn't tell apps " +
-                "whether this is on, so check it once.",
+            desc = if (autostart == null) {
+                "Lets Ray start in the background for headset buttons and wake-up. This phone doesn't tell apps " +
+                    "whether it is on, so check it once."
+            } else {
+                "Lets Ray start in the background for headset buttons and wake-up."
+            },
             icon = Icons.Default.PowerSettingsNew,
+            isGranted = autostart == true,
             actionLabel = "Open Autostart settings",
             onAction = {
                 try {
@@ -254,10 +265,12 @@ fun PermissionsDashboard(
 
         PermissionCard(
             title = "Screen reading",
-            desc = "Lets Ray read the text on your screen when you ask \"what's on my screen?\".",
+            desc = "Lets Ray read the text on your screen when you ask \"what's on my screen?\". On Xiaomi: " +
+                "Accessibility, General tab, scroll to the bottom, Downloaded apps, Ray Screen Accessibility. If " +
+                "Android says it's a restricted setting: App info, the ⋮ menu, Allow restricted settings, then try again.",
             icon = Icons.Default.Accessibility,
             isGranted = isAccessibilityActive,
-            actionLabel = "Open accessibility",
+            actionLabel = "Open Accessibility",
             onAction = {
                 val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK
@@ -356,5 +369,24 @@ fun PermissionCard(
                 Text(actionLabel, fontWeight = FontWeight.SemiBold)
             }
         }
+    }
+}
+
+// Xiaomi's Autostart switch for this app: app-op 10008 (MIUIOP_AUTO_START, shown by `adb shell appops get
+// com.damirl.ray`), read through AppOpsManager's hidden int-op check.  null where it can't be read (other phones, or
+// Android refusing the hidden call): the card then keeps its button and doesn't count
+private fun xiaomiAutostart(context: Context): Boolean? {
+    if (!android.os.Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true)) return null
+    return try {
+        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+        val check = android.app.AppOpsManager::class.java.getMethod(
+            "checkOpNoThrow", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, String::class.java
+        )
+        val mode = check.invoke(appOps, 10008, android.os.Process.myUid(), context.packageName) as Int
+        android.util.Log.d("RayOnboarding", "Xiaomi autostart app-op mode=$mode")
+        mode == android.app.AppOpsManager.MODE_ALLOWED
+    } catch (e: Exception) {
+        android.util.Log.w("RayOnboarding", "Xiaomi autostart unreadable", e)
+        null
     }
 }
