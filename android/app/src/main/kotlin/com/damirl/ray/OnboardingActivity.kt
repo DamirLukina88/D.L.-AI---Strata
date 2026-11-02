@@ -1,16 +1,25 @@
 package com.damirl.ray
 
+import android.Manifest
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,28 +27,26 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Accessibility
-import androidx.compose.material.icons.filled.BatteryAlert
+import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Power
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -48,42 +55,54 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.damirl.ray.tools.RayAccessibilityService
+import com.damirl.ray.ui.components.RayAvatar
 import com.damirl.ray.ui.theme.RayTheme
+import com.damirl.ray.ui.theme.StrataAccent
+import com.damirl.ray.ui.theme.StrataAccentText
+import com.damirl.ray.ui.theme.StrataAccentTint
+import com.damirl.ray.ui.theme.StrataBg
+import com.damirl.ray.ui.theme.StrataInk
+import com.damirl.ray.ui.theme.StrataInkMuted
+import com.damirl.ray.ui.theme.StrataLine
+import com.damirl.ray.ui.theme.StrataOk
+import com.damirl.ray.ui.theme.StrataOkTint
+import com.damirl.ray.ui.theme.StrataSurface
+import com.damirl.ray.ui.theme.StrataSurface2
 
 class OnboardingActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        )
 
         setContent {
             RayTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    PermissionsDashboard(
-                        onContinue = {
-                            startActivity(Intent(this, MainActivity::class.java))
-                            finish()
-                        }
-                    )
-                }
+                PermissionsDashboard(
+                    onContinue = {
+                        startActivity(Intent(this, MainActivity::class.java))
+                        finish()
+                    }
+                )
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PermissionsDashboard(
     onContinue: () -> Unit
@@ -91,137 +110,183 @@ fun PermissionsDashboard(
     val context = LocalContext.current
     val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
 
+    fun micGranted() = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+        PackageManager.PERMISSION_GRANTED
+    fun notificationsGranted() = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+
+    var isMicGranted by remember { mutableStateOf(micGranted()) }
     var isBatteryIgnored by remember {
         mutableStateOf(powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true)
     }
+    var isNotificationAccess by remember { mutableStateOf(notificationsGranted()) }
     var isAccessibilityActive by remember {
         mutableStateOf(RayAccessibilityService.isRunning())
     }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        isMicGranted = micGranted()
         isBatteryIgnored = powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true
+        isNotificationAccess = notificationsGranted()
         isAccessibilityActive = RayAccessibilityService.isRunning()
     }
 
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text("🐾 Ray Permissions & Setup", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                }
-            )
-        }
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 20.dp, vertical = 12.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text(
-                text = "For Ray to speak in background, respond to earbuds, inspect the screen, and read 2FA codes autonomously on Xiaomi HyperOS, configure these permissions:",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+    val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        isMicGranted = granted
+    }
 
-            // 1. HyperOS Autostart
-            PermissionCard(
-                title = "1. HyperOS Autostart",
-                desc = "Required for background earbud triggers and wake-up.",
-                icon = Icons.Default.Power,
-                actionLabel = "Open Autostart Settings",
-                onAction = {
-                    try {
-                        val intent = Intent().apply {
-                            component = ComponentName(
-                                "com.miui.securitycenter",
-                                "com.miui.permcenter.autostart.AutoStartManagementActivity"
-                            )
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                        }
-                        context.startActivity(intent)
-                    } catch (_: Exception) {
-                        val fallback = Intent(Settings.ACTION_SETTINGS).apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                        }
-                        context.startActivity(fallback)
-                    }
-                }
-            )
+    // HyperOS does not report Autostart to apps, so only the other four count
+    val ready = listOf(isMicGranted, isBatteryIgnored, isNotificationAccess, isAccessibilityActive).count { it }
 
-            // 2. Battery Saver: No Restrictions
-            PermissionCard(
-                title = "2. Battery Saver (No Restrictions)",
-                desc = "Prevents system from killing background Piper voice synthesis.",
-                icon = Icons.Default.BatteryAlert,
-                isGranted = isBatteryIgnored,
-                actionLabel = if (isBatteryIgnored) "Configured ✓" else "Disable Restrictions",
-                onAction = {
-                    try {
-                        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                            data = Uri.parse("package:${context.packageName}")
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                        }
-                        context.startActivity(intent)
-                    } catch (_: Exception) {
-                        val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                        }
-                        context.startActivity(intent)
-                    }
-                }
-            )
-
-            // 3. Notification Access
-            PermissionCard(
-                title = "3. Notification Access (2FA & Media)",
-                desc = "Allows Ray to read OTP verification codes and Spotify/YouTube now-playing info.",
-                icon = Icons.Default.Notifications,
-                actionLabel = "Open Notification Access",
-                onAction = {
-                    val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                    }
-                    context.startActivity(intent)
-                }
-            )
-
-            // 4. Accessibility Service
-            PermissionCard(
-                title = "4. Screen Accessibility",
-                desc = "Allows Ray to inspect visible text on screen when you ask 'what is on my screen'.",
-                icon = Icons.Default.Accessibility,
-                isGranted = isAccessibilityActive,
-                actionLabel = if (isAccessibilityActive) "Enabled ✓" else "Enable Accessibility",
-                onAction = {
-                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                    }
-                    context.startActivity(intent)
-                }
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Button(
-                onClick = onContinue,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Text("Open Ray Assistant", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.width(8.dp))
-                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(StrataBg)
+            .safeDrawingPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Header: Ray, what this is for, how far along it is
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RayAvatar(size = 56.dp)
+            Spacer(modifier = Modifier.width(14.dp))
+            Column {
+                Text("Set up Ray", color = StrataInk, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                Text("Permissions for your phone", color = StrataInkMuted, fontSize = 14.sp)
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
         }
+        Text(
+            text = "These let Ray listen when you hold the button, keep talking in the background, " +
+                "read 2FA codes and what's playing, and look at your screen when you ask.",
+            color = StrataInkMuted,
+            fontSize = 14.sp,
+            lineHeight = 20.sp
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            LinearProgressIndicator(
+                progress = { ready / 4f },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(6.dp)
+                    .clip(CircleShape),
+                color = if (ready == 4) StrataOk else StrataAccent,
+                trackColor = StrataSurface2,
+                strokeCap = StrokeCap.Round,
+                gapSize = 0.dp,
+                drawStopIndicator = {}
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text("$ready of 4 ready", color = if (ready == 4) StrataOk else StrataAccentText, fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold)
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        PermissionCard(
+            title = "Microphone",
+            desc = "So Ray hears you when you hold the button or tap the mic.",
+            icon = Icons.Default.Mic,
+            isGranted = isMicGranted,
+            actionLabel = "Allow microphone",
+            onAction = { micLauncher.launch(Manifest.permission.RECORD_AUDIO) }
+        )
+
+        PermissionCard(
+            title = "Autostart",
+            desc = "Lets Ray start in the background for earbud buttons and wake-up. HyperOS doesn't tell apps " +
+                "whether this is on, so check it once.",
+            icon = Icons.Default.PowerSettingsNew,
+            actionLabel = "Open Autostart settings",
+            onAction = {
+                try {
+                    val intent = Intent().apply {
+                        component = ComponentName(
+                            "com.miui.securitycenter",
+                            "com.miui.permcenter.autostart.AutoStartManagementActivity"
+                        )
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    context.startActivity(intent)
+                } catch (_: Exception) {
+                    val fallback = Intent(Settings.ACTION_SETTINGS).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    context.startActivity(fallback)
+                }
+            }
+        )
+
+        PermissionCard(
+            title = "No battery restrictions",
+            desc = "Keeps Android from stopping Ray's voice while he reads a reply in the background.",
+            icon = Icons.Default.BatteryChargingFull,
+            isGranted = isBatteryIgnored,
+            actionLabel = "Remove restrictions",
+            onAction = {
+                try {
+                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = Uri.parse("package:${context.packageName}")
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    context.startActivity(intent)
+                } catch (_: Exception) {
+                    val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    context.startActivity(intent)
+                }
+            }
+        )
+
+        PermissionCard(
+            title = "Notification access",
+            desc = "Lets Ray read 2FA codes and what Spotify or YouTube is playing.",
+            icon = Icons.Default.Notifications,
+            isGranted = isNotificationAccess,
+            actionLabel = "Open notification access",
+            onAction = {
+                val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(intent)
+            }
+        )
+
+        PermissionCard(
+            title = "Screen reading",
+            desc = "Lets Ray read the text on your screen when you ask \"what's on my screen?\".",
+            icon = Icons.Default.Accessibility,
+            isGranted = isAccessibilityActive,
+            actionLabel = "Open accessibility",
+            onAction = {
+                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(intent)
+            }
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Button(
+            onClick = onContinue,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = StrataAccent, contentColor = StrataInk)
+        ) {
+            Text("Open Ray", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.width(8.dp))
+            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
     }
 }
 
+// One permission: an icon tile (orange to do, green once done), what it is for, and the way to it.  A permission
+// Android reports as done shows a "Ready" badge instead of the button; one it can't report keeps its button
 @Composable
 fun PermissionCard(
     title: String,
@@ -231,41 +296,64 @@ fun PermissionCard(
     isGranted: Boolean = false,
     onAction: () -> Unit
 ) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        ),
-        modifier = Modifier.fillMaxWidth()
+    val shape = RoundedCornerShape(16.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(StrataSurface)
+            .border(1.dp, StrataLine, shape)
+            .padding(16.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (isGranted) StrataOkTint else StrataAccentTint),
+                contentAlignment = Alignment.Center
+            ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (isGranted) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp)
+                    tint = if (isGranted) StrataOk else StrataAccentText,
+                    modifier = Modifier.size(22.dp)
                 )
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(text = title, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             }
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.width(12.dp))
             Text(
-                text = desc,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                text = title,
+                color = StrataInk,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp,
+                modifier = Modifier.weight(1f)
             )
+            if (isGranted) {
+                Row(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(StrataOkTint)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = null, tint = StrataOk, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Ready", color = StrataOk, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(text = desc, color = StrataInkMuted, fontSize = 13.sp, lineHeight = 18.sp)
+        if (!isGranted) {
             Spacer(modifier = Modifier.height(12.dp))
             OutlinedButton(
                 onClick = onAction,
                 shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, StrataAccent.copy(alpha = 0.6f)),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = StrataAccentText),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                if (isGranted) {
-                    Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF4CAF50))
-                    Spacer(modifier = Modifier.width(6.dp))
-                }
-                Text(actionLabel)
+                Text(actionLabel, fontWeight = FontWeight.SemiBold)
             }
         }
     }

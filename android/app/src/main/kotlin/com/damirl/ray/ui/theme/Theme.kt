@@ -16,50 +16,44 @@
 
 package com.damirl.ray.ui.theme
 
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
 
-private val DarkColorScheme = darkColorScheme(
-    primary = primaryDark,
-    primaryContainer = primaryContainerDark,
-    secondary = secondaryDark,
-    tertiary = tertiaryDark
-)
-
-private val LightColorScheme = lightColorScheme(
-    primary = primaryLight,
-    primaryContainer = primaryContainerLight,
-    secondary = secondaryLight,
-    tertiary = tertiaryLight
+// Always Strata's dark palette: the companion hosts the web app, whose default theme is dark, and its native screens
+// (setup, the voice drawer) should look like part of it rather than follow the wallpaper or the system theme
+private val StrataColorScheme = darkColorScheme(
+    primary = StrataAccent,
+    onPrimary = Color.White,
+    primaryContainer = StrataAccentTint,
+    onPrimaryContainer = StrataAccentText,
+    secondary = StrataAccentText,
+    onSecondary = StrataBg,
+    secondaryContainer = StrataAccentTint,
+    onSecondaryContainer = StrataAccentText,
+    tertiary = StrataOk,
+    background = StrataBg,
+    onBackground = StrataInk,
+    surface = StrataSurface,
+    onSurface = StrataInk,
+    surfaceVariant = StrataSurface2,
+    onSurfaceVariant = StrataInkSoft,
+    surfaceContainerLowest = StrataBg,
+    surfaceContainerLow = StrataSurface,
+    surfaceContainer = StrataSurface,
+    surfaceContainerHigh = StrataSurface2,
+    surfaceContainerHighest = StrataSurface2,
+    outline = StrataInkMuted,
+    outlineVariant = StrataLine,
+    error = StrataDanger,
 )
 
 @Composable
-fun RayTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = false,
-    content: @Composable () -> Unit
-) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
-    }
-
+fun RayTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = colorScheme,
+        colorScheme = StrataColorScheme,
         typography = Typography,
         content = content
     )
 }
-

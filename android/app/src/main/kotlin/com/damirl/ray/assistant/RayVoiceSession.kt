@@ -5,8 +5,14 @@ import android.os.Bundle
 import android.service.voice.VoiceInteractionSession
 import android.util.Log
 import android.view.View
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -16,7 +22,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,21 +35,21 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
@@ -64,19 +72,37 @@ import com.damirl.ray.audio.SpeechRecognitionManager
 import com.damirl.ray.network.ChatMessage
 import com.damirl.ray.network.NetworkClient
 import com.damirl.ray.network.RayChatRepository
+import com.damirl.ray.ui.components.RayAvatar
 import com.damirl.ray.ui.theme.RayTheme
+import com.damirl.ray.ui.theme.StrataAccent
+import com.damirl.ray.ui.theme.StrataAccentText
+import com.damirl.ray.ui.theme.StrataAccentTint
+import com.damirl.ray.ui.theme.StrataDanger
+import com.damirl.ray.ui.theme.StrataInk
+import com.damirl.ray.ui.theme.StrataInkMuted
+import com.damirl.ray.ui.theme.StrataInkSoft
+import com.damirl.ray.ui.theme.StrataLine
+import com.damirl.ray.ui.theme.StrataSurface
+import com.damirl.ray.ui.theme.StrataSurface2
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
+
+// What the drawer is doing, for its status line, its dot and its mic button
+enum class VoicePhase { LISTENING, THINKING, ANSWERING, IDLE, ERROR }
 
 class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
     LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
 
     companion object {
         private const val TAG = "RayVoiceSession"
+        // Google's recognizer stops 5 s after the mic opens if nobody has started talking; listen once more before
+        // giving up, so there are 10 s to start (holding the power button, then finding words, often takes longer)
+        private const val NO_SPEECH_RETRIES = 1
     }
 
     private val lifecycleRegistry = LifecycleRegistry(this)
@@ -93,18 +119,24 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
     private var speechManager: SpeechRecognitionManager? = null
 
     // UI state observable by Compose
-    private var sessionTitle by mutableStateOf("Listening...")
+    private var phase by mutableStateOf(VoicePhase.LISTENING)
+    private var status by mutableStateOf("Listening…")
     private var userPrompt by mutableStateOf("")
+    private var partialText by mutableStateOf("")
+    private var micLevel by mutableFloatStateOf(0f)
     private var assistantResponse by mutableStateOf("")
     private var activeToolNote by mutableStateOf<String?>(null)
-    private var isThinkingOrStreaming by mutableStateOf(false)
-    private var isListening by mutableStateOf(false)
+    private var noSpeechRetries = 0
 
     override fun onCreate() {
         super.onCreate()
         savedStateRegistryController.performRestore(null)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
-        speechManager = SpeechRecognitionManager(context)
+        val manager = SpeechRecognitionManager(context)
+        speechManager = manager
+        // the live transcript and the mic level drive the drawer while it listens
+        sessionScope.launch { manager.partialText.collect { if (phase == VoicePhase.LISTENING) partialText = it } }
+        sessionScope.launch { manager.rmsLevel.collect { micLevel = it } }
 
         window?.window?.let { win ->
             win.setLayout(
@@ -132,12 +164,13 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
             setContent {
                 RayTheme {
                     AssistantOverlayScreen(
-                        title = sessionTitle,
+                        phase = phase,
+                        status = status,
                         prompt = userPrompt,
+                        partial = partialText,
+                        micLevel = micLevel,
                         response = assistantResponse,
                         toolNote = activeToolNote,
-                        isListening = isListening,
-                        isStreaming = isThinkingOrStreaming,
                         onDismiss = { hide() },
                         onExpand = {
                             val intent = android.content.Intent(context, com.damirl.ray.MainActivity::class.java).apply {
@@ -147,9 +180,10 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
                             hide()
                         },
                         onMicTap = {
-                            if (isListening) {
+                            if (phase == VoicePhase.LISTENING) {
                                 speechManager?.stopListening()
                             } else {
+                                noSpeechRetries = 0
                                 startListeningLoop()
                             }
                         }
@@ -170,7 +204,7 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
         userPrompt = ""
         assistantResponse = ""
         activeToolNote = null
-        isThinkingOrStreaming = false
+        noSpeechRetries = 0
 
         // Probe route in background
         sessionScope.launch {
@@ -181,22 +215,39 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
     }
 
     private fun startListeningLoop() {
-        isListening = true
-        sessionTitle = "Listening..."
+        phase = VoicePhase.LISTENING
+        status = if (noSpeechRetries > 0) "Still listening…" else "Listening…"
         userPrompt = ""
+        partialText = ""
         activeToolNote = null
 
         speechManager?.startListening(
             onFinalResult = { transcribed ->
                 Log.d(TAG, "Assistant session speech: '$transcribed'")
-                isListening = false
                 userPrompt = transcribed
+                partialText = ""
                 processQuery(transcribed)
             },
             onError = { err ->
                 Log.w(TAG, "Assistant session STT error: $err")
-                isListening = false
-                sessionTitle = err
+                phase = VoicePhase.ERROR
+                status = "Couldn't listen: $err"
+            },
+            onNoSpeech = {
+                if (noSpeechRetries < NO_SPEECH_RETRIES) {
+                    noSpeechRetries++
+                    Log.d(TAG, "No speech yet, listening again ($noSpeechRetries)")
+                    status = "Still listening…"
+                    // the recognizer service is still disconnecting from the last attempt; starting at once fails (11)
+                    sessionScope.launch {
+                        delay(400)
+                        if (phase == VoicePhase.LISTENING) startListeningLoop()
+                    }
+                } else {
+                    phase = VoicePhase.IDLE
+                    status = "I didn't catch that"
+                    partialText = ""
+                }
             }
         )
     }
@@ -204,8 +255,8 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
     private fun processQuery(text: String) {
         if (text.isBlank()) return
 
-        sessionTitle = "Ray is thinking..."
-        isThinkingOrStreaming = true
+        phase = VoicePhase.THINKING
+        status = "Thinking…"
         assistantResponse = ""
         activeToolNote = null
 
@@ -213,23 +264,27 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
 
         sessionScope.launch {
             var accumulated = ""
+            var failed = false
             chatRepository.streamChat(messages, isVoice = true)
                 .catch { error ->
-                    isThinkingOrStreaming = false
+                    failed = true
+                    phase = VoicePhase.ERROR
                     assistantResponse = "Error: ${error.message}"
-                    sessionTitle = "Connection error"
+                    status = "Can't reach the server"
                 }
                 .collect { token ->
-                    sessionTitle = "Ray is answering..."
+                    phase = VoicePhase.ANSWERING
+                    status = "Answering…"
                     accumulated += token
                     if (token.contains("phone_") || token.contains("[Tool]")) {
-                        activeToolNote = "🔧 Executing phone tool..."
+                        activeToolNote = "Using a phone tool…"
                     }
                     assistantResponse = accumulated
                 }
 
-            isThinkingOrStreaming = false
-            sessionTitle = "Ray Assistant 🐾"
+            if (failed) return@launch
+            phase = VoicePhase.IDLE
+            status = "Tap the mic to ask again"
 
             if (accumulated.isNotBlank()) {
                 AudioPlaybackService.startSpeaking(context, accumulated)
@@ -241,7 +296,6 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
         super.onHide()
         Log.d(TAG, "RayVoiceSession onHide")
         speechManager?.stopListening()
-        isListening = false
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
     }
@@ -257,180 +311,231 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
     }
 }
 
+// The drawer that slides up when Ray is held: Ray and what he is doing, what you said (live while you speak), his
+// answer, and the mic.  Strata's dark surfaces with the orange accent, like the web app's Code tab
 @Composable
 fun AssistantOverlayScreen(
-    title: String,
+    phase: VoicePhase,
+    status: String,
     prompt: String,
+    partial: String,
+    micLevel: Float,
     response: String,
     toolNote: String? = null,
-    isListening: Boolean,
-    isStreaming: Boolean,
     onDismiss: () -> Unit,
     onExpand: () -> Unit = {},
     onMicTap: () -> Unit
 ) {
+    val listening = phase == VoicePhase.LISTENING
+    val sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.5f))
+            .background(Color.Black.copy(alpha = 0.55f))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
             ) { onDismiss() }
     ) {
-        Surface(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
+                .clip(sheetShape)
+                .background(StrataSurface)
+                .border(1.dp, StrataLine, sheetShape)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
-                ) { /* Consume clicks inside sheet */ },
-            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 12.dp,
-            shadowElevation = 16.dp
+                ) { /* Consume clicks inside sheet */ }
+                .navigationBarsPadding()
+                .padding(start = 20.dp, end = 12.dp, top = 12.dp, bottom = 20.dp)
         ) {
-            Column(
+            // Drag handle
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(20.dp)
+                    .size(40.dp, 4.dp)
+                    .clip(CircleShape)
+                    .background(StrataLine)
+                    .align(Alignment.CenterHorizontally)
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Header: Ray, and what he is doing
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Drag handle
-                Box(
-                    modifier = Modifier
-                        .size(40.dp, 4.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.outlineVariant)
-                        .align(Alignment.CenterHorizontally)
-                )
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+                RayAvatar(size = 44.dp)
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Ray", color = StrataInk, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primaryContainer),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("🐾", fontSize = 18.sp)
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "Ray Assistant",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp
-                            )
-                            Text(
-                                text = title,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (isListening) Color(0xFFE53935) else MaterialTheme.colorScheme.outline
-                            )
-                        }
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = onExpand) {
-                            Text("⤢", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                        }
-                        IconButton(onClick = onDismiss) {
-                            Icon(Icons.Default.Close, contentDescription = "Close assistant")
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Tool note indicator
-                if (!toolNote.isNullOrBlank()) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    ) {
+                        StatusDot(phase)
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = toolNote,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            text = status,
+                            fontSize = 13.sp,
+                            color = when (phase) {
+                                VoicePhase.LISTENING -> StrataAccentText
+                                VoicePhase.ERROR -> StrataDanger
+                                else -> StrataInkMuted
+                            }
                         )
                     }
                 }
-
-                // Content area
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(140.dp)
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    if (prompt.isNotBlank()) {
-                        Text(
-                            text = "\"$prompt\"",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                    }
-
-                    if (response.isNotBlank()) {
-                        Text(
-                            text = response,
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontSize = 15.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    } else if (isListening) {
-                        Text(
-                            text = "Listening for your voice...",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.outline
-                        )
-                    } else if (isStreaming) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Thinking...", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
+                IconButton(onClick = onExpand) {
+                    Icon(Icons.Default.OpenInFull, contentDescription = "Open Ray", tint = StrataInkMuted,
+                        modifier = Modifier.size(20.dp))
                 }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Bottom Mic action
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    IconButton(
-                        onClick = onMicTap,
-                        modifier = Modifier
-                            .size(56.dp)
-                            .background(
-                                color = if (isListening) Color(0xFFE53935) else MaterialTheme.colorScheme.primary,
-                                shape = CircleShape
-                            )
-                    ) {
-                        Icon(
-                            if (isListening) Icons.Default.Stop else Icons.Default.Mic,
-                            contentDescription = if (isListening) "Stop" else "Listen",
-                            tint = Color.White,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = StrataInkMuted)
                 }
             }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // What was said and the answer, on the raised surface the web app uses for messages
+            val cardShape = RoundedCornerShape(16.dp)
+            Column(
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .fillMaxWidth()
+                    .heightIn(min = 96.dp, max = 240.dp)
+                    .clip(cardShape)
+                    .background(StrataSurface2)
+                    .border(1.dp, StrataLine, cardShape)
+                    .verticalScroll(rememberScrollState())
+                    .padding(14.dp)
+            ) {
+                if (!toolNote.isNullOrBlank()) {
+                    Text(
+                        text = toolNote,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = StrataAccentText,
+                        modifier = Modifier
+                            .padding(bottom = 8.dp)
+                            .clip(CircleShape)
+                            .background(StrataAccentTint)
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+                val said = prompt.ifBlank { partial }
+                if (said.isNotBlank()) {
+                    Text(
+                        text = "“$said”",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (prompt.isBlank()) StrataInkMuted else StrataInkSoft
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                when {
+                    response.isNotBlank() -> Text(text = response, fontSize = 15.sp, lineHeight = 22.sp,
+                        color = if (phase == VoicePhase.ERROR) StrataDanger else StrataInk)
+                    listening && said.isBlank() -> Text("Say something…", fontSize = 15.sp, color = StrataInkMuted)
+                    phase == VoicePhase.THINKING -> ThinkingDots()
+                    phase == VoicePhase.IDLE && said.isBlank() ->
+                        Text("Tap the mic and speak.", fontSize = 15.sp, color = StrataInkMuted)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            MicButton(
+                listening = listening,
+                level = micLevel,
+                onClick = onMicTap,
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .align(Alignment.CenterHorizontally)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = if (listening) "Tap to stop" else "Tap to speak",
+                fontSize = 12.sp,
+                color = StrataInkMuted,
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .align(Alignment.CenterHorizontally)
+            )
+        }
+    }
+}
+
+// Orange and breathing while listening or working, muted when idle, red after an error
+@Composable
+private fun StatusDot(phase: VoicePhase) {
+    val busy = phase == VoicePhase.LISTENING || phase == VoicePhase.THINKING || phase == VoicePhase.ANSWERING
+    val pulse by rememberInfiniteTransition(label = "dot").animateFloat(
+        initialValue = 0.35f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "dotAlpha"
+    )
+    val color = when (phase) {
+        VoicePhase.ERROR -> StrataDanger
+        VoicePhase.IDLE -> StrataInkMuted
+        else -> StrataAccent
+    }
+    Box(
+        modifier = Modifier
+            .size(8.dp)
+            .clip(CircleShape)
+            .background(color.copy(alpha = if (busy) pulse else 1f))
+    )
+}
+
+// Three orange dots rising in turn while Ray thinks
+@Composable
+private fun ThinkingDots() {
+    val t by rememberInfiniteTransition(label = "think").animateFloat(
+        initialValue = 0f, targetValue = 3f,
+        animationSpec = infiniteRepeatable(tween(1200)), label = "thinkPhase"
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 6.dp)) {
+        repeat(3) { i ->
+            val on = (t.toInt() % 3) == i
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(if (on) StrataAccent else StrataAccent.copy(alpha = 0.3f))
+            )
+        }
+    }
+}
+
+// The orange mic.  While listening a soft ring around it grows with your voice (SpeechRecognizer's level, about
+// -2 to 10 dB), so you can see that Ray hears you
+@Composable
+private fun MicButton(listening: Boolean, level: Float, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val loud = if (listening) ((level + 2f) / 12f).coerceIn(0f, 1f) else 0f
+    val ring by animateFloatAsState(targetValue = 1f + 0.45f * loud, animationSpec = tween(120), label = "micRing")
+    Box(modifier = modifier.size(96.dp), contentAlignment = Alignment.Center) {
+        if (listening) {
+            Box(
+                modifier = Modifier
+                    .size(68.dp)
+                    .scale(ring)
+                    .clip(CircleShape)
+                    .background(StrataAccent.copy(alpha = 0.22f))
+            )
+        }
+        IconButton(
+            onClick = onClick,
+            modifier = Modifier
+                .size(64.dp)
+                .clip(CircleShape)
+                .background(StrataAccent)
+        ) {
+            Icon(
+                if (listening) Icons.Default.Stop else Icons.Default.Mic,
+                contentDescription = if (listening) "Stop listening" else "Speak",
+                tint = Color.White,
+                modifier = Modifier.size(30.dp)
+            )
         }
     }
 }

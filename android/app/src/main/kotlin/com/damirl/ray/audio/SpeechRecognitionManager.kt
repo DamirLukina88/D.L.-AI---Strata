@@ -29,9 +29,12 @@ class SpeechRecognitionManager(private val context: Context) {
     private val _rmsLevel = MutableStateFlow(0f)
     val rmsLevel: StateFlow<Float> = _rmsLevel.asStateFlow()
 
+    // onNoSpeech, when given, is called instead of onError when nothing was said (Google's recognizer gives up 5 s
+    // after the mic opens if no speech has started, and that limit can't be raised), so the caller can listen again
     fun startListening(
         onFinalResult: (String) -> Unit,
-        onError: (String) -> Unit
+        onError: (String) -> Unit,
+        onNoSpeech: (() -> Unit)? = null
     ) {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             Log.e(TAG, "Speech recognition is not available on this device")
@@ -43,6 +46,7 @@ class SpeechRecognitionManager(private val context: Context) {
 
         try {
             val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+            var heardSpeech = false
             recognizer.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
                     Log.d(TAG, "SpeechRecognizer ready for speech")
@@ -52,6 +56,7 @@ class SpeechRecognitionManager(private val context: Context) {
 
                 override fun onBeginningOfSpeech() {
                     Log.d(TAG, "User started speaking")
+                    heardSpeech = true
                 }
 
                 override fun onRmsChanged(rmsdB: Float) {
@@ -76,12 +81,14 @@ class SpeechRecognitionManager(private val context: Context) {
                         SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Recognizer busy"
                         SpeechRecognizer.ERROR_SERVER -> "Server error"
                         SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech heard"
+                        SpeechRecognizer.ERROR_SERVER_DISCONNECTED -> "Speech service disconnected"
                         else -> "Speech recognition error ($error)"
                     }
-                    Log.w(TAG, "SpeechRecognizer error: $message")
+                    Log.w(TAG, "SpeechRecognizer error: $message (speech heard: $heardSpeech)")
                     _isListening.value = false
-                    onError(message)
                     destroyRecognizer()
+                    val silent = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                    if (silent && onNoSpeech != null) onNoSpeech() else onError(message)
                 }
 
                 override fun onResults(results: Bundle?) {
@@ -90,10 +97,12 @@ class SpeechRecognitionManager(private val context: Context) {
                     Log.d(TAG, "Final transcription: '$text'")
                     _isListening.value = false
                     _partialText.value = text
-                    if (text.isNotBlank()) {
-                        onFinalResult(text)
-                    }
                     destroyRecognizer()
+                    when {
+                        text.isNotBlank() -> onFinalResult(text)
+                        onNoSpeech != null -> onNoSpeech()
+                        else -> onError("No speech heard")
+                    }
                 }
 
                 override fun onPartialResults(partialResults: Bundle?) {
@@ -114,7 +123,10 @@ class SpeechRecognitionManager(private val context: Context) {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                // a language tag string: a Locale object is dropped by the recognizer (ClassCastException in its log)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+                // No EXTRA_SPEECH_INPUT_*_SILENCE_LENGTH_MILLIS: Google's on-device recognizer applies them to the wait
+                // before speech too (2000 ms ended a listen 2 s after the mic opened), so its own 5 s is kept
             }
 
             recognizer.startListening(intent)
