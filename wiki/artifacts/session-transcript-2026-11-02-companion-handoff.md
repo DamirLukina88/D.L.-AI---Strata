@@ -81,7 +81,7 @@ The user changed setting `Model Selection` from None to Gemini 3.8 Flash (High).
 
 ### Turn 2: Ray / Antigravity Agent (2026-11-02T09:52:05Z)
 
-Building an Android app for **Ray** turns him from a home-server assistant into a true omnipresent personal companion. Because Ray already runs on a dedicated Strata engine (`ai.damir-lukina.com`) with Piper TTS and Home Assistant MCP tools, an Android client can serve as both a **voice portal** and an **agentic bridge to phone hardware**.
+Building an Android app for **Ray** turns him from a home-server assistant into a true omnipresent personal companion. Because Ray already runs on a dedicated Strata engine (`ai.example.com`) with Piper TTS and Home Assistant MCP tools, an Android client can serve as both a **voice portal** and an **agentic bridge to phone hardware**.
 
 ---
 
@@ -127,7 +127,7 @@ To keep Ray talking and listening smoothly when the phone is locked or the app i
   * Inline text reply: Reply directly from the notification shade without launching the app.
 * **Push Delivery Pipeline**:
   * **Self-Hosted (Zero Cloud/Privacy)**: Use **ntfy.sh** (or a private ntfy docker container) or **UnifiedPush**.
-  * **Persistent WebSocket / SSE**: The app keeps an active background sync channel to `ai.damir-lukina.com` when connected to Wi-Fi/unmetered networks.
+  * **Persistent WebSocket / SSE**: The app keeps an active background sync channel to `ai.example.com` when connected to Wi-Fi/unmetered networks.
   * **FCM (Firebase Cloud Messaging)**: High battery efficiency if you don't mind using Google Play services.
 
 ---
@@ -168,7 +168,7 @@ Giving Ray read/write awareness of the phone opens up powerful agentic workflows
 | :--- | :--- | :--- |
 | **Language & UI** | **Kotlin + Jetpack Compose** | Modern Android standard, reactive state, fast prototyping. |
 | **Networking** | **Ktor Client or OkHttp** | Full SSE (Server-Sent Events) and WebSocket support to connect to Strata's streaming endpoints (`/v1/chat/completions` or `/api/code/session`). |
-| **Auth** | **Cloudflare Access JWT / Bearer Token** | Securely authenticate requests hitting `https://ai.damir-lukina.com`. |
+| **Auth** | **Cloudflare Access JWT / Bearer Token** | Securely authenticate requests hitting `https://ai.example.com`. |
 | **Audio Pipeline** | **ExoPlayer / Media3** | Robust background playback, streaming PCM/WAV/Opus chunks, handling audio focus interruptions. |
 | **STT Engine** | **Vosk / Whisper on-device** or **Web Speech API** / **Server Whisper** | Offline local speech-to-text fallback or streaming speech input. |
 
@@ -177,7 +177,7 @@ Giving Ray read/write awareness of the phone opens up powerful agentic workflows
 ### Suggested Next Steps
 
 1. **Phase 1 (MVP)**:
-   * Build a Jetpack Compose client with SSE streaming to `ai.damir-lukina.com`.
+   * Build a Jetpack Compose client with SSE streaming to `ai.example.com`.
    * Implement the Foreground Service + `MediaSession` for background voice playback.
    * Add a Quick Settings tile and default Digital Assistant intent.
 2. **Phase 2 (Phone Tools)**:
@@ -249,7 +249,7 @@ As soon as you plug it in and tap **Allow**, let me know and I will immediately:
 
 wirelles debuggin on network
 device name DL x Ultra
-192.168.3.32:33107
+192.168.1.10:33107
 wifi pairing code [REDACTED]
 
 
@@ -261,7 +261,7 @@ The current local time is: 2026-11-02T11:01:01+01:00.
 
 ### Turn 6: User (2026-11-02T10:01:53Z)
 
-192.168.3.32:45551
+192.168.1.10:45551
 pairing code [REDACTED]
 
 <ADDITIONAL_METADATA>
@@ -298,7 +298,7 @@ Pairing and wireless connection were successful!
    * Stream system logs and debug traces (`adb logcat`).
    * Query phone telemetry, test `VoiceInteractionService` permissions, and test audio playback.
 
-Where would you like to start? We can initialize a clean Jetpack Compose project (e.g. `RayApp`) and scaffold the connection to `https://ai.damir-lukina.com` with the background voice/media service.
+Where would you like to start? We can initialize a clean Jetpack Compose project (e.g. `RayApp`) and scaffold the connection to `https://ai.example.com` with the background voice/media service.
 
 ---
 
@@ -447,13 +447,13 @@ Now I'll fix the plan itself.
 I checked the plan against your phone over ADB. I also found mistakes I had made in the plan itself, and fixed them. Full findings are in **[ray_android_xiaomi_audit.md](file://~/.gemini/antigravity/brain/6cda1e32-4945-46c2-ba20-ede82d8daf9e/ray_android_xiaomi_audit.md)**, and **[ray_android_app_plan.md](file://~/.gemini/antigravity/brain/6cda1e32-4945-46c2-ba20-ede82d8daf9e/ray_android_app_plan.md)** now has the corrections.
 
 **Mistakes in my plan:**
-- **Wrong server address:** I had `192.168.3.35`, but that's your **Mi TV**. The server is `192.168.3.200`.
+- **Wrong server address:** I had `192.168.1.10`, but that's your **Mi TV**. The server is `192.168.1.10`.
 - **Made-up Wi-Fi names:** `DL-5G` / `DL-2.4G` were invented. Your network is `D.L.`.
 - **Server not reachable on your home network:** Strata only accepts connections from the server itself (`127.0.0.1:8080`) right now. For the faster home connection, it has to be opened to the LAN with the API key.
 - **Unneeded step:** I'd planned a Cloudflare service token, but it isn't needed. `/v1/*` already bypasses Cloudflare Access and accepts the API key, and that includes Piper voice and Whisper speech-to-text.
 
 **Conflicts with Xiaomi and this phone:**
-- **AdGuard is your active VPN.** Android runs only one VPN at a time, so Tailscale is out. AdGuard's HTTPS filtering would also break the app's secure connection to `ai.damir-lukina.com`, so Ray has to be excluded in AdGuard.
+- **AdGuard is your active VPN.** Android runs only one VPN at a time, so Tailscale is out. AdGuard's HTTPS filtering would also break the app's secure connection to `ai.example.com`, so Ray has to be excluded in AdGuard.
 - **Autostart is off by default** for new apps. Without it plus "Battery: No restrictions", HyperOS will kill Ray's background services. The plan now has a setup screen that sends you to each of these settings and checks them.
 - **Pop-ups from the background are blocked by HyperOS.** So the red panda sheet will be drawn inside the assistant's own window instead of a separate screen. Every trigger (tile, earbuds, "Hey Ray") opens that same window.
 - **Power button:** HyperOS routes long-press through its own setting (`long_press_power_key=launch_google_search`), so it may keep opening Google even after Ray becomes the default assistant. I haven't tested this yet; it's the first check in Phase 3. The corner swipe gesture does go to the default assistant.
@@ -520,7 +520,7 @@ I have incorporated strict **Zero-Leak Git Hygiene and Secrets Isolation** direc
    * `android/secrets.properties` (holds local test keys and endpoints).
    * Keystores (`*.jks`, `*.keystore`) and build artifacts (`android/.gradle/`, `android/build/`, `android/app/build/`, `*.apk`).
 2. **Zero Hardcoded Secrets in Source Code**:
-   * No `STRATA_API_KEY`, private domain (`ai.damir-lukina.com`), or home LAN IP (`192.168.3.200`) will ever be committed to Java/Kotlin code, XML strings, or Gradle configs.
+   * No `STRATA_API_KEY`, private domain (`ai.example.com`), or home LAN IP (`192.168.1.10`) will ever be committed to Java/Kotlin code, XML strings, or Gradle configs.
    * Committed code will use generic placeholder defaults (e.g. `https://your-server.example.com`).
    * Real connection parameters are injected at build-time via the untracked `secrets.properties` or configured dynamically at runtime in the app's encrypted Settings screen.
    * We will commit a safe `secrets.properties.example` template with dummy values.
@@ -556,7 +556,7 @@ The current local time is: 2026-11-02T11:33:07+01:00.
 ### Step 0: Server Preparation & Git Hygiene — Complete!
 
 1. **Firewall & LAN Binding**:
-   * Permitted TCP port `8080` in `ufw` for your local subnet (`192.168.3.0/24`).
+   * Permitted TCP port `8080` in `ufw` for your local subnet (`192.168.1.10/24`).
    * Configured Strata with `--host 0.0.0.0` and restarted `strata-server.service`.
    * Verified listening on `0.0.0.0:8080`.
 2. **Ray Agent API Endpoint (`POST /v1/ray/chat`)**:
@@ -618,10 +618,10 @@ The current local time is: 2026-11-02T11:45:17+01:00.
    * The app (`com.damirl.ray`) is installed and running in the foreground on your phone.
    * Edge-to-edge UI with Ray's banner and red panda theme.
 2. **Dual-Mode Network Client Active**:
-   * The phone automatically probed `http://192.168.3.200:8080/health` on your Wi-Fi (`D.L.`).
+   * The phone automatically probed `http://192.168.1.10:8080/health` on your Wi-Fi (`D.L.`).
    * Verified in your phone's Logcat:
      ```
-     D RayNetwork: Using LAN route: http://192.168.3.200:8080
+     D RayNetwork: Using LAN route: http://192.168.1.10:8080
      ```
    * The green top banner on your screen confirms: **"⚡ Low-Latency LAN Active"**.
 3. **SSE Streaming Chat Pipeline**:
@@ -708,7 +708,7 @@ Once you confirm the audio playback, we will proceed to **Step 4: Voice Input (S
 
 ### Turn 28: User (2026-11-02T11:07:39Z)
 
-works great. i disconnected from wifi and ray could not connect the ai.damir-lukina.com acces is still not built?
+works great. i disconnected from wifi and ray could not connect the ai.example.com acces is still not built?
 
 <ADDITIONAL_METADATA>
 The current local time is: 2026-11-02T12:07:39+01:00.
@@ -723,14 +723,14 @@ The current local time is: 2026-11-02T12:07:39+01:00.
 #### What Happened:
 The remote route was already functional on the server, but the app's health probe was checking:
 ```
-GET https://ai.damir-lukina.com/health
+GET https://ai.example.com/health
 ```
-Your Cloudflare Access rules protect everything on `ai.damir-lukina.com` **except `/v1/*`** (which is configured to bypass Access and authenticate via the `STRATA_API_KEY`). Because `/health` is outside `/v1/`, Cloudflare returned a `401 Unauthorized` HTML challenge, causing the app to think the remote server was offline.
+Your Cloudflare Access rules protect everything on `ai.example.com` **except `/v1/*`** (which is configured to bypass Access and authenticate via the `STRATA_API_KEY`). Because `/health` is outside `/v1/`, Cloudflare returned a `401 Unauthorized` HTML challenge, causing the app to think the remote server was offline.
 
 #### The Fix:
 1. **Updated Remote Probe**: Changed the probe endpoint to:
    ```
-   GET https://ai.damir-lukina.com/v1/models  (with Bearer STRATA_API_KEY)
+   GET https://ai.example.com/v1/models  (with Bearer STRATA_API_KEY)
    ```
    This bypasses Cloudflare Access cleanly and returns HTTP 200 directly from Strata.
 2. **Rebuilt & Deployed**: The updated app has been installed on your phone over wireless ADB.
@@ -843,7 +843,7 @@ ADB wireless connectivity is **online and healthy** via TLS:
 | :--- | :--- |
 | **Connection State** | **Device Authorized & Active** (`adb-25005bdd-T0QZfr._adb-tls-connect._tcp`) |
 | **Device Model** | **Xiaomi 17 Ultra** (`2512BPNDAG`) |
-| **Wi-Fi IP** | `192.168.3.32` |
+| **Wi-Fi IP** | `192.168.1.10` |
 | **Battery** | 83% |
 | **Current Assistant** | Google Assistant (`GsaVoiceInteractionService`) |
 
@@ -904,7 +904,7 @@ The current local time is: 2026-11-02T18:40:25+01:00.
 
 we need to re pair the device
 pairing code [REDACTED]
-192.168.3.32:46169
+192.168.1.10:46169
 
 <ADDITIONAL_METADATA>
 The current local time is: 2026-11-02T18:45:12+01:00.

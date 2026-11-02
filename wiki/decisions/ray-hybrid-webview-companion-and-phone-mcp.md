@@ -5,14 +5,14 @@ description: "Architectural design and implementation of the edge-to-edge Androi
 status: active
 tags: [android, companion, webview, mcp, phone-tools, speech, zero-drift]
 created: 2026-11-02
-updated: 2026-11-02
+updated: 2026-11-03
 last_verified: 2026-11-02
 ---
 
 # Ray Hybrid WebView Companion and Phone MCP Architecture
 
 ## Context & Motivation
-To eliminate dual-app maintenance drift between the desktop Web App and the Android native client, Ray on Android is architected as an edge-to-edge hardware-accelerated hybrid companion app. The companion loads the full Strata Web App (LAN `http://192.168.3.200:8080` / Remote `https://ai.damir-lukina.com`) within an edge-to-edge chromeless WebView while exposing hardware-level phone capabilities back to Ray's local LLM via MCP (Model Context Protocol).
+To eliminate dual-app maintenance drift between the desktop Web App and the Android native client, Ray on Android is architected as an edge-to-edge hardware-accelerated hybrid companion app. The companion loads the full Strata Web App (LAN `http://192.168.1.10:8080` / Remote `https://ai.example.com`) within an edge-to-edge chromeless WebView while exposing hardware-level phone capabilities back to Ray's local LLM via MCP (Model Context Protocol).
 
 ## Architecture Components
 
@@ -83,9 +83,16 @@ Found and fixed during validation (`fbbb5ebb`):
 
 **Setup screen on HyperOS (2026-11-02):** Xiaomi Autostart is app-op 10008 (`adb shell appops get com.damirl.ray` shows `MIUIOP(10008): allow`), readable in the app through the hidden `AppOpsManager.checkOpNoThrow(int, int, String)` (logged as unsupported, not blocked). Screen reading lives at Accessibility, General tab, bottom, **Downloaded apps**, Ray Screen Accessibility; the direct details intent needs `OPEN_ACCESSIBILITY_DETAILS_SETTINGS`, which apps can't hold.
 
+**About tab in the app (2026-11-02):** the web app's About opens with a "Ray on this phone" card whose button calls `RayAndroid.openSetup()` (the setup screen); the card is `hidden` and shown only when that bridge call exists, so the website never shows it. In the app, About also hides what the app doesn't use (`.android-hide` under `.is-android-companion`): the API key (the app supplies it), the browser voice picker, the STT engine and language (the phone's own recognizer is used) and the Brave guide. The Sampling drawer's Max tokens field was removed on both, and the web app no longer sends `max_tokens` with the shared settings (none was saved).
+
+**Workspace files in the app (2026-11-02):** two gotchas. (1) `WebChromeClient.FileChooserParams.parseResult` reads only `intent.data`; with several files picked the gallery puts them in `clipData` (and only the first in `data`), so only the first upload arrived; `pickedUris` reads every clipData item. (2) A WebView ignores downloads without a `DownloadListener`, and when it has one it first fetches the link itself to learn it's a download, which used up the server's single-use download ticket (DownloadManager then got 403). The workspace now hands each ticket URL straight to `RayAndroid.downloadFile` → `Downloads.enqueue` (DownloadManager, public Downloads, cookies for Cloudflare Access, Strata hosts only via `StrataOrigins`). `URLUtil.guessFileName` misses `filename*=UTF-8''…` after `filename="…"` and named everything `download.<ext>`; `Downloads.attachmentName` parses it. The web workspace has checkboxes, a folder tick selects every file inside, and "N selected · Download · Clear" downloads each file on its own (user's choice over a zip).
+
+**Voice drawer: thinking and the panda (2026-11-02):** `/v1/ray/chat` forwards the session's `thinking` events as `delta.reasoning_content` and `tool_call` as `ray_tool {name}` (`serve/test_ray_chat.py`). The drawer streams the thinking in a muted box that folds to "Thought for N s" when the answer starts (never spoken). The header shows the web app's own `rayface.js`, copied into `assets/rayface/` by the Gradle task `copyRayFace`, on a transparent WebView with no network and no bridge (`RayFaceView`): `listen()` while listening, `thinking()`, `taskTool()` after tool calls, `speakText()` while the native voice reads, then `end()` with `RayFace.stay = true` (he stays in a calm idle; the website never sets it). Gotcha: in a WebView laid out by Compose, CSS `100vh`/`100%` resolved to 0 px at load, so the page sizes `#ray-face` from `innerWidth`/`innerHeight` in script and on resize.
+
 Debugging recipe: debug builds expose `webview_devtools_remote_<pid>`; `adb forward tcp:9333 localabstract:webview_devtools_remote_$(adb shell pidof com.damirl.ray)` then `curl localhost:9333/json` lists every live page (one per WebView) for measuring layout with `Runtime.evaluate`.
 
 ## Related
+- [Ray Companion Validation (2026-11-02)](../artifacts/ray-companion-validation-2026-11-02.md) — What was tested on the phone and the results
 - [Session Transcript & Development Handoff (2026-11-02)](../artifacts/session-transcript-2026-11-02-companion-handoff.md) — Complete transcript and Claude Code technical handoff dossier covering root-cause diagnoses and live verification.
 
 ## Sources
@@ -103,4 +110,6 @@ Debugging recipe: debug builds expose `webview_devtools_remote_<pid>`; `adb forw
 - `android/app/src/main/kotlin/com/damirl/ray/ui/webview/RayWebView.kt`
 - `android/app/src/main/kotlin/com/damirl/ray/ui/webview/RayNativeBridge.kt`
 - `android/app/src/main/kotlin/com/damirl/ray/tools/`
+- `android/app/src/main/kotlin/com/damirl/ray/ui/webview/Downloads.kt`, `ui/components/RayFaceView.kt`, `serve/test_ray_chat.py`
+- User, chat, 2026-11-02: About card, hiding unused settings, removing Max tokens, multi-file upload and download, thinking and the panda in the drawer
 
