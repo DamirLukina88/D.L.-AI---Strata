@@ -8,10 +8,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.damirl.ray.audio.AudioPlaybackService
 import com.damirl.ray.audio.SpeechRecognitionManager
+import com.damirl.ray.audio.VoiceOutput
 import com.damirl.ray.network.ChatMessage
 import com.damirl.ray.network.NetworkClient
 import com.damirl.ray.network.RayChatRepository
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
@@ -32,6 +34,9 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
     private val chatRepository = RayChatRepository(networkClient)
     private var speechManager: SpeechRecognitionManager? = SpeechRecognitionManager(context)
     private var noSpeechRetries = 0
+    private var askJob: Job? = null
+    private var retryJob: Job? = null
+    private var closed = false
 
     // UI state observable by Compose
     var phase by mutableStateOf(VoicePhase.LISTENING)
@@ -59,6 +64,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
 
     /** The drawer was opened: start over and listen. */
     fun start() {
+        closed = false
         userPrompt = ""
         assistantResponse = ""
         activeToolNote = null
@@ -76,11 +82,26 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
         }
     }
 
-    fun stopListening() {
-        speechManager?.stopListening()
+    /**
+     * The drawer was closed, swiped away or lost focus: stop listening, drop the answer it was waiting for and stop
+     * reading one aloud, so Ray neither listens nor talks with nobody looking (the app's mic would hear him otherwise)
+     */
+    fun close() {
+        if (closed) return
+        closed = true
+        Log.d(TAG, "Drawer closed: stopping listening and speech")
+        retryJob?.cancel()
+        askJob?.cancel()
+        speechManager?.cancel()
+        VoiceOutput.stopNative(context)
+        if (phase == VoicePhase.LISTENING || phase == VoicePhase.THINKING || phase == VoicePhase.ANSWERING) {
+            phase = VoicePhase.IDLE
+            status = "Tap the mic to ask again"
+        }
     }
 
     fun destroy() {
+        close()
         speechManager?.cancel()
         speechManager = null
     }
@@ -110,9 +131,9 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
                     Log.d(TAG, "No speech yet, listening again ($noSpeechRetries)")
                     status = "Still listening…"
                     // the recognizer service is still disconnecting from the last attempt; starting at once fails (11)
-                    scope.launch {
+                    retryJob = scope.launch {
                         delay(400)
-                        if (phase == VoicePhase.LISTENING) listen()
+                        if (!closed && phase == VoicePhase.LISTENING) listen()
                     }
                 } else {
                     phase = VoicePhase.IDLE
@@ -133,7 +154,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
 
         val messages = listOf(ChatMessage(role = "user", content = text))
 
-        scope.launch {
+        askJob = scope.launch {
             var accumulated = ""
             var failed = false
             chatRepository.streamChat(messages, isVoice = true)
@@ -157,7 +178,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
             phase = VoicePhase.IDLE
             status = "Tap the mic to ask again"
 
-            if (accumulated.isNotBlank()) {
+            if (accumulated.isNotBlank() && !closed) {
                 AudioPlaybackService.startSpeaking(context, accumulated)
             }
         }

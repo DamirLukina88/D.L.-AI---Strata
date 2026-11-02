@@ -171,7 +171,7 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
     override fun onHide() {
         super.onHide()
         Log.d(TAG, "RayVoiceSession onHide")
-        drawer?.stopListening()
+        drawer?.close()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
     }

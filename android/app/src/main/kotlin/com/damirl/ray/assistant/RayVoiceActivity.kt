@@ -57,9 +57,11 @@ class RayVoiceActivity : ComponentActivity() {
         drawer?.start()
     }
 
-    override fun onStop() {
-        super.onStop()
-        drawer?.stopListening()
+    // closed, swiped away or covered by anything else: stop listening and talking, and go (it opens fresh next time)
+    override fun onPause() {
+        super.onPause()
+        drawer?.close()
+        if (!isFinishing) finish()
     }
 
     override fun onDestroy() {

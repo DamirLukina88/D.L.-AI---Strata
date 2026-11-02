@@ -10,6 +10,7 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import com.damirl.ray.audio.AudioPlaybackService
 import com.damirl.ray.audio.BluetoothMic
+import com.damirl.ray.audio.VoiceOutput
 import com.damirl.ray.audio.SpeechCleaner
 import com.damirl.ray.audio.SpeechRecognitionManager
 import com.damirl.ray.tools.CameraVisionManager
@@ -35,6 +36,12 @@ class RayNativeBridge(
     private var speechManager: SpeechRecognitionManager? = null
 
     init {
+        // the drawer and the native mic stop the web app's voice through this before they listen
+        VoiceOutput.stopWebSpeech = {
+            webViewProvider()?.let { wv ->
+                wv.post { wv.evaluateJavascript("if (typeof TTSController !== 'undefined' && TTSController.speaking) TTSController.stop();", null) }
+            }
+        }
         try {
             speechManager = SpeechRecognitionManager(context)
         } catch (e: Exception) {

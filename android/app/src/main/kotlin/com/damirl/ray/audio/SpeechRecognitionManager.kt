@@ -43,6 +43,8 @@ class SpeechRecognitionManager(private val context: Context) {
         }
 
         stopListening()
+        // never while Ray is talking: he would hear himself
+        VoiceOutput.stopAll(context)
         // a Bluetooth headset's mic (helmet intercom, earbuds) when one is connected, else the phone's
         BluetoothMic.acquire(context, "listen") { begin(onFinalResult, onError, onNoSpeech) }
     }
