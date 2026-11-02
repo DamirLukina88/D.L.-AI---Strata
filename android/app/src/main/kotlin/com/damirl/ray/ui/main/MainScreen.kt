@@ -78,7 +78,7 @@ fun MainScreen(
     val targetUrl = when (val r = route) {
         is NetworkRoute.Lan -> r.url
         is NetworkRoute.Remote -> r.url
-        is NetworkRoute.Offline -> BuildConfig.STRATA_LAN_URL
+        is NetworkRoute.Offline -> viewModel.networkClient.getActiveBaseUrl()
     }
 
     Box(

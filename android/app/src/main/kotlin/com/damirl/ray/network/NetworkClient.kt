@@ -19,6 +19,9 @@ class NetworkClient(
 ) {
     companion object {
         private const val TAG = "RayNetwork"
+
+        /** One client for the app's page and the voice drawer, so the route is probed once and agreed on. */
+        val shared: NetworkClient by lazy { NetworkClient() }
     }
 
     val okHttpClient: OkHttpClient = OkHttpClient.Builder()
@@ -88,7 +91,7 @@ class NetworkClient(
         return when (val r = _currentRoute.value) {
             is NetworkRoute.Lan -> r.url
             is NetworkRoute.Remote -> r.url
-            NetworkRoute.Offline -> remoteUrl.ifBlank { lanUrl }
+            NetworkRoute.Offline -> lanUrl.ifBlank { remoteUrl }      // the same as the page (MainScreen)
         }
     }
 

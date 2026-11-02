@@ -31,7 +31,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
         private const val NO_SPEECH_RETRIES = 1
     }
 
-    private val networkClient = NetworkClient()
+    private val networkClient = NetworkClient.shared
     private val chatRepository = RayChatRepository(networkClient)
     private var speechManager: SpeechRecognitionManager? = SpeechRecognitionManager(context)
     private var noSpeechRetries = 0
