@@ -81,6 +81,8 @@ Found and fixed during validation (`fbbb5ebb`):
 
 **No self-listening (2026-11-02):** every listen first silences both of Ray's voices (`VoiceOutput.stopAll`: the native `AudioPlaybackService` and the web `TTSController`), and closing, swiping away or leaving the drawer stops listening, drops the pending answer and stops speech (`VoiceDrawerController.close()`). Before, the app's mic button could pick up the drawer's spoken answer and send it back to Ray.
 
+**Setup screen on HyperOS (2026-11-02):** Xiaomi Autostart is app-op 10008 (`adb shell appops get com.damirl.ray` shows `MIUIOP(10008): allow`), readable in the app through the hidden `AppOpsManager.checkOpNoThrow(int, int, String)` (logged as unsupported, not blocked). Screen reading lives at Accessibility, General tab, bottom, **Downloaded apps**, Ray Screen Accessibility; the direct details intent needs `OPEN_ACCESSIBILITY_DETAILS_SETTINGS`, which apps can't hold.
+
 Debugging recipe: debug builds expose `webview_devtools_remote_<pid>`; `adb forward tcp:9333 localabstract:webview_devtools_remote_$(adb shell pidof com.damirl.ray)` then `curl localhost:9333/json` lists every live page (one per WebView) for measuring layout with `Runtime.evaluate`.
 
 ## Related
