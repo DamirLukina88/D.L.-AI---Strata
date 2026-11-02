@@ -566,6 +566,18 @@ class McpRegistry:
         bad = self.unknown_args(model_name, args)
         if bad:
             return bad
+        if tool in ("send_mail", "send_gmail_message"):
+            try:
+                import dl_translate
+                err = dl_translate.check_email_language(
+                    body=str(args.get("body") or ""),
+                    html=str(args.get("html") or args.get("html_body") or ""),
+                    html_file=args.get("html_file"),
+                )
+                if err:
+                    return err
+            except ImportError:
+                pass
         with self.lock:
             on, srv = self.enabled.get(name), self.servers.get(name)
             if on is None or srv is None:                    # turned off (idle, tool limit) since it was routed

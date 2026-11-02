@@ -114,11 +114,14 @@ class Base(unittest.TestCase):
         }, "Drafts": {}, "Folders/Računi": {}})
         self.p1 = mock.patch.object(dl_proton, "imap_connect", lambda s: self.imap)
         self.p2 = mock.patch.object(dl_proton, "smtp_connect", lambda s: FakeSmtp())
+        self.p_lang = mock.patch("dl_translate.check_email_language", return_value=None)
         self.p1.start()
         self.p2.start()
+        self.p_lang.start()
         FakeSmtp.sent = []
 
     def tearDown(self):
+        self.p_lang.stop()
         self.p1.stop()
         self.p2.stop()
         self.env.stop()
@@ -284,6 +287,26 @@ class Writing(Base):
 
     def test_no_recipient(self):
         self.assertTrue(dl_proton.call("send_mail", {"to": "", "subject": "x", "body": "y"}).startswith("Error"))
+
+    def test_send_mail_language_guard_blocks_untranslated_non_english(self):
+        self.p_lang.stop()
+        try:
+            with mock.patch("dl_translate.check_email_language", return_value="Error: This email is in HR but was not translated by DeepL."):
+                out = dl_proton.call("send_mail", {"to": "a@example.com", "subject": "x", "body": "Dobar dan"})
+                self.assertIn("not translated by DeepL", out)
+                self.assertEqual(FakeSmtp.sent, [])
+        finally:
+            self.p_lang.start()
+
+    def test_send_mail_language_guard_allows_verified(self):
+        self.p_lang.stop()
+        try:
+            with mock.patch("dl_translate.check_email_language", return_value=None):
+                out = dl_proton.call("send_mail", {"to": "a@example.com", "subject": "x", "body": "Dobar dan"})
+                self.assertTrue(out.startswith("Sent"), out)
+                self.assertEqual(len(FakeSmtp.sent), 1)
+        finally:
+            self.p_lang.start()
 
 
 class SettingsChecks(unittest.TestCase):

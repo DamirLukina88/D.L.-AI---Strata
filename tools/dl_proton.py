@@ -576,6 +576,17 @@ def send_mail(a: dict, s: dict) -> str:
     if not to:
         return "Error: no recipient address in `to`"
     msg = compose(s, a, _original(s, a))
+    try:
+        import dl_translate
+        err = dl_translate.check_email_language(
+            body=str(a.get("body") or ""),
+            html=str(a.get("html") or ""),
+            html_file=a.get("html_file"),
+        )
+        if err:
+            return err
+    except ImportError:
+        pass
     smtp = smtp_connect(s)
     try:
         refused = smtp.send_message(msg, from_addr=msg["From"], to_addrs=to + cc + bcc)

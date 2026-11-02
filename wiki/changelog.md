@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-11-01:** Ingestion. decisions/deepl-only-non-english-and-weather-guards.md. (Agent: Antigravity)
 - **2026-11-01:** Record 2026-11-01 Strata performance benchmark results on 64K context window. (Agent: Antigravity)
 - **2026-11-01:** Ingestion. artifacts/strata-benchmark-2026-11-01.md. (Agent: Antigravity)
 - **2026-11-01:** Commit fork-attribution license update and ignore local reports/ and research_notes/ folders. (Agent: Antigravity)

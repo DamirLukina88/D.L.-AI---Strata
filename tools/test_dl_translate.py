@@ -19,6 +19,7 @@ import dl_mcp  # noqa: E402
 
 class Translate(unittest.TestCase):
     def setUp(self):
+        T.RECORDED_DEEPL_HASHES.clear()
         self.sent = []
         self.tmp = tempfile.TemporaryDirectory()
         self.ws = Path(self.tmp.name)
@@ -95,6 +96,42 @@ class Translate(unittest.TestCase):
             self.p[0].start()
         self.assertEqual(seen["url"], "https://api-free.deepl.com/v2/translate")
         self.assertEqual(seen["auth"], "DeepL-Auth-Key abc:fx")
+
+    def test_check_email_language_english_passes(self):
+        # DeepL detects EN
+        with mock.patch.object(T, "translate", return_value=("Hello", "EN")):
+            err = T.check_email_language(body="Hello, this is an English weather report.")
+            self.assertIsNone(err)
+
+    def test_check_email_language_recorded_deepl_passes(self):
+        # Even if content is Croatian, if recorded by DeepL it passes without calling translate
+        T.record_translation_output("Vrijeme u Zagrebu je sunčano.")
+        with mock.patch.object(T, "translate", side_effect=AssertionError("should not call translate")):
+            err = T.check_email_language(body="Vrijeme u Zagrebu je sunčano.")
+            self.assertIsNone(err)
+
+    def test_check_email_language_unrecorded_non_english_blocked(self):
+        # Croatian authored by agent without DeepL
+        with mock.patch.object(T, "translate", return_value=("Weather in Zagreb", "HR")):
+            err = T.check_email_language(body="Vrijeme u Zagrebu je sunčano.")
+            self.assertIsNotNone(err)
+            self.assertIn("This email is in HR but was not translated by DeepL", err)
+            self.assertIn("turn on deepl", err)
+
+    def test_check_email_language_deepl_unreachable_gives_error(self):
+        with mock.patch.object(T, "translate", side_effect=T.TranslateError("network timeout")):
+            err = T.check_email_language(body="Unknown text that fails network")
+            self.assertIsNotNone(err)
+            self.assertIn("could not verify email language", err)
+            self.assertIn("DeepL is not reachable", err)
+
+    def test_check_email_language_html_file_recorded_passes(self):
+        dest = self.ws / "forecast.hr.html"
+        dest.write_text("<!DOCTYPE html><html><body>Prognoza</body></html>", encoding="utf-8")
+        T.record_translation_output("<!DOCTYPE html><html><body>Prognoza</body></html>", dest)
+        with mock.patch.object(T, "translate", side_effect=AssertionError("should not call translate")):
+            err = T.check_email_language(html_file="forecast.hr.html")
+            self.assertIsNone(err)
 
 
 if __name__ == "__main__":
