@@ -146,11 +146,21 @@ class AudioPlaybackService : Service() {
                     requestAudioFocus()
 
                     _isSpeakingState.value = true
-                    serviceScope.launch {
-                        piperPlayer?.speak(text) {
-                            Log.d(TAG, "Speech playback finished")
-                            finishPlayback()
+                    val play = {
+                        serviceScope.launch {
+                            piperPlayer?.speak(text) {
+                                Log.d(TAG, "Speech playback finished")
+                                finishPlayback()
+                            }
                         }
+                    }
+                    // you spoke through a headset (helmet intercom): answer over its call link, which it plays even
+                    // while the intercom is on; otherwise the usual output (the music link, or the phone)
+                    if (BluetoothMic.inHeadsetConversation()) {
+                        Log.d(TAG, "Answering over the headset's call link")
+                        BluetoothMic.acquire(this, "reply") { if (_isSpeakingState.value) play() }
+                    } else {
+                        play()
                     }
                 }
             }
@@ -230,6 +240,7 @@ class AudioPlaybackService : Service() {
 
     private fun finishPlayback() {
         _isSpeakingState.value = false
+        BluetoothMic.release("reply")
         updateMediaPlaybackState(PlaybackStateCompat.STATE_STOPPED)
         piperPlayer?.stop()
         releaseWakeLock()
@@ -299,6 +310,7 @@ class AudioPlaybackService : Service() {
         super.onDestroy()
         Log.d(TAG, "AudioPlaybackService destroyed")
         serviceScope.cancel()
+        BluetoothMic.release("reply")
         piperPlayer?.release()
         piperPlayer = null
         mediaSession?.isActive = false

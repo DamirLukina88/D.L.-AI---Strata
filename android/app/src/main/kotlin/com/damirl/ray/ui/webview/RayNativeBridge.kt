@@ -9,6 +9,7 @@ import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import com.damirl.ray.audio.AudioPlaybackService
+import com.damirl.ray.audio.BluetoothMic
 import com.damirl.ray.audio.SpeechCleaner
 import com.damirl.ray.audio.SpeechRecognitionManager
 import com.damirl.ray.tools.CameraVisionManager
@@ -50,6 +51,20 @@ class RayNativeBridge(
             audioSpeaker.invoke(cleaned)
         } else {
             AudioPlaybackService.startSpeaking(context, cleaned)
+        }
+    }
+
+    // The web app's reply (the server voice through Web Audio) goes over a headset's call link too, after you spoke
+    // through the headset (BluetoothMic): TTSController holds it while it reads aloud and lets go when it stops
+    @JavascriptInterface
+    fun holdHeadsetForSpeech(on: Boolean) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            if (!on) {
+                BluetoothMic.release("web-reply")
+            } else if (BluetoothMic.inHeadsetConversation()) {
+                Log.d(TAG, "Web reply over the headset's call link")
+                BluetoothMic.acquire(context, "web-reply") {}
+            }
         }
     }
 

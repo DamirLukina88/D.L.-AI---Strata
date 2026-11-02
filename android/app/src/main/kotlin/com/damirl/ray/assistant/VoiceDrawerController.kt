@@ -1,0 +1,165 @@
+package com.damirl.ray.assistant
+
+import android.content.Context
+import android.util.Log
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.damirl.ray.audio.AudioPlaybackService
+import com.damirl.ray.audio.SpeechRecognitionManager
+import com.damirl.ray.network.ChatMessage
+import com.damirl.ray.network.NetworkClient
+import com.damirl.ray.network.RayChatRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.launch
+
+// What the voice drawer does, apart from where it is shown: listening (with one more try when nothing was said),
+// sending what you said to Ray, and reading his answer aloud.  Used by RayVoiceSession (the system assistant overlay)
+// and RayVoiceActivity (the same drawer as an activity, when the assistant service isn't connected)
+class VoiceDrawerController(private val context: Context, private val scope: CoroutineScope) {
+
+    companion object {
+        private const val TAG = "RayVoiceDrawer"
+        // Google's recognizer stops 5 s after the mic opens if nobody has started talking; listen once more before
+        // giving up, so there are 10 s to start (holding the power button, then finding words, often takes longer)
+        private const val NO_SPEECH_RETRIES = 1
+    }
+
+    private val networkClient = NetworkClient()
+    private val chatRepository = RayChatRepository(networkClient)
+    private var speechManager: SpeechRecognitionManager? = SpeechRecognitionManager(context)
+    private var noSpeechRetries = 0
+
+    // UI state observable by Compose
+    var phase by mutableStateOf(VoicePhase.LISTENING)
+        private set
+    var status by mutableStateOf("Listening…")
+        private set
+    var userPrompt by mutableStateOf("")
+        private set
+    var partialText by mutableStateOf("")
+        private set
+    var micLevel by mutableFloatStateOf(0f)
+        private set
+    var assistantResponse by mutableStateOf("")
+        private set
+    var activeToolNote by mutableStateOf<String?>(null)
+        private set
+
+    init {
+        // the live transcript and the mic level drive the drawer while it listens
+        speechManager?.let { manager ->
+            scope.launch { manager.partialText.collect { if (phase == VoicePhase.LISTENING) partialText = it } }
+            scope.launch { manager.rmsLevel.collect { micLevel = it } }
+        }
+    }
+
+    /** The drawer was opened: start over and listen. */
+    fun start() {
+        userPrompt = ""
+        assistantResponse = ""
+        activeToolNote = null
+        noSpeechRetries = 0
+        scope.launch { networkClient.probeAndSelectRoute() }
+        listen()
+    }
+
+    fun onMicTap() {
+        if (phase == VoicePhase.LISTENING) {
+            speechManager?.stopListening()
+        } else {
+            noSpeechRetries = 0
+            listen()
+        }
+    }
+
+    fun stopListening() {
+        speechManager?.stopListening()
+    }
+
+    fun destroy() {
+        speechManager?.cancel()
+        speechManager = null
+    }
+
+    private fun listen() {
+        phase = VoicePhase.LISTENING
+        status = if (noSpeechRetries > 0) "Still listening…" else "Listening…"
+        userPrompt = ""
+        partialText = ""
+        activeToolNote = null
+
+        speechManager?.startListening(
+            onFinalResult = { transcribed ->
+                Log.d(TAG, "Heard: '$transcribed'")
+                userPrompt = transcribed
+                partialText = ""
+                ask(transcribed)
+            },
+            onError = { err ->
+                Log.w(TAG, "Listening failed: $err")
+                phase = VoicePhase.ERROR
+                status = "Couldn't listen: $err"
+            },
+            onNoSpeech = {
+                if (noSpeechRetries < NO_SPEECH_RETRIES) {
+                    noSpeechRetries++
+                    Log.d(TAG, "No speech yet, listening again ($noSpeechRetries)")
+                    status = "Still listening…"
+                    // the recognizer service is still disconnecting from the last attempt; starting at once fails (11)
+                    scope.launch {
+                        delay(400)
+                        if (phase == VoicePhase.LISTENING) listen()
+                    }
+                } else {
+                    phase = VoicePhase.IDLE
+                    status = "I didn't catch that"
+                    partialText = ""
+                }
+            }
+        )
+    }
+
+    private fun ask(text: String) {
+        if (text.isBlank()) return
+
+        phase = VoicePhase.THINKING
+        status = "Thinking…"
+        assistantResponse = ""
+        activeToolNote = null
+
+        val messages = listOf(ChatMessage(role = "user", content = text))
+
+        scope.launch {
+            var accumulated = ""
+            var failed = false
+            chatRepository.streamChat(messages, isVoice = true)
+                .catch { error ->
+                    failed = true
+                    phase = VoicePhase.ERROR
+                    assistantResponse = "Error: ${error.message}"
+                    status = "Can't reach the server"
+                }
+                .collect { token ->
+                    phase = VoicePhase.ANSWERING
+                    status = "Answering…"
+                    accumulated += token
+                    if (token.contains("phone_") || token.contains("[Tool]")) {
+                        activeToolNote = "Using a phone tool…"
+                    }
+                    assistantResponse = accumulated
+                }
+
+            if (failed) return@launch
+            phase = VoicePhase.IDLE
+            status = "Tap the mic to ask again"
+
+            if (accumulated.isNotBlank()) {
+                AudioPlaybackService.startSpeaking(context, accumulated)
+            }
+        }
+    }
+}

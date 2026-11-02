@@ -60,6 +60,17 @@
             </intent-filter>
         </activity>
 
+        <!-- The voice drawer as an activity, for when the assistant overlay can't be asked for (RayVoiceActivity) -->
+        <activity
+            android:name=".assistant.RayVoiceActivity"
+            android:theme="@style/Theme.Ray.Translucent"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.damirl.ray.voice"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:exported="false" />
+
         <!-- Translucent Trampoline Activity to handle Voice Commands, Earbud Triggers, & QS Shade collapse -->
         <activity
             android:name=".assistant.RayAssistTrampolineActivity"

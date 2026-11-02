@@ -6,7 +6,6 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.WindowManager
-import com.damirl.ray.MainActivity
 
 class RayAssistTrampolineActivity : Activity() {
 
@@ -39,13 +38,13 @@ class RayAssistTrampolineActivity : Activity() {
         // Try to invoke the system voice assistant overlay
         val shown = RayVoiceInteractionService.showSession(args)
         if (!shown) {
-            Log.d(TAG, "Voice interaction session unavailable -> Launching MainActivity")
-            val nextIntent = Intent(this, MainActivity::class.java).apply {
+            // the assistant service isn't connected to this process (or Ray isn't the default assistant): the same
+            // drawer as an activity, not the full app
+            Log.d(TAG, "Voice interaction session unavailable -> RayVoiceActivity")
+            startActivity(Intent(this, RayVoiceActivity::class.java).apply {
                 action = intent?.action ?: Intent.ACTION_ASSIST
-                putExtra(EXTRA_START_LISTENING, true)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            startActivity(nextIntent)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            })
         }
 
         finish()

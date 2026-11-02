@@ -95,6 +95,18 @@ class RayVoiceInteractionService : VoiceInteractionService() {
         }
     }
 
+    // Android 14+: every request to show the drawer, and the ones Android gives up on, so a press that opens nothing
+    // shows in the log where it stopped (2026-11-02: about 1 in 4 got showSessionForActiveService() and no onShow)
+    override fun onPrepareToShowSession(args: Bundle, showFlags: Int) {
+        super.onPrepareToShowSession(args, showFlags)
+        Log.d(TAG, "onPrepareToShowSession, showFlags=$showFlags")
+    }
+
+    override fun onShowSessionFailed(args: Bundle) {
+        super.onShowSessionFailed(args)
+        Log.w(TAG, "onShowSessionFailed: $args")
+    }
+
     override fun onShutdown() {
         super.onShutdown()
         mediaSession?.isActive = false

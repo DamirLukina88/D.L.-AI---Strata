@@ -42,7 +42,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -67,11 +66,6 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
-import com.damirl.ray.audio.AudioPlaybackService
-import com.damirl.ray.audio.SpeechRecognitionManager
-import com.damirl.ray.network.ChatMessage
-import com.damirl.ray.network.NetworkClient
-import com.damirl.ray.network.RayChatRepository
 import com.damirl.ray.ui.components.RayAvatar
 import com.damirl.ray.ui.theme.RayTheme
 import com.damirl.ray.ui.theme.StrataAccent
@@ -88,9 +82,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.launch
 
 // What the drawer is doing, for its status line, its dot and its mic button
 enum class VoicePhase { LISTENING, THINKING, ANSWERING, IDLE, ERROR }
@@ -100,9 +91,6 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
 
     companion object {
         private const val TAG = "RayVoiceSession"
-        // Google's recognizer stops 5 s after the mic opens if nobody has started talking; listen once more before
-        // giving up, so there are 10 s to start (holding the power button, then finding words, often takes longer)
-        private const val NO_SPEECH_RETRIES = 1
     }
 
     private val lifecycleRegistry = LifecycleRegistry(this)
@@ -114,29 +102,14 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
     override val viewModelStore: ViewModelStore get() = store
 
     private val sessionScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val networkClient = NetworkClient()
-    private val chatRepository = RayChatRepository(networkClient)
-    private var speechManager: SpeechRecognitionManager? = null
-
-    // UI state observable by Compose
-    private var phase by mutableStateOf(VoicePhase.LISTENING)
-    private var status by mutableStateOf("Listening…")
-    private var userPrompt by mutableStateOf("")
-    private var partialText by mutableStateOf("")
-    private var micLevel by mutableFloatStateOf(0f)
-    private var assistantResponse by mutableStateOf("")
-    private var activeToolNote by mutableStateOf<String?>(null)
-    private var noSpeechRetries = 0
+    private var drawer: VoiceDrawerController? = null
 
     override fun onCreate() {
         super.onCreate()
+        Log.d(TAG, "RayVoiceSession onCreate")
         savedStateRegistryController.performRestore(null)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
-        val manager = SpeechRecognitionManager(context)
-        speechManager = manager
-        // the live transcript and the mic level drive the drawer while it listens
-        sessionScope.launch { manager.partialText.collect { if (phase == VoicePhase.LISTENING) partialText = it } }
-        sessionScope.launch { manager.rmsLevel.collect { micLevel = it } }
+        drawer = VoiceDrawerController(context, sessionScope)
 
         window?.window?.let { win ->
             win.setLayout(
@@ -163,35 +136,28 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
 
             setContent {
                 RayTheme {
-                    AssistantOverlayScreen(
-                        phase = phase,
-                        status = status,
-                        prompt = userPrompt,
-                        partial = partialText,
-                        micLevel = micLevel,
-                        response = assistantResponse,
-                        toolNote = activeToolNote,
-                        onDismiss = { hide() },
-                        onExpand = {
-                            val intent = android.content.Intent(context, com.damirl.ray.MainActivity::class.java).apply {
-                                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    drawer?.let { d ->
+                        VoiceDrawer(
+                            drawer = d,
+                            onDismiss = { hide() },
+                            onExpand = {
+                                val intent = android.content.Intent(context, com.damirl.ray.MainActivity::class.java).apply {
+                                    flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+                                }
+                                context.startActivity(intent)
+                                hide()
                             }
-                            context.startActivity(intent)
-                            hide()
-                        },
-                        onMicTap = {
-                            if (phase == VoicePhase.LISTENING) {
-                                speechManager?.stopListening()
-                            } else {
-                                noSpeechRetries = 0
-                                startListeningLoop()
-                            }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
         return composeView
+    }
+
+    override fun onPrepareShow(args: Bundle?, showFlags: Int) {
+        super.onPrepareShow(args, showFlags)
+        Log.d(TAG, "RayVoiceSession onPrepareShow, showFlags=$showFlags")
     }
 
     override fun onShow(args: Bundle?, showFlags: Int) {
@@ -199,103 +165,13 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         Log.d(TAG, "RayVoiceSession onShow, showFlags=$showFlags")
-
-        // Reset state
-        userPrompt = ""
-        assistantResponse = ""
-        activeToolNote = null
-        noSpeechRetries = 0
-
-        // Probe route in background
-        sessionScope.launch {
-            networkClient.probeAndSelectRoute()
-        }
-
-        startListeningLoop()
-    }
-
-    private fun startListeningLoop() {
-        phase = VoicePhase.LISTENING
-        status = if (noSpeechRetries > 0) "Still listening…" else "Listening…"
-        userPrompt = ""
-        partialText = ""
-        activeToolNote = null
-
-        speechManager?.startListening(
-            onFinalResult = { transcribed ->
-                Log.d(TAG, "Assistant session speech: '$transcribed'")
-                userPrompt = transcribed
-                partialText = ""
-                processQuery(transcribed)
-            },
-            onError = { err ->
-                Log.w(TAG, "Assistant session STT error: $err")
-                phase = VoicePhase.ERROR
-                status = "Couldn't listen: $err"
-            },
-            onNoSpeech = {
-                if (noSpeechRetries < NO_SPEECH_RETRIES) {
-                    noSpeechRetries++
-                    Log.d(TAG, "No speech yet, listening again ($noSpeechRetries)")
-                    status = "Still listening…"
-                    // the recognizer service is still disconnecting from the last attempt; starting at once fails (11)
-                    sessionScope.launch {
-                        delay(400)
-                        if (phase == VoicePhase.LISTENING) startListeningLoop()
-                    }
-                } else {
-                    phase = VoicePhase.IDLE
-                    status = "I didn't catch that"
-                    partialText = ""
-                }
-            }
-        )
-    }
-
-    private fun processQuery(text: String) {
-        if (text.isBlank()) return
-
-        phase = VoicePhase.THINKING
-        status = "Thinking…"
-        assistantResponse = ""
-        activeToolNote = null
-
-        val messages = listOf(ChatMessage(role = "user", content = text))
-
-        sessionScope.launch {
-            var accumulated = ""
-            var failed = false
-            chatRepository.streamChat(messages, isVoice = true)
-                .catch { error ->
-                    failed = true
-                    phase = VoicePhase.ERROR
-                    assistantResponse = "Error: ${error.message}"
-                    status = "Can't reach the server"
-                }
-                .collect { token ->
-                    phase = VoicePhase.ANSWERING
-                    status = "Answering…"
-                    accumulated += token
-                    if (token.contains("phone_") || token.contains("[Tool]")) {
-                        activeToolNote = "Using a phone tool…"
-                    }
-                    assistantResponse = accumulated
-                }
-
-            if (failed) return@launch
-            phase = VoicePhase.IDLE
-            status = "Tap the mic to ask again"
-
-            if (accumulated.isNotBlank()) {
-                AudioPlaybackService.startSpeaking(context, accumulated)
-            }
-        }
+        drawer?.start()
     }
 
     override fun onHide() {
         super.onHide()
         Log.d(TAG, "RayVoiceSession onHide")
-        speechManager?.stopListening()
+        drawer?.stopListening()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
     }
@@ -304,11 +180,28 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
         super.onDestroy()
         Log.d(TAG, "RayVoiceSession onDestroy")
         sessionScope.cancel()
-        speechManager?.cancel()
-        speechManager = null
+        drawer?.destroy()
+        drawer = null
         store.clear()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
     }
+}
+
+// The drawer bound to its controller (the system overlay and RayVoiceActivity both show this)
+@Composable
+fun VoiceDrawer(drawer: VoiceDrawerController, onDismiss: () -> Unit, onExpand: () -> Unit) {
+    AssistantOverlayScreen(
+        phase = drawer.phase,
+        status = drawer.status,
+        prompt = drawer.userPrompt,
+        partial = drawer.partialText,
+        micLevel = drawer.micLevel,
+        response = drawer.assistantResponse,
+        toolNote = drawer.activeToolNote,
+        onDismiss = onDismiss,
+        onExpand = onExpand,
+        onMicTap = { drawer.onMicTap() }
+    )
 }
 
 // The drawer that slides up when Ray is held: Ray and what he is doing, what you said (live while you speak), his

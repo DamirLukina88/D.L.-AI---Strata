@@ -11,6 +11,16 @@ class RayVoiceSessionService : VoiceInteractionSessionService() {
         private const val TAG = "RaySessionService"
     }
 
+    override fun onCreate() {
+        super.onCreate()
+        Log.d(TAG, "RayVoiceSessionService onCreate")
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        Log.d(TAG, "RayVoiceSessionService onDestroy")
+    }
+
     override fun onNewSession(args: Bundle?): VoiceInteractionSession {
         Log.d(TAG, "Creating new RayVoiceSession")
         return RayVoiceSession(this)

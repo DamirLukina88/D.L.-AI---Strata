@@ -517,6 +517,7 @@ const TTSController = {
     if (phoneBusy && typeof window.RayAndroid.stopSpeaking === "function") window.RayAndroid.stopSpeaking();
     clearInterval(this.nativeTimer);
     this.nativeTimer = null;
+    this.holdHeadset(false);
     if (typeof RayFace !== "undefined") RayFace.end(this.speaking && this.currentIndex >= this.queue.length);
     this.stopWatchdog();
     this.releaseWakeLock();
@@ -659,6 +660,7 @@ const TTSController = {
     }
 
     const chunk = this.queue[this.currentIndex];
+    this.holdHeadset(true);
     if (this.useServer()) { this.playServerChunk(this.currentIndex); return; }
     if (typeof SpeechSynthesisUtterance === "undefined") {
       if (this.native()) { this.speakNative(chunk); return; }
@@ -734,6 +736,14 @@ const TTSController = {
   // the Android companion app's own voice (RayAndroid.speak), when the server voice is off or failed: one chunk at a
   // time, the next once the phone reports it has stopped speaking (or never started within 4 s)
   native() { return !!(window.RayAndroid && typeof window.RayAndroid.speak === "function"); },
+  // Android app: after you spoke through a headset (helmet intercom), hold its call link while Ray reads aloud, so
+  // the answer comes back through the headset (RayAndroid.holdHeadsetForSpeech decides whether a headset is in use)
+  headsetHeld: false,
+  holdHeadset(on) {
+    if (this.headsetHeld === on) return;
+    this.headsetHeld = on;
+    try { if (window.RayAndroid && typeof window.RayAndroid.holdHeadsetForSpeech === "function") window.RayAndroid.holdHeadsetForSpeech(on); } catch (e) {}
+  },
   nativeTimer: null,
   speakNative(chunk) {
     const queue = this.queue, orb = this.orb(), t0 = Date.now();
