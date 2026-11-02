@@ -15,7 +15,7 @@ Newest entries first.
 
 ## Log
 
-- **2026-11-03:** Update. decisions/ray-hybrid-webview-companion-and-phone-mcp.md. (Agent: Claude Code)
+- **2026-11-03:** Update. decisions/ray-hybrid-webview-companion-and-phone-mcp.md, artifacts/session-transcript-2026-11-02-companion-handoff.md, decisions/github-fork-and-sanitization.md. (Agent: Claude Code)
 - **2026-11-03:** Ingestion. artifacts/ray-companion-validation-2026-11-02.md. (Agent: Claude Code)
 - **2026-11-02:** Artifact Backup. Exported full session transcript and Claude Code development handoff dossier. (Agent: Antigravity)
 - **2026-11-02:** Ingestion. artifacts/session-transcript-2026-11-02-companion-handoff.md. (Agent: Antigravity)
