@@ -164,6 +164,17 @@ This decision documents two critical speech subsystem fixes: (1) resolving Speec
   - Stopping mid-turn (via Stop button `#code-stop-btn` or clicking Ray's avatar) silences only that turn; the toggle remains ON for following turns.
   - Individual message card speaker buttons (`[data-code-speak]`) remain one-off readers and do not toggle global speak mode.
 
+## Cross-Device Audio Gating for Voice Sessions (2026-11-02)
+
+- **Gotcha**: When talking to Ray via voice on the Android companion app, the turn is submitted to the shared CLI session daemon (`tools/dl_sessiond.py`) with `{ voice: true, origin: "ray-android" }`. The daemon broadcasts live events to all attached clients, including the desktop web app. Because the desktop web browser saw `ev.voice: true`, it marked `code.turnFromVoice = true` and attempted to initiate Web Audio playback (`AudioContext.resume()`).
+- **Consequences**:
+  1. Chrome blocked playback with the autoplay error: `The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page.`
+  2. If autoplay had been permitted, the PC desktop speakers would have spoken simultaneously with the phone/earbuds, creating a double-audio echo.
+- **Solution**:
+  1. Gated `code.turnFromVoice` in `serve/web/app.js` (`codeEvent`) to only activate if the turn originated from *this* browser client (`isOwnPrompt = code.client ? ev.origin === code.client : ev.origin !== "ray-android"`). Remote voice turns (from Ray Android or CLI) update the UI transcript and thinking state in real time, but remain completely silent on the desktop.
+  2. Hardened `startAudioKeepAlive()` and `playServerChunk()` to guard `AudioContext.resume()` with graceful promise rejection handling so browser autoplay blocks never produce unhandled errors.
+  3. Added Tests 60 and 61 in `tools/test_stt_controller.js` verifying that remote origin voice turns do not activate desktop auto-speak.
+
 ## Sources
 
 - User, chat, 2026-10-28: pitch and speed controls did not work for the voice

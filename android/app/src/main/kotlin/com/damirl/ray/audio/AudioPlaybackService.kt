@@ -1,0 +1,312 @@
+package com.damirl.ray.audio
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.os.Build
+import android.os.IBinder
+import android.os.PowerManager
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
+import android.util.Log
+import android.view.KeyEvent
+import androidx.core.app.NotificationCompat
+import com.damirl.ray.MainActivity
+import com.damirl.ray.R
+import com.damirl.ray.network.NetworkClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+
+class AudioPlaybackService : Service() {
+
+    companion object {
+        private const val TAG = "RayAudio"
+        private const val NOTIFICATION_ID = 1001
+        private const val CHANNEL_ID = "ray_speech_playback"
+
+        const val ACTION_SPEAK = "com.damirl.ray.action.SPEAK"
+        const val ACTION_STOP = "com.damirl.ray.action.STOP"
+        const val EXTRA_TEXT = "extra_text"
+
+        private val _isSpeakingState = MutableStateFlow(false)
+        val isSpeakingState: StateFlow<Boolean> = _isSpeakingState.asStateFlow()
+
+        fun startSpeaking(context: Context, text: String) {
+            val intent = Intent(context, AudioPlaybackService::class.java).apply {
+                action = ACTION_SPEAK
+                putExtra(EXTRA_TEXT, text)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }
+
+        fun stopSpeaking(context: Context) {
+            val intent = Intent(context, AudioPlaybackService::class.java).apply {
+                action = ACTION_STOP
+            }
+            context.startService(intent)
+        }
+    }
+
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var audioManager: AudioManager? = null
+    private var audioFocusRequest: AudioFocusRequest? = null
+    private var piperPlayer: PiperAudioPlayer? = null
+    private var mediaSession: MediaSessionCompat? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        Log.d(TAG, "AudioPlaybackService created")
+
+        createNotificationChannel()
+        piperPlayer = PiperAudioPlayer(this, NetworkClient())
+
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "RayAssistant:AudioWakeLock").apply {
+            setReferenceCounted(false)
+        }
+
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        initMediaSession()
+    }
+
+    private fun initMediaSession() {
+        try {
+            val mediaButtonIntent = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+                setClass(this@AudioPlaybackService, MediaButtonReceiver::class.java)
+            }
+            val mediaButtonPendingIntent = PendingIntent.getBroadcast(
+                this,
+                0,
+                mediaButtonIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            mediaSession = MediaSessionCompat(this, "RayAudioServiceSession").apply {
+                setFlags(
+                    MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
+                    MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
+                )
+                setMediaButtonReceiver(mediaButtonPendingIntent)
+                setCallback(object : MediaSessionCompat.Callback() {
+                    override fun onMediaButtonEvent(mediaButtonEvent: Intent): Boolean {
+                        val keyEvent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            mediaButtonEvent.getParcelableExtra(Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            mediaButtonEvent.getParcelableExtra(Intent.EXTRA_KEY_EVENT)
+                        } ?: return super.onMediaButtonEvent(mediaButtonEvent)
+
+                        return MediaButtonHandler.handleKeyEvent(this@AudioPlaybackService, keyEvent)
+                    }
+
+                    override fun onPause() {
+                        finishPlayback()
+                    }
+
+                    override fun onStop() {
+                        finishPlayback()
+                    }
+                })
+                isActive = true
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to initialize MediaSessionCompat in AudioPlaybackService", e)
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val action = intent?.action ?: return START_NOT_STICKY
+
+        when (action) {
+            ACTION_SPEAK -> {
+                val text = intent.getStringExtra(EXTRA_TEXT) ?: ""
+                if (text.isNotBlank()) {
+                    updateMediaPlaybackState(PlaybackStateCompat.STATE_PLAYING)
+                    val notification = createNotification(text)
+                    startForeground(NOTIFICATION_ID, notification)
+                    acquireWakeLock()
+                    requestAudioFocus()
+
+                    _isSpeakingState.value = true
+                    serviceScope.launch {
+                        piperPlayer?.speak(text) {
+                            Log.d(TAG, "Speech playback finished")
+                            finishPlayback()
+                        }
+                    }
+                }
+            }
+            ACTION_STOP -> {
+                Log.d(TAG, "Received ACTION_STOP")
+                finishPlayback()
+            }
+        }
+
+        return START_NOT_STICKY
+    }
+
+    private fun updateMediaPlaybackState(state: Int) {
+        val playbackState = PlaybackStateCompat.Builder()
+            .setActions(
+                PlaybackStateCompat.ACTION_PLAY or
+                PlaybackStateCompat.ACTION_PAUSE or
+                PlaybackStateCompat.ACTION_PLAY_PAUSE or
+                PlaybackStateCompat.ACTION_STOP
+            )
+            .setState(state, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1.0f)
+            .build()
+        mediaSession?.setPlaybackState(playbackState)
+    }
+
+    private fun acquireWakeLock() {
+        try {
+            wakeLock?.let {
+                if (!it.isHeld) {
+                    it.acquire(120_000) // 2 minute safety timeout
+                    Log.d(TAG, "WakeLock acquired")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to acquire wake lock", e)
+        }
+    }
+
+    private fun releaseWakeLock() {
+        try {
+            wakeLock?.let {
+                if (it.isHeld) {
+                    it.release()
+                    Log.d(TAG, "WakeLock released")
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun requestAudioFocus() {
+        val am = audioManager ?: return
+        val attrs = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ASSISTANT)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build()
+
+        val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+            .setAudioAttributes(attrs)
+            .setOnAudioFocusChangeListener { focusChange ->
+                Log.d(TAG, "AudioFocus changed: $focusChange")
+                if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {
+                    finishPlayback()
+                }
+            }
+            .build()
+
+        audioFocusRequest = req
+        val result = am.requestAudioFocus(req)
+        Log.d(TAG, "AudioFocus granted: ${result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED}")
+    }
+
+    private fun abandonAudioFocus() {
+        val req = audioFocusRequest ?: return
+        audioManager?.abandonAudioFocusRequest(req)
+        audioFocusRequest = null
+    }
+
+    private fun finishPlayback() {
+        _isSpeakingState.value = false
+        updateMediaPlaybackState(PlaybackStateCompat.STATE_STOPPED)
+        piperPlayer?.stop()
+        releaseWakeLock()
+        abandonAudioFocus()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Ray Voice Playback",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Shows ongoing audio playback for Ray Assistant"
+                setShowBadge(false)
+            }
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.createNotificationChannel(channel)
+        }
+    }
+
+    private fun createNotification(text: String): Notification {
+        val openAppIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val openAppPendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val stopIntent = Intent(this, AudioPlaybackService::class.java).apply {
+            action = ACTION_STOP
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this,
+            1,
+            stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("Ray Assistant 🐾")
+            .setContentText(text.take(60))
+            .setContentIntent(openAppPendingIntent)
+            .addAction(android.R.drawable.ic_media_pause, "Stop", stopPendingIntent)
+            .setOngoing(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+
+        mediaSession?.let { session ->
+            builder.setStyle(
+                androidx.media.app.NotificationCompat.MediaStyle()
+                    .setMediaSession(session.sessionToken)
+                    .setShowActionsInCompactView(0)
+            )
+        }
+
+        return builder.build()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        Log.d(TAG, "AudioPlaybackService destroyed")
+        serviceScope.cancel()
+        piperPlayer?.release()
+        piperPlayer = null
+        mediaSession?.isActive = false
+        mediaSession?.release()
+        mediaSession = null
+        releaseWakeLock()
+        abandonAudioFocus()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+}

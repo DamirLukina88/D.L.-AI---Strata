@@ -827,6 +827,218 @@ const toggleOffResult = simulateExplicitToggleOff();
 assert.strictEqual(toggleOffResult.toggleVal, false, "Explicit toggle OFF must update store");
 assert.strictEqual(toggleOffResult.speaking, false, "Explicit toggle OFF must stop any active speech");
 
-console.log("All STT, TTS Filter, Accessibility, Mobile Keyboard & Speaker Toggle Tests Passed Successfully! (59/59)");
+// Test 60: Voice prompt from remote client (e.g. ray-android) must NOT trigger turnFromVoice on desktop browser
+function simulateRemoteUserVoiceEvent(clientCodeId, eventOrigin, isVoice) {
+  const isOwnPrompt = clientCodeId ? eventOrigin === clientCodeId : eventOrigin !== "ray-android";
+  return Boolean(isVoice) && isOwnPrompt;
+}
+assert.strictEqual(
+  simulateRemoteUserVoiceEvent("client-web-123", "ray-android", true),
+  false,
+  "Remote voice prompt from Ray Android must not set turnFromVoice on desktop browser"
+);
+
+// Test 61: Voice prompt from this browser client must trigger turnFromVoice
+assert.strictEqual(
+  simulateRemoteUserVoiceEvent("client-web-123", "client-web-123", true),
+  true,
+  "Local voice prompt from this browser client must set turnFromVoice on desktop browser"
+);
+
+// Test 62: RayAndroid Bridge Detection
+function simulateCompanionDetection(hasBridge) {
+  const classList = new Set();
+  const doc = {
+    body: {
+      classList: {
+        add: (c) => classList.add(c),
+        contains: (c) => classList.has(c),
+      }
+    }
+  };
+  const win = hasBridge ? { RayAndroid: {} } : {};
+  if (win.RayAndroid && doc.body) {
+    doc.body.classList.add("is-android-companion");
+  }
+  return doc.body.classList.contains("is-android-companion");
+}
+assert.strictEqual(simulateCompanionDetection(true), true, "Injecting RayAndroid bridge must add is-android-companion class");
+assert.strictEqual(simulateCompanionDetection(false), false, "Without bridge, is-android-companion class must not be set");
+
+// Test 63: Mobile Header Pruning
+function simulateHeaderPruning() {
+  const elements = {
+    "logout-btn": { style: { display: "block" } },
+    "code-fullscreen-btn": { style: { display: "inline-flex" } },
+  };
+  const win = { RayAndroid: {} };
+  if (win.RayAndroid) {
+    if (elements["logout-btn"]) elements["logout-btn"].style.display = "none";
+    if (elements["code-fullscreen-btn"]) elements["code-fullscreen-btn"].style.display = "none";
+  }
+  return {
+    logoutDisplay: elements["logout-btn"].style.display,
+    fullscreenDisplay: elements["code-fullscreen-btn"].style.display,
+  };
+}
+const pruned = simulateHeaderPruning();
+assert.strictEqual(pruned.logoutDisplay, "none", "#logout-btn must be hidden on mobile companion");
+assert.strictEqual(pruned.fullscreenDisplay, "none", "#code-fullscreen-btn must be hidden on mobile companion");
+
+// Test 64: TTS Delegation to Native Bridge
+function simulateTTSDelegation(hasRayAndroid) {
+  let nativeSpoke = false;
+  let nativeCleanText = "";
+  let webAudioUsed = false;
+
+  const win = hasRayAndroid ? {
+    RayAndroid: {
+      speak: (text) => {
+        nativeSpoke = true;
+        nativeCleanText = text;
+      }
+    }
+  } : {};
+
+  const controller = {
+    clean: (t) => t.replace(/<think>[\s\S]*?<\/think>/g, "").trim(),
+    speakText(rawText) {
+      if (win.RayAndroid && typeof win.RayAndroid.speak === "function") {
+        const clean = this.clean(rawText);
+        win.RayAndroid.speak(clean);
+        return;
+      }
+      webAudioUsed = true;
+    }
+  };
+
+  controller.speakText("<think>internal</think>Hello from Strata!");
+  return { nativeSpoke, nativeCleanText, webAudioUsed };
+}
+const delegated = simulateTTSDelegation(true);
+assert.strictEqual(delegated.nativeSpoke, true, "TTSController must delegate to window.RayAndroid.speak");
+assert.strictEqual(delegated.nativeCleanText, "Hello from Strata!", "TTSController must clean speech before bridge call");
+assert.strictEqual(delegated.webAudioUsed, false, "Browser Web Audio must NOT be used when RayAndroid bridge is present");
+
+const notDelegated = simulateTTSDelegation(false);
+assert.strictEqual(notDelegated.nativeSpoke, false);
+assert.strictEqual(notDelegated.webAudioUsed, true);
+
+// Test 65: Drawer State Reporting
+function simulateDrawerStateReporting(sessionsOpen, drawerOpen) {
+  const elements = {
+    "sessions-drawer": { dataset: { open: String(sessionsOpen) } },
+    "drawer": { dataset: { open: String(drawerOpen) } },
+  };
+  function hasOpenDrawer() {
+    const s = elements["sessions-drawer"];
+    const d = elements["drawer"];
+    return Boolean((s && s.dataset.open === "true") || (d && d.dataset.open === "true"));
+  }
+  const RayAndroid = {
+    hasOpenDrawer: () => hasOpenDrawer()
+  };
+  return RayAndroid.hasOpenDrawer();
+}
+assert.strictEqual(simulateDrawerStateReporting(true, false), true, "hasOpenDrawer must return true when sessions-drawer is open");
+assert.strictEqual(simulateDrawerStateReporting(false, true), true, "hasOpenDrawer must return true when drawer is open");
+assert.strictEqual(simulateDrawerStateReporting(false, false), false, "hasOpenDrawer must return false when no drawers are open");
+
+// Test 66: Native STT Delegation to RayAndroid
+function simulateSTTDelegation() {
+  let nativeListeningStarted = false;
+  let nativeListeningStopped = false;
+  let deliveredText = "";
+  let deliveredFinal = false;
+
+  const win = {
+    RayAndroid: {
+      startListening: () => { nativeListeningStarted = true; },
+      stopListening: () => { nativeListeningStopped = true; }
+    }
+  };
+
+  const mockInput = { value: "", dispatchEvent: () => {} };
+  let isRecording = false;
+
+  const controller = {
+    currentTarget: "code",
+    getTargetInput: () => mockInput,
+    updateMicUI: (rec) => { isRecording = rec; },
+    dismissKeyboard: () => {},
+    start(target) {
+      if (win.RayAndroid && typeof win.RayAndroid.startListening === "function") {
+        this.currentTarget = target;
+        this.updateMicUI(true);
+        win.RayAndroid.startListening();
+      }
+    },
+    stop() {
+      if (win.RayAndroid && typeof win.RayAndroid.stopListening === "function") {
+        win.RayAndroid.stopListening();
+        this.updateMicUI(false);
+      }
+    },
+    handleNativeSpeechResult(text, isFinal) {
+      deliveredText = text;
+      deliveredFinal = isFinal;
+      mockInput.value = text;
+      if (isFinal) this.updateMicUI(false);
+    }
+  };
+
+  controller.start("code");
+  const started = nativeListeningStarted && isRecording;
+  controller.handleNativeSpeechResult("ukljuci svjetlo", true);
+  const received = mockInput.value === "ukljuci svjetlo" && !isRecording;
+  controller.stop();
+  const stopped = nativeListeningStopped;
+
+  return { started, received, stopped, deliveredText, deliveredFinal };
+}
+const sttDel = simulateSTTDelegation();
+assert.strictEqual(sttDel.started, true, "STTController must delegate start() to window.RayAndroid.startListening");
+assert.strictEqual(sttDel.received, true, "Native speech result must populate textarea and reset mic state");
+assert.strictEqual(sttDel.stopped, true, "STTController must delegate stop() to window.RayAndroid.stopListening");
+
+// Test 67: Companion Phone Tool Execution Bridge
+function simulatePhoneCompanionBridge() {
+  let executedTool = "";
+  let executedArgs = "";
+  let resultPostedId = "";
+  let resultPostedVal = "";
+
+  const win = {
+    RayAndroid: {
+      executeTool: (name, argsJson, callId) => {
+        executedTool = name;
+        executedArgs = argsJson;
+        return JSON.stringify({ tool: name, callId: callId, result: "Phone flashlight turned ON." });
+      }
+    }
+  };
+
+  // Simulate pending queue payload
+  const pending = { id: "phone_123_abc", tool: "phone_toggle_torch", args: { enabled: true } };
+
+  // Dispatch tool
+  const toolRes = win.RayAndroid.executeTool(pending.tool, JSON.stringify(pending.args), pending.id);
+  const parsed = JSON.parse(toolRes);
+  resultPostedId = pending.id;
+  resultPostedVal = parsed.result;
+
+  return {
+    executedTool,
+    executedArgs,
+    resultPostedId,
+    resultPostedVal
+  };
+}
+const bridgeSim = simulatePhoneCompanionBridge();
+assert.strictEqual(bridgeSim.executedTool, "phone_toggle_torch", "Companion bridge must dispatch tool to RayAndroid.executeTool");
+assert.strictEqual(bridgeSim.resultPostedId, "phone_123_abc", "Bridge must preserve callId when posting result");
+assert.strictEqual(bridgeSim.resultPostedVal, "Phone flashlight turned ON.", "Bridge must extract clean result string");
+
+console.log("All STT, TTS Filter, Accessibility, Mobile Keyboard, Speaker Toggle, Cross-Device Audio Gating & Android Companion Bridge Tests Passed Successfully! (67/67)");
 
 

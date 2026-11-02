@@ -90,6 +90,66 @@ WORKSPACE_TEXT_EXTS = {
 
 
 SESSIOND_SOCKET = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "dl-ai" / "sessiond.sock"
+
+
+class PhoneBridge:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.pending_calls: dict[str, dict] = {}
+        self.last_seen = 0.0
+        self.is_connected = False
+
+    def report_heartbeat(self):
+        with self.lock:
+            self.last_seen = time.time()
+            self.is_connected = True
+
+    def get_status(self) -> dict:
+        with self.lock:
+            active = (time.time() - self.last_seen) < 30.0
+            return {"connected": active, "last_seen": self.last_seen, "pending_count": len(self.pending_calls)}
+
+    def enqueue_call(self, tool: str, args: dict, timeout: float = 6.0) -> str | None:
+        with self.lock:
+            active = (time.time() - self.last_seen) < 30.0
+            if not active:
+                return None
+            call_id = f"phone_{int(time.time() * 1000)}_{secrets.token_hex(2)}"
+            ev = threading.Event()
+            entry = {"id": call_id, "tool": tool, "args": args, "created": time.time(), "event": ev, "result": None, "dispatched": False}
+            self.pending_calls[call_id] = entry
+        finished = ev.wait(timeout)
+        with self.lock:
+            res_entry = self.pending_calls.pop(call_id, None)
+        if not finished or not res_entry or res_entry.get("result") is None:
+            return None
+        return res_entry["result"]
+
+    def pop_pending_call(self) -> dict | None:
+        with self.lock:
+            now = time.time()
+            for cid, entry in list(self.pending_calls.items()):
+                if now - entry["created"] > 10.0:
+                    self.pending_calls.pop(cid, None)
+                    continue
+                if not entry.get("dispatched"):
+                    entry["dispatched"] = True
+                    return {"id": entry["id"], "tool": entry["tool"], "args": entry["args"]}
+        return None
+
+    def post_result(self, call_id: str, result: str) -> bool:
+        with self.lock:
+            self.last_seen = time.time()
+            self.is_connected = True
+            entry = self.pending_calls.get(call_id)
+            if entry:
+                entry["result"] = result
+                entry["event"].set()
+                return True
+        return False
+
+
+PHONE_BRIDGE = PhoneBridge()
 _download_tickets: dict[str, tuple[Path, float]] = {}
 _download_tickets_lock = threading.Lock()
 
@@ -5964,9 +6024,25 @@ def make_handler(svc: Service):
                 if self._authorized():
                     self._json(200, {"models": svc.available_models(), "current": svc.model})
                 return
-            if path == "/api/code/session/events":
+            if path in ("/api/code/session/events", "/v1/ray/history", "/v1/ray/session"):
                 if self._authorized():
-                    self._session_events((parse_qs(urlsplit(self.path).query).get("session") or ["dl-ai-code"])[0])
+                    session_name = (parse_qs(urlsplit(self.path).query).get("session") or ["dl-ai-code"])[0]
+                    if path == "/api/code/session/events":
+                        self._session_events(session_name)
+                    else:
+                        self._ray_history(session_name)
+                return
+            if path == "/api/phone/status":
+                if not (self._authorized() or not self._foreign_origin()):
+                    return
+                self._json(200, PHONE_BRIDGE.get_status())
+                return
+            if path == "/api/phone/tool/pending":
+                if not (self._authorized() or not self._foreign_origin()):
+                    return
+                PHONE_BRIDGE.report_heartbeat()
+                call = PHONE_BRIDGE.pop_pending_call()
+                self._json(200, {"pending": call})
                 return
             if path in ("/api/workspace/files", "/api/workspace"):
                 if not self._authorized():
@@ -6318,6 +6394,43 @@ def make_handler(svc: Service):
                 except OSError as e:
                     self._json(503, {"error": {"message": f"the CLI session daemon is not running ({e})"}})
                 return
+            if path in ("/api/phone/status", "/api/phone/tool/call", "/api/phone/tool/result"):
+                if path == "/api/phone/tool/call":
+                    if not self._authorized():
+                        return
+                elif not (self._authorized() or not self._foreign_origin()):
+                    return
+                if path == "/api/phone/status":
+                    PHONE_BRIDGE.report_heartbeat()
+                    self._json(200, {"status": "ok"})
+                    return
+                if path == "/api/phone/tool/call":
+                    try:
+                        req = json.loads(self._body() or b"{}")
+                    except ValueError:
+                        req = {}
+                    tool_name = req.get("tool")
+                    tool_args = req.get("args") or {}
+                    if not tool_name:
+                        self._json(400, {"error": {"message": "missing tool name"}})
+                        return
+                    res = PHONE_BRIDGE.enqueue_call(tool_name, tool_args, timeout=6.0)
+                    if res is not None:
+                        self._json(200, {"result": res})
+                    else:
+                        self._json(504, {"error": {"message": "phone tool call timed out or phone is offline"}})
+                    return
+                if path == "/api/phone/tool/result":
+                    try:
+                        req = json.loads(self._body() or b"{}")
+                    except ValueError:
+                        req = {}
+                    cid = req.get("id")
+                    cres = req.get("result", "")
+                    if cid:
+                        PHONE_BRIDGE.post_result(cid, cres)
+                    self._json(200, {"status": "ok"})
+                    return
             if path in ("/v1/audio/transcriptions", "/audio/transcriptions"):
                 self._audio_transcriptions()
                 return
@@ -6373,7 +6486,7 @@ def make_handler(svc: Service):
                     except EngineDied as e:
                         self._json(503, {"error": {"type": "server_error", "message": str(e)}})
                     return
-                if path in ("/v1/chat/completions", "/v1/completions", "/v1/messages", "/v1/responses"):
+                if path in ("/v1/chat/completions", "/v1/completions", "/v1/messages", "/v1/responses", "/v1/ray/chat"):
                     self.record = svc.begin_request(path, req)
                 if path == "/v1/responses":
                     self._responses(req)
@@ -6388,6 +6501,8 @@ def make_handler(svc: Service):
                     self._json(code, body)
                 elif path == "/v1/chat/completions":
                     self._openai(req)
+                elif path == "/v1/ray/chat":
+                    self._ray_chat(req)
                 elif path == "/v1/completions":
                     self._completions(req)
                 elif path == "/v1/messages":
@@ -6793,6 +6908,229 @@ def make_handler(svc: Service):
                     yield item
             finally:
                 items.close()
+
+        def _ray_history(self, session_name: str = "dl-ai-code"):
+            """Returns the recent conversational history from the shared CLI session daemon (dl_sessiond)."""
+            if not SESSIOND_SOCKET.exists():
+                self._json(200, {"session": session_name, "messages": []})
+                return
+            conn = socket.socket(socket.AF_UNIX)
+            conn.settimeout(10)
+            try:
+                conn.connect(str(SESSIOND_SOCKET))
+                conn.sendall((json.dumps({"op": "attach", "session": session_name}) + "\n").encode())
+                f = conn.makefile("rb")
+                hello = json.loads(f.readline() or "{}")
+                msgs = []
+                for ev in hello.get("events", []):
+                    ev_type = ev.get("type")
+                    if ev_type == "user":
+                        msgs.append({"role": "user", "content": ev.get("text", "")})
+                    elif ev_type == "text":
+                        if msgs and msgs[-1]["role"] == "assistant":
+                            msgs[-1]["content"] += ev.get("text", "")
+                        else:
+                            msgs.append({"role": "assistant", "content": ev.get("text", "")})
+                self._json(200, {
+                    "session": session_name,
+                    "state": hello.get("state", {}),
+                    "messages": msgs[-50:]
+                })
+            except Exception as e:
+                self._json(500, {"error": {"message": f"failed to load session history: {e}"}})
+            finally:
+                conn.close()
+
+        def _ray_chat(self, req: dict):
+            """Bridge /v1/ray/chat to the shared CLI session daemon (dl_sessiond) so Ray has access to
+            all MCP tools, full multi-turn conversational context, and workspace.
+            Falls back to raw engine completion if sessiond is not running."""
+            if not SESSIOND_SOCKET.exists():
+                self._ray_chat_prepare(req)
+                return self._openai(req)
+
+            messages = req.get("messages", [])
+            last_user_msg = next((m.get("content") for m in reversed(messages) if m.get("role") == "user"), "")
+            if not last_user_msg:
+                last_user_msg = req.get("text", "")
+            if not last_user_msg:
+                self._json(400, {"error": {"message": "messages must contain at least one user message"}})
+                return
+
+            session_name = req.get("session") or "dl-ai-code"
+            is_voice = req.get("voice", True)
+
+            clean_msg = last_user_msg.strip().lower().rstrip(".!?,")
+            is_new_session = clean_msg in (
+                "/clear", "/new", "/reset",
+                "clear", "new session", "start a new session",
+                "start new session", "clear session", "clear conversation",
+                "reset session", "reset conversation", "start a new conversation",
+                "new conversation", "start over", "start fresh"
+            )
+            followup_prompt = ""
+            for prefix in ("start a new session and ", "start a new session to ", "new session, ", "new session: ", "start fresh and "):
+                if clean_msg.startswith(prefix):
+                    is_new_session = True
+                    followup_prompt = last_user_msg[len(prefix):].strip()
+                    break
+
+            try:
+                conn = socket.socket(socket.AF_UNIX)
+                conn.settimeout(180)
+                conn.connect(str(SESSIOND_SOCKET))
+                f = conn.makefile("rb")
+            except OSError:
+                self._ray_chat_prepare(req)
+                return self._openai(req)
+
+            try:
+                conn.sendall((json.dumps({"op": "attach", "session": session_name}) + "\n").encode())
+                hello = json.loads(f.readline() or "{}")
+
+                if is_new_session:
+                    conn.sendall((json.dumps({
+                        "op": "input",
+                        "session": session_name,
+                        "text": "/clear",
+                        "voice": is_voice,
+                        "origin": "ray-android"
+                    }) + "\n").encode())
+                    # Consume events until turn_end
+                    while True:
+                        line = f.readline()
+                        if not line:
+                            break
+                        try:
+                            ev = json.loads(line)
+                        except Exception:
+                            continue
+                        if ev.get("type") == "turn_end":
+                            break
+
+                    if not followup_prompt:
+                        reply_text = "Started a clean new session! What would you like to work on?"
+                        if not req.get("stream", True):
+                            return self._json(200, {
+                                "id": "chatcmpl-ray",
+                                "object": "chat.completion",
+                                "model": svc.model,
+                                "choices": [{"index": 0, "message": {"role": "assistant", "content": reply_text}, "finish_reason": "stop"}]
+                            })
+                        self._sse()
+                        chunk = {
+                            "id": "chatcmpl-ray",
+                            "object": "chat.completion.chunk",
+                            "model": svc.model,
+                            "choices": [{"index": 0, "delta": {"content": reply_text}, "finish_reason": None}]
+                        }
+                        self.wfile.write(b"data: " + json.dumps(chunk, ensure_ascii=False).encode() + b"\n\n")
+                        self.wfile.write(b"data: [DONE]\n\n")
+                        self.wfile.flush()
+                        return
+
+                    # Follow-up prompt provided
+                    last_user_msg = followup_prompt
+
+                conn.sendall((json.dumps({
+                    "op": "input",
+                    "session": session_name,
+                    "text": last_user_msg,
+                    "voice": is_voice,
+                    "origin": "ray-android"
+                }) + "\n").encode())
+
+                if not req.get("stream", True):
+                    full_reply = ""
+                    while True:
+                        line = f.readline()
+                        if not line:
+                            break
+                        try:
+                            ev = json.loads(line)
+                        except Exception:
+                            continue
+                        if ev.get("type") == "text":
+                            full_reply += ev.get("text", "")
+                        elif ev.get("type") == "turn_end":
+                            break
+                    res = {
+                        "id": "chatcmpl-ray",
+                        "object": "chat.completion",
+                        "model": svc.model,
+                        "choices": [{
+                            "index": 0,
+                            "message": {"role": "assistant", "content": full_reply},
+                            "finish_reason": "stop"
+                        }]
+                    }
+                    return self._json(200, res)
+
+                self._sse()
+                while True:
+                    line = f.readline()
+                    if not line:
+                        break
+                    try:
+                        ev = json.loads(line)
+                    except Exception:
+                        continue
+                    ev_type = ev.get("type")
+                    if ev_type == "text":
+                        delta_text = ev.get("text", "")
+                        chunk = {
+                            "id": "chatcmpl-ray",
+                            "object": "chat.completion.chunk",
+                            "model": svc.model,
+                            "choices": [{
+                                "index": 0,
+                                "delta": {"content": delta_text},
+                                "finish_reason": None
+                            }]
+                        }
+                        self.wfile.write(b"data: " + json.dumps(chunk, ensure_ascii=False).encode() + b"\n\n")
+                        self.wfile.flush()
+                    elif ev_type == "turn_end":
+                        break
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return
+            finally:
+                conn.close()
+
+        def _ray_chat_prepare(self, req: dict):
+            """D.L. AI / Ray Android: inject Ray's persona and voice guidance for the assistant app."""
+            if "stream" not in req:
+                req["stream"] = True
+            if "strata_mcp" not in req and svc.mcp is not None:
+                req["strata_mcp"] = True
+            messages = req.setdefault("messages", [])
+            has_system = any(m.get("role") == "system" for m in messages)
+            try:
+                from dl_cli import RAY_ABOUT, voice_note
+            except ImportError:
+                try:
+                    from tools.dl_cli import RAY_ABOUT, voice_note
+                except ImportError:
+                    RAY_ABOUT = ("You and the model run on the home server, and that is what you call it.\n"
+                                 "Who you are: Ray (he/him), the household's red panda and AI assistant, as well as its "
+                                 "coding agent and its smart home helper (Home Assistant, through an MCP server). "
+                                 "Your avatar in the web app is a red panda drawn in dots. Like a red panda you are "
+                                 "curious, playful and good-natured. Talk like a friendly, capable person: casual and "
+                                 "direct, with a light joke now and then. When you use an emoji for yourself in writing, "
+                                 "it is 🐾 and no other animal.")
+                    def voice_note(thinking=True):
+                        return "[Spoken prompt: your reply will be read aloud. Answer in plain speech.]"
+            if not has_system:
+                messages.insert(0, {"role": "system", "content": RAY_ABOUT})
+            is_voice = req.pop("voice", False)
+            if is_voice and messages:
+                last_user = next((m for m in reversed(messages) if m.get("role") == "user"), None)
+                if last_user and isinstance(last_user.get("content"), str):
+                    v_note = voice_note(thinking=True)
+                    if v_note and v_note not in last_user["content"]:
+                        last_user["content"] += "\n" + v_note
 
         def _openai(self, req):
             req = svc.with_shared(req, "openai")

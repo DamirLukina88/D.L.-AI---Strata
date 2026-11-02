@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import threading
+import unicodedata
 from pathlib import Path
 
 DEFAULT_VOICE = "en_US-hfc_male-medium"
@@ -58,9 +59,91 @@ def get_tts_status(env=None) -> dict:
     return {"available": bool(piper_path(env) and voice in have), "engine": "piper", "voice": voice, "voices": have}
 
 
+def clean_for_speech(text: str) -> str:
+    """Prepares text for natural speech synthesis: removes emojis, pictograms, code blocks,
+    markdown formatting, and translates numbers/units to plain spoken words."""
+    if not text:
+        return ""
+    # 1. Remove thinking / reasoning blocks
+    text = re.sub(r"(?is)<think>.*?</think>", "", text)
+    text = re.sub(r"(?is)<think>.*$", "", text)
+
+    # 2. Fenced code blocks
+    text = re.sub(r"(?m)(?:^|\n)```[^\n`]*\n[\s\S]*?(?:^|\n)```[ \t]*(?:\n|$)", " [Code block omitted.] ", text)
+    text = re.sub(r"(?m)(?:^|\n)```[^\n`]*\n[\s\S]*$", " [Code block omitted.] ", text)
+
+    # 3. Strip Markdown Headings (# Header)
+    text = re.sub(r"(?m)^#{1,6}\s+", "", text)
+
+    # 4. Strip Bold and Italics
+    text = re.sub(r"[*_]{1,3}([^*_]+)[*_]{1,3}", r"\1", text)
+
+    # 5. Strip Blockquotes (> quote)
+    text = re.sub(r"(?m)^>\s*", "", text)
+
+    # 6. Strip List bullets and numbers
+    text = re.sub(r"(?m)^[\s]*[-*+]\s+", "", text)
+    text = re.sub(r"(?m)^[\s]*\d+\.\s+", "", text)
+
+    # 7. Strip inline code (`code`)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+
+    # 8. Convert markdown links [Label](url) to just Label
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+
+    # 9. Strip bare URLs
+    text = re.sub(r"https?://[^\s]+", "link", text)
+
+    # 10. Strip horizontal rules
+    text = re.sub(r"(?m)^[-*_]{3,}\s*$", "", text)
+
+    # 11. Currency, percentages, temperatures
+    text = re.sub(r"\$(\d+(?:\.\d+)?)", r"\1 dollars", text)
+    text = re.sub(r"(\d+)\s*%", r"\1 percent", text)
+    text = re.sub(r"%", " percent ", text)
+    text = re.sub(r"(?i)(\d+)\s*°\s*C\b", r"\1 degrees Celsius", text)
+    text = re.sub(r"(?i)(\d+)\s*°\s*F\b", r"\1 degrees Fahrenheit", text)
+    text = re.sub(r"°", " degrees ", text)
+    text = re.sub(r"~(\d+)", r"about \1", text)
+
+    # 12. Translate speech-friendly symbols
+    text = re.sub(r"&", " and ", text)
+    text = re.sub(r"->|→|=>|⇒", ", ", text)
+    text = re.sub(r"\s*\+\s*", " plus ", text)
+    text = re.sub(r"\s*=\s*", " equals ", text)
+
+    # 13. Strip emojis, pictograms, variation selectors, skin tone modifiers
+    chars = []
+    for ch in text:
+        cat = unicodedata.category(ch)
+        cp = ord(ch)
+        # So: Symbol other (emojis, pictograms)
+        # Sk: Symbol modifier
+        if cat in ("So", "Sk") or cp in (0xFE0E, 0xFE0F, 0x200D) or (0x1F300 <= cp <= 0x1FAFF) or (0x2600 <= cp <= 0x27BF):
+            continue
+        chars.append(ch)
+    text = "".join(chars)
+
+    # 14. Strip technical punctuation and symbols
+    text = re.sub(r"[~|^\\<>/#*_§©®™•●■◆▪▫◦★☆✓✔✕✖✗]", " ", text)
+
+    # 15. Replace parentheses with commas
+    text = re.sub(r"\(([^)]+)\)", r", \1, ", text)
+
+    # 16. Normalize dashes
+    text = re.sub(r"\s*[\u2012\u2013\u2014\u2015\u2212]\s*", ", ", text)
+
+    # 17. Collapse duplicate whitespace and commas
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"(\s*,)+", ",", text)
+    text = re.sub(r"\s*,\s*", ", ", text)
+    text = re.sub(r"\n\s*\n+", "\n\n", text)
+    return text.strip()
+
+
 def synthesize(text: str, voice: str | None = None, speed: float = 1.0, env=None, timeout: float = 60) -> bytes:
     """WAV bytes (16-bit mono, the voice's own rate) for `text`; `speed` 1.0 is the voice's normal pace."""
-    text = (text or "").strip()
+    text = clean_for_speech(text)
     if not text:
         raise SpeechError("no text to speak")
     if len(text) > MAX_CHARS:

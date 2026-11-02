@@ -5,7 +5,7 @@ description: "Record of every change the agent made to this wiki"
 status: active
 tags: [meta, changelog]
 created: 2026-10-05
-updated: 2026-11-01
+updated: 2026-11-02
 last_verified: 2026-10-05
 ---
 
@@ -15,6 +15,9 @@ Newest entries first.
 
 ## Log
 
+- **2026-11-02:** Update. decisions/ray-assistant-persona.md. (Agent: Antigravity)
+- **2026-11-02:** Ingestion. decisions/ray-hybrid-webview-companion-and-phone-mcp.md. (Agent: Antigravity)
+- **2026-11-02:** Update. decisions/desktop-piper-voice-switching-and-stt-auto-speak.md. (Agent: Antigravity)
 - **2026-11-01:** Ingestion. decisions/deepl-only-non-english-and-weather-guards.md. (Agent: Antigravity)
 - **2026-11-01:** Record 2026-11-01 Strata performance benchmark results on 64K context window. (Agent: Antigravity)
 - **2026-11-01:** Ingestion. artifacts/strata-benchmark-2026-11-01.md. (Agent: Antigravity)

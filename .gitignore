@@ -78,3 +78,15 @@ serve/web/site-config.js
 # Local benchmark reports and scratch research notes
 /reports/
 /research_notes/
+
+# Android App build outputs, local properties, and secrets
+android/.gradle/
+android/build/
+android/*/build/
+android/local.properties
+android/secrets.properties
+android/*/*.jks
+android/*/*.keystore
+*.apk
+*.aab
+*.bak

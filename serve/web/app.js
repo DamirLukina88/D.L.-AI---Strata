@@ -478,7 +478,10 @@ const TTSController = {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
       if (!this.audioCtx) this.audioCtx = new AudioCtx();
-      if (this.audioCtx.state === "suspended") this.audioCtx.resume();
+      if (this.audioCtx.state === "suspended") {
+        this.audioCtx.resume().catch(() => {});
+      }
+      if (this.audioCtx.state !== "running") return;
       const buffer = this.audioCtx.createBuffer(1, Math.floor(this.audioCtx.sampleRate * 0.05), this.audioCtx.sampleRate);
       const source = this.audioCtx.createBufferSource();
       source.buffer = buffer;
@@ -508,6 +511,9 @@ const TTSController = {
   },
 
   stop() {
+    if (typeof window !== "undefined" && window.RayAndroid && typeof window.RayAndroid.stopSpeaking === "function") {
+      window.RayAndroid.stopSpeaking();
+    }
     if (!window.speechSynthesis) return;
     if (typeof RayFace !== "undefined") RayFace.end(this.speaking && this.currentIndex >= this.queue.length);
     this.stopWatchdog();
@@ -552,6 +558,16 @@ const TTSController = {
   },
 
   speakText(rawText, btn = null, msgObj = null) {
+    if (typeof window !== "undefined" && window.RayAndroid && typeof window.RayAndroid.speak === "function") {
+      const clean = this.clean ? this.clean(rawText) : rawText;
+      if (!clean) return;
+      this.speaking = true;
+      this.activeBtn = btn;
+      this.activeMsg = msgObj;
+      this.updateButtonState(true);
+      window.RayAndroid.speak(clean);
+      return;
+    }
     if (!window.speechSynthesis) {
       toast("error", "TTS not supported", "Your browser does not support the Web Speech API.");
       return;
@@ -771,7 +787,14 @@ const TTSController = {
     }
     if (!this.speaking || this.queue !== queue || i !== this.currentIndex) return;
     const ctx = this.audio();
-    if (ctx.state === "suspended" && !this.paused) { try { await ctx.resume(); } catch (e) {} }
+    if (ctx && ctx.state === "suspended" && !this.paused) {
+      try {
+        await ctx.resume();
+      } catch (e) {
+        console.warn("AudioContext resume blocked by browser autoplay policy:", e);
+        return;
+      }
+    }
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.playbackRate.value = pitch;
@@ -1564,6 +1587,16 @@ const STTController = {
 
   async start(target = "code") {
     this.dismissKeyboard(target);
+    if (typeof window !== "undefined" && window.RayAndroid && typeof window.RayAndroid.startListening === "function") {
+      if (typeof TTSController !== "undefined" && TTSController.speaking) {
+        TTSController.stop();
+      }
+      this.currentTarget = target;
+      this.isRecording = true;
+      this.updateMicUI(true);
+      window.RayAndroid.startListening();
+      return;
+    }
     const engine = this.getEngine();
     if (engine === "whisper") {
       return this.startMediaRecorder(target);
@@ -1573,6 +1606,11 @@ const STTController = {
 
   stop() {
     this.clearSilenceTimer();
+    if (typeof window !== "undefined" && window.RayAndroid && typeof window.RayAndroid.stopListening === "function") {
+      try { window.RayAndroid.stopListening(); } catch (_) {}
+      this.isRecording = false;
+      this.updateMicUI(false);
+    }
     if (this.maxTimer) {
       clearTimeout(this.maxTimer);
       this.maxTimer = null;
@@ -1591,6 +1629,26 @@ const STTController = {
       try {
         this.recognition.stop();
       } catch (e) {}
+    }
+  },
+
+  handleNativeSpeechResult(text, isFinal) {
+    if (!text) return;
+    const target = this.currentTarget || "code";
+    const ta = this.getTargetInput(target);
+    if (ta) {
+      ta.value = text;
+      try { ta.selectionStart = ta.selectionEnd = ta.value.length; } catch (_) {}
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    this.lastInputWasVoice = true;
+    this.lastTranscribedText = text;
+    if (isFinal) {
+      this.isRecording = false;
+      this.updateMicUI(false);
+      if (this.autoSend) {
+        this.scheduleAutoSend(target);
+      }
     }
   },
 
@@ -1940,7 +1998,12 @@ function showTab(name) {
   for (const v of ["code", "monitor", "about"]) {
     if ($(`view-${v}`)) $(`view-${v}`).hidden = !shown(v);
   }
-  if (location.hash.slice(1) !== tab) history.replaceState(null, "", tab === "code" ? location.pathname : `#${tab}`);
+  const currentHash = location.hash.slice(1);
+  if (tab === "code" && currentHash) {
+    history.replaceState(null, "", location.pathname);
+  } else if (tab !== "code" && currentHash !== tab) {
+    history.replaceState(null, "", `#${tab}`);
+  }
   if (shown("code")) openCodeSession(); else codeDisconnect();
   if (shown("monitor")) loadMcp();
   if (shown("about")) loadConfig();
@@ -2327,7 +2390,9 @@ function codeEvent(ev, replay) {
     case "user":
       codeEnd();
       if (!replay && ev.voice != null) {
-        code.turnFromVoice = Boolean(ev.voice);
+        // Only auto-speak if the prompt originated from this browser client (not an external device like the Android app or CLI)
+        const isOwnPrompt = code.client ? ev.origin === code.client : ev.origin !== "ray-android";
+        code.turnFromVoice = Boolean(ev.voice) && isOwnPrompt;
         codeSpeechEnd();
         if (code.turnFromVoice && TTSController.willAutoSpeak() && TTSController.orb() && typeof RayFace !== "undefined") {
           RayFace.thinking();
@@ -2823,7 +2888,10 @@ document.addEventListener("visibilitychange", () => {     // phones suspend back
 const DEFAULT_KEY = "";
 function headers(json = false) {
   const h = {};
-  const key = store.get("apikey", DEFAULT_KEY);
+  let key = store.get("apikey", DEFAULT_KEY);
+  if (!key && typeof window !== "undefined" && window.RayAndroid && typeof window.RayAndroid.getApiKey === "function") {
+    try { key = window.RayAndroid.getApiKey(); } catch (_) {}
+  }
   if (key) h.Authorization = "Bearer " + key;
   if (json) h["Content-Type"] = "application/json";
   return h;
@@ -4098,9 +4166,131 @@ syncShared();                                            // the server's Chat se
 $("drawer-close").onclick = () => openDrawer(false);
 $("scrim").onclick = () => openDrawer(false);
 
+function hasOpenDrawer() {
+  if (typeof document === "undefined") return false;
+  const s = document.getElementById("sessions-drawer");
+  const d = document.getElementById("drawer");
+  return Boolean((s && s.dataset && s.dataset.open === "true") || (d && d.dataset && d.dataset.open === "true"));
+}
+
+function closeOpenDrawer() {
+  if (typeof document === "undefined") return false;
+  const s = document.getElementById("sessions-drawer");
+  if (s && s.dataset && s.dataset.open === "true") {
+    if (typeof openSessions === "function") openSessions(false);
+    else s.dataset.open = "false";
+    return true;
+  }
+  const d = document.getElementById("drawer");
+  if (d && d.dataset && d.dataset.open === "true") {
+    if (typeof openDrawer === "function") openDrawer(false);
+    else d.dataset.open = "false";
+    return true;
+  }
+  return false;
+}
+
+let phoneBridgePollerRunning = false;
+function startPhoneCompanionBridge() {
+  if (phoneBridgePollerRunning) return;
+  phoneBridgePollerRunning = true;
+  let heartbeatTick = 0;
+
+  async function pollLoop() {
+    if (typeof window === "undefined" || !window.RayAndroid) {
+      phoneBridgePollerRunning = false;
+      return;
+    }
+    try {
+      if (++heartbeatTick % 10 === 1) {
+        fetch("api/phone/status", { method: "POST", headers: headers(true), body: "{}" }).catch(() => {});
+      }
+      const r = await fetch("api/phone/tool/pending", { headers: headers() });
+      if (r.ok) {
+        const data = await r.json();
+        if (data && data.pending) {
+          const p = data.pending;
+          let toolRes = "";
+          try {
+            if (typeof window.RayAndroid.executeTool === "function") {
+              toolRes = window.RayAndroid.executeTool(p.tool, JSON.stringify(p.args || {}), p.id);
+            } else {
+              toolRes = "Error: RayAndroid.executeTool unavailable";
+            }
+          } catch (e) {
+            toolRes = "Error executing tool: " + (e && e.message ? e.message : String(e));
+          }
+          let resVal = toolRes;
+          try {
+            const parsed = JSON.parse(toolRes);
+            if (parsed && parsed.result !== undefined) resVal = parsed.result;
+          } catch (_) {}
+          await fetch("api/phone/tool/result", {
+            method: "POST",
+            headers: headers(true),
+            body: JSON.stringify({ id: p.id, result: resVal })
+          }).catch(() => {});
+        }
+      }
+    } catch (_) {}
+    setTimeout(pollLoop, 1500);
+  }
+  pollLoop();
+}
+
+function checkRayAndroidCompanion() {
+  if (typeof window === "undefined" || !window.RayAndroid) return;
+  if (window._rayAndroidCompanionInitialized) return;
+  window._rayAndroidCompanionInitialized = true;
+  if (typeof document !== "undefined" && document.body) {
+    document.body.classList.add("is-android-companion");
+    const logoutBtn = document.getElementById("logout-btn");
+    if (logoutBtn) logoutBtn.style.display = "none";
+    const fullscreenBtn = document.getElementById("code-fullscreen-btn");
+    if (fullscreenBtn) fullscreenBtn.style.display = "none";
+  }
+  if (typeof showTab === "function") {
+    showTab("code");
+  }
+  if (typeof window.RayAndroid.getApiKey === "function") {
+    try {
+      const bridgeKey = window.RayAndroid.getApiKey();
+      if (bridgeKey) {
+        store.set("apikey", bridgeKey);
+        const apiInput = document.getElementById("api-key");
+        if (apiInput) apiInput.value = bridgeKey;
+      }
+    } catch (_) {}
+  }
+  if (typeof window.RayAndroid.hasOpenDrawer !== "function") {
+    try {
+      window.RayAndroid.hasOpenDrawer = () => hasOpenDrawer();
+    } catch (_) {}
+  }
+  if (typeof window.RayAndroid.closeOpenDrawer !== "function") {
+    try {
+      window.RayAndroid.closeOpenDrawer = () => closeOpenDrawer();
+    } catch (_) {}
+  }
+  window.onRayAndroidSpeechResult = (text, isFinal) => {
+    if (typeof STTController !== "undefined" && typeof STTController.handleNativeSpeechResult === "function") {
+      STTController.handleNativeSpeechResult(text, isFinal);
+    }
+  };
+  startPhoneCompanionBridge();
+}
+
+if (typeof window !== "undefined") {
+  window.hasOpenDrawer = hasOpenDrawer;
+  window.closeOpenDrawer = closeOpenDrawer;
+  window.checkRayAndroidCompanion = checkRayAndroidCompanion;
+}
+
 // ------------------------------------------------------------------ start
+checkRayAndroidCompanion();
 TTSController.init();
 STTController.init();
 loadHealth().then(loadMcp).then(loadAvailableModels);
 showTab(location.hash.slice(1) || "code");
 poll();
+
