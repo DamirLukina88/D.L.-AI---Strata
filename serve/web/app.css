@@ -1257,6 +1257,9 @@ body.is-resizing .view { pointer-events: none; }      /* the drag keeps going ov
 .is-android-companion .code-mobile-composer {
   padding-bottom: 8px;
 }
+/* About settings the app doesn't use: the key comes from the app, and dictation and the fallback voice are the
+   phone's own (browser voices, STT engine and language, Brave) */
+.is-android-companion .android-hide,
 .is-android-companion #logout-btn,
 .is-android-companion #code-fullscreen-btn {
   display: none !important;

@@ -11,7 +11,7 @@
 <meta name="theme-color" content="#0b0d10">
 <link rel="stylesheet" href="web/tokens.css">
 <link rel="stylesheet" href="web/components.css">
-<link rel="stylesheet" href="web/app.css?v=20261101-mon2">
+<link rel="stylesheet" href="web/app.css?v=20261102-android-about">
 <script>
   // the theme before the first paint: default dark for D.L. AI
   try {
@@ -241,7 +241,7 @@
       </div>
       <div class="st-card">
         <span class="card-title">Settings</span>
-        <div class="st-field">
+        <div class="st-field android-hide">
           <label class="st-label" for="api-key">API key <output>only if the server was started with one</output></label>
           <input class="st-input" id="api-key" type="password" autocomplete="off" placeholder="Not needed">
         </div>
@@ -255,7 +255,7 @@
         </div>
         <p class="muted small">Ray reads aloud with his own voice (Piper HFC male) from the home server, the same on every device. With the server voice off below, or if it fails, the browser's voice reads instead. Dictation uses local Whisper on the home server, or the browser's own recognition (engine below).</p>
 
-        <div class="st-field">
+        <div class="st-field android-hide">
           <label class="st-label" for="tts-voice-select">Read-aloud voice (TTS) <output id="tts-voice-count"></output></label>
           <select class="st-select" id="tts-voice-select" aria-label="Select speech voice">
             <option value="">System default</option>
@@ -315,7 +315,7 @@
           </button>
         </div>
 
-        <div class="st-field" style="border-top:1px solid var(--st-line-soft);margin-top:16px;padding-top:14px;">
+        <div class="st-field android-hide" style="border-top:1px solid var(--st-line-soft);margin-top:16px;padding-top:14px;">
           <label class="st-label" for="stt-engine-select">Speech recognition engine (STT)</label>
           <select class="st-select" id="stt-engine-select" aria-label="Select speech recognition engine">
             <option value="auto">Automatic (Local Whisper or Browser Native)</option>
@@ -325,7 +325,7 @@
           <div class="muted small" id="stt-engine-status" style="margin-top:4px;">Checking local Whisper engine...</div>
         </div>
 
-        <div class="st-field" style="margin-top:10px;">
+        <div class="st-field android-hide" style="margin-top:10px;">
           <label class="st-label" for="stt-lang-select">Speech recognition language (STT)</label>
           <select class="st-select" id="stt-lang-select" aria-label="Select speech recognition language">
             <option value="en-US">English (United States)</option>
@@ -348,7 +348,7 @@
           <button class="st-toggle" id="stt-auto-toggle" role="switch" aria-checked="false" aria-label="Auto send on speech pause"></button>
         </div>
 
-        <div class="toggle-row" style="border-top:1px dashed var(--st-line);margin-top:8px;padding-top:8px;">
+        <div class="toggle-row android-hide" style="border-top:1px dashed var(--st-line);margin-top:8px;padding-top:8px;">
           <span>Brave Browser Voice Dictation<br><span class="muted small">If voice typing is blocked in Brave Browser</span></span>
           <button class="st-btn st-btn--secondary st-btn--sm" id="brave-guide-btn" type="button">Setup Guide</button>
         </div>
@@ -406,10 +406,6 @@
       <input class="st-slider" type="range" id="s-topk" min="1" max="64" step="1">
     </div>
     <div class="st-field">
-      <label class="st-label" for="s-max">Max tokens <output>empty = until done</output></label>
-      <input class="st-input" id="s-max" type="number" min="1" step="1" placeholder="Until done">
-    </div>
-    <div class="st-field">
       <label class="st-label" for="s-seed">Seed <output>empty = random</output></label>
       <input class="st-input" id="s-seed" type="number" min="1" step="1" placeholder="Random">
     </div>
@@ -420,7 +416,7 @@
       and other apps get them for anything they don't set themselves.</p>
     <div class="drawer-actions">
       <button class="st-btn st-btn--secondary" id="s-reset" type="button"
-        title="Thinking high, temperature 0.6, top-p 0.95, top-k 20, max tokens auto, no seed - saved for the CLI">Reset to defaults</button>
+        title="Thinking high, temperature 0.6, top-p 0.95, top-k 20, no seed - saved for the CLI">Reset to defaults</button>
       <button class="st-btn st-btn--primary" id="s-apply" type="button">Apply</button>
     </div>
   </div>
@@ -519,6 +515,6 @@
 <script src="web/site-config.js?v=20261020-logout1"></script>
 <script src="web/speakstream.js?v=20261029-panda25"></script>
 <script src="web/rayface.js?v=20261029-panda25"></script>
-<script src="web/app.js?v=20261102-android-setup"></script>
+<script src="web/app.js?v=20261102-android-about"></script>
 </body>
 </html>

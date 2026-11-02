@@ -3556,7 +3556,7 @@ function markdown(text) {
 }
 
 // ------------------------------------------------------------------ settings (thinking and sampling, shared with the CLI)
-const DEFAULTS = {thinking: "auto", temperature: 0.6, top_p: 0.95, top_k: 20, max: "", seed: "", esp: true};
+const DEFAULTS = {thinking: "auto", temperature: 0.6, top_p: 0.95, top_k: 20, seed: "", esp: true};
 let settings = {...DEFAULTS, ...store.get("sampling", {})};
 
 // ------------------------------------------------------------------ the sampling drawer
@@ -3597,7 +3597,7 @@ function loadDrawer(s = settings) {
   const eff = (code.state && code.state.effort) || s.thinking || "auto";
   for (const b of $("s-thinking").children) b.setAttribute("aria-checked", String(b.dataset.v === eff));
   $("s-temp").value = s.temperature; $("s-topp").value = s.top_p; $("s-topk").value = s.top_k;
-  $("s-max").value = s.max; $("s-seed").value = s.seed;
+  $("s-seed").value = s.seed;
   $("s-esp").setAttribute("aria-checked", String(s.esp !== false));
   $("esp-row").hidden = !projectionLoaded();
   outputs();
@@ -3610,7 +3610,7 @@ function fromShared(d) {
   return {thinking: stored.thinking || (d.reasoning_effort === "high" ? "auto" : d.reasoning_effort) || DEFAULTS.thinking,
           temperature: d.temperature ?? DEFAULTS.temperature,
           top_p: d.top_p ?? settings.top_p, top_k: d.top_k ?? settings.top_k,
-          max: d.max_tokens ? String(d.max_tokens) : "", seed: d.seed != null ? String(d.seed) : "",
+          seed: d.seed != null ? String(d.seed) : "",
           esp: d.experimental_speed_projection ?? settings.esp};
 }
 async function syncShared() {
@@ -3630,7 +3630,6 @@ function sharedDefaults(s) {
   const d = {reasoning_effort: (s.thinking && s.thinking !== "auto") ? s.thinking : "high", temperature: +s.temperature};
   if (+s.temperature > 0) Object.assign(d, {top_p: +s.top_p, top_k: +s.top_k});
   if (s.seed) d.seed = +s.seed;
-  if (s.max) d.max_tokens = +s.max;
   if (projectionLoaded()) d.experimental_speed_projection = s.esp !== false;
   return d;
 }
@@ -3666,7 +3665,7 @@ $("s-apply").onclick = async () => {
   const sel = [...$("s-thinking").children].find((b) => b.getAttribute("aria-checked") === "true");
   const thinking = sel ? sel.dataset.v : "auto";
   settings = {thinking, temperature: +$("s-temp").value, top_p: +$("s-topp").value,
-              top_k: +$("s-topk").value, max: $("s-max").value.trim(), seed: $("s-seed").value.trim(),
+              top_k: +$("s-topk").value, seed: $("s-seed").value.trim(),
               esp: $("s-esp").getAttribute("aria-checked") === "true"};
   store.set("sampling", settings);
   openDrawer(false);
