@@ -48,6 +48,9 @@ To eliminate dual-app maintenance drift between the desktop Web App and the Andr
 - Bidirectional tool relay loop: `startPhoneCompanionBridge()` in `app.js` polls `api/phone/tool/pending`, dispatches execution via `RayAndroid.executeTool()`, and posts results back to `api/phone/tool/result`.
 - Navigation loop prevention: Guards `history.replaceState` against spurious re-triggers when switching between web app tabs.
 
+## Related
+- [Session Transcript & Development Handoff (2026-11-02)](../artifacts/session-transcript-2026-11-02-companion-handoff.md) — Complete transcript and Claude Code technical handoff dossier covering root-cause diagnoses and live verification.
+
 ## Sources
 - `tools/phone_mcp.py`
 - `tools/test_phone_mcp.py`

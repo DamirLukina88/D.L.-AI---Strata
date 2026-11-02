@@ -1252,10 +1252,10 @@ body.is-resizing .view { pointer-events: none; }      /* the drag keeps going ov
    Android Companion App Hybrid Styling & Safe Areas
    ================================================================ */
 .is-android-companion .st-header {
-  padding-top: max(8px, env(safe-area-inset-top));
+  padding-top: 8px;
 }
 .is-android-companion .code-mobile-composer {
-  padding-bottom: max(10px, env(safe-area-inset-bottom));
+  padding-bottom: 8px;
 }
 .is-android-companion #logout-btn,
 .is-android-companion #code-fullscreen-btn {

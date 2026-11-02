@@ -15,6 +15,8 @@ Newest entries first.
 
 ## Log
 
+- **2026-11-02:** Artifact Backup. Exported full session transcript and Claude Code development handoff dossier. (Agent: Antigravity)
+- **2026-11-02:** Ingestion. artifacts/session-transcript-2026-11-02-companion-handoff.md. (Agent: Antigravity)
 - **2026-11-02:** Update. decisions/ray-assistant-persona.md. (Agent: Antigravity)
 - **2026-11-02:** Ingestion. decisions/ray-hybrid-webview-companion-and-phone-mcp.md. (Agent: Antigravity)
 - **2026-11-02:** Update. decisions/desktop-piper-voice-switching-and-stt-auto-speak.md. (Agent: Antigravity)
