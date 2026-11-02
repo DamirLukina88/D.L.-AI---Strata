@@ -79,6 +79,8 @@ Found and fixed during validation (`fbbb5ebb`):
 - Gotcha: `RayVoiceInteractionService.instance` exists only in the process Android bound the service to. After HyperOS's swipe-away kill (`SwipeUpClean`) the next process had no binding (`onBindingDied`), so the trampoline's `showSession` failed. The trampoline now opens `RayVoiceActivity`, the same drawer as an activity (shown over the lock screen). Not reproducible over adb: `am kill` leaves the process alive while the service is bound, and force-stop makes Android rebind at once.
 - Drawer show steps are logged (`RayAssistService: onPrepareToShowSession` / `onShowSessionFailed`, `RaySessionService`, `RayVoiceSession: onCreate/onPrepareShow/onShow`) to explain the triggers that opened nothing.
 
+**No self-listening (2026-11-02):** every listen first silences both of Ray's voices (`VoiceOutput.stopAll`: the native `AudioPlaybackService` and the web `TTSController`), and closing, swiping away or leaving the drawer stops listening, drops the pending answer and stops speech (`VoiceDrawerController.close()`). Before, the app's mic button could pick up the drawer's spoken answer and send it back to Ray.
+
 Debugging recipe: debug builds expose `webview_devtools_remote_<pid>`; `adb forward tcp:9333 localabstract:webview_devtools_remote_$(adb shell pidof com.damirl.ray)` then `curl localhost:9333/json` lists every live page (one per WebView) for measuring layout with `Runtime.evaluate`.
 
 ## Related
