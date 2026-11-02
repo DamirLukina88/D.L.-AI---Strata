@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The web app's background, st-bg in serve/web/tokens.css -->
+    <color name="strata_bg">#FF0B0D10</color>
+</resources>

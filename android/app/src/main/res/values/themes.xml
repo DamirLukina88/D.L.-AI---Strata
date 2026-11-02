@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Ray" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Dark, in the web app's background (st-bg): a light theme showed a white window (and splash) for a moment before the web app
+         drew, every time Ray started -->
+    <style name="Theme.Ray" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/strata_bg</item>
+        <item name="android:colorBackground">@color/strata_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
 
     <style name="Theme.Ray.Translucent" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>

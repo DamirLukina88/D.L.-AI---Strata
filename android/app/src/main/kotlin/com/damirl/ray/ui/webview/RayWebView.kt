@@ -95,6 +95,8 @@ fun RayWebView(
                     displayZoomControls = false
                 }
 
+                // Strata's --st-bg until the page draws (WebView is white by default, which flashed on start)
+                setBackgroundColor(android.graphics.Color.parseColor("#0B0D10"))
                 isVerticalScrollBarEnabled = false
                 isHorizontalScrollBarEnabled = false
 
