@@ -107,7 +107,7 @@ class RayNotificationListenerService : NotificationListenerService() {
 
         val otp = extract2faCode("$title $text")
         if (otp != null) {
-            Log.d(TAG, "Extracted 2FA OTP code: $otp from ${sbn.packageName}")
+            Log.d(TAG, "2FA code found in a notification from ${sbn.packageName}")   // never the code itself
         }
     }
 

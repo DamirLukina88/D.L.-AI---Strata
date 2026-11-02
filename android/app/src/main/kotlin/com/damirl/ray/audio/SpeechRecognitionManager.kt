@@ -105,7 +105,7 @@ class SpeechRecognitionManager(private val context: Context) {
                 override fun onResults(results: Bundle?) {
                     val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     val text = matches?.firstOrNull()?.trim() ?: ""
-                    Log.d(TAG, "Final transcription: '$text'")
+                    if (com.damirl.ray.BuildConfig.DEBUG) Log.d(TAG, "Final transcription: '$text'")
                     _isListening.value = false
                     _partialText.value = text
                     destroyRecognizer()
@@ -120,7 +120,7 @@ class SpeechRecognitionManager(private val context: Context) {
                     val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     val text = matches?.firstOrNull()?.trim() ?: ""
                     if (text.isNotBlank()) {
-                        Log.d(TAG, "Partial transcription: '$text'")
+                        if (com.damirl.ray.BuildConfig.DEBUG) Log.d(TAG, "Partial transcription: '$text'")
                         _partialText.value = text
                     }
                 }

@@ -13,11 +13,9 @@ import com.damirl.ray.audio.BluetoothMic
 import com.damirl.ray.audio.VoiceOutput
 import com.damirl.ray.audio.SpeechCleaner
 import com.damirl.ray.audio.SpeechRecognitionManager
-import com.damirl.ray.tools.CameraVisionManager
-import com.damirl.ray.tools.DeviceToolsManager
-import com.damirl.ray.tools.RayAccessibilityService
-import com.damirl.ray.tools.RayMediaController
-import com.damirl.ray.tools.RayNotificationListenerService
+import com.damirl.ray.BuildConfig
+import com.damirl.ray.network.StrataOrigins
+import com.damirl.ray.tools.PhoneTools
 import org.json.JSONObject
 
 class RayNativeBridge(
@@ -30,10 +28,20 @@ class RayNativeBridge(
         private const val TAG = "RayNativeBridge"
     }
 
-    private val deviceTools = DeviceToolsManager(context)
-    private val mediaController = RayMediaController(context)
-    private val cameraVision = CameraVisionManager(context)
+    private val phoneTools = PhoneTools(context)
     private var speechManager: SpeechRecognitionManager? = null
+
+    // The page the WebView shows now (set by RayWebView on every navigation).  Every call below answers only the
+    // Strata server's own pages: any other page the WebView might show (a link, a redirect) gets nothing, above all
+    // not the API key or the phone tools
+    @Volatile
+    var pageUrl: String? = null
+
+    private fun trusted(call: String): Boolean {
+        if (StrataOrigins.isTrusted(pageUrl)) return true
+        Log.w(TAG, "RayAndroid.$call refused: the page is not the Strata server")
+        return false
+    }
 
     init {
         // the drawer and the native mic stop the web app's voice through this before they listen
@@ -51,9 +59,10 @@ class RayNativeBridge(
 
     @JavascriptInterface
     fun speak(text: String) {
+        if (!trusted("speak")) return
         val cleaned = SpeechCleaner.clean(text)
         if (cleaned.isBlank()) return
-        Log.d(TAG, "speak: '$cleaned'")
+        if (BuildConfig.DEBUG) Log.d(TAG, "speak: '$cleaned'")
         if (audioSpeaker != null) {
             audioSpeaker.invoke(cleaned)
         } else {
@@ -65,6 +74,7 @@ class RayNativeBridge(
     // through the headset (BluetoothMic): TTSController holds it while it reads aloud and lets go when it stops
     @JavascriptInterface
     fun holdHeadsetForSpeech(on: Boolean) {
+        if (!trusted("holdHeadsetForSpeech")) return
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             if (!on) {
                 BluetoothMic.release("web-reply")
@@ -77,23 +87,25 @@ class RayNativeBridge(
 
     // Polled by the web app's TTSController so it speaks the next chunk only after this one finishes
     @JavascriptInterface
-    fun isSpeaking(): Boolean = AudioPlaybackService.isSpeakingState.value
+    fun isSpeaking(): Boolean = trusted("isSpeaking") && AudioPlaybackService.isSpeakingState.value
 
     @JavascriptInterface
     fun stopSpeaking() {
+        if (!trusted("stopSpeaking")) return
         Log.d(TAG, "stopSpeaking")
         AudioPlaybackService.stopSpeaking(context)
     }
 
     @JavascriptInterface
     fun startListening() {
+        if (!trusted("startListening")) return
         Log.d(TAG, "startListening called from web")
         hapticFeedback("subtle")
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             try {
                 speechManager?.startListening(
                     onFinalResult = { transcribed ->
-                        Log.d(TAG, "Speech final: '$transcribed'")
+                        if (BuildConfig.DEBUG) Log.d(TAG, "Speech final: '$transcribed'")
                         deliverSpeechResultToWeb(transcribed, isFinal = true)
                     },
                     onError = { err ->
@@ -108,6 +120,7 @@ class RayNativeBridge(
 
     @JavascriptInterface
     fun stopListening() {
+        if (!trusted("stopListening")) return
         Log.d(TAG, "stopListening called from web")
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             try {
@@ -120,6 +133,7 @@ class RayNativeBridge(
 
     @JavascriptInterface
     fun hapticFeedback(intensity: String = "subtle") {
+        if (!trusted("hapticFeedback")) return
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
@@ -149,20 +163,22 @@ class RayNativeBridge(
 
     // A workspace file's single-use download link (absolute URL) and its name: into Downloads, see Downloads
     @JavascriptInterface
-    fun downloadFile(url: String, fileName: String): Boolean = Downloads.enqueue(context, url, fileName)
+    fun downloadFile(url: String, fileName: String): Boolean = trusted("downloadFile") && Downloads.enqueue(context, url, fileName)
 
     // "Ok Ray" on or off (the switch in the web app's About card); see WakeWord
     @JavascriptInterface
-    fun isWakeWordOn(): Boolean = com.damirl.ray.assistant.WakeWord.isOn(context)
+    fun isWakeWordOn(): Boolean = trusted("isWakeWordOn") && com.damirl.ray.assistant.WakeWord.isOn(context)
 
     @JavascriptInterface
     fun setWakeWord(on: Boolean) {
+        if (!trusted("setWakeWord")) return
         android.os.Handler(android.os.Looper.getMainLooper()).post { com.damirl.ray.assistant.WakeWord.set(context, on) }
     }
 
     // The "Android settings" button in the web app's About tab: the setup screen with Ray's permissions
     @JavascriptInterface
     fun openSetup() {
+        if (!trusted("openSetup")) return
         Log.d(TAG, "openSetup")
         context.startActivity(android.content.Intent(context, com.damirl.ray.OnboardingActivity::class.java).apply {
             if (context !is android.app.Activity) addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -171,6 +187,7 @@ class RayNativeBridge(
 
     @JavascriptInterface
     fun getApiKey(): String {
+        if (!trusted("getApiKey")) return ""
         return try {
             com.damirl.ray.BuildConfig.STRATA_API_KEY
         } catch (_: Throwable) {
@@ -180,61 +197,19 @@ class RayNativeBridge(
 
     @JavascriptInterface
     fun executeTool(name: String, argsJson: String = "{}", callId: String = ""): String {
-        Log.d(TAG, "executeTool: name=$name args=$argsJson callId=$callId")
+        if (!trusted("executeTool")) {
+            return JSONObject().put("tool", name).put("callId", callId)
+                .put("result", "Error: refused (not the Strata server)").toString()
+        }
+        // arguments can be private (app names, alarm labels): logged in debug builds only
+        if (BuildConfig.DEBUG) Log.d(TAG, "executeTool: name=$name args=$argsJson callId=$callId") else Log.d(TAG, "executeTool: $name")
         val args = try {
             JSONObject(if (argsJson.isBlank()) "{}" else argsJson)
         } catch (_: Exception) {
             JSONObject()
         }
 
-        val result = when (name) {
-            "phone_toggle_torch" -> {
-                val enabled = args.optBoolean("enabled", false)
-                deviceTools.toggleTorch(enabled)
-            }
-            "phone_get_battery" -> {
-                deviceTools.getBatteryInfo()
-            }
-            "phone_set_volume" -> {
-                val stream = args.optString("stream", "media")
-                val level = args.optInt("level", 50)
-                deviceTools.setVolume(stream, level)
-            }
-            "phone_set_alarm" -> {
-                val hour = args.optInt("hour", 8)
-                val minute = args.optInt("minute", 0)
-                val label = args.optString("label", "Alarm from Ray")
-                deviceTools.setAlarm(hour, minute, label)
-            }
-            "phone_launch_app" -> {
-                val pkg = args.optString("package_or_name", "")
-                deviceTools.launchApp(pkg)
-            }
-            "phone_get_recent_notifications" -> {
-                val count = args.optInt("count", 5)
-                RayNotificationListenerService.getRecentNotifications(count)
-            }
-            "phone_get_2fa_code" -> {
-                RayNotificationListenerService.getLatest2faCode()
-            }
-            "phone_get_now_playing" -> {
-                mediaController.getNowPlaying()
-            }
-            "phone_control_media" -> {
-                val action = args.optString("action", "play_pause")
-                mediaController.controlMedia(action)
-            }
-            "phone_camera_snap" -> {
-                val prompt = args.optString("prompt", "")
-                cameraVision.snapPhoto(prompt)
-            }
-            "phone_get_screen" -> {
-                RayAccessibilityService.getScreenContent()
-            }
-            else -> {
-                "Error: Unknown tool '$name'."
-            }
-        }
+        val result = phoneTools.execute(name, args)
 
         return try {
             val json = JSONObject().apply {
@@ -255,16 +230,6 @@ class RayNativeBridge(
         return "{\"tool\":\"$escapedTool\",\"callId\":\"$escapedCallId\",\"result\":\"$escapedResult\"}"
     }
 
-    @JavascriptInterface
-    fun hasOpenDrawer(): Boolean {
-        // Will be queried or evaluated on WebView
-        return false
-    }
-
-    @JavascriptInterface
-    fun closeOpenDrawer(): Boolean {
-        return false
-    }
 
     private fun deliverSpeechResultToWeb(text: String, isFinal: Boolean) {
         val webView = webViewProvider() ?: return

@@ -84,11 +84,11 @@ fun RayWebView(
                     databaseEnabled = true
                     cacheMode = WebSettings.LOAD_DEFAULT
                     mediaPlaybackRequiresUserGesture = false
-                    allowFileAccess = true
-                    allowContentAccess = true
+                    allowFileAccess = false                       // nothing on the phone's storage by file:// URL
+                    allowContentAccess = true                     // picked files reach uploads as content:// URIs
                     useWideViewPort = true
                     loadWithOverviewMode = true
-                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                     setSupportZoom(false)
                     builtInZoomControls = false
                     displayZoomControls = false
@@ -131,8 +131,14 @@ fun RayWebView(
                     }
 
                     override fun onPermissionRequest(request: PermissionRequest?) {
-                        // Automatically grant Web Audio / Camera permissions inside companion app
-                        request?.grant(request.resources)
+                        // the mic and camera for the Strata server's own pages only
+                        if (request == null) return
+                        if (com.damirl.ray.network.StrataOrigins.isTrusted(request.origin?.toString())) {
+                            request.grant(request.resources)
+                        } else {
+                            Log.w("RayWebView", "Mic/camera refused for ${request.origin}")
+                            request.deny()
+                        }
                     }
 
                     override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
@@ -159,6 +165,17 @@ fun RayWebView(
                         } catch (e: Exception) {
                             false
                         }
+                    }
+
+                    // the bridge answers only while the Strata server's page is shown (RayNativeBridge.trusted)
+                    override fun onPageStarted(view: WebView?, startedUrl: String?, favicon: android.graphics.Bitmap?) {
+                        bridge.pageUrl = startedUrl
+                        super.onPageStarted(view, startedUrl, favicon)
+                    }
+
+                    override fun doUpdateVisitedHistory(view: WebView?, visitedUrl: String?, isReload: Boolean) {
+                        bridge.pageUrl = visitedUrl
+                        super.doUpdateVisitedHistory(view, visitedUrl, isReload)
                     }
 
                     override fun onPageFinished(view: WebView?, finishedUrl: String?) {

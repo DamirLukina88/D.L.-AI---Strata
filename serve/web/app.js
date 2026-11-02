@@ -4391,16 +4391,6 @@ function checkRayAndroidCompanion() {
       }
     } catch (_) {}
   }
-  if (typeof window.RayAndroid.hasOpenDrawer !== "function") {
-    try {
-      window.RayAndroid.hasOpenDrawer = () => hasOpenDrawer();
-    } catch (_) {}
-  }
-  if (typeof window.RayAndroid.closeOpenDrawer !== "function") {
-    try {
-      window.RayAndroid.closeOpenDrawer = () => closeOpenDrawer();
-    } catch (_) {}
-  }
   window.onRayAndroidSpeechResult = (text, isFinal) => {
     if (typeof STTController !== "undefined" && typeof STTController.handleNativeSpeechResult === "function") {
       STTController.handleNativeSpeechResult(text, isFinal);

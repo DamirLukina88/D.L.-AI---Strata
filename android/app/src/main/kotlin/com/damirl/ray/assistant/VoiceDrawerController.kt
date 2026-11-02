@@ -129,7 +129,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
 
         speechManager?.startListening(
             onFinalResult = { transcribed ->
-                Log.d(TAG, "Heard: '$transcribed'")
+                if (com.damirl.ray.BuildConfig.DEBUG) Log.d(TAG, "Heard: '$transcribed'")
                 userPrompt = transcribed
                 partialText = ""
                 ask(transcribed)

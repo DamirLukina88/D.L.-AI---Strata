@@ -4,6 +4,7 @@ import android.content.Context
 import com.damirl.ray.tools.RayNotificationListenerService
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -30,6 +31,8 @@ class RayNativeBridgeTest {
                 deliveredSpeech = cleaned
             }
         )
+
+        bridge.pageUrl = com.damirl.ray.BuildConfig.STRATA_LAN_URL
 
         val rawInput = "<think>Calculating internal state...</think>Hello from Strata engine! 🐾 Everything is 100% operational."
         bridge.speak(rawInput)
@@ -71,6 +74,7 @@ class RayNativeBridgeTest {
     fun testHardwareToolDispatching_routesProperly() {
         val context = createDummyContext()
         val bridge = RayNativeBridge(context = context)
+        bridge.pageUrl = com.damirl.ray.BuildConfig.STRATA_LAN_URL
 
         val responseJson = bridge.executeTool(
             name = "phone_toggle_torch",
@@ -92,6 +96,7 @@ class RayNativeBridgeTest {
     fun testToolDispatching_unknownTool_returnsCleanErrorJson() {
         val context = createDummyContext()
         val bridge = RayNativeBridge(context = context)
+        bridge.pageUrl = com.damirl.ray.BuildConfig.STRATA_LAN_URL
 
         val responseJson = bridge.executeTool(
             name = "phone_fake_tool",
@@ -110,6 +115,7 @@ class RayNativeBridgeTest {
     fun testToolDispatching_malformedJson_doesNotCrash() {
         val context = createDummyContext()
         val bridge = RayNativeBridge(context = context)
+        bridge.pageUrl = com.damirl.ray.BuildConfig.STRATA_LAN_URL
 
         val responseJson = bridge.executeTool(
             name = "phone_toggle_torch",
@@ -128,7 +134,32 @@ class RayNativeBridgeTest {
     fun testGetApiKey_returnsConfiguredOrEmpty() {
         val context = createDummyContext()
         val bridge = RayNativeBridge(context = context)
+        bridge.pageUrl = com.damirl.ray.BuildConfig.STRATA_LAN_URL
         val key = bridge.getApiKey()
         assertNotNull(key)
+    }
+
+    // another page in the WebView (a link, a redirect) gets nothing from the bridge
+    @Test
+    fun testUntrustedPage_getsNoKeyAndNoTools() {
+        val context = createDummyContext()
+        val bridge = RayNativeBridge(context = context)
+        bridge.pageUrl = "https://evil.example.org/"
+        assertEquals("", bridge.getApiKey())
+        val res = org.json.JSONObject(bridge.executeTool("phone_get_battery", "{}", "c1"))
+        assertTrue(res.getString("result").startsWith("Error: refused"))
+        assertEquals("c1", res.getString("callId"))
+        bridge.pageUrl = null
+        assertEquals("", bridge.getApiKey())
+    }
+
+    // a look-alike host that merely contains the server's host name is not the server
+    @Test
+    fun testLookAlikeHost_isNotTrusted() {
+        val lan = java.net.URI(com.damirl.ray.BuildConfig.STRATA_LAN_URL).host
+        assertTrue(com.damirl.ray.network.StrataOrigins.isTrusted(com.damirl.ray.BuildConfig.STRATA_LAN_URL))
+        assertFalse(com.damirl.ray.network.StrataOrigins.isTrusted("http://$lan.evil.example.org/"))
+        assertFalse(com.damirl.ray.network.StrataOrigins.isTrusted("file:///sdcard/x.html"))
+        assertFalse(com.damirl.ray.network.StrataOrigins.isTrusted(null))
     }
 }

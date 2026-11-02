@@ -1,6 +1,6 @@
 package com.damirl.ray.network
 
-import android.net.Uri
+import java.net.URI
 import com.damirl.ray.BuildConfig
 
 // The Strata server's own addresses (the LAN and the remote URL from secrets.properties).  Only pages and downloads
@@ -10,7 +10,7 @@ object StrataOrigins {
 
     private val hosts: Set<String> by lazy {
         listOf(BuildConfig.STRATA_LAN_URL, BuildConfig.STRATA_REMOTE_URL)
-            .mapNotNull { runCatching { Uri.parse(it).host?.lowercase() }.getOrNull() }
+            .mapNotNull { hostOf(it) }
             .filter { it.isNotBlank() }
             .toSet()
     }
@@ -19,7 +19,9 @@ object StrataOrigins {
 
     fun isTrusted(url: String?): Boolean {
         if (url.isNullOrBlank()) return false
-        val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
+        val uri = runCatching { URI(url) }.getOrNull() ?: return false
         return (uri.scheme == "http" || uri.scheme == "https") && isTrustedHost(uri.host)
     }
+
+    private fun hostOf(url: String): String? = runCatching { URI(url).host?.lowercase() }.getOrNull()
 }

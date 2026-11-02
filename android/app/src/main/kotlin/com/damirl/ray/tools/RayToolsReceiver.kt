@@ -6,6 +6,9 @@ import android.content.Intent
 import android.util.Log
 import org.json.JSONObject
 
+// Phone tools by broadcast, for tools/phone_mcp.py's adb fallback (when the app's web page isn't open to relay them).
+// The manifest requires android.permission.DUMP from the sender: the adb shell holds it, ordinary apps can't, so no
+// other app on the phone can toggle the torch, launch apps or set alarms through Ray
 class RayToolsReceiver : BroadcastReceiver() {
 
     companion object {
@@ -34,34 +37,14 @@ class RayToolsReceiver : BroadcastReceiver() {
             }
             ACTION_EXECUTE_TOOL -> {
                 val tool = intent.getStringExtra("tool") ?: return
-                val argsStr = intent.getStringExtra("args") ?: "{}"
+                val args = try {
+                    JSONObject(intent.getStringExtra("args") ?: "{}")
+                } catch (_: Exception) {
+                    JSONObject()
+                }
                 try {
-                    val args = JSONObject(argsStr)
-                    when (tool) {
-                        "phone_toggle_torch" -> {
-                            val enabled = args.optBoolean("enabled", false)
-                            toolsManager.toggleTorch(enabled)
-                        }
-                        "phone_set_volume" -> {
-                            val stream = args.optString("stream", "media")
-                            val level = args.optInt("level", 50)
-                            toolsManager.setVolume(stream, level)
-                        }
-                        "phone_set_alarm" -> {
-                            val hour = args.optInt("hour", 8)
-                            val minute = args.optInt("minute", 0)
-                            val label = args.optString("label", "Alarm from Ray")
-                            toolsManager.setAlarm(hour, minute, label)
-                        }
-                        "phone_launch_app" -> {
-                            val pkg = args.optString("package_or_name", "")
-                            toolsManager.launchApp(pkg)
-                        }
-                        "phone_control_media" -> {
-                            val mediaAction = args.optString("action", "play_pause")
-                            RayMediaController(context).controlMedia(mediaAction)
-                        }
-                    }
+                    val result = PhoneTools(context).execute(tool, args)
+                    Log.d(TAG, "Tool $tool from adb: ${result.take(80)}")
                 } catch (e: Exception) {
                     Log.e(TAG, "Error executing tool from broadcast: $tool", e)
                 }

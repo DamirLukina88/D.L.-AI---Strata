@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Plain HTTP is allowed because the Strata server is reached on the home LAN by IP (http://192.168.x.x:8080);
+     the remote route is HTTPS.  Only the system's certificate authorities are trusted (not ones a user installed,
+     which could be used to read the app's traffic, the API key included) -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
-            <certificates src="user" />
         </trust-anchors>
     </base-config>
 </network-security-config>

@@ -275,7 +275,9 @@ class PhoneMcpServer:
             pass
         return None
 
-    def _call_companion_api(self, tool_name: str, args: Dict[str, Any], timeout: float = 6.0) -> Optional[str]:
+    # 8 s: the server waits up to 6 s for the phone (/api/phone/tool/call), so its answer (the result, or "the phone
+    # didn't answer") arrives before this side gives up
+    def _call_companion_api(self, tool_name: str, args: Dict[str, Any], timeout: float = 8.0) -> Optional[str]:
         """Attempt to dispatch the tool call to the active Ray companion session via server relay."""
         payload = json.dumps({"tool": tool_name, "args": args}).encode("utf-8")
         try:

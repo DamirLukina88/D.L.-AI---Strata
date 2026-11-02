@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- What the FileProvider may share: the camera's photos in the app's own Pictures folder only (it shared all of
+     external storage before) -->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <external-files-path name="pictures" path="Pictures" />
-    <external-path name="external" path="." />
 </paths>
