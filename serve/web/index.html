@@ -11,7 +11,7 @@
 <meta name="theme-color" content="#0b0d10">
 <link rel="stylesheet" href="web/tokens.css">
 <link rel="stylesheet" href="web/components.css">
-<link rel="stylesheet" href="web/app.css?v=20261102-android-about">
+<link rel="stylesheet" href="web/app.css?v=20261102-ws-select">
 <script>
   // the theme before the first paint: default dark for D.L. AI
   try {
@@ -458,12 +458,20 @@
       <input type="text" class="st-input ws-search" id="ws-search" placeholder="Search workspace files&hellip;">
       <span class="muted small ws-count" id="ws-count">0 files</span>
     </div>
+    <!-- shown while files are ticked: download them all at once (each as its own file) -->
+    <div class="ws-selbar" id="ws-selbar" hidden>
+      <span class="ws-selbar__count" id="ws-sel-count">0 selected</span>
+      <button type="button" class="st-btn st-btn--primary st-btn--sm" id="ws-sel-download">
+        <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-download"/></svg><span>Download</span></button>
+      <button type="button" class="st-btn st-btn--secondary st-btn--sm" id="ws-sel-clear">Clear</button>
+    </div>
 
     <div class="table-wrap ws-table-wrap">
       <table class="st-table ws-table">
         <thead>
           <tr>
-            <th>Name</th>
+            <th><label class="ws-name-head"><input type="checkbox" class="ws-check" id="ws-check-all"
+              aria-label="Select all files shown">Name</label></th>
             <th class="num">Size</th>
             <th>Modified</th>
             <th class="num">Actions</th>
@@ -515,6 +523,6 @@
 <script src="web/site-config.js?v=20261020-logout1"></script>
 <script src="web/speakstream.js?v=20261029-panda25"></script>
 <script src="web/rayface.js?v=20261029-panda25"></script>
-<script src="web/app.js?v=20261102-android-about"></script>
+<script src="web/app.js?v=20261102-ws-download"></script>
 </body>
 </html>

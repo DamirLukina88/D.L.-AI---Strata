@@ -417,6 +417,26 @@ body.is-resizing .view { pointer-events: none; }      /* the drag keeps going ov
   justify-content: space-between;
   gap: 12px;
 }
+.ws-selbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--st-line);
+  border-radius: var(--st-r-md);
+  background: var(--st-accent-tint, var(--st-surface-2));
+}
+.ws-selbar[hidden] { display: none; }
+.ws-selbar__count { flex: 1; font-weight: var(--st-fw-medium); font-size: var(--st-fs-sm); }
+.ws-check {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--st-accent);
+  cursor: pointer;
+}
+.ws-name-head { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
 .ws-search {
   flex: 1;
   height: 38px;

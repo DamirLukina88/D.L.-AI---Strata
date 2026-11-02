@@ -147,6 +147,10 @@ class RayNativeBridge(
         }
     }
 
+    // A workspace file's single-use download link (absolute URL) and its name: into Downloads, see Downloads
+    @JavascriptInterface
+    fun downloadFile(url: String, fileName: String): Boolean = Downloads.enqueue(context, url, fileName)
+
     // The "Android settings" button in the web app's About tab: the setup screen with Ray's permissions
     @JavascriptInterface
     fun openSetup() {

@@ -1,0 +1,25 @@
+package com.damirl.ray.network
+
+import android.net.Uri
+import com.damirl.ray.BuildConfig
+
+// The Strata server's own addresses (the LAN and the remote URL from secrets.properties).  Only pages and downloads
+// from these hosts are trusted: they stay inside the app, may use the RayAndroid bridge and the mic, and their files
+// go to Downloads.  Hosts are compared exactly (a "contains" check let look-alike hosts through)
+object StrataOrigins {
+
+    private val hosts: Set<String> by lazy {
+        listOf(BuildConfig.STRATA_LAN_URL, BuildConfig.STRATA_REMOTE_URL)
+            .mapNotNull { runCatching { Uri.parse(it).host?.lowercase() }.getOrNull() }
+            .filter { it.isNotBlank() }
+            .toSet()
+    }
+
+    fun isTrustedHost(host: String?): Boolean = host != null && host.lowercase() in hosts
+
+    fun isTrusted(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
+        return (uri.scheme == "http" || uri.scheme == "https") && isTrustedHost(uri.host)
+    }
+}

@@ -7,6 +7,7 @@ import android.net.Uri
 import android.util.Log
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
+import android.webkit.URLUtil
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -45,9 +46,7 @@ fun RayWebView(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            val data = result.data
-            val uris = WebChromeClient.FileChooserParams.parseResult(result.resultCode, data)
-            filePathCallback?.onReceiveValue(uris)
+            filePathCallback?.onReceiveValue(pickedUris(result.resultCode, result.data))
         } else {
             filePathCallback?.onReceiveValue(null)
         }
@@ -147,8 +146,8 @@ fun RayWebView(
                         val reqUrl = request?.url ?: return false
                         val host = reqUrl.host ?: ""
 
-                        // Stay inside WebView for server and local endpoints
-                        if (host.contains("damir-lukina.com") || host.startsWith("192.168.") || host == "localhost" || host == "127.0.0.1") {
+                        // Stay inside WebView for the Strata server's own pages
+                        if (com.damirl.ray.network.StrataOrigins.isTrustedHost(host)) {
                             return false
                         }
 
@@ -167,6 +166,14 @@ fun RayWebView(
                         Log.d("RayWebView", "Page loaded: $finishedUrl")
                         view?.evaluateJavascript("if (typeof checkRayAndroidCompanion === 'function') checkRayAndroidCompanion();", null)
                     }
+                }
+
+                // A WebView ignores downloads unless it is given a listener: files from the Strata server go to Downloads
+                // (the workspace's own buttons use RayAndroid.downloadFile instead, see Downloads)
+                setDownloadListener { dlUrl, userAgent, contentDisposition, mimeType, _ ->
+                    val name = Downloads.attachmentName(contentDisposition)
+                        ?: URLUtil.guessFileName(dlUrl, contentDisposition, mimeType)
+                    Downloads.enqueue(ctx, dlUrl, name, mimeType, userAgent)
                 }
 
                 loadUrl(url)
@@ -189,4 +196,15 @@ fun RayWebView(
             webViewInstance = null
         }
     }
+}
+
+// Every file picked in the chooser.  FileChooserParams.parseResult reads only intent.data, but with several files
+// picked the gallery puts them all in clipData (and only the first in data), so the page got one file
+private fun pickedUris(resultCode: Int, data: Intent?): Array<Uri>? {
+    val clip = data?.clipData
+    if (clip != null && clip.itemCount > 0) {
+        return Array(clip.itemCount) { clip.getItemAt(it).uri }
+    }
+    data?.data?.let { return arrayOf(it) }
+    return WebChromeClient.FileChooserParams.parseResult(resultCode, data)
 }

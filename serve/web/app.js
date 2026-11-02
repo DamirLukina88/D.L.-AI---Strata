@@ -3685,6 +3685,7 @@ $("s-apply").onclick = async () => {
 let wsFiles = [];
 let wsRoot = "";                      // the server's workspace folder, for @path references
 let wsLoading = false;
+const wsSelected = new Set();         // paths of the files ticked for "Download"
 
 function openWorkspace(open = true) {
   const dlg = $("workspace-dialog");
@@ -3713,6 +3714,8 @@ async function loadWorkspaceFiles() {
     const data = await r.json();
     wsFiles = data.files || [];
     wsRoot = data.workspace || "";
+    const present = new Set(wsFiles.filter((f) => !f.is_dir).map((f) => f.path));
+    for (const p of [...wsSelected]) if (!present.has(p)) wsSelected.delete(p);
     if (data.workspace && $("ws-path")) $("ws-path").textContent = data.workspace;
     renderWorkspaceFiles();
   } catch (err) {
@@ -3827,6 +3830,7 @@ function renderFolderNode(folder, depth, list, query) {
 
   tr.innerHTML = `
     <td class="ws-file-name-cell" style="padding-left: ${indentPx}px;">
+      <input type="checkbox" class="ws-check" aria-label="Select every file in ${esc(folder.name)}">
       <span class="ws-folder-chevron">${isExpanded ? "▼" : "▶"}</span>
       <span class="ws-file-icon">${icon("folder", "st-icon st-icon--sm")}</span>
       <strong class="ws-file-title" title="${esc(folder.path)}">${esc(folder.name)}/</strong>
@@ -3853,6 +3857,19 @@ function renderFolderNode(folder, depth, list, query) {
   tr.querySelector(".ws-del-btn").onclick = (e) => {
     e.stopPropagation();
     deleteFromWorkspace({ name: folder.name, path: folder.path, is_dir: true });
+  };
+
+  // ticking a folder ticks every file inside it (also in its subfolders)
+  const inside = folderFilePaths(folder);
+  const box = tr.querySelector(".ws-check");
+  const ticked = inside.filter((p) => wsSelected.has(p)).length;
+  box.checked = inside.length > 0 && ticked === inside.length;
+  box.indeterminate = ticked > 0 && ticked < inside.length;
+  box.disabled = inside.length === 0;
+  box.onclick = (e) => e.stopPropagation();
+  box.onchange = () => {
+    for (const p of inside) box.checked ? wsSelected.add(p) : wsSelected.delete(p);
+    renderWorkspaceFiles();
   };
 
   list.appendChild(tr);
@@ -3882,9 +3899,14 @@ function renderFileRow(f, depth, list) {
 
   const fileIcon = f.kind === "image" ? "image" : "attach";
   tdName.innerHTML = `
+    <input type="checkbox" class="ws-check" aria-label="Select ${esc(f.name)}"${wsSelected.has(f.path) ? " checked" : ""}>
     <span class="ws-file-icon">${icon(fileIcon, "st-icon st-icon--sm")}</span>
     <span class="ws-file-title" title="${esc(f.path)}">${esc(f.name)}</span>
   `;
+  tdName.querySelector(".ws-check").onchange = (e) => {
+    e.target.checked ? wsSelected.add(f.path) : wsSelected.delete(f.path);
+    renderWorkspaceFiles();
+  };
   tr.appendChild(tdName);
 
   const tdSize = document.createElement("td");
@@ -3941,6 +3963,8 @@ function renderWorkspaceFiles() {
     $("ws-count").textContent = `${tree.totalFiles} of ${allFileCount} file${allFileCount === 1 ? "" : "s"}`;
   }
 
+  updateWorkspaceSelection(tree);
+
   if (tree.totalFiles === 0 && tree.folders.size === 0) {
     list.innerHTML = `<tr><td colspan="4" class="muted">${query ? "No matching files" : "Workspace is empty. Drop files or folders above to upload."}</td></tr>`;
     return;
@@ -3975,7 +3999,7 @@ function attachFromWorkspace(f) {
   toast("success", "Added to the prompt", f.name);
 }
 
-async function downloadFromWorkspace(f) {
+async function downloadFromWorkspace(f, quiet = false) {
   try {
     // a single-use link the browser's own download manager fetches: streamed straight to disk, with progress and
     // resume, instead of holding the whole file in page memory (large zips failed on mobile)
@@ -3984,17 +4008,68 @@ async function downloadFromWorkspace(f) {
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const { url } = await r.json();
+    // in the Android app the link goes straight to the phone's download manager: the WebView's own download path
+    // fetched it first and used up the single-use ticket
+    if (window.RayAndroid && typeof window.RayAndroid.downloadFile === "function") {
+      if (!window.RayAndroid.downloadFile(new URL(url, location.href).href, f.name)) throw new Error("the phone refused it");
+      if (!quiet) toast("success", "Download started", f.name);
+      return true;
+    }
     const a = document.createElement("a");
     a.href = url;
     a.download = f.name;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    toast("success", "Download started", f.name);
+    if (!quiet) toast("success", "Download started", f.name);
+    return true;
   } catch (err) {
-    toast("error", "Download failed", err.message);
+    toast("error", "Download failed", `${f.name}: ${err.message}`);
+    return false;
   }
 }
+
+// every file path in a folder of the workspace tree, its subfolders included
+function folderFilePaths(folder) {
+  const out = folder.files.map((f) => f.path);
+  for (const sub of folder.folders.values()) out.push(...folderFilePaths(sub));
+  return out;
+}
+
+// the selection bar ("N selected · Download · Clear") and the header's "select all" (the files the search shows)
+function updateWorkspaceSelection(tree) {
+  const shown = [...tree.files.map((f) => f.path), ...[...tree.folders.values()].flatMap(folderFilePaths)];
+  const all = $("ws-check-all");
+  if (all) {
+    const ticked = shown.filter((p) => wsSelected.has(p)).length;
+    all.checked = shown.length > 0 && ticked === shown.length;
+    all.indeterminate = ticked > 0 && ticked < shown.length;
+    all.disabled = shown.length === 0;
+    all.onchange = () => {
+      for (const p of shown) all.checked ? wsSelected.add(p) : wsSelected.delete(p);
+      renderWorkspaceFiles();
+    };
+  }
+  const n = wsSelected.size;
+  if ($("ws-selbar")) $("ws-selbar").hidden = n === 0;
+  if ($("ws-sel-count")) $("ws-sel-count").textContent = `${n} file${n === 1 ? "" : "s"} selected`;
+}
+
+// each ticked file downloads on its own (a single-use link each); a short gap between them, or browsers drop clicks
+async function downloadSelectedFromWorkspace() {
+  const files = wsFiles.filter((f) => !f.is_dir && wsSelected.has(f.path));
+  if (!files.length) return;
+  let started = 0;
+  for (const [i, f] of files.entries()) {
+    if (i) await new Promise((r) => setTimeout(r, 400));
+    if (await downloadFromWorkspace(f, true)) started++;
+  }
+  if (started) toast("success", `Downloading ${started} file${started === 1 ? "" : "s"}`, "Each one is saved on its own");
+  wsSelected.clear();
+  renderWorkspaceFiles();
+}
+if ($("ws-sel-download")) $("ws-sel-download").onclick = () => downloadSelectedFromWorkspace();
+if ($("ws-sel-clear")) $("ws-sel-clear").onclick = () => { wsSelected.clear(); renderWorkspaceFiles(); };
 
 async function deleteFromWorkspace(f) {
   const targetLabel = f.is_dir ? `folder "${f.name}" and all its contents` : `"${f.name}"`;
@@ -4107,8 +4182,10 @@ if ($("ws-close-btn")) $("ws-close-btn").onclick = () => openWorkspace(false);
 if ($("ws-refresh-btn")) $("ws-refresh-btn").onclick = () => loadWorkspaceFiles();
 if ($("ws-search")) $("ws-search").oninput = () => renderWorkspaceFiles();
 if ($("ws-file-input")) $("ws-file-input").onchange = () => {
-  uploadFilesToWorkspace($("ws-file-input").files);
+  // a copy: clearing the input below empties its FileList while the uploads still await one file after another
+  const files = Array.from($("ws-file-input").files);
   $("ws-file-input").value = "";
+  uploadFilesToWorkspace(files);
 };
 
 const wsDropzone = $("ws-dropzone");
