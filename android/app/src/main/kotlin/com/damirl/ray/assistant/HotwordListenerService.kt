@@ -82,7 +82,7 @@ class HotwordListenerService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_tile_paw)
             .setContentTitle("Ray Wake Word 🐾")
             .setContentText("Listening hands-free in background")
             .setContentIntent(pendingIntent)

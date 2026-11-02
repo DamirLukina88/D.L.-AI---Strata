@@ -275,7 +275,7 @@ class AudioPlaybackService : Service() {
         )
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_tile_paw)
             .setContentTitle("Ray Assistant 🐾")
             .setContentText(text.take(60))
             .setContentIntent(openAppPendingIntent)
