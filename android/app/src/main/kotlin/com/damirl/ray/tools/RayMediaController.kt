@@ -50,7 +50,8 @@ class RayMediaController(private val context: Context) {
         // played; it starts only once the phone is unlocked (Play is pressed on screen)
         const val LOCKED_START = "Not playing yet: the phone is locked, and Brave starts it only once the user " +
             "unlocks the phone (Ray presses Play on the screen; up to 5 minutes). Say only this to the user: " +
-            "\"It starts as soon as you unlock the phone.\""
+            "\"It starts as soon as you unlock the phone.\" (With the helmet set as a trusted device, Ray can start " +
+            "songs without that.)"
         private const val AUTOSTART_MS = 300_000L            // long enough to take the phone out and unlock it
         private val PLAYABLE = Regex("""^https://(music\.|www\.|m\.)?youtube\.com/.*|^https://youtu\.be/.*""")
     }
@@ -87,13 +88,20 @@ class RayMediaController(private val context: Context) {
         waitForQuiet()                                        // he says his answer first, the page loads meanwhile
         val speaking = AudioPlaybackService.isSpeakingState
         var tries = 0
+        var unlocked = false
         while (SystemClock.uptimeMillis() < end) {
-            if (bravePlaying()) { if (wasShown) backToRay(); return }
+            if (bravePlaying()) { done(wasShown, unlocked); return }
             val quiet = !speaking.value && !inCall() && com.damirl.ray.audio.BluetoothMic.idle()
             val locked = keyguard?.isDeviceLocked ?: true
+            // a trusted phone (the helmet connected: Smart Lock) shows its lock screen without needing the PIN:
+            // Ray dismisses it to reach the Play button, and locks it again once the music plays
+            if (quiet && !locked && !unlocked && RayUnlockActivity.dismissable(context)) {
+                unlocked = RayUnlockActivity.dismiss(context)
+                Log.d(TAG, "autostart: trusted lock screen dismissed=$unlocked")
+            }
             if (quiet && !locked && RayAccessibilityService.tapLabelled(BRAVE, PLAY_LABELS)) {
                 if (waitForBrave(1_500)) {
-                    if (wasShown) backToRay()
+                    done(wasShown, unlocked)
                     return
                 }
             }
@@ -103,6 +111,15 @@ class RayMediaController(private val context: Context) {
             Thread.sleep(250)
         }
         Log.d(TAG, "autostart: gave up (no Play button, phone locked or still busy)")
+        if (unlocked) RayAccessibilityService.lockScreen()
+    }
+
+    // the music plays: back to Ray's app if it was on screen, or the phone locked again if Ray unlocked it
+    private fun done(wasShown: Boolean, unlocked: Boolean) {
+        if (unlocked) {
+            Thread.sleep(500)
+            Log.d(TAG, "music plays: locking the phone again=${RayAccessibilityService.lockScreen()}")
+        } else if (wasShown) backToRay()
     }
 
     // Brave in the background freezes a paused page, and then its session ignores play; Brave on screen wakes it
@@ -117,6 +134,7 @@ class RayMediaController(private val context: Context) {
             return "Error: Brave didn't resume while the phone is locked (it freezes a paused page). Ask the user " +
                 "to unlock the phone, then try again."
         }
+        val unlocked = RayUnlockActivity.dismissable(context) && RayUnlockActivity.dismiss(context)
         if (com.damirl.ray.assistant.VoiceDrawerController.closeIfOpen()) Thread.sleep(800)   // it covers Brave
         val launch = context.packageManager.getLaunchIntentForPackage(BRAVE)
             ?: return "Error: Brave could not be opened."
@@ -126,7 +144,7 @@ class RayMediaController(private val context: Context) {
         var playing = waitForBrave(2_000)
         if (!playing && RayAccessibilityService.tapLabelled(BRAVE, PLAY_LABELS)) playing = waitForBrave(2_500)
         Log.d(TAG, "resumeBrave: woke Brave, playing=$playing")
-        if (playing && wasShown) backToRay()
+        if (playing || unlocked) done(wasShown, unlocked)
         return if (playing) "Playing. $SHORT" else "Error: Brave didn't resume. It is on the screen now; ask the " +
             "user to press play there."
     }

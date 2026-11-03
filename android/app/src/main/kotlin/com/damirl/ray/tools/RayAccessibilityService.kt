@@ -79,6 +79,9 @@ class RayAccessibilityService : AccessibilityService() {
             return false
         }
 
+        /** Locks the phone (screen off) - after Ray unlocked a trusted phone to start a song. */
+        fun lockScreen(): Boolean = instance?.performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN) == true
+
         /** Debug only: the labels [pkg]'s windows show (why a tap found nothing). */
         fun labelsOf(pkg: String): String {
             val service = instance ?: return "screen reading is off"

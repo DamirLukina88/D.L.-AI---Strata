@@ -75,6 +75,17 @@
             android:turnScreenOn="true"
             android:exported="false" />
 
+        <!-- Dismisses the lock screen when the phone is trusted (a connected trusted helmet: Smart Lock / Extend
+             Unlock), so Ray can press Play in Brave; never shows a PIN prompt (RayUnlockActivity) -->
+        <activity
+            android:name=".tools.RayUnlockActivity"
+            android:theme="@style/Theme.Ray.Translucent"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:exported="false" />
+
         <!-- Translucent Trampoline Activity to handle Voice Commands, Earbud Triggers, & QS Shade collapse -->
         <activity
             android:name=".assistant.RayAssistTrampolineActivity"
