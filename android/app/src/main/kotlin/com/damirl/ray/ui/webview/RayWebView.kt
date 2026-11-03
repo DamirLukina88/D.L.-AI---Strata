@@ -77,7 +77,8 @@ fun RayWebView(
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
 
-                clearCache(true)
+                // no clearCache(true) here: it threw away the whole web app on every start, so each launch fetched it
+                // again; index.html is served no-cache and every script and stylesheet has a ?v= tag, so updates arrive
                 settings.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true

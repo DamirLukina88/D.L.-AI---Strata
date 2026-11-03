@@ -7044,7 +7044,7 @@ def make_handler(svc: Service):
                 }) + "\n").encode())
 
                 if not req.get("stream", True):
-                    full_reply = ""
+                    full_reply, after_tool = "", False
                     while True:
                         line = f.readline()
                         if not line:
@@ -7054,7 +7054,14 @@ def make_handler(svc: Service):
                         except Exception:
                             continue
                         if ev.get("type") == "text":
-                            full_reply += ev.get("text", "")
+                            text = ev.get("text", "")
+                            if after_tool and text and full_reply and not full_reply[-1].isspace() \
+                                    and not text[0].isspace():
+                                text = " " + text                # the preamble and the answer, spaced apart
+                            after_tool = False
+                            full_reply += text
+                        elif ev.get("type") == "tool_call":
+                            after_tool = True
                         elif ev.get("type") == "turn_end":
                             break
                     res = {
@@ -7070,6 +7077,7 @@ def make_handler(svc: Service):
                     return self._json(200, res)
 
                 self._sse()
+                tail, after_tool = "", False                # text after a tool call starts a new paragraph of speech
                 while True:
                     line = f.readline()
                     if not line:
@@ -7082,10 +7090,18 @@ def make_handler(svc: Service):
                     # the answer as content; the model's thinking as reasoning_content (the voice drawer shows it,
                     # never reads it aloud); a tool call as ray_tool (the drawer's "Using a tool" note)
                     if ev_type == "text":
-                        delta, extra = {"content": ev.get("text", "")}, {}
+                        text = ev.get("text", "")
+                        # the preamble before a tool ("Checking your battery now.") and the answer after it came out
+                        # glued together ("now.Your battery")
+                        if after_tool and text and tail and not tail[-1].isspace() and not text[0].isspace():
+                            text = " " + text
+                        after_tool = False
+                        tail = text[-1:] or tail
+                        delta, extra = {"content": text}, {}
                     elif ev_type == "thinking":
                         delta, extra = {"reasoning_content": ev.get("text", "")}, {}
                     elif ev_type == "tool_call":
+                        after_tool = True
                         delta, extra = {}, {"ray_tool": {"name": ev.get("name") or ""}}
                     elif ev_type == "turn_end":
                         break

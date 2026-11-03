@@ -92,3 +92,10 @@ Installing this fork on your own PC, and how to use it from the browser, the ter
 - **The session daemon** listens only on a Unix socket in your runtime directory (mode 600).
 - **Workspace file access** is confined to the workspace directory.
 
+
+## Running the tests
+
+`tools/run_tests.sh` runs every suite of this fork the way each needs it (no GPU, model or running server needed):
+the server tests, the tools tests one module at a time, and the web app's Node tests; `--android` adds the Android
+app's unit tests and lint. It prints one line per suite. The engine's C++ tests are ctest (see
+[AMD_HIP.md](AMD_HIP.md)).

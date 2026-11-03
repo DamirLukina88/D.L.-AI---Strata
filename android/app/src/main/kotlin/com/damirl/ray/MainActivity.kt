@@ -11,20 +11,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import com.damirl.ray.assistant.RayAssistTrampolineActivity
 import com.damirl.ray.ui.theme.RayTheme
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 
 class MainActivity : ComponentActivity() {
-
-    companion object {
-        private val _autoListenRequest = MutableStateFlow(false)
-        val autoListenRequest: StateFlow<Boolean> = _autoListenRequest.asStateFlow()
-
-        fun clearAutoListenRequest() {
-            _autoListenRequest.value = false
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,8 +52,12 @@ class MainActivity : ComponentActivity() {
                 Intent.ACTION_VOICE_COMMAND == action ||
                 "android.speech.action.VOICE_SEARCH_HANDS_FREE" == action ||
                 "android.intent.action.VOICE_ASSIST" == action
+        // the same voice drawer as the power button, the helmet button, the tile and "Ok Ray"
         if (shouldListen) {
-            _autoListenRequest.value = true
+            startActivity(Intent(this, RayAssistTrampolineActivity::class.java).apply {
+                this.action = action ?: Intent.ACTION_ASSIST
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            })
         }
     }
 }

@@ -54,18 +54,19 @@ correctness problems were fixed with tests. Nine items are open and listed below
    `test_strata_mcp`. Upstream code; *recommendation:* compare with upstream's current tests before changing them.
 6. **"Ok Ray" is only lightly tested.** 1 of 2 synthetic voices from the PC speakers woke the phone; false
    triggers over a day and battery use are not measured.
-7. **The Quick Settings tile and assist intent use an older path** (they ask Ray from the main screen and read the
-   answer aloud) instead of opening the voice drawer. *Recommendation:* send them to the drawer like the helmet
-   button.
-8. **The spoken preamble and the answer run together** in `/v1/ray/chat` text ("…now.Your battery…"). Harmless for
-   speech; add a space between them.
+7. ~~**The assist intent used an older path.**~~ **Fixed 2026-11-03:** the tile already opened the drawer; the main
+   app's own assist/voice intents now open it too, and the old ask-and-speak path is gone from the main screen.
+8. ~~**The spoken preamble and the answer ran together.**~~ **Fixed 2026-11-03:** `/v1/ray/chat` adds a space when
+   text continues after a tool call (streamed and not); `serve/test_ray_chat.py` covers both. Live after the next
+   server restart.
 9. **The camera tool can't send the photo back.** Honest now; building it needs the photo uploaded to the server
    and passed to the model as an image.
 
 ## Performance (no long benchmarks run)
 
-- The app's WebView cleared its whole cache on every start (`clearCache(true)`), so every launch fetched all of the
-  web app again. The `?v=` tags already handle updates; *recommendation:* remove the clear.
+- The app's WebView cleared its cache on every start (`clearCache(true)`); removed 2026-11-03. It made no difference in
+  practice: the server sends `Cache-Control: no-cache, no-store` for every file under `/web/`, so nothing is cached
+  anyway. Letting the versioned files (`?v=`) be cached would speed up loading; that is upstream's static handler.
 - The web page polls `/api/phone/tool/pending` every 1.5 s while the app is open. Fine on Wi-Fi; a long poll would
   save battery.
 - The APK is 118 MB: the "Ok Ray" model is about 38 MB of that.
@@ -77,7 +78,9 @@ correctness problems were fixed with tests. Nine items are open and listed below
 - The README was rewritten for newcomers (100 lines); the detail moved to `docs/RAY_*.md`.
 - AGENTS.md says `python tools/test_setup_<name>.py`, but many tools tests only run from the repo root
   (`python -m unittest tools.test_x`); four "failures" in this audit were only that. There is no runner or CI.
-  *Recommendation:* a `tools/run_tests.sh` that runs every suite the right way.
+  **Fixed 2026-11-03:** `tools/run_tests.sh` runs every suite the right way (tools modules one at a time from the root
+  with `tools/` on the path; `--android` adds the app); 6.5 min in all. Only the known installer and Strata MCP
+  modules fail.
 - Two codebase maps were wrong: `tools/antigravity_local.py` is a symlink to `dl_cli.py`, not a copy, and the
   phone MCP's adb fallback covers all 11 tools.
 - The engine's missing `tests/CMakeLists.txt` is upstream's way to default tests off in a release, not a bug.

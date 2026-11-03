@@ -25,6 +25,7 @@ TURN = [
     {"type": "user", "text": "hi"},
     {"type": "thinking", "text": "The user says hi. "},
     {"type": "thinking", "text": "Check the battery first."},
+    {"type": "text", "text": "Checking now."},
     {"type": "tool_call", "id": "c1", "name": "phone__phone_get_battery", "args": {}},
     {"type": "tool_result", "id": "c1", "text": "80%"},
     {"type": "text", "text": "Hi! "},
@@ -107,17 +108,27 @@ class RayChatStream(unittest.TestCase):
         out = self.chunks({"messages": [{"role": "user", "content": "hi"}], "stream": True, "voice": True})
         self.assertEqual(out[-1], "[DONE]")
         deltas = [c["choices"][0]["delta"] for c in out[:-1]]
-        self.assertEqual("".join(d.get("content", "") for d in deltas), "Hi! Your battery is at 80%.")
+        # the preamble before the tool and the answer after it are spaced apart
+        self.assertEqual("".join(d.get("content", "") for d in deltas), "Checking now. Hi! Your battery is at 80%.")
         self.assertEqual("".join(d.get("reasoning_content", "") for d in deltas),
                          "The user says hi. Check the battery first.")
         self.assertEqual([c["ray_tool"]["name"] for c in out[:-1] if "ray_tool" in c], ["phone__phone_get_battery"])
         # the order holds: thinking, then the tool, then the answer
         kinds = ["think" if "reasoning_content" in d else "tool" if "ray_tool" in c else "text"
                  for c, d in zip(out[:-1], deltas)]
-        self.assertEqual(kinds, ["think", "think", "tool", "text", "text"])
+        self.assertEqual(kinds, ["think", "think", "text", "tool", "text", "text"])
         # the prompt reached the session as a spoken one from the Android app
         sent = [op for op in self.sessiond.received if op.get("op") == "input"][-1]
         self.assertEqual((sent["text"], sent["voice"], sent["origin"]), ("hi", True, "ray-android"))
+
+
+    def test_non_streaming_reply_is_spaced_too(self):
+        req = urllib.request.Request(self.base + "/v1/ray/chat", headers={"Content-Type": "application/json"},
+                                     data=json.dumps({"messages": [{"role": "user", "content": "hi"}],
+                                                      "stream": False}).encode())
+        with urllib.request.urlopen(req, timeout=30) as r:
+            body = json.loads(r.read())
+        self.assertEqual(body["choices"][0]["message"]["content"], "Checking now. Hi! Your battery is at 80%.")
 
 
 if __name__ == "__main__":
