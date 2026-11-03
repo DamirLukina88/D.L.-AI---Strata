@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-11-03:** Update. decisions/cloudflare-tunnel-remote-exposure.md. (Agent: Claude Code)
 - **2026-11-03:** Ingestion. artifacts/strata-audit-2026-11.md. (Agent: Claude Code)
 - **2026-11-03:** Update. decisions/ray-hybrid-webview-companion-and-phone-mcp.md, artifacts/session-transcript-2026-11-02-companion-handoff.md, decisions/github-fork-and-sanitization.md. (Agent: Claude Code)
 - **2026-11-03:** Ingestion. artifacts/ray-companion-validation-2026-11-02.md. (Agent: Claude Code)
