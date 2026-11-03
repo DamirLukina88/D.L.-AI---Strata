@@ -57,6 +57,23 @@ None of these applied cleanly with `git apply --check` except the e9b4bf00 tests
 
 **Steps:** back up `engine/strata`, port, build `build-hip`, run the new `serve_stop_bound_test`, and do a smoke test with the model unloaded. Then a `tools/strata_bench.py` A/B (off, on, off, on), with the server stopped and run as its own `systemd-run --user -p MemorySwapMax=0` unit (see the 2026-10-31 OOM gotcha in the [0.2.9 port plan](upstream-v0-2-9-port-plan-2026-10-31.md)). That takes about 30-40 min of model time, so ask first.
 
+**Step 2 result (2026-11-03):** ported #4677 (243fdb21) and #4350 (e1b27d54, engine and server) by hand; the optional #4671 and #4846 were left out. Committed 63a139f1. `build-hip` built in 87 s; deployed as `engine/strata`, version `0.1.44.1+0.2.10-fixes`. Rollback: `engine/strata.bak-20261103` and `engine/BUILD.json.bak-20261103`. Tests: `serve_stop_bound_test` 2,736 cases passed; `serve/test_fatal_gpu_restart.py` 7 passed. Smoke test: a `read_file` call came back right, and the second turn of a 6.4K-token conversation reused 6,352 of its 6,414 prompt tokens.
+
+A/B (22:51-23:24), the new binary with `STRATA_SERVE_STOP_BOUND=0` (off) against the default (on). `tools/strata_bench.py`, Ray's config with `lazy_load` false, each leg a fresh server as its own `systemd-run --user -p MemorySwapMax=0` unit, `strata-server` stopped; medians:
+
+| | off 1 | on 1 | off 2 | on 2 | on / off |
+|---|---:|---:|---:|---:|---:|
+| chat decode tok/s | 24.4 | 23.2 | 26.0 | 26.5 | -1.4% |
+| chat first token, s | 1.622 | 1.691 | 1.704 | 1.746 | +3.3% |
+| 4K prompt tok/s | 305.1 | 295.6 | 300.9 | 306.8 | -0.6% |
+| 16K prompt tok/s | 335.8 | 333.1 | 331.5 | 337.7 | +0.5% |
+| agent cache hit % | 67.09 | 67.13 | 67.09 | 67.23 | +0.1% |
+| agent tokens re-read | 4 | 5 | 3 | 5 | (all tiny) |
+| agent turn first token, s | 11.40 | 11.37 | 11.15 | 11.34 | +0.7% |
+| agent decode tok/s | 28.9 | 29.8 | 29.5 | 29.9 | +2.2% |
+
+0 errors in all four legs, and no fatal GPU line. Every difference is inside run-to-run noise. The bench's agent turns already re-read only 3-5 tokens, so they never hit the case #4677 fixes (upstream measured it with `--batch 8` on 4 x R9700). It stays on, as upstream's default; it is harmless here. Not measured: the #4350 check (`hipPeekAtLastError` once per decode window) against the old binary, since both legs used the new one. A real GPU fault was not tried.
+
 ## Related
 
 - [Upstream Strata v0.2.9 Review (2026-10-31)](upstream-v0-2-9-review-2026-10-31.md)

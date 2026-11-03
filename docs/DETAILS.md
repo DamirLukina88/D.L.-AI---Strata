@@ -863,6 +863,16 @@ print(r.choices[0].message.content)
   that has closed is held until the turn ends, a new call starts or 1,500 characters follow. A call in the thinking, and a
   bare call with no `<tool_call>` around it, keep the old rule. A call written as `tools.write`, `functions.write` or
   `default_api.write` is the declared tool `write` (#4751); a tool that is declared under the dotted name keeps it.
+- **A parked conversation matches what the client got** (ported from upstream 0.2.10, #4677; HIP). A request commits only the
+  accepted rows of its last speculative window that it can still send, so its saved conversation stays a prefix of the next
+  prompt. On by default; `STRATA_SERVE_STOP_BOUND=0` turns it off. Measured on the RX 7600 XT (Coder IQ1_M, `tools/strata_bench.py`,
+  off/on/off/on, medians): agent cache hit 67.09 / 67.13 / 67.09 / 67.23%, 3 to 5 tokens re-read per run both ways, agent decode
+  28.9 / 29.8 / 29.5 / 29.9 tok/s, 4K prompt 305.1 / 295.6 / 300.9 / 306.8 tok/s. That is no change beyond noise: this suite's
+  turns did not hit the case upstream measured (4 of 16 continuations falling back on 4 x R9700 with `--batch 8`).
+- **A fatal GPU error restarts the engine** (ported from upstream 0.2.10, #4350). After an illegal memory access or a launch
+  failure in a decode window or a commit, the engine prints `ERR fatal GPU error: ...` and exits. The server answers that request
+  with a 503 and starts the engine on the next one; after 3 such errors in 10 minutes it stops restarting it until the 10 minutes
+  have passed. Tested with the server's unit tests (a fake engine); no real GPU fault was tried.
 - **Tool calls in other forms (opt-in).** `"tool_call_recovery": true` in `strata-<model>.json` reads a call of a
   tool the request declared also when the model writes it as `<parameter=NAME>` instead of `<function=NAME>`, as JSON
   (`{"name": ..., "arguments": ...}`) inside `<tool_call>`, as a `<function=NAME>` block at the start of a line
