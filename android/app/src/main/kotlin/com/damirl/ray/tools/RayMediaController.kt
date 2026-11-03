@@ -1,5 +1,6 @@
 package com.damirl.ray.tools
 
+import android.app.KeyguardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -21,6 +22,9 @@ class RayMediaController(private val context: Context) {
     companion object {
         private const val TAG = "RayMedia"
         const val BRAVE = "com.brave.browser"
+        // the player's Play button on music.youtube.com (English and Croatian page language)
+        private val PLAY_LABELS = setOf("play", "reproduciraj", "pokreni", "play video")
+        private const val AUTOSTART_MS = 90_000L
         private val PLAYABLE = Regex("""^https://(music\.|www\.|m\.)?youtube\.com/.*|^https://youtu\.be/.*""")
     }
 
@@ -35,11 +39,40 @@ class RayMediaController(private val context: Context) {
         return try {
             context.startActivity(intent)
             Log.d(TAG, "playUrl: opened in Brave")
-            "Playing it in YouTube Music (Brave)."
+            Thread({ autostart() }, "RayMusicStart").start()
+            "Opened it in YouTube Music (Brave); it starts as soon as you're done talking."
         } catch (e: Exception) {
             Log.e(TAG, "Brave could not be opened", e)
             "Error: Brave could not be opened (${e.message}). Is it installed?"
         }
+    }
+
+    // Brave doesn't autoplay a page another app opened (it waits for a tap), so Ray taps Play himself (his screen
+    // reading service): once nothing plays any more (he has finished talking, the old song stopped), the phone is
+    // unlocked and Brave's page shows the button.  Until then, or until Brave plays by itself, he waits (90 s at most)
+    private fun autostart() {
+        val keyguard = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+        val end = SystemClock.uptimeMillis() + AUTOSTART_MS
+        Thread.sleep(2_500)                                   // the page loads
+        while (SystemClock.uptimeMillis() < end) {
+            if (bravePlaying()) return
+            val quiet = audioManager?.isMusicActive != true
+            val locked = keyguard?.isDeviceLocked ?: true
+            if (quiet && !locked && RayAccessibilityService.tapLabelled(BRAVE, PLAY_LABELS)) {
+                Thread.sleep(2_000)
+                if (bravePlaying()) return
+            }
+            Thread.sleep(1_000)
+        }
+        Log.d(TAG, "autostart: gave up (no Play button, phone locked or still busy)")
+    }
+
+    private fun bravePlaying(): Boolean = try {
+        val component = ComponentName(context, RayNotificationListenerService::class.java)
+        sessionManager?.getActiveSessions(component).orEmpty()
+            .any { it.packageName == BRAVE && it.playbackState?.state == PlaybackState.STATE_PLAYING }
+    } catch (_: SecurityException) {
+        false
     }
 
     // the session to control: the one playing, else Brave's, else any that has a song; never Ray's own (his voice)

@@ -224,7 +224,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_play_music",
-        "description": "Find a song (or artist, album) on YouTube Music and play it on the phone, in the user's YouTube Music tab in Brave. Use it when the user asks to play, put on or search for a song or music. Without a query it plays the user's Liked songs (their default when they just say 'play music'). Works while the phone is locked. For pause, skip or back, use phone_control_media.",
+        "description": "Find a song (or artist, album) on YouTube Music and play it on the phone, in the user's YouTube Music tab in Brave. Use it when the user asks to play, put on or search for a song or music. Without a query it plays the user's Liked songs (their default when they just say 'play music'). It starts by itself once Ray has finished talking and the phone is unlocked. For pause, skip or back, use phone_control_media.",
         "inputSchema": {
             "type": "object",
             "properties": {

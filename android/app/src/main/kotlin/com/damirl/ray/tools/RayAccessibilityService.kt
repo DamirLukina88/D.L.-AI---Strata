@@ -39,6 +39,32 @@ class RayAccessibilityService : AccessibilityService() {
             return sb.toString().trimEnd()
         }
 
+        /** Taps the first visible element of [pkg]'s windows labelled one of [labels] (case-insensitive). */
+        fun tapLabelled(pkg: String, labels: Set<String>): Boolean {
+            val service = instance ?: return false
+            for (window in service.windows) {
+                val root = window.root ?: continue
+                if (root.packageName?.toString() != pkg) continue
+                val queue = ArrayDeque(listOf(root))
+                var seen = 0
+                while (queue.isNotEmpty() && seen++ < 4000) {
+                    val node = queue.removeFirst()
+                    val label = (node.contentDescription ?: node.text)?.toString()?.trim()?.lowercase()
+                    if (label != null && label in labels && node.isVisibleToUser) {
+                        // the label can sit on a child of the button: the nearest clickable one gets the tap
+                        var target: AccessibilityNodeInfo? = node
+                        while (target != null && !target.isClickable) target = target.parent
+                        if ((target ?: node).performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                            Log.d(TAG, "Tapped '$label' in $pkg")
+                            return true
+                        }
+                    }
+                    for (i in 0 until node.childCount) node.getChild(i)?.let { queue.add(it) }
+                }
+            }
+            return false
+        }
+
         private fun traverseNode(node: AccessibilityNodeInfo?, out: MutableList<String>, depth: Int) {
             if (node == null || depth > 15) return
 
