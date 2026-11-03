@@ -200,7 +200,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_get_last_photo",
-        "description": "Show the newest photo taken with phone_camera_snap again (it is in the workspace under phone-photos/). Only works while the phone is unlocked.",
+        "description": "Show the newest photo again (it is in the workspace under phone-photos/); if none was taken in the last 2 minutes, it takes one now like phone_camera_snap. Only works while the phone is unlocked and Ray is on its screen.",
         "inputSchema": {
             "type": "object",
             "properties": {}

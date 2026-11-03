@@ -44,10 +44,15 @@ class CameraVisionManager(private val context: Context) {
             ?: return "Error: the phone's picture folder is not available."
         val snaps = dir.listFiles { f -> f.name.startsWith("RAY_SNAP_") && f.name.endsWith(".jpg") }.orEmpty()
             .sortedByDescending { it.lastModified() }
-        if (snaps.isEmpty()) return "Error: no photo yet. Open the camera with phone_camera_snap first."
-        val file = snaps.firstOrNull { it.length() > 0 } ?: return "Error: no photo yet: take one with phone_camera_snap."
-        // empty leftovers of cancelled snaps go
-        snaps.filter { it.length() == 0L && it != snaps.first() }.forEach { it.delete() }
+        // empty leftovers (the old camera-app flow left 0-byte files) go
+        snaps.filter { it.length() == 0L }.forEach { it.delete() }
+        val file = snaps.firstOrNull { it.length() > 0 }
+        // nothing from the last 2 minutes: the model asked to "fetch" a photo that was never taken (an older
+        // conversation taught it a fetch step), so take one now; whichever photo tool it picks, it gets a photo
+        if (file == null || System.currentTimeMillis() - file.lastModified() > 2 * 60_000) {
+            Log.d(TAG, "No recent photo: taking one")
+            return snapPhoto("")
+        }
         return upload(file, networkClient)
     }
 
