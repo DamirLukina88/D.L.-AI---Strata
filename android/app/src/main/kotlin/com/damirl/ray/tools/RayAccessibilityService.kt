@@ -42,34 +42,39 @@ class RayAccessibilityService : AccessibilityService() {
             return sb.toString().trimEnd()
         }
 
-        /** Taps the first visible element of [pkg]'s windows labelled one of [labels] (case-insensitive). */
-        fun tapLabelled(pkg: String, labels: Set<String>): Boolean {
+        /** Taps a visible element of [pkg] labelled one of [labels] (case-insensitive), trying them in order. */
+        fun tapLabelled(pkg: String, labels: List<String>): Boolean {
             val service = instance ?: return false
-            for (window in service.windows) {
-                val root = window.root ?: continue
-                if (root.packageName?.toString() != pkg) continue
-                val queue = ArrayDeque(listOf(root))
-                var seen = 0
-                while (queue.isNotEmpty() && seen++ < 4000) {
-                    val node = queue.removeFirst()
-                    val label = (node.contentDescription ?: node.text)?.toString()?.trim()?.lowercase()
-                    if (label != null && (label in labels || labels.any { label.startsWith("$it (") }) && node.isVisibleToUser) {
-                        // the label can sit on a child of the button: the nearest clickable one gets the click;
-                        // a web page may ignore that, so a tap on the screen where the button is comes next
-                        var target: AccessibilityNodeInfo? = node
-                        while (target != null && !target.isClickable) target = target.parent
-                        if ((target ?: node).performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-                            Log.d(TAG, "Clicked '$label' in $pkg")
-                            return true
-                        }
-                        val box = Rect().also { node.getBoundsInScreen(it) }
-                        if (!box.isEmpty && service.tapAt(box.exactCenterX(), box.exactCenterY())) {
-                            Log.d(TAG, "Tapped '$label' in $pkg at ${box.centerX()},${box.centerY()}")
-                            return true
-                        }
+            val roots = service.windows.mapNotNull { it.root }.filter { it.packageName?.toString() == pkg }
+            for (wanted in labels) {
+                for (root in roots) {
+                    val queue = ArrayDeque(listOf(root))
+                    var seen = 0
+                    while (queue.isNotEmpty() && seen++ < 4000) {
+                        val node = queue.removeFirst()
+                        val label = (node.contentDescription ?: node.text)?.toString()?.trim()?.lowercase()
+                        if ((label == wanted || label?.startsWith("$wanted (") == true) && node.isVisibleToUser &&
+                            tap(service, node, pkg, label)) return true
+                        for (i in 0 until node.childCount) node.getChild(i)?.let { queue.add(it) }
                     }
-                    for (i in 0 until node.childCount) node.getChild(i)?.let { queue.add(it) }
                 }
+            }
+            return false
+        }
+
+        // the label can sit on a child of the button: the nearest clickable one gets the click; a web page may
+        // ignore that, so a tap on the screen where the button is comes next
+        private fun tap(service: RayAccessibilityService, node: AccessibilityNodeInfo, pkg: String, label: String): Boolean {
+            var target: AccessibilityNodeInfo? = node
+            while (target != null && !target.isClickable) target = target.parent
+            if ((target ?: node).performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                Log.d(TAG, "Clicked '$label' in $pkg")
+                return true
+            }
+            val box = Rect().also { node.getBoundsInScreen(it) }
+            if (!box.isEmpty && service.tapAt(box.exactCenterX(), box.exactCenterY())) {
+                Log.d(TAG, "Tapped '$label' in $pkg at ${box.centerX()},${box.centerY()}")
+                return true
             }
             return false
         }

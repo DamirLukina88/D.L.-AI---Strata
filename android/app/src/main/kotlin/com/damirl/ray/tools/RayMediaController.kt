@@ -41,9 +41,9 @@ class RayMediaController(private val context: Context) {
             }, "RayMusicResume").start()
         }
         const val BRAVE = "com.brave.browser"
-        // the player's Play button on music.youtube.com (English and Croatian page language)
-        // (the round button itself has no label for screen readers, only its "Start playback" hint)
-        private val PLAY_LABELS = setOf("play", "start playback", "reproduciraj", "pokreni", "play video")
+        // the player's Play button on music.youtube.com, in the order tried: "Play" starts it; its "Start playback"
+        // hint (the only label on a fresh page) is a fallback (a tap on it did nothing on 2026-11-03 21:34)
+        private val PLAY_LABELS = listOf("play", "reproduciraj", "pokreni", "play video", "start playback")
         // the model tends to explain a music command at length; the user wants a few words
         const val SHORT = "Say only that sentence to the user, word for word: no greeting, no comment, no offer."
         // the tool said "Started" on a locked phone (the helmet, the phone in a pocket) and Ray told the user it
@@ -85,9 +85,6 @@ class RayMediaController(private val context: Context) {
         // the tool runs before Ray says his answer: wait for it to start (10 s at most; a typed chat may have none)
         // and to end, so the song doesn't start under his voice
         waitForQuiet()                                        // he says his answer first, the page loads meanwhile
-        // the voice drawer covers Brave, and Ray's screen reading can't see the Play button under it (it played the
-        // moment the user closed the drawer): his answer is said, so the drawer closes
-        if (com.damirl.ray.assistant.VoiceDrawerController.closeIfOpen()) Thread.sleep(1_000)
         val speaking = AudioPlaybackService.isSpeakingState
         var tries = 0
         while (SystemClock.uptimeMillis() < end) {
@@ -95,15 +92,15 @@ class RayMediaController(private val context: Context) {
             val quiet = !speaking.value && !inCall() && com.damirl.ray.audio.BluetoothMic.idle()
             val locked = keyguard?.isDeviceLocked ?: true
             if (quiet && !locked && RayAccessibilityService.tapLabelled(BRAVE, PLAY_LABELS)) {
-                if (waitForBrave(2_500)) {
+                if (waitForBrave(1_500)) {
                     if (wasShown) backToRay()
                     return
                 }
             }
-            if (BuildConfig.DEBUG && ++tries % 5 == 1) {
+            if (BuildConfig.DEBUG && ++tries % 20 == 1) {
                 Log.d(TAG, "autostart: quiet=$quiet locked=$locked; Brave shows: " + RayAccessibilityService.labelsOf(BRAVE))
             }
-            Thread.sleep(1_000)
+            Thread.sleep(250)
         }
         Log.d(TAG, "autostart: gave up (no Play button, phone locked or still busy)")
     }
@@ -141,17 +138,19 @@ class RayMediaController(private val context: Context) {
         val speaking = AudioPlaybackService.isSpeakingState
         val end = SystemClock.uptimeMillis() + maxMs
         val answerBy = SystemClock.uptimeMillis() + 8_000
-        while (!speaking.value && SystemClock.uptimeMillis() < answerBy) Thread.sleep(250)
-        while ((speaking.value || !com.damirl.ray.audio.BluetoothMic.idle() || inCall()) &&
-            SystemClock.uptimeMillis() < end) Thread.sleep(250)
-        Thread.sleep(1_000)                                   // the helmet switches back to music
+        while (!speaking.value && SystemClock.uptimeMillis() < answerBy) Thread.sleep(100)
+        while ((speaking.value || inCall()) && SystemClock.uptimeMillis() < end) Thread.sleep(100)
+        // said: the drawer has done its job, and it covers Brave (Ray's screen reading saw no Play button under it)
+        com.damirl.ray.assistant.VoiceDrawerController.closeIfOpen()
+        while (!com.damirl.ray.audio.BluetoothMic.idle() && SystemClock.uptimeMillis() < end) Thread.sleep(100)
+        Thread.sleep(300)                                     // the helmet switches back to music
     }
 
     private fun waitForBrave(ms: Long): Boolean {
         val end = SystemClock.uptimeMillis() + ms
         while (SystemClock.uptimeMillis() < end) {
             if (bravePlaying()) return true
-            Thread.sleep(250)
+            Thread.sleep(150)
         }
         return bravePlaying()
     }
