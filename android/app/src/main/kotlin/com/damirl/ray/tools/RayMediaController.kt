@@ -69,7 +69,9 @@ class RayMediaController(private val context: Context) {
             context.startActivity(intent)
             Log.d(TAG, "playUrl: opened in Brave (locked=$locked)")
             Thread({ autostart() }, "RayMusicStart").start()
-            if (locked) LOCKED_START else "Started."
+            // Brave allowed to autoplay (its --autoplay-policy line, 2026-11-03) starts the song itself, locked
+            // too: only when it doesn't is the user told to unlock
+            if (locked && !waitForBrave(12_000)) LOCKED_START else "Started."
         } catch (e: Exception) {
             Log.e(TAG, "Brave could not be opened", e)
             "Error: Brave could not be opened (${e.message}). Is it installed?"

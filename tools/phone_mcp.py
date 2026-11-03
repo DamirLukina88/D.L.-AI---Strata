@@ -594,6 +594,15 @@ class PhoneMcpServer:
             # the broadcast above had Ray's app open it, and it presses Play once he is quiet and the phone is
             # unlocked (am start alone only opened the page: it never played, but this said it did)
             locked = "isKeyguardShowing=true" in (self._run_adb_cmd(["shell", "dumpsys", "window"]) or "")
+            # Brave allowed to autoplay starts it itself, locked too (its command line, see RayMediaController)
+            end = time.time() + 12
+            while locked and time.time() < end:
+                media = self._run_adb_cmd(["shell", "dumpsys", "media_session"]) or ""
+                brave = media.split("package=com.brave.browser", 1)[1][:600] if "package=com.brave.browser" in media else ""
+                if "state=PLAYING" in brave:
+                    locked = False
+                    break
+                time.sleep(1)
             return ("Not playing yet: the phone is locked, and Brave starts it only once the user unlocks the phone "
                     "(Ray presses Play on the screen; up to 5 minutes). Say only this to the user: "
                     "\"It starts as soon as you unlock the phone.\"" if locked else "Started.")
