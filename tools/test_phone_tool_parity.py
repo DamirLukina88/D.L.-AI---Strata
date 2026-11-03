@@ -19,7 +19,7 @@ KOTLIN = ROOT / "android/app/src/main/kotlin/com/damirl/ray/tools/PhoneTools.kt"
 def app_tools():
     """{tool name: {argument: default as written in Kotlin}} from PhoneTools.execute's `when`."""
     src = KOTLIN.read_text(encoding="utf-8")
-    body = src[src.index("fun execute("):src.index("else ->")]
+    body = src[src.index("fun run("):src.index("else ->")]
     tools = {}
     # each branch starts with "phone_x" -> and runs to the next branch
     parts = re.split(r'\n\s*"(phone_[a-z0-9_]+)"\s*->', "\n" + body)

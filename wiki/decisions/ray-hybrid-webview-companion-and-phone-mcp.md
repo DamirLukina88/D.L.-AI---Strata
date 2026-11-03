@@ -97,6 +97,8 @@ Found and fixed during validation (`fbbb5ebb`):
 
 **Wireless adb drops on the Xiaomi (2026-11-03):** `/tmp/adb.1000.log` shows the phone closing the TLS link every 8–60 s (`SSL_read failed … bytes_read=0`) and wireless debugging coming back on new ports, then switching off; not a PC-side bug (one adb server; the SDK and android-tools builds share protocol 41). A USB cable, Developer options › Stay awake and Disable adb authorization timeout, and keeping the phone charging help. **Root cause (user, 2026-11-03):** HyperOS dual-band Wi-Fi "speed boost" had its second band joined to the Gree air conditioner's own Wi-Fi instead of the router, so the phone kept switching between two networks (two different addresses) and wireless debugging restarted on new ports; fixed in the phone's Wi-Fi settings, after which the link held with 0 drops. The fix that worked (user, 2026-11-02 and 03): `adb disconnect`, then re-pair wireless debugging (phone: Wireless debugging › Pair device with pairing code; PC: `adb pair <ip>:<pairing port>`), then `adb connect <ip>:<port>`.
 
+**Private tools need an unlocked phone (2026-11-03):** the drawer stays usable over the lock screen, but `PhoneTools.PRIVATE` (2FA code, notifications, screen content) is refused while the device is locked, so whoever holds the locked phone can't read them through Ray.
+
 Debugging recipe: debug builds expose `webview_devtools_remote_<pid>`; `adb forward tcp:9333 localabstract:webview_devtools_remote_$(adb shell pidof com.damirl.ray)` then `curl localhost:9333/json` lists every live page (one per WebView) for measuring layout with `Runtime.evaluate`.
 
 ## Related

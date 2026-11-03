@@ -36,10 +36,10 @@ correctness problems were fixed with tests. Nine items are open and listed below
 
 ## Open, most important first
 
-1. **Phone tools from the lock screen.** The voice drawer opens over the lock screen (kept on purpose), and from
-   there Ray can read the latest 2FA code, notifications and the screen. Anyone holding the locked phone can ask
-   for them. *Recommendation:* refuse `phone_get_2fa_code`, `phone_get_recent_notifications` and `phone_get_screen`
-   while the keyguard is locked (`KeyguardManager.isKeyguardLocked`), and say "unlock the phone first".
+1. ~~**Phone tools from the lock screen.**~~ **Fixed 2026-11-03:** `PhoneTools` refuses `phone_get_2fa_code`,
+   `phone_get_recent_notifications` and `phone_get_screen` while `KeyguardManager.isDeviceLocked` (unknown counts as
+   locked) and tells Ray to ask for an unlock; the other tools still work from the lock screen. 4 unit tests; checked
+   unlocked on the phone (the locked case is for the user to try).
 2. **The API key travels in plain HTTP on the LAN and is compiled into the APK.** Anyone on the Wi-Fi can read it
    (the phone's second Wi-Fi band had joined the air conditioner's network), and anyone with the APK file has it.
    *Recommendation:* HTTPS on the LAN route too (e.g. the tunnel hostname also at home), or a per-device key the
