@@ -152,8 +152,11 @@ fun RayWebView(
                         val reqUrl = request?.url ?: return false
                         val host = reqUrl.host ?: ""
 
-                        // Stay inside WebView for the Strata server's own pages
-                        if (com.damirl.ray.network.StrataOrigins.isTrustedHost(host)) {
+                        // Stay inside WebView for the Strata server's own pages, and for Cloudflare Access's login (the email
+                        // code) on the way to the remote one: opened in the browser, the login cookie landed there and
+                        // the app never got in.  The login pages get no bridge (RayNativeBridge.trusted)
+                        if (com.damirl.ray.network.StrataOrigins.isTrustedHost(host) ||
+                            com.damirl.ray.network.StrataOrigins.isLoginHost(host)) {
                             return false
                         }
 

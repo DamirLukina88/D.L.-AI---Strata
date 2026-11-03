@@ -162,4 +162,17 @@ class RayNativeBridgeTest {
         assertFalse(com.damirl.ray.network.StrataOrigins.isTrusted("file:///sdcard/x.html"))
         assertFalse(com.damirl.ray.network.StrataOrigins.isTrusted(null))
     }
+
+    // the Cloudflare Access login stays in the app, but it is not the Strata server
+    @Test
+    fun testAccessLogin_staysInAppButIsNotTrusted() {
+        val o = com.damirl.ray.network.StrataOrigins
+        assertTrue(o.isLoginHost("damirl.cloudflareaccess.com"))
+        assertFalse(o.isLoginHost("cloudflareaccess.com.evil.example.org"))
+        assertFalse(o.isLoginHost("a.b.cloudflareaccess.com"))
+        assertFalse(o.isTrusted("https://damirl.cloudflareaccess.com/cdn-cgi/access/login/x"))
+        val bridge = RayNativeBridge(context = createDummyContext())
+        bridge.pageUrl = "https://damirl.cloudflareaccess.com/cdn-cgi/access/login/x"
+        assertEquals("", bridge.getApiKey())
+    }
 }

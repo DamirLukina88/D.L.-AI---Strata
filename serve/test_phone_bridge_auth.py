@@ -78,5 +78,16 @@ class PhoneRelayNeedsTheKey(unittest.TestCase):
         self.assertEqual((status, body.get("pending")), (200, None))
 
 
+class PageRefusesFrames(PhoneRelayNeedsTheKey):
+    """The app's page embeds no frames and may not be framed: the Android bridge is injected into every frame."""
+
+    def test_html_pages_forbid_frames(self):
+        with urllib.request.urlopen(self.base + "/", timeout=10) as r:
+            csp = r.headers.get("Content-Security-Policy", "")
+            self.assertIn("frame-src 'none'", csp)
+            self.assertIn("frame-ancestors 'self'", csp)
+            self.assertEqual(r.headers.get("X-Frame-Options"), "SAMEORIGIN")
+
+
 if __name__ == "__main__":
     unittest.main()

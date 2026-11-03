@@ -6134,6 +6134,10 @@ def make_handler(svc: Service):
                 body = (ROOT / "serve" / "web" / ("monitor.html" if path else "index.html")).read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+                # D.L. AI: no frames in the page (the Android app's bridge is injected into every frame, and the page
+                # embeds none), and no other site may frame it (clickjacking)
+                self.send_header("Content-Security-Policy", "frame-src 'none'; frame-ancestors 'self'")
+                self.send_header("X-Frame-Options", "SAMEORIGIN")
                 self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
                 self.send_header("Pragma", "no-cache")
                 self.send_header("Expires", "0")

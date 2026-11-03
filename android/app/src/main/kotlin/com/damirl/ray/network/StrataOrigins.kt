@@ -17,6 +17,12 @@ object StrataOrigins {
 
     fun isTrustedHost(host: String?): Boolean = host != null && host.lowercase() in hosts
 
+    /** Cloudflare Access's login pages (<team>.cloudflareaccess.com): kept inside the app, but never trusted. */
+    fun isLoginHost(host: String?): Boolean {
+        val h = host?.lowercase() ?: return false
+        return h.endsWith(".cloudflareaccess.com") && h.count { it == '.' } == 2
+    }
+
     fun isTrusted(url: String?): Boolean {
         if (url.isNullOrBlank()) return false
         val uri = runCatching { URI(url) }.getOrNull() ?: return false
