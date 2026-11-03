@@ -1,0 +1,473 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 9.0.1" type="baseline" client="gradle" dependencies="false" name="AGP (9.0.1)" variant="all" version="9.0.1">
+
+    <issue
+        id="OldTargetApi"
+        message="Not targeting the latest versions of Android; compatibility modes apply. Consider testing and updating this version. Consult the `android.os.Build.VERSION_CODES` javadoc for details."
+        errorLine1="    targetSdk = 35"
+        errorLine2="    ~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="24"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="StartActivityAndCollapseDeprecated"
+        message="TileService#startActivityAndCollapse(Intent) is deprecated. Use TileService#startActivityAndCollapse(PendingIntent) instead."
+        errorLine1="                startActivityAndCollapse(intent)"
+        errorLine2="                                         ~~~~~~">
+        <location
+            file="src/main/kotlin/com/damirl/ray/assistant/RayTileService.kt"
+            line="69"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="BatteryLife"
+        message="Use of `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` violates the Play Store Content Policy regarding acceptable use cases, as described in https://developer.android.com/training/monitoring-device-state/doze-standby.html"
+        errorLine1="                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {"
+        errorLine2="                                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/com/damirl/ray/OnboardingActivity.kt"
+            line="238"
+            column="50"/>
+    </issue>
+
+    <issue
+        id="QueryPermissionsNeeded"
+        message="As of Android 11, this method no longer returns information about all apps; see https://g.co/dev/packagevisibility for details"
+        errorLine1="            val installedApps = pm.getInstalledApplications(0)"
+        errorLine2="                                   ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/com/damirl/ray/tools/DeviceToolsManager.kt"
+            line="180"
+            column="36"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of Gradle than 9.1.0 is available: 9.8.2"
+        errorLine1="distributionUrl=https\://services.gradle.org/distributions/gradle-9.1.0-bin.zip"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="../gradle/wrapper/gradle-wrapper.properties"
+            line="3"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of com.android.application than 9.0.1 is available: 9.5.0"
+        errorLine1="androidGradlePlugin = &quot;9.0.1&quot;"
+        errorLine2="                      ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="2"
+            column="23"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.core:core-ktx than 1.18.0 is available: 1.19.1"
+        errorLine1="androidxCore = &quot;1.18.0&quot;"
+        errorLine2="               ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="3"
+            column="16"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-runtime-compose than 2.10.0 is available: 2.11.0"
+        errorLine1="androidxLifecycle = &quot;2.10.0&quot;"
+        errorLine2="                    ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="4"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-runtime-ktx than 2.10.0 is available: 2.11.0"
+        errorLine1="androidxLifecycle = &quot;2.10.0&quot;"
+        errorLine2="                    ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="4"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-viewmodel-compose than 2.10.0 is available: 2.11.0"
+        errorLine1="androidxLifecycle = &quot;2.10.0&quot;"
+        errorLine2="                    ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="4"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.compose:compose-bom than 2026.03.01 is available: 2026.09.00"
+        errorLine1="androidxComposeBom = &quot;2026.03.01&quot;"
+        errorLine2="                     ~~~~~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="6"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.navigation3:navigation3-runtime than 1.0.1 is available: 1.2.0"
+        errorLine1="nav3Core = &quot;1.0.1&quot;"
+        errorLine2="           ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="14"
+            column="12"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.navigation3:navigation3-ui than 1.0.1 is available: 1.2.0"
+        errorLine1="nav3Core = &quot;1.0.1&quot;"
+        errorLine2="           ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="14"
+            column="12"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-viewmodel-navigation3 than 2.10.0 is available: 2.11.0"
+        errorLine1="lifecycleViewmodelNav3 = &quot;2.10.0&quot;"
+        errorLine2="                         ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="15"
+            column="26"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.media:media than 1.7.0 is available: 1.8.0"
+        errorLine1="androidxMedia = &quot;1.7.0&quot;"
+        errorLine2="                ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="20"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.json:json than 20240303 is available: 20260814"
+        errorLine1="  testImplementation(&quot;org.json:json:20240303&quot;)"
+        errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="190"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-test than 1.10.2 is available: 1.11.0"
+        errorLine1="coroutines = &quot;1.10.2&quot;"
+        errorLine2="             ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="11"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.jetbrains.kotlin.plugin.compose than 2.3.20 is available: 2.4.21"
+        errorLine1="kotlin = &quot;2.3.20&quot;"
+        errorLine2="         ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="13"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.jetbrains.kotlin.plugin.serialization than 2.3.20 is available: 2.4.21"
+        errorLine1="kotlin = &quot;2.3.20&quot;"
+        errorLine2="         ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="13"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of com.squareup.okhttp3:okhttp than 4.12.0 is available: 5.5.1"
+        errorLine1="okhttp = &quot;4.12.0&quot;"
+        errorLine2="         ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="17"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of com.squareup.okhttp3:okhttp-sse than 4.12.0 is available: 5.5.1"
+        errorLine1="okhttp = &quot;4.12.0&quot;"
+        errorLine2="         ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="17"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.jetbrains.kotlinx:kotlinx-serialization-json than 1.7.3 is available: 1.12.0"
+        errorLine1="kotlinxSerializationJson = &quot;1.7.3&quot;"
+        errorLine2="                           ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="18"
+            column="28"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of net.java.dev.jna:jna than 5.18.1 is available: 5.19.1"
+        errorLine1="jna = &quot;5.18.1&quot;"
+        errorLine2="      ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="21"
+            column="7"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="    modifier: Modifier = Modifier,"
+        errorLine2="    ~~~~~~~~">
+        <location
+            file="src/main/kotlin/com/damirl/ray/ui/main/MainScreen.kt"
+            line="40"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="ChromeOsAbiSupport"
+        message="Missing x86_64 ABI support for ChromeOS"
+        errorLine1="    ndk { abiFilters += &quot;arm64-v8a&quot; }"
+        errorLine2="                        ~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="29"
+            column="25"/>
+    </issue>
+
+    <issue
+        id="PermissionImpliesUnsupportedChromeOsHardware"
+        message="Permission exists without corresponding hardware `&lt;uses-feature android:name=&quot;android.hardware.camera&quot; required=&quot;false&quot;>` tag"
+        errorLine1="    &lt;uses-permission android:name=&quot;android.permission.CAMERA&quot; />"
+        errorLine2="     ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="14"
+            column="6"/>
+    </issue>
+
+    <issue
+        id="InsecureBaseConfiguration"
+        message="Insecure Base Configuration"
+        errorLine1="    &lt;base-config cleartextTrafficPermitted=&quot;true&quot;>"
+        errorLine2="                                            ~~~~">
+        <location
+            file="src/main/res/xml/network_security_config.xml"
+            line="6"
+            column="45"/>
+    </issue>
+
+    <issue
+        id="DataExtractionRules"
+        message="The attribute `android:allowBackup` is deprecated from Android 12 and higher and may be removed in future versions. Consider adding the attribute `android:dataExtractionRules` specifying an `@xml` resource which configures cloud backups and device transfers on Android 12 and higher."
+        errorLine1="        android:allowBackup=&quot;false&quot;"
+        errorLine2="                             ~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="28"
+            column="30"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 28"
+        errorLine1="            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/com/damirl/ray/audio/AudioPlaybackService.kt"
+            line="52"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 28"
+        errorLine1="        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/com/damirl/ray/audio/AudioPlaybackService.kt"
+            line="255"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 28"
+        errorLine1="        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/com/damirl/ray/assistant/RayAssistTrampolineActivity.kt"
+            line="22"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="This folder configuration (`v26`) is unnecessary; `minSdkVersion` is 28. Merge all the resources in this folder into `mipmap-anydpi`.">
+        <location
+            file="src/main/res/mipmap-anydpi-v26"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var toolCalls by mutableStateOf(0)"
+        errorLine2="                     ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/com/damirl/ray/assistant/VoiceDrawerController.kt"
+            line="64"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.xml.backup_rules` appears to be unused"
+        errorLine1="&lt;full-backup-content>"
+        errorLine2="^">
+        <location
+            file="src/main/res/xml/backup_rules.xml"
+            line="8"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.xml.data_extraction_rules` appears to be unused"
+        errorLine1="&lt;data-extraction-rules>"
+        errorLine2="^">
+        <location
+            file="src/main/res/xml/data_extraction_rules.xml"
+            line="6"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="TypographyEllipsis"
+        message="Replace &quot;...&quot; with ellipsis character (…, &amp;#8230;) ?"
+        errorLine1="    &lt;string name=&quot;tile_subtitle_speaking&quot;>Speaking...&lt;/string>"
+        errorLine2="                                          ~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="5"
+            column="43"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Bitmap.scale` instead?"
+        errorLine1="                Bitmap.createScaledBitmap(bitmap, (bitmap.width * ratio).toInt(), (bitmap.height * ratio).toInt(), true)"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/com/damirl/ray/tools/CameraVisionManager.kt"
+            line="89"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="            val request = DownloadManager.Request(Uri.parse(url)).apply {"
+        errorLine2="                                                  ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/com/damirl/ray/ui/webview/Downloads.kt"
+            line="28"
+            column="51"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                        data = Uri.parse(&quot;package:${context.packageName}&quot;)"
+        errorLine2="                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/com/damirl/ray/OnboardingActivity.kt"
+            line="239"
+            column="32"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                        data = Uri.parse(&quot;package:${context.packageName}&quot;)"
+        errorLine2="                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/com/damirl/ray/OnboardingActivity.kt"
+            line="239"
+            column="32"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toColorInt` instead?"
+        errorLine1="                setBackgroundColor(android.graphics.Color.parseColor(&quot;#0B0D10&quot;))"
+        errorLine2="                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/com/damirl/ray/ui/webview/RayWebView.kt"
+            line="98"
+            column="36"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ON, on).apply()"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/com/damirl/ray/assistant/WakeWord.kt"
+            line="26"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseTomlInstead"
+        message="Use version catalog instead"
+        errorLine1="  testImplementation(&quot;org.json:json:20240303&quot;)"
+        errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="190"
+            column="22"/>
+    </issue>
+
+</issues>

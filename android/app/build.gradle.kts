@@ -63,6 +63,13 @@ android {
   testOptions {
     unitTests.isReturnDefaultValues = true
   }
+
+  // ./gradlew lintDebug: the findings that existed on 2026-11-03 are in lint-baseline.xml; new ones are reported
+  lint {
+    baseline = file("lint-baseline.xml")
+    abortOnError = false
+    checkDependencies = false
+  }
 }
 
 kotlin {
@@ -157,15 +164,15 @@ dependencies {
   implementation(libs.androidx.compose.ui.tooling.preview)
   implementation(libs.androidx.compose.material3)
   // Material icons extended
-  implementation("androidx.compose.material:material-icons-extended:1.7.8")
+  implementation(libs.androidx.compose.material.icons.extended)
 
   // MediaSessionCompat & MediaButton support
-  implementation("androidx.media:media:1.7.0")
+  implementation(libs.androidx.media)
 
   // Networking (OkHttp + SSE + JSON)
-  implementation("com.squareup.okhttp3:okhttp:4.12.0")
-  implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")
-  implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+  implementation(libs.okhttp)
+  implementation(libs.okhttp.sse)
+  implementation(libs.kotlinx.serialization.json)
 
   // "Ok Ray" wake word: Vosk, offline, with its small English model (see downloadVoskModel)
   implementation(libs.vosk.android) { exclude(group = "net.java.dev.jna") }
