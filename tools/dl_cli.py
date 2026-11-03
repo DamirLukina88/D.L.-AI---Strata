@@ -1059,7 +1059,7 @@ def resolve_file_references(prompt: str, workspace: Path) -> str:
 # A tool that hands the model a picture puts [[image: <path in the workspace>]] in its result (the phone's photo
 # tools; view_file on an image).  Only these tools may, and only image files inside the workspace count, so a fetched
 # web page or another tool's text can't make the model read other files
-IMAGE_RESULT_TOOLS = ("phone_camera_snap", "phone_get_last_photo", "view_file")
+IMAGE_RESULT_TOOLS = ("phone_camera_snap", "phone_get_last_photo", "phone_get_gallery_image", "view_file")
 IMAGE_MARKER = re.compile(r"\[\[image:\s*([^\]\n]+?)\s*\]\]")
 
 

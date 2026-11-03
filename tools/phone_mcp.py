@@ -12,8 +12,9 @@ Provides Ray with autonomous smartphone capabilities:
 8. phone_get_now_playing - Media metadata (Spotify, YouTube)
 9. phone_control_media - Media playback (play, pause, next, previous)
 10. phone_camera_snap - take a photo (back camera, shutter sound) and show it to the model
-11. phone_get_last_photo - the newest photo again
-12. phone_get_screen - Accessibility screen inspection
+11. phone_get_last_photo - the newest photo Ray took, again
+12. phone_get_gallery_image - the newest photo or screenshot the user took (the phone's gallery)
+13. phone_get_screen - Accessibility screen inspection
 """
 import json
 import os
@@ -187,7 +188,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_camera_snap",
-        "description": "Take a photo with the phone's back camera and see it: the photo comes back to you as an image. Use it whenever the user asks what you see, to look at something, or what is in front of the phone (not the workspace files). The phone plays the shutter sound. Works only while Ray is on the phone's screen (the app or the voice drawer) and the phone is unlocked.",
+        "description": "Take a photo with the phone's back camera and see it: the photo comes back to you as an image. Use it whenever the user asks what you see, to look at something, or what is in front of the phone (not the workspace files). Not for a photo or screenshot the user already took: that is phone_get_gallery_image. The phone plays the shutter sound. Works only while Ray is on the phone's screen (the app or the voice drawer) and the phone is unlocked.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -200,10 +201,24 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_get_last_photo",
-        "description": "Show the newest photo again (it is in the workspace under phone-photos/); if none was taken in the last 2 minutes, it takes one now like phone_camera_snap. Only works while the phone is unlocked and Ray is on its screen.",
+        "description": "Show the newest photo Ray took himself with phone_camera_snap again (it is in the workspace under phone-photos/); if none was taken in the last 2 minutes, it takes one now like phone_camera_snap. Not for the user's own photos or screenshots: that is phone_get_gallery_image. Only works while the phone is unlocked and Ray is on its screen.",
         "inputSchema": {
             "type": "object",
             "properties": {}
+        }
+    },
+    {
+        "name": "phone_get_gallery_image",
+        "description": "Look at the newest photo or screenshot the user took, from the phone's gallery: it comes back to you as an image. Use it when the user asks for their latest/last photo, screenshot, or a picture from the gallery or the phone. It never takes a new photo. Only works while the phone is unlocked.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": ["photo", "screenshot", "any"],
+                    "description": "photo: the newest camera photo; screenshot: the newest screenshot; any: the newest image of any kind (default)."
+                }
+            }
         }
     },
     {
@@ -342,7 +357,8 @@ class PhoneMcpServer:
             "--es", "tool", name,
             "--es", "args", json.dumps(args)
         ]
-        self._run_adb_cmd(broadcast_cmd, timeout=1.5)
+        if name != "phone_get_gallery_image":              # the gallery is read over adb alone (one copy)
+            self._run_adb_cmd(broadcast_cmd, timeout=1.5)
 
         if name == "phone_toggle_torch":
             enabled = bool(args.get("enabled", False))
@@ -479,6 +495,9 @@ class PhoneMcpServer:
         elif name == "phone_get_last_photo":
             return self._pull_last_photo()
 
+        elif name == "phone_get_gallery_image":
+            return self._pull_gallery_image(str(args.get("kind", "any")).lower())
+
         elif name == "phone_get_screen":
             out = self._run_adb_cmd(["shell", "uiautomator", "dump", "/dev/stdout"])
             if out:
@@ -510,11 +529,42 @@ class PhoneMcpServer:
         if size == 0:
             return ("Error: the camera hasn't handed over the photo yet. After taking it, the user must tap the tick "
                     "(✓, confirm) in the camera's review screen; ask them to do that, or to take it again.")
+        return self._pull_image(f"{self.PHOTO_DIR}/{newest}", f"phone-photos/{newest.rsplit('_', 1)[0]}.jpg")
+
+    GALLERY_DIRS = {
+        "photo": ["/sdcard/DCIM/Camera"],
+        "screenshot": ["/sdcard/DCIM/Screenshots", "/sdcard/Pictures/Screenshots"],
+    }
+    IMAGE_EXT = (".jpg", ".jpeg", ".png", ".webp", ".heic")
+
+    def _pull_gallery_image(self, kind: str) -> str:
+        """The newest camera photo or screenshot in the gallery folders, pulled over adb (newest by file time)."""
+        dirs = self.GALLERY_DIRS.get(kind) or self.GALLERY_DIRS["photo"] + self.GALLERY_DIRS["screenshot"]
+        what = kind if kind in self.GALLERY_DIRS else "image"
+        newest = None                                         # (epoch seconds, path)
+        for d in dirs:
+            out = self._run_adb_cmd(["shell", f"ls -t '{d}' 2>/dev/null | head -20"]) or ""
+            for fn in out.split():
+                if fn.lower().endswith(self.IMAGE_EXT) and not fn.startswith("."):
+                    path = f"{d}/{fn}"
+                    t = (self._run_adb_cmd(["shell", "stat", "-c", "%Y", path]) or "").strip()
+                    if t.isdigit() and (newest is None or int(t) > newest[0]):
+                        newest = (int(t), path)
+                    break
+        if newest is None:
+            return f"Error: there is no {what} in the phone's gallery."
+        prefix = "GALLERY_SCREENSHOT" if kind == "screenshot" else "GALLERY"
+        rel = f"phone-photos/{prefix}_{time.strftime('%Y%m%d_%H%M%S', time.localtime(newest[0]))}.jpg"
+        answer = self._pull_image(newest[1], rel)
+        if answer.startswith("Error"):
+            return answer
+        return f"The newest {what} in the gallery: {newest[1].rsplit('/', 1)[-1]}. {answer}"
+
+    def _pull_image(self, remote: str, rel: str) -> str:
         root = Path(os.environ.get("STRATA_WORKSPACE_DIR") or Path.home() / "DL-AI-workspace")
-        rel = f"phone-photos/{newest.rsplit('_', 1)[0]}.jpg"
         dest = root / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
-        if self._run_adb_cmd(["pull", f"{self.PHOTO_DIR}/{newest}", str(dest)], timeout=30) is None:
+        if self._run_adb_cmd(["pull", remote, str(dest)], timeout=30) is None:
             return "Error: the photo could not be copied from the phone."
         try:                                                  # upright and smaller, like the app sends it
             from PIL import Image, ImageOps

@@ -46,11 +46,12 @@ class TestPhoneMcpServer(unittest.TestCase):
             "phone_control_media",
             "phone_camera_snap",
             "phone_get_last_photo",
+            "phone_get_gallery_image",
             "phone_get_screen",
         }
 
         found_names = {t["name"] for t in tools}
-        self.assertEqual(len(tools), 12, f"Expected 12 tools, got {len(tools)}: {found_names}")
+        self.assertEqual(len(tools), 13, f"Expected 13 tools, got {len(tools)}: {found_names}")
         self.assertEqual(found_names, expected_tools, f"Missing tool declarations: {expected_tools - found_names}")
 
         for tool in tools:

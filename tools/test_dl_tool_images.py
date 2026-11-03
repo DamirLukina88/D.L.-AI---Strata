@@ -54,6 +54,11 @@ class ToolResultImages(unittest.TestCase):
         self.assertEqual(dl_cli.tool_result_images("phone__phone_camera_snap", res, self.project),
                          [f"file://{self.photo.resolve()}"])
 
+    def test_the_gallery_image_too(self):
+        res = "The newest screenshot in the gallery: x.png. The photo is in the workspace as phone-photos/RAY_SNAP_1.jpg. [[image: phone-photos/RAY_SNAP_1.jpg]]"
+        self.assertEqual(dl_cli.tool_result_images("phone__phone_get_gallery_image", res, self.project),
+                         [f"file://{self.photo.resolve()}"])
+
     def test_view_file_shows_an_image_instead_of_its_bytes(self):
         res = dl_cli.tool_view_file({"AbsolutePath": str(self.photo)}, self.project)
         self.assertNotIn("\ufffd", res)                                # no JPEG bytes as text

@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
@@ -41,6 +42,7 @@ import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material3.Button
@@ -115,6 +117,10 @@ fun PermissionsDashboard(
         PackageManager.PERMISSION_GRANTED
     fun cameraGranted() = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
         PackageManager.PERMISSION_GRANTED
+    val photosPermission = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES
+        else Manifest.permission.READ_EXTERNAL_STORAGE
+    fun photosGranted() = ContextCompat.checkSelfPermission(context, photosPermission) ==
+        PackageManager.PERMISSION_GRANTED
     fun notificationsGranted() = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
     // from Android's list of switched-on services, so it reads right even while the service isn't running
     fun screenReadingOn() = (Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: "")
@@ -123,6 +129,7 @@ fun PermissionsDashboard(
 
     var isMicGranted by remember { mutableStateOf(micGranted()) }
     var isCameraGranted by remember { mutableStateOf(cameraGranted()) }
+    var isPhotosGranted by remember { mutableStateOf(photosGranted()) }
     var isBatteryIgnored by remember {
         mutableStateOf(powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true)
     }
@@ -133,6 +140,7 @@ fun PermissionsDashboard(
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         isMicGranted = micGranted()
         isCameraGranted = cameraGranted()
+        isPhotosGranted = photosGranted()
         isBatteryIgnored = powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true
         isNotificationAccess = notificationsGranted()
         isAccessibilityActive = screenReadingOn()
@@ -145,9 +153,12 @@ fun PermissionsDashboard(
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         isCameraGranted = granted
     }
+    val photosLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        isPhotosGranted = granted
+    }
 
     // Autostart counts where the phone lets Ray read it (Xiaomi); elsewhere only the others
-    val checks = listOfNotNull(isMicGranted, isCameraGranted, autostart, isBatteryIgnored, isNotificationAccess, isAccessibilityActive)
+    val checks = listOfNotNull(isMicGranted, isCameraGranted, isPhotosGranted, autostart, isBatteryIgnored, isNotificationAccess, isAccessibilityActive)
     val total = checks.size
     val ready = checks.count { it }
 
@@ -213,6 +224,16 @@ fun PermissionsDashboard(
             isGranted = isCameraGranted,
             actionLabel = "Allow camera",
             onAction = { cameraLauncher.launch(Manifest.permission.CAMERA) }
+        )
+
+        PermissionCard(
+            title = "Photos",
+            desc = "So Ray can look at your newest photo or screenshot when you ask for it. He reads only the newest " +
+                "one, only when asked and only while the phone is unlocked.",
+            icon = Icons.Default.PhotoLibrary,
+            isGranted = isPhotosGranted,
+            actionLabel = "Allow photos",
+            onAction = { photosLauncher.launch(photosPermission) }
         )
 
         PermissionCard(
