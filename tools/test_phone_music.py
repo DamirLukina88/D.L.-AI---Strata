@@ -43,6 +43,12 @@ class PlayMusic(unittest.TestCase):
         self.assertEqual(args["url"], "https://music.youtube.com/watch?v=BSTsnWoslP4")
         self.assertIn("Queen", found)
 
+    def test_the_answer_is_short(self):
+        with mock.patch.object(phone_mcp, "find_song", return_value=phone_mcp.first_song(SEARCH)), \
+                mock.patch.object(self.server, "_execute_on_phone", return_value="Started."):
+            res = self.server.execute_tool("phone_play_music", {"query": "bohemian rhapsody"})
+        self.assertEqual(res, "Playing 'Bohemian Rhapsody' by Queen. " + phone_mcp.SHORT_ANSWER)
+
     def test_no_query_plays_the_liked_songs(self):
         with mock.patch.object(phone_mcp, "find_song") as search:
             args, found = self.server._resolve_song({})

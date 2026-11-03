@@ -174,7 +174,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_control_media",
-        "description": "Control what the phone is playing (YouTube Music in Brave, Spotify, ...): play, pause, next song, previous song, stop. Works while the phone is locked. To play a particular song, use phone_play_music.",
+        "description": "Control what the phone is playing (YouTube Music in Brave, Spotify, ...): play, pause, next song, previous song, stop. Pause, next and previous work while the phone is locked; resuming a paused song may need it unlocked (Ray brings Brave to the front for a moment). To play a particular song, use phone_play_music.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -265,6 +265,7 @@ BRAVE = "com.brave.browser"
 # YouTube Music's own search (the web player's API; no account or key), filtered to songs
 YTM_SEARCH = "https://music.youtube.com/youtubei/v1/search?prettyPrint=false"
 YTM_SONGS = "EgWKAQIIAWoKEAkQBRAKEAMQBA=="
+SHORT_ANSWER = "Confirm it to the user in a few words, nothing more."   # the model tended to talk at length
 LIKED_SONGS = "https://music.youtube.com/watch?list=LM"          # the signed-in user's Liked songs
 
 
@@ -390,7 +391,9 @@ class PhoneMcpServer:
             if not args.get("url"):
                 return found
             result = self._execute_on_phone(name, args)
-            return f"{found} {result}" if found and not result.startswith("Error") else result
+            if result.startswith("Error"):
+                return result
+            return f"{found} {SHORT_ANSWER}"
         return self._execute_on_phone(name, args)
 
     def _resolve_song(self, args: Dict[str, Any]):
@@ -402,7 +405,7 @@ class PhoneMcpServer:
             return {"url": url}, ""
         query = str(args.get("query") or "").strip()
         if not query:                                         # the user's default: their Liked songs
-            return {"url": LIKED_SONGS}, "Playing your Liked songs."
+            return {"url": LIKED_SONGS}, "Playing the Liked songs."
         try:
             song = find_song(query)
         except Exception as e:
@@ -410,7 +413,7 @@ class PhoneMcpServer:
         if not song:
             return {}, f"Error: YouTube Music found no song for '{query}'."
         return {"query": query, "url": f"https://music.youtube.com/watch?v={song['video_id']}"}, \
-            f"Found '{song['title']}' by {song['artist']}."
+            f"Playing '{song['title']}' by {song['artist']}."
 
     def _execute_on_phone(self, name: str, args: Dict[str, Any]) -> str:
         # 1. Try Companion App via Server Relay if connected
@@ -585,7 +588,7 @@ class PhoneMcpServer:
             out = self._run_adb_cmd(["shell", "am", "start", "-a", "android.intent.action.VIEW",
                                      "-d", f"'{args['url']}'", "-p", BRAVE,
                                      "--es", "com.android.browser.application_id", "com.damirl.ray"])
-            return "Playing it in YouTube Music (Brave)." if out is not None else "Error: Brave could not be opened."
+            return "Started." if out is not None else "Error: Brave could not be opened."
 
         elif name == "phone_get_screen":
             out = self._run_adb_cmd(["shell", "uiautomator", "dump", "/dev/stdout"])

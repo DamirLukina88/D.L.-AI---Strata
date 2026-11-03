@@ -14,6 +14,21 @@ import com.damirl.ray.ui.theme.RayTheme
 
 class MainActivity : ComponentActivity() {
 
+    companion object {
+        /** Ray's app is on screen (the music tools bring it back after waking Brave). */
+        @Volatile var shown = false
+    }
+
+    override fun onResume() {
+        super.onResume()
+        shown = true
+    }
+
+    override fun onPause() {
+        shown = false
+        super.onPause()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleIntent(intent)

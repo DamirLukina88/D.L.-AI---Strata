@@ -1,6 +1,9 @@
 package com.damirl.ray.tools
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
+import android.graphics.Rect
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -50,12 +53,18 @@ class RayAccessibilityService : AccessibilityService() {
                 while (queue.isNotEmpty() && seen++ < 4000) {
                     val node = queue.removeFirst()
                     val label = (node.contentDescription ?: node.text)?.toString()?.trim()?.lowercase()
-                    if (label != null && label in labels && node.isVisibleToUser) {
-                        // the label can sit on a child of the button: the nearest clickable one gets the tap
+                    if (label != null && (label in labels || labels.any { label.startsWith("$it (") }) && node.isVisibleToUser) {
+                        // the label can sit on a child of the button: the nearest clickable one gets the click;
+                        // a web page may ignore that, so a tap on the screen where the button is comes next
                         var target: AccessibilityNodeInfo? = node
                         while (target != null && !target.isClickable) target = target.parent
                         if ((target ?: node).performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-                            Log.d(TAG, "Tapped '$label' in $pkg")
+                            Log.d(TAG, "Clicked '$label' in $pkg")
+                            return true
+                        }
+                        val box = Rect().also { node.getBoundsInScreen(it) }
+                        if (!box.isEmpty && service.tapAt(box.exactCenterX(), box.exactCenterY())) {
+                            Log.d(TAG, "Tapped '$label' in $pkg at ${box.centerX()},${box.centerY()}")
                             return true
                         }
                     }
@@ -63,6 +72,24 @@ class RayAccessibilityService : AccessibilityService() {
                 }
             }
             return false
+        }
+
+        /** Debug only: the labels [pkg]'s windows show (why a tap found nothing). */
+        fun labelsOf(pkg: String): String {
+            val service = instance ?: return "screen reading is off"
+            val out = mutableListOf<String>()
+            for (window in service.windows) {
+                val root = window.root ?: continue
+                if (root.packageName?.toString() != pkg) continue
+                val queue = ArrayDeque(listOf(root))
+                while (queue.isNotEmpty() && out.size < 60) {
+                    val node = queue.removeFirst()
+                    (node.contentDescription ?: node.text)?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+                        ?.let { out.add(it.take(30)) }
+                    for (i in 0 until node.childCount) node.getChild(i)?.let { queue.add(it) }
+                }
+            }
+            return if (out.isEmpty()) "no labels (${service.windows.size} windows)" else out.joinToString(" | ")
         }
 
         private fun traverseNode(node: AccessibilityNodeInfo?, out: MutableList<String>, depth: Int) {
@@ -80,6 +107,12 @@ class RayAccessibilityService : AccessibilityService() {
                 child?.recycle()
             }
         }
+    }
+
+    private fun tapAt(x: Float, y: Float): Boolean {
+        val path = Path().apply { moveTo(x, y) }
+        return dispatchGesture(GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 60)).build(), null, null)
     }
 
     override fun onServiceConnected() {

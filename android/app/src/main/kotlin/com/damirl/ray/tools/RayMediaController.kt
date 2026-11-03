@@ -13,6 +13,8 @@ import android.media.session.PlaybackState
 import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
+import com.damirl.ray.BuildConfig
+import com.damirl.ray.audio.AudioPlaybackService
 
 // What the phone plays: the now-playing info, play/pause/skip through the player's media session (YouTube Music in
 // Brave shows one with background play), and phone_play_music, which opens a YouTube Music link in Brave.  None of
@@ -23,7 +25,10 @@ class RayMediaController(private val context: Context) {
         private const val TAG = "RayMedia"
         const val BRAVE = "com.brave.browser"
         // the player's Play button on music.youtube.com (English and Croatian page language)
-        private val PLAY_LABELS = setOf("play", "reproduciraj", "pokreni", "play video")
+        // (the round button itself has no label for screen readers, only its "Start playback" hint)
+        private val PLAY_LABELS = setOf("play", "start playback", "reproduciraj", "pokreni", "play video")
+        // the model tends to explain a music command at length; the user wants a few words
+        const val SHORT = "Confirm it to the user in a few words, nothing more."
         private const val AUTOSTART_MS = 90_000L
         private val PLAYABLE = Regex("""^https://(music\.|www\.|m\.)?youtube\.com/.*|^https://youtu\.be/.*""")
     }
@@ -40,7 +45,7 @@ class RayMediaController(private val context: Context) {
             context.startActivity(intent)
             Log.d(TAG, "playUrl: opened in Brave")
             Thread({ autostart() }, "RayMusicStart").start()
-            "Opened it in YouTube Music (Brave); it starts as soon as you're done talking."
+            "Started."
         } catch (e: Exception) {
             Log.e(TAG, "Brave could not be opened", e)
             "Error: Brave could not be opened (${e.message}). Is it installed?"
@@ -48,23 +53,86 @@ class RayMediaController(private val context: Context) {
     }
 
     // Brave doesn't autoplay a page another app opened (it waits for a tap), so Ray taps Play himself (his screen
-    // reading service): once nothing plays any more (he has finished talking, the old song stopped), the phone is
+    // reading service): once he has finished talking (and no call is on), the phone is
     // unlocked and Brave's page shows the button.  Until then, or until Brave plays by itself, he waits (90 s at most)
     private fun autostart() {
         val keyguard = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+        val wasShown = com.damirl.ray.MainActivity.shown        // typed in Ray's app: back to it once it plays
         val end = SystemClock.uptimeMillis() + AUTOSTART_MS
-        Thread.sleep(2_500)                                   // the page loads
+        // the tool runs before Ray says his answer: wait for it to start (10 s at most; a typed chat may have none)
+        // and to end, so the song doesn't start under his voice
+        val speaking = AudioPlaybackService.isSpeakingState
+        val answerBy = SystemClock.uptimeMillis() + 10_000
+        while (!speaking.value && SystemClock.uptimeMillis() < answerBy) Thread.sleep(250)
+        Thread.sleep(1_000)                                   // the page loads (and his last word ends)
+        var tries = 0
         while (SystemClock.uptimeMillis() < end) {
-            if (bravePlaying()) return
-            val quiet = audioManager?.isMusicActive != true
+            if (bravePlaying()) { if (wasShown) backToRay(); return }
+            val quiet = !speaking.value && !inCall()
             val locked = keyguard?.isDeviceLocked ?: true
             if (quiet && !locked && RayAccessibilityService.tapLabelled(BRAVE, PLAY_LABELS)) {
-                Thread.sleep(2_000)
-                if (bravePlaying()) return
+                if (waitForBrave(2_500)) {
+                    if (wasShown) backToRay()
+                    return
+                }
+            }
+            if (BuildConfig.DEBUG && ++tries % 5 == 1) {
+                Log.d(TAG, "autostart: quiet=$quiet locked=$locked; Brave shows: " + RayAccessibilityService.labelsOf(BRAVE))
             }
             Thread.sleep(1_000)
         }
         Log.d(TAG, "autostart: gave up (no Play button, phone locked or still busy)")
+    }
+
+    // Brave in the background freezes a paused page, and then its session ignores play; Brave on screen wakes it
+    // up.  So: play; if nothing plays after 2.5 s, Brave comes to the front, play again (or tap the player's Play
+    // button), and Ray's app comes back if it was on screen.  Blocking, at most about 10 s
+    private fun resumeBrave(session: MediaController): String {
+        session.transportControls.play()
+        if (waitForBrave(2_500)) return "Playing. $SHORT"
+        val wasShown = com.damirl.ray.MainActivity.shown
+        val keyguard = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+        if (keyguard?.isDeviceLocked != false) {
+            return "Error: Brave didn't resume while the phone is locked (it freezes a paused page). Ask the user " +
+                "to unlock the phone, then try again."
+        }
+        val launch = context.packageManager.getLaunchIntentForPackage(BRAVE)
+            ?: return "Error: Brave could not be opened."
+        context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        Thread.sleep(1_500)
+        braveSession()?.transportControls?.play()
+        var playing = waitForBrave(2_000)
+        if (!playing && RayAccessibilityService.tapLabelled(BRAVE, PLAY_LABELS)) playing = waitForBrave(2_500)
+        Log.d(TAG, "resumeBrave: woke Brave, playing=$playing")
+        if (playing && wasShown) backToRay()
+        return if (playing) "Playing. $SHORT" else "Error: Brave didn't resume. It is on the screen now; ask the " +
+            "user to press play there."
+    }
+
+    private fun waitForBrave(ms: Long): Boolean {
+        val end = SystemClock.uptimeMillis() + ms
+        while (SystemClock.uptimeMillis() < end) {
+            if (bravePlaying()) return true
+            Thread.sleep(250)
+        }
+        return bravePlaying()
+    }
+
+    private fun braveSession(): MediaController? = try {
+        sessionManager?.getActiveSessions(ComponentName(context, RayNotificationListenerService::class.java))
+            .orEmpty().firstOrNull { it.packageName == BRAVE }
+    } catch (_: SecurityException) {
+        null
+    }
+
+    private fun backToRay() {
+        context.startActivity(Intent(context, com.damirl.ray.MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+    }
+
+    // a call (no music over it)
+    private fun inCall(): Boolean = audioManager?.mode.let {
+        it == AudioManager.MODE_IN_CALL || it == AudioManager.MODE_IN_COMMUNICATION
     }
 
     private fun bravePlaying(): Boolean = try {
@@ -150,6 +218,9 @@ class RayMediaController(private val context: Context) {
                     "plays the Liked songs)."
             }
             val controls = active.transportControls
+            val starts = normAction == "play" ||
+                (normAction == "play_pause" && active.playbackState?.state != PlaybackState.STATE_PLAYING)
+            if (starts && active.packageName == BRAVE) return resumeBrave(active)
             when (normAction) {
                 "play" -> controls.play()
                 "pause" -> controls.pause()
@@ -166,7 +237,13 @@ class RayMediaController(private val context: Context) {
                 else -> controls.play()
             }
             Log.d(TAG, "controlMedia: dispatched '$normAction' via TransportControls to ${active.packageName}")
-            return "Done: $normAction (${if (active.packageName == BRAVE) "YouTube Music in Brave" else active.packageName})."
+            val done = when (normAction) {
+                "next", "skip" -> "Skipped to the next song"
+                "previous", "prev" -> "Back to the previous song"
+                "pause", "stop" -> "Paused"
+                else -> "Playing"
+            }
+            return "$done. $SHORT"
         } catch (e: SecurityException) {
             Log.d(TAG, "Falling back to AudioManager key events for media control: ${e.message}")
         } catch (e: Exception) {
@@ -185,7 +262,7 @@ class RayMediaController(private val context: Context) {
         }
 
         sendMediaKeyEvent(keyCode)
-        return "Executed media action '$normAction'."
+        return "Done: $normAction. $SHORT"
     }
 
     private fun sendMediaKeyEvent(keyCode: Int) {
