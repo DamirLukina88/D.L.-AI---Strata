@@ -481,8 +481,7 @@ class PhoneMcpServer:
             return "Opened the camera on the phone. The photo stays on the phone: you can't see it yet."
 
         elif name == "phone_get_last_photo":
-            # the photo comes back through the app's page (the relay); a broadcast has no answer to read
-            return "Error: the photo can only be fetched while the Ray app is open on the phone."
+            return self._pull_last_photo()
 
         elif name == "phone_get_screen":
             out = self._run_adb_cmd(["shell", "uiautomator", "dump", "/dev/stdout"])
@@ -496,6 +495,40 @@ class PhoneMcpServer:
             return "No readable text detected on current screen."
 
         return None
+
+    PHOTO_DIR = "/sdcard/Android/data/com.damirl.ray/files/Pictures"
+
+    def _pull_last_photo(self) -> str:
+        """The app isn't relaying (its page is closed): the newest photo Ray's camera saved, pulled over adb into the
+        workspace (phone-photos/), at most 1600 px when Pillow is there.  Same [[image: …]] answer as the app's."""
+        listing = self._run_adb_cmd(["shell", "ls", "-l", self.PHOTO_DIR]) or ""
+        snaps = []
+        for line in listing.splitlines():
+            parts = line.split()
+            if len(parts) >= 8 and parts[-1].startswith("RAY_SNAP_") and parts[-1].endswith(".jpg"):
+                snaps.append((parts[-1], int(parts[4]) if parts[4].isdigit() else 0))
+        if not snaps:
+            return "Error: no photo yet. Open the camera with phone_camera_snap first."
+        snaps.sort(key=lambda x: x[0], reverse=True)          # RAY_SNAP_<yyyyMMdd_HHmmss>_: the name sorts by time
+        newest, size = snaps[0]
+        if size == 0:
+            return ("Error: the camera hasn't handed over the photo yet. After taking it, the user must tap the tick "
+                    "(✓, confirm) in the camera's review screen; ask them to do that, or to take it again.")
+        root = Path(os.environ.get("STRATA_WORKSPACE_DIR") or Path.home() / "DL-AI-workspace")
+        rel = f"phone-photos/{newest.rsplit('_', 1)[0]}.jpg"
+        dest = root / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if self._run_adb_cmd(["pull", f"{self.PHOTO_DIR}/{newest}", str(dest)], timeout=30) is None:
+            return "Error: the photo could not be copied from the phone."
+        try:                                                  # upright and smaller, like the app sends it
+            from PIL import Image, ImageOps
+            with Image.open(dest) as im:
+                im = ImageOps.exif_transpose(im)
+                im.thumbnail((1600, 1600))
+                im.convert("RGB").save(dest, "JPEG", quality=85)
+        except Exception:
+            pass                                              # no Pillow: the full photo
+        return f"The photo is in the workspace as {rel}. [[image: {rel}]]"
 
     def handle(self, req: Dict[str, Any]) -> Dict[str, Any]:
         """Handle incoming JSON-RPC 2.0 request."""

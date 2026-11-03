@@ -42,7 +42,7 @@ BUILT_IN = [("exa", "Web search (Exa web API, not MCP): exa_web_search, /exa <qu
             ("context7", "Library docs (Context7 MCP, started for each lookup): resolve_library_id, get_library_docs, /context7 <lib>")]
 CATALOG_PATH = Path(os.environ.get("DL_MCP_CONFIG") or Path.home() / ".config" / "dl-ai" / "mcp.json")
 ENV_INHERIT = ["PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME",
-               "XDG_CONFIG_HOME", "XDG_DATA_HOME", "TMPDIR"]
+               "XDG_CONFIG_HOME", "XDG_DATA_HOME", "TMPDIR", "STRATA_WORKSPACE_DIR"]
 SETTINGS = {"max_tools": 25, "idle_turns": 3, "timeout_s": 120.0, "start_timeout_s": 180.0,
             "max_result_chars": DEFAULTS["max_result_chars"]}
 META_NAME = "mcp"

@@ -30,9 +30,6 @@ class CameraVisionManager(private val context: Context) {
     companion object {
         private const val TAG = "CameraVision"
         private const val MAX_SIDE = 1600
-        // kept across PhoneTools instances (the adb receiver makes a new one per call)
-        @Volatile private var lastSnappedPhotoPath: String? = null
-        @Volatile private var lastSnapAt = 0L
     }
 
     /** A file in the app's Pictures folder and the camera intent that writes into it. */
@@ -41,8 +38,7 @@ class CameraVisionManager(private val context: Context) {
             val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             val storageDir = context.getExternalFilesDir(Environment.DIRECTORY_PICTURES)
             val imageFile = File.createTempFile("RAY_SNAP_${timeStamp}_", ".jpg", storageDir)
-            lastSnappedPhotoPath = imageFile.absolutePath
-            lastSnapAt = System.currentTimeMillis()
+            Log.d(TAG, "Camera opened for ${imageFile.name}")
 
             val photoUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", imageFile)
             val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
@@ -61,8 +57,8 @@ class CameraVisionManager(private val context: Context) {
         val pair = createCaptureIntent() ?: return "Error: the camera could not be opened."
         return try {
             context.startActivity(pair.first)
-            "Opened the camera on the phone. Ask the user to take the photo and tell you when it's done, then call " +
-                "phone_get_last_photo to see it."
+            "Opened the camera on the phone. Ask the user to take the photo, tap the tick (✓) to confirm it and tell " +
+                "you when it's done, then call phone_get_last_photo to see it."
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start camera activity", e)
             "Error: the camera could not be opened."
@@ -71,12 +67,22 @@ class CameraVisionManager(private val context: Context) {
 
     /** The photo taken after the last phone_camera_snap, sent to the server's workspace; blocking (not on the main thread). */
     fun uploadLastPhoto(networkClient: NetworkClient = NetworkClient.shared): String {
-        val file = lastSnappedPhotoPath?.let { File(it) }
-            ?: return "Error: no photo yet. Open the camera with phone_camera_snap first."
-        // the camera writes the file when the user confirms the shot; until then it is empty
-        if (!file.isFile || file.length() == 0L) {
-            return "Error: the photo hasn't been taken yet (the camera may still be open). Ask the user to take it."
+        // from the folder, not from memory: while the camera is in front, HyperOS may close Ray's app and its memory
+        val dir = context.getExternalFilesDir(Environment.DIRECTORY_PICTURES)
+            ?: return "Error: the phone's picture folder is not available."
+        val snaps = dir.listFiles { f -> f.name.startsWith("RAY_SNAP_") && f.name.endsWith(".jpg") }.orEmpty()
+            .sortedByDescending { it.lastModified() }
+        if (snaps.isEmpty()) return "Error: no photo yet. Open the camera with phone_camera_snap first."
+        val file = snaps.firstOrNull { it.length() > 0 }
+        // the newest snap is still empty: the camera got no confirmed shot for it (the camera app hands the photo over
+        // only when the user taps the tick on its review screen; back or cancel leaves the file empty)
+        if (file == null || snaps.first().length() == 0L && System.currentTimeMillis() - snaps.first().lastModified() < 10 * 60_000) {
+            Log.d(TAG, "Last snap is empty: ${snaps.first().name}")
+            return "Error: the camera hasn't handed over the photo yet. After taking it, the user must tap the tick (✓, " +
+                "confirm) in the camera's review screen; ask them to do that, or to take it again."
         }
+        // empty leftovers of cancelled snaps go
+        snaps.filter { it.length() == 0L && it != snaps.first() }.forEach { it.delete() }
         val jpeg = try {
             prepare(file)
         } catch (e: Exception) {
