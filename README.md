@@ -18,6 +18,11 @@ system RAM. Your conversations stay at home.
 <td align="center" width="33%"><img src="docs/media/screens/web-monitor.png" alt="The web app's monitor on a phone: speed, VRAM, GPU temperature, power, CPU and RAM" width="230"><br><b>Live monitor</b></td>
 <td align="center" width="33%"><img src="docs/media/screens/android-drawer.png" alt="The Android app's voice drawer: Ray the panda listening, with a big orange mic button" width="230"><br><b>Android voice drawer</b></td>
 </tr>
+<tr>
+<td align="center"><img src="docs/media/screens/android-about.png" alt="The Android app's About tab: the Ray on this phone card with the Android settings button and the Ok Ray switch" width="230"><br><b>"Ok Ray" and phone settings</b></td>
+<td align="center"><img src="docs/media/screens/android-setup.png" alt="The Android app's setup screen: microphone, autostart, battery, notification access and screen reading, all ready" width="230"><br><b>Setup on the phone</b></td>
+<td></td>
+</tr>
 </table>
 
 ## What Ray does
