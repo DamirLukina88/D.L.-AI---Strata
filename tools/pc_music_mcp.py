@@ -100,7 +100,13 @@ def launch(url: str) -> Optional[str]:
     if not binary:
         return "Error: Brave is not installed on the PC."
     PROFILE.mkdir(parents=True, exist_ok=True)
-    subprocess.Popen([binary, f"--user-data-dir={PROFILE}", f"--remote-debugging-port={PORT}",
+    if not (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")):
+        return ("Error: the PC music server has no display (WAYLAND_DISPLAY/DISPLAY); its mcp.json entry needs them "
+                "in env_inherit.")
+    # its own systemd scope: a restart of the session daemon (whose cgroup started it) doesn't close the window
+    scope = ["systemd-run", "--user", "--scope", "--quiet", "--unit", f"ray-music-brave-{os.getpid()}"] \
+        if shutil.which("systemd-run") else []
+    subprocess.Popen(scope + [binary, f"--user-data-dir={PROFILE}", f"--remote-debugging-port={PORT}",
                       "--no-first-run", "--no-default-browser-check",
                       "--autoplay-policy=no-user-gesture-required", url],
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
