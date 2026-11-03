@@ -20,6 +20,7 @@ Provides Ray with autonomous smartphone capabilities:
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -443,9 +444,11 @@ class PhoneMcpServer:
             "-a", "com.damirl.ray.ACTION_EXECUTE_TOOL",
             "-n", "com.damirl.ray/.tools.RayToolsReceiver",
             "--es", "tool", name,
-            "--es", "args", json.dumps(args)
+            # adb shell joins its arguments into one command line on the phone: quoted, or a space in the
+            # arguments (a song name) split them and the app got broken JSON
+            "--es", "args", shlex.quote(json.dumps(args))
         ]
-        if name not in ("phone_get_gallery_image", "phone_play_music"):   # these run over adb alone (one copy)
+        if name != "phone_get_gallery_image":              # the gallery is read over adb alone (one copy)
             self._run_adb_cmd(broadcast_cmd, timeout=1.5)
 
         if name == "phone_toggle_torch":
@@ -587,10 +590,12 @@ class PhoneMcpServer:
             return self._pull_gallery_image(str(args.get("kind", "any")).lower())
 
         elif name == "phone_play_music":
-            out = self._run_adb_cmd(["shell", "am", "start", "-a", "android.intent.action.VIEW",
-                                     "-d", f"'{args['url']}'", "-p", BRAVE,
-                                     "--es", "com.android.browser.application_id", "com.damirl.ray"])
-            return "Started." if out is not None else "Error: Brave could not be opened."
+            # the broadcast above had Ray's app open it, and it presses Play once he is quiet and the phone is
+            # unlocked (am start alone only opened the page: it never played, but this said it did)
+            locked = "isKeyguardShowing=true" in (self._run_adb_cmd(["shell", "dumpsys", "window"]) or "")
+            return ("Not playing yet: the phone is locked, and Brave starts it only once the user unlocks the phone "
+                    "(Ray presses Play on the screen; up to 5 minutes). Tell the user exactly that, in one short "
+                    "sentence." if locked else "Started.")
 
         elif name == "phone_get_screen":
             out = self._run_adb_cmd(["shell", "uiautomator", "dump", "/dev/stdout"])
