@@ -77,7 +77,8 @@ class Entry:
         # arguments set here, hidden from the model and added to every call (e.g. the Google account)
         self.fixed_args = {str(k): v for k, v in (raw.get("fixed_args") or {}).items()}
         self.triggers = [re.compile(t, re.I) for t in raw.get("triggers") or []]
-        # clients whose every prompt turns this server on (the phone's tools for prompts from the Ray Android app)
+        # clients whose every prompt turns this server on (the phone's tools for prompts from the Ray Android app);
+        # "ray-android" also covers "ray-android-app-<id>" (the app's chat page)
         self.origins = {str(o) for o in raw.get("origins") or []}
         # the router skips this entry when one of these matches (e.g. Proton's mail words, but the user named Gmail)
         self.unless = [re.compile(t, re.I) for t in raw.get("unless") or []]
@@ -413,7 +414,7 @@ class McpRegistry:
         for name, entry in self.catalog.items():
             if name in self.enabled or entry.unavailable(self.surface):
                 continue
-            if origin and origin in entry.origins:
+            if origin and any(origin == o or origin.startswith(o + "-") for o in entry.origins):
                 if not self.enable(name, f"prompt from {origin}").startswith("error"):
                     hits.append((name, origin))
                 continue

@@ -74,6 +74,16 @@ class Router(unittest.TestCase):
         finally:
             r.close()
         r = registry(catalog=cat)
+        try:                                                # the app's chat page: ray-android-app-<id>
+            self.assertEqual([n for n, _ in r.route("hello", origin="ray-android-app-1a2b3c4d")], ["deepl"])
+        finally:
+            r.close()
+        r = registry(catalog=cat)
+        try:                                                # a look-alike that isn't a dash-continuation
+            self.assertEqual(r.route("hello", origin="ray-androidx"), [])
+        finally:
+            r.close()
+        r = registry(catalog=cat)
         try:                                                # another client: only its words count
             self.assertEqual(r.route("what's my battery at?", origin="web-1234"), [])
             self.assertNotIn("deepl", r.enabled)

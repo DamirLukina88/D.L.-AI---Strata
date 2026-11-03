@@ -2399,7 +2399,7 @@ function codeEvent(ev, replay) {
       codeEnd();
       if (!replay && ev.voice != null) {
         // Only auto-speak if the prompt originated from this browser client (not an external device like the Android app or CLI)
-        const isOwnPrompt = code.client ? ev.origin === code.client : ev.origin !== "ray-android";
+        const isOwnPrompt = code.client ? ev.origin === codeOrigin() : ev.origin !== "ray-android";
         code.turnFromVoice = Boolean(ev.voice) && isOwnPrompt;
         codeSpeechEnd();
         if (code.turnFromVoice && TTSController.willAutoSpeak() && TTSController.orb() && typeof RayFace !== "undefined") {
@@ -2416,7 +2416,7 @@ function codeEvent(ev, replay) {
           </div>` : ""));
         if (prompt) { card.dataset.seq = ev.seq; card.dataset.prompt = ev.text; }
       }
-      if (!replay && ev.origin && ev.origin === code.client) codeScroll(true);   // #4014: what you sent is shown, even scrolled up
+      if (!replay && ev.origin && ev.origin === codeOrigin()) codeScroll(true);   // #4014: what you sent is shown, even scrolled up
       break;
     case "tool_call": {
       codeEnd();
@@ -2469,7 +2469,7 @@ function codeEvent(ev, replay) {
     case "state": codeSetState(ev); break;
     case "restored": codeRestored(ev); break;
     case "rewound":                                  // the prompt you went back from, back in your input box
-      if (!replay && ev.origin === code.client && ev.cmd !== "/edit" && $("code-mobile-input")) {
+      if (!replay && ev.origin === codeOrigin() && ev.cmd !== "/edit" && $("code-mobile-input")) {
         const ta = $("code-mobile-input");
         ta.value = ev.text || "";
         ta.dispatchEvent(new Event("input"));
@@ -2492,6 +2492,13 @@ function codeRestored(ev) {
   codeScroll(true);
   code.replaying = false;
   if ($("sessions-drawer")?.dataset.open === "true") sessionsLoad();
+}
+
+// what this page's prompts are marked with: the session's id for it, and inside the Ray Android app "ray-android-app-"
+// first, so Ray's phone tools come on for them as for the voice drawer's (dl_mcp origins: "ray-android")
+function codeOrigin() {
+  if (!code.client) return "";
+  return (window.RayAndroid ? "ray-android-app-" : "") + code.client;
 }
 
 function codeHello(h) {
@@ -2597,7 +2604,7 @@ async function codeOp(op, extra = {}) {
   try {
     const r = await fetch("api/code/session", {
       method: "POST", headers: headers(true),
-      body: JSON.stringify({ op, session: CODE_SESSION, origin: code.client, ...extra }),
+      body: JSON.stringify({ op, session: CODE_SESSION, origin: codeOrigin(), ...extra }),
     });
     const res = await r.json().catch(() => ({}));
     if (!r.ok || res.type === "error") throw new Error(res.error?.message || res.text || `HTTP ${r.status}`);

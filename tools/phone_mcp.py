@@ -187,7 +187,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_camera_snap",
-        "description": "Take a photo with the phone's back camera and see it: the photo comes back to you as an image. The phone plays the shutter sound. Works only while Ray is on the phone's screen (the app or the voice drawer) and the phone is unlocked; point the phone first.",
+        "description": "Take a photo with the phone's back camera and see it: the photo comes back to you as an image. Use it whenever the user asks what you see, to look at something, or what is in front of the phone (not the workspace files). The phone plays the shutter sound. Works only while Ray is on the phone's screen (the app or the voice drawer) and the phone is unlocked.",
         "inputSchema": {
             "type": "object",
             "properties": {
