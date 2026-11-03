@@ -99,6 +99,8 @@ Found and fixed during validation (`fbbb5ebb`):
 
 **Private tools need an unlocked phone (2026-11-03):** the drawer stays usable over the lock screen, but `PhoneTools.PRIVATE` (2FA code, notifications, screen content) is refused while the device is locked, so whoever holds the locked phone can't read them through Ray.
 
+**Away from home (2026-11-03):** the Cloudflare Access login (email code) stays inside the app (`StrataOrigins.isLoginHost`, no bridge on those pages); the user tested logging in from outside the home network and it works.
+
 Debugging recipe: debug builds expose `webview_devtools_remote_<pid>`; `adb forward tcp:9333 localabstract:webview_devtools_remote_$(adb shell pidof com.damirl.ray)` then `curl localhost:9333/json` lists every live page (one per WebView) for measuring layout with `Runtime.evaluate`.
 
 ## Related
