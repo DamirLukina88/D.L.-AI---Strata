@@ -2,6 +2,9 @@ package com.damirl.ray.tools
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Browser
 import android.media.AudioManager
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
@@ -10,10 +13,41 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
 
+// What the phone plays: the now-playing info, play/pause/skip through the player's media session (YouTube Music in
+// Brave shows one with background play), and phone_play_music, which opens a YouTube Music link in Brave.  None of
+// it needs the phone unlocked
 class RayMediaController(private val context: Context) {
 
     companion object {
         private const val TAG = "RayMedia"
+        const val BRAVE = "com.brave.browser"
+        private val PLAYABLE = Regex("""^https://(music\.|www\.|m\.)?youtube\.com/.*|^https://youtu\.be/.*""")
+    }
+
+    /** Opens [url] (a YouTube Music song or the Liked songs, found by phone_mcp.py) in Brave, where it plays. */
+    fun playUrl(url: String): String {
+        if (!PLAYABLE.matches(url)) return "Error: only music.youtube.com or youtube.com links can be played."
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            .setPackage(BRAVE)
+            // the same app id each time: Brave reuses Ray's tab instead of opening a new one per song
+            .putExtra(Browser.EXTRA_APPLICATION_ID, context.packageName)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return try {
+            context.startActivity(intent)
+            Log.d(TAG, "playUrl: opened in Brave")
+            "Playing it in YouTube Music (Brave)."
+        } catch (e: Exception) {
+            Log.e(TAG, "Brave could not be opened", e)
+            "Error: Brave could not be opened (${e.message}). Is it installed?"
+        }
+    }
+
+    // the session to control: the one playing, else Brave's, else any that has a song; never Ray's own (his voice)
+    private fun target(controllers: List<MediaController>): MediaController? {
+        val others = controllers.filter { it.packageName != context.packageName }
+        return others.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
+            ?: others.firstOrNull { it.packageName == BRAVE }
+            ?: others.firstOrNull { it.metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE) != null }
     }
 
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
@@ -27,7 +61,7 @@ class RayMediaController(private val context: Context) {
             val component = ComponentName(context, RayNotificationListenerService::class.java)
             val controllers = sessionManager?.getActiveSessions(component) ?: emptyList()
 
-            for (controller in controllers) {
+            for (controller in listOfNotNull(target(controllers))) {
                 val metadata = controller.metadata
                 val state = controller.playbackState
 
@@ -42,6 +76,7 @@ class RayMediaController(private val context: Context) {
                     val appName = when {
                         pkg.contains("spotify") -> "Spotify"
                         pkg.contains("youtube") -> "YouTube"
+                        pkg == BRAVE -> "YouTube Music in Brave"
                         else -> pkg
                     }
                     return "$status: '$title'$artistStr on $appName."
@@ -76,29 +111,29 @@ class RayMediaController(private val context: Context) {
             val component = ComponentName(context, RayNotificationListenerService::class.java)
             val controllers = sessionManager?.getActiveSessions(component) ?: emptyList()
 
-            if (controllers.isNotEmpty()) {
-                val active = controllers.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
-                    ?: controllers.first()
-
-                val controls = active.transportControls
-                when (normAction) {
-                    "play" -> controls.play()
-                    "pause" -> controls.pause()
-                    "play_pause" -> {
-                        if (active.playbackState?.state == PlaybackState.STATE_PLAYING) {
-                            controls.pause()
-                        } else {
-                            controls.play()
-                        }
-                    }
-                    "next", "skip" -> controls.skipToNext()
-                    "previous", "prev" -> controls.skipToPrevious()
-                    "stop" -> controls.stop()
-                    else -> controls.play()
-                }
-                Log.d(TAG, "controlMedia: dispatched '$normAction' via TransportControls to ${active.packageName}")
-                return "Executed media action '$normAction'."
+            val active = target(controllers)
+            if (active == null) {
+                return "Nothing is playing or paused. To start music, use phone_play_music (without a query it " +
+                    "plays the Liked songs)."
             }
+            val controls = active.transportControls
+            when (normAction) {
+                "play" -> controls.play()
+                "pause" -> controls.pause()
+                "play_pause" -> {
+                    if (active.playbackState?.state == PlaybackState.STATE_PLAYING) {
+                        controls.pause()
+                    } else {
+                        controls.play()
+                    }
+                }
+                "next", "skip" -> controls.skipToNext()
+                "previous", "prev" -> controls.skipToPrevious()
+                "stop" -> controls.stop()
+                else -> controls.play()
+            }
+            Log.d(TAG, "controlMedia: dispatched '$normAction' via TransportControls to ${active.packageName}")
+            return "Done: $normAction (${if (active.packageName == BRAVE) "YouTube Music in Brave" else active.packageName})."
         } catch (e: SecurityException) {
             Log.d(TAG, "Falling back to AudioManager key events for media control: ${e.message}")
         } catch (e: Exception) {

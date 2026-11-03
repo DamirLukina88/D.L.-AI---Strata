@@ -15,6 +15,7 @@ Provides Ray with autonomous smartphone capabilities:
 11. phone_get_last_photo - the newest photo Ray took, again
 12. phone_get_gallery_image - the newest photo or screenshot the user took (the phone's gallery)
 13. phone_get_screen - Accessibility screen inspection
+14. phone_play_music - find a song on YouTube Music and play it in the phone's browser (Brave)
 """
 import json
 import os
@@ -173,7 +174,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_control_media",
-        "description": "Control phone media playback (play, pause, next, previous, stop).",
+        "description": "Control what the phone is playing (YouTube Music in Brave, Spotify, ...): play, pause, next song, previous song, stop. Works while the phone is locked. To play a particular song, use phone_play_music.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -222,6 +223,23 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
         }
     },
     {
+        "name": "phone_play_music",
+        "description": "Find a song (or artist, album) on YouTube Music and play it on the phone, in the user's YouTube Music tab in Brave. Use it when the user asks to play, put on or search for a song or music. Without a query it plays the user's Liked songs (their default when they just say 'play music'). Works while the phone is locked. For pause, skip or back, use phone_control_media.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "What to play, e.g. 'Bohemian Rhapsody Queen' or 'Dubioza Kolektiv'. Leave it out for the Liked songs."
+                },
+                "url": {
+                    "type": "string",
+                    "description": "A music.youtube.com or youtube.com link to play instead of searching (optional)."
+                }
+            }
+        }
+    },
+    {
         "name": "phone_get_screen",
         "description": "Inspect visible text and UI elements currently displayed on the phone screen via Accessibility.",
         "inputSchema": {
@@ -240,6 +258,43 @@ def extract_otp_code(text: str) -> Optional[str]:
         match = pattern.search(text)
         if match:
             return match.group(1)
+    return None
+
+
+BRAVE = "com.brave.browser"
+# YouTube Music's own search (the web player's API; no account or key), filtered to songs
+YTM_SEARCH = "https://music.youtube.com/youtubei/v1/search?prettyPrint=false"
+YTM_SONGS = "EgWKAQIIAWoKEAkQBRAKEAMQBA=="
+LIKED_SONGS = "https://music.youtube.com/watch?list=LM"          # the signed-in user's Liked songs
+
+
+def find_song(query: str, timeout: float = 10.0) -> Optional[Dict[str, str]]:
+    """The first song YouTube Music finds for query: {video_id, title, artist}, or None."""
+    body = {"context": {"client": {"clientName": "WEB_REMIX", "clientVersion": "1.20241106.01.00", "hl": "en"}},
+            "query": query, "params": YTM_SONGS}
+    req = urllib.request.Request(YTM_SEARCH, data=json.dumps(body).encode(), headers={
+        "Content-Type": "application/json", "User-Agent": "Mozilla/5.0", "Origin": "https://music.youtube.com"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return first_song(json.loads(resp.read().decode()))
+
+
+def first_song(data: Any) -> Optional[Dict[str, str]]:
+    """The first song row of a YouTube Music search answer."""
+    stack = [data]
+    while stack:
+        o = stack.pop(0)
+        if isinstance(o, dict):
+            row = o.get("musicResponsiveListItemRenderer")
+            vid = ((row or {}).get("playlistItemData") or {}).get("videoId")
+            if vid:
+                cols = ["".join(r.get("text", "") for r in
+                                (c.get("musicResponsiveListItemFlexColumnRenderer", {}).get("text", {}).get("runs") or []))
+                        for c in row.get("flexColumns", [])]
+                return {"video_id": vid, "title": cols[0] if cols else "?",
+                        "artist": (cols[1].split(" • ")[0] if len(cols) > 1 else "") or "an unknown artist"}
+            stack.extend(o.values())
+        elif isinstance(o, list):
+            stack.extend(o)
     return None
 
 
@@ -330,6 +385,34 @@ class PhoneMcpServer:
 
     def execute_tool(self, name: str, args: Dict[str, Any]) -> str:
         """Execute a phone tool with fallback across Companion API and ADB."""
+        if name == "phone_play_music":
+            args, found = self._resolve_song(args)
+            if not args.get("url"):
+                return found
+            result = self._execute_on_phone(name, args)
+            return f"{found} {result}" if found and not result.startswith("Error") else result
+        return self._execute_on_phone(name, args)
+
+    def _resolve_song(self, args: Dict[str, Any]):
+        """phone_play_music's link: the one given, else the first song YouTube Music finds; and what was found."""
+        url = str(args.get("url") or "").strip()
+        if url:
+            if not re.match(r"https://(music\.|www\.|m\.)?youtube\.com/|https://youtu\.be/", url):
+                return {}, "Error: only music.youtube.com or youtube.com links can be played."
+            return {"url": url}, ""
+        query = str(args.get("query") or "").strip()
+        if not query:                                         # the user's default: their Liked songs
+            return {"url": LIKED_SONGS}, "Playing your Liked songs."
+        try:
+            song = find_song(query)
+        except Exception as e:
+            return {}, f"Error: YouTube Music could not be searched ({e})."
+        if not song:
+            return {}, f"Error: YouTube Music found no song for '{query}'."
+        return {"query": query, "url": f"https://music.youtube.com/watch?v={song['video_id']}"}, \
+            f"Found '{song['title']}' by {song['artist']}."
+
+    def _execute_on_phone(self, name: str, args: Dict[str, Any]) -> str:
         # 1. Try Companion App via Server Relay if connected
         if self.is_companion_connected():
             relay_result = self._call_companion_api(name, args)
@@ -357,7 +440,7 @@ class PhoneMcpServer:
             "--es", "tool", name,
             "--es", "args", json.dumps(args)
         ]
-        if name != "phone_get_gallery_image":              # the gallery is read over adb alone (one copy)
+        if name not in ("phone_get_gallery_image", "phone_play_music"):   # these run over adb alone (one copy)
             self._run_adb_cmd(broadcast_cmd, timeout=1.5)
 
         if name == "phone_toggle_torch":
@@ -497,6 +580,12 @@ class PhoneMcpServer:
 
         elif name == "phone_get_gallery_image":
             return self._pull_gallery_image(str(args.get("kind", "any")).lower())
+
+        elif name == "phone_play_music":
+            out = self._run_adb_cmd(["shell", "am", "start", "-a", "android.intent.action.VIEW",
+                                     "-d", f"'{args['url']}'", "-p", BRAVE,
+                                     "--es", "com.android.browser.application_id", "com.damirl.ray"])
+            return "Playing it in YouTube Music (Brave)." if out is not None else "Error: Brave could not be opened."
 
         elif name == "phone_get_screen":
             out = self._run_adb_cmd(["shell", "uiautomator", "dump", "/dev/stdout"])
