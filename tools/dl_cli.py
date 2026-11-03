@@ -1056,10 +1056,10 @@ def resolve_file_references(prompt: str, workspace: Path) -> str:
     return new_prompt
 
 
-# A tool that hands the model a picture puts [[image: <path in the workspace>]] in its result (the phone's
-# phone_get_last_photo: the photo the user just took).  Only these tools may, and only image files inside the
-# workspace count, so a fetched web page or another tool's text can't make the model read other files
-IMAGE_RESULT_TOOLS = ("phone_get_last_photo",)
+# A tool that hands the model a picture puts [[image: <path in the workspace>]] in its result (the phone's photo
+# tools; view_file on an image).  Only these tools may, and only image files inside the workspace count, so a fetched
+# web page or another tool's text can't make the model read other files
+IMAGE_RESULT_TOOLS = ("phone_camera_snap", "phone_get_last_photo", "view_file")
 IMAGE_MARKER = re.compile(r"\[\[image:\s*([^\]\n]+?)\s*\]\]")
 
 
@@ -1180,6 +1180,9 @@ def tool_view_file(args: dict, workspace: Path) -> str:
         p = (workspace / p).resolve()
     if not p.is_file():
         return f"Error: File not found: {p}"
+    # an image is shown to the model as an image (tool_result_images), not read as text (that gave raw JPEG bytes)
+    if p.suffix.lower() in IMAGE_EXTENSIONS:
+        return f"Image file {p} ({p.stat().st_size // 1024} KB): shown to you as an image. [[image: {p}]]"
     try:
         lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
         start = args.get("StartLine", 1) or 1

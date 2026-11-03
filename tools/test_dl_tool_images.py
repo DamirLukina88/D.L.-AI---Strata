@@ -40,7 +40,7 @@ class ToolResultImages(unittest.TestCase):
 
     def test_other_tools_cannot_show_images(self):
         res = "[[image: phone-photos/RAY_SNAP_1.jpg]]"
-        for name in ("fetch__fetch", "view_file", "phone__phone_get_screen"):
+        for name in ("fetch__fetch", "run_command", "phone__phone_get_screen"):
             self.assertEqual(dl_cli.tool_result_images(name, res, self.project), [], name)
 
     def test_only_image_files_inside_the_workspace(self):
@@ -48,6 +48,19 @@ class ToolResultImages(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertEqual(dl_cli.tool_result_images("phone__phone_get_last_photo",
                                                            f"[[image: {marker}]]", self.project), [])
+
+    def test_the_photo_from_a_snap_too(self):
+        res = "The photo is in the workspace as phone-photos/RAY_SNAP_1.jpg. [[image: phone-photos/RAY_SNAP_1.jpg]]"
+        self.assertEqual(dl_cli.tool_result_images("phone__phone_camera_snap", res, self.project),
+                         [f"file://{self.photo.resolve()}"])
+
+    def test_view_file_shows_an_image_instead_of_its_bytes(self):
+        res = dl_cli.tool_view_file({"AbsolutePath": str(self.photo)}, self.project)
+        self.assertNotIn("\ufffd", res)                                # no JPEG bytes as text
+        self.assertEqual(dl_cli.tool_result_images("view_file", res, self.project), [f"file://{self.photo.resolve()}"])
+        # an image outside the workspace is not shown
+        res = dl_cli.tool_view_file({"AbsolutePath": str(self.outside)}, self.project)
+        self.assertEqual(dl_cli.tool_result_images("view_file", res, self.project), [])
 
     def test_the_image_reaches_the_model_as_a_cli_note(self):
         # the message added after the round is a CLI note (not the user's words: the finish checks look for those)
