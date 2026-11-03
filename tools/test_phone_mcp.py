@@ -2,7 +2,7 @@
 """tools/test_phone_mcp.py - Unit tests for tools/phone_mcp.py.
 
 Verifies:
-1. Schema Integrity: all 11 tools match the MCP tool schema.
+1. Schema Integrity: all 12 tools match the MCP tool schema.
 2. Tool Dispatch & Payload: JSON-RPC formats and argument handling.
 3. Offline Phone Fallback: graceful, non-crashing responses when unreachable.
 """
@@ -23,7 +23,7 @@ class TestPhoneMcpServer(unittest.TestCase):
         self.server = M.PhoneMcpServer(base_url="http://127.0.0.1:9999", adb_enabled=False)
 
     def test_schema_integrity(self):
-        """Test 1: Schema Integrity - all 11 tools match the MCP specification."""
+        """Test 1: Schema Integrity - all 12 tools match the MCP specification."""
         req = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -45,11 +45,12 @@ class TestPhoneMcpServer(unittest.TestCase):
             "phone_get_now_playing",
             "phone_control_media",
             "phone_camera_snap",
+            "phone_get_last_photo",
             "phone_get_screen",
         }
 
         found_names = {t["name"] for t in tools}
-        self.assertEqual(len(tools), 11, f"Expected 11 tools, got {len(tools)}: {found_names}")
+        self.assertEqual(len(tools), 12, f"Expected 12 tools, got {len(tools)}: {found_names}")
         self.assertEqual(found_names, expected_tools, f"Missing tool declarations: {expected_tools - found_names}")
 
         for tool in tools:

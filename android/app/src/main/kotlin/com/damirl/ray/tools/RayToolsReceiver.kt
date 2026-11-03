@@ -42,12 +42,18 @@ class RayToolsReceiver : BroadcastReceiver() {
                 } catch (_: Exception) {
                     JSONObject()
                 }
-                try {
-                    val result = PhoneTools(context).execute(tool, args)
-                    Log.d(TAG, "Tool $tool from adb: ${result.take(80)}")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error executing tool from broadcast: $tool", e)
-                }
+                // off the main thread: some tools use the network (phone_get_last_photo uploads the photo)
+                val pending = goAsync()
+                Thread {
+                    try {
+                        val result = PhoneTools(context).execute(tool, args)
+                        Log.d(TAG, "Tool $tool from adb: ${result.take(80)}")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error executing tool from broadcast: $tool", e)
+                    } finally {
+                        pending.finish()
+                    }
+                }.start()
             }
         }
     }

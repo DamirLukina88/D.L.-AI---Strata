@@ -4,7 +4,7 @@ import android.app.KeyguardManager
 import android.content.Context
 import org.json.JSONObject
 
-// Ray's 11 phone tools by name, with their arguments' defaults: the one place that runs them, for the web app's
+// Ray's 12 phone tools by name, with their arguments' defaults: the one place that runs them, for the web app's
 // relay (RayNativeBridge.executeTool) and the adb fallback (RayToolsReceiver).  The names and arguments match the
 // schemas in tools/phone_mcp.py (tools/test_phone_tool_parity.py checks it)
 class PhoneTools(
@@ -38,22 +38,23 @@ class PhoneTools(
         "phone_get_now_playing" -> mediaController.getNowPlaying()
         "phone_control_media" -> mediaController.controlMedia(args.optString("action", "play_pause"))
         "phone_camera_snap" -> cameraVision.snapPhoto(args.optString("prompt", ""))
+        "phone_get_last_photo" -> cameraVision.uploadLastPhoto()
         "phone_get_screen" -> RayAccessibilityService.getScreenContent()
         else -> "Error: Unknown tool '$name'."
     }
 
     companion object {
         /** Tools that read what's private on the phone: refused while it is locked. */
-        val PRIVATE = setOf("phone_get_2fa_code", "phone_get_recent_notifications", "phone_get_screen")
+        val PRIVATE = setOf("phone_get_2fa_code", "phone_get_recent_notifications", "phone_get_screen", "phone_get_last_photo")
 
-        const val LOCKED_ANSWER = "Error: the phone is locked. Codes, notifications and the screen are only read once " +
+        const val LOCKED_ANSWER = "Error: the phone is locked. Codes, notifications, the screen and photos are only read once " +
             "the user has unlocked it, so ask them to unlock the phone and try again."
 
         /** The tool names above, in order (the parity test reads the `when`, this is for code). */
         val NAMES = listOf(
             "phone_toggle_torch", "phone_get_battery", "phone_set_volume", "phone_set_alarm", "phone_launch_app",
             "phone_get_recent_notifications", "phone_get_2fa_code", "phone_get_now_playing", "phone_control_media",
-            "phone_camera_snap", "phone_get_screen"
+            "phone_camera_snap", "phone_get_last_photo", "phone_get_screen"
         )
     }
 }

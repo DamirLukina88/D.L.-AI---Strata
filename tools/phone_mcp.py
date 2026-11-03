@@ -11,8 +11,9 @@ Provides Ray with autonomous smartphone capabilities:
 7. phone_get_2fa_code - Multilingual 2FA/SMS OTP extraction
 8. phone_get_now_playing - Media metadata (Spotify, YouTube)
 9. phone_control_media - Media playback (play, pause, next, previous)
-10. phone_camera_snap - CameraX photo capture and vision
-11. phone_get_screen - Accessibility screen inspection
+10. phone_camera_snap - open the camera for the user to take a photo
+11. phone_get_last_photo - that photo, into the workspace and shown to the model
+12. phone_get_screen - Accessibility screen inspection
 """
 import json
 import os
@@ -185,7 +186,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_camera_snap",
-        "description": "Open the phone's camera so the user can take a photo. The photo stays on the phone: it is not sent back to you, so you cannot see it.",
+        "description": "Open the phone's camera so the user can take a photo. You can't see it yet: ask the user to take the photo and say when it's done, then call phone_get_last_photo.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -194,6 +195,14 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
                     "description": "What the photo is for (kept with the request; not analysed yet)."
                 }
             }
+        }
+    },
+    {
+        "name": "phone_get_last_photo",
+        "description": "Get the photo the user took after phone_camera_snap: it is saved in the workspace (phone-photos/) and shown to you as an image, so you can look at it and answer about it. Only works while the phone is unlocked.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {}
         }
     },
     {
@@ -470,6 +479,10 @@ class PhoneMcpServer:
                 "--es", "prompt", prompt
             ])
             return "Opened the camera on the phone. The photo stays on the phone: you can't see it yet."
+
+        elif name == "phone_get_last_photo":
+            # the photo comes back through the app's page (the relay); a broadcast has no answer to read
+            return "Error: the photo can only be fetched while the Ray app is open on the phone."
 
         elif name == "phone_get_screen":
             out = self._run_adb_cmd(["shell", "uiautomator", "dump", "/dev/stdout"])

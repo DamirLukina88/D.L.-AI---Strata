@@ -1056,6 +1056,32 @@ def resolve_file_references(prompt: str, workspace: Path) -> str:
     return new_prompt
 
 
+# A tool that hands the model a picture puts [[image: <path in the workspace>]] in its result (the phone's
+# phone_get_last_photo: the photo the user just took).  Only these tools may, and only image files inside the
+# workspace count, so a fetched web page or another tool's text can't make the model read other files
+IMAGE_RESULT_TOOLS = ("phone_get_last_photo",)
+IMAGE_MARKER = re.compile(r"\[\[image:\s*([^\]\n]+?)\s*\]\]")
+
+
+def tool_result_images(tool_name: str, result: str, workspace: Path) -> list[str]:
+    """file:// URLs of the images a tool's result points at, from the allowed tools only (see IMAGE_RESULT_TOOLS).
+    A relative path is looked up in the current project folder, then in the server's workspace root."""
+    if not any(tool_name == t or tool_name.endswith("__" + t) for t in IMAGE_RESULT_TOOLS):
+        return []
+    roots = [Path(workspace).resolve()]
+    env_root = os.environ.get("STRATA_WORKSPACE_DIR")
+    if env_root:
+        roots.append(Path(env_root).expanduser().resolve())
+    urls = []
+    for raw in IMAGE_MARKER.findall(result or ""):
+        for root in roots:
+            p = (root / raw.strip()).resolve()
+            if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS and (p == root or root in p.parents):
+                urls.append(f"file://{p}")
+                break
+    return urls
+
+
 def resolve_prompt_and_images(prompt: str, workspace: Path) -> tuple[str, list[str]]:
     """Resolves @file references, inlining text files, sampling video frames, rendering PDF
     pages, transcribing audio, and extracting all valid visual image paths for strata-vision."""
@@ -3808,6 +3834,20 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             })
             if effort_auto and dl_effort is not None and not small_talk:
                 _auto_raise(dl_effort.raise_reason(fn_name, args, result_str, seen))
+
+        # pictures a tool handed back this round (the phone's photo): the model sees them in the next call, as a user
+        # message after all of the round's tool results (the order the chat template expects)
+        round_imgs = []
+        for m in reversed(messages):
+            if m.get("role") != "tool":
+                break
+            round_imgs = tool_result_images(m.get("name", ""), str(m.get("content", "")), current_ws) + round_imgs
+        if round_imgs:
+            messages.append({"role": "user", "dl_tool_images": True, "content":
+                             [{"type": "text", "text": "[D.L. CLI: the image the tool returned above.]"}] +
+                             [{"type": "image_url", "image_url": {"url": u}} for u in round_imgs]})
+            if emit:
+                emit({"type": "notice", "level": "info", "text": f"Image from the tool shown to the model ({len(round_imgs)})"})
 
         if cps is not None:                         # this round's changes, so the next one can be undone
             if cps.ws != Path(current_ws).resolve():
