@@ -35,8 +35,8 @@ class RayMediaController(private val context: Context) {
                 media.waitForQuiet()
                 resumeAfterSpeech = false
                 if (!media.bravePlaying()) {
-                    media.braveSession()?.transportControls?.play()
-                    Log.d(TAG, "after speech: resumed Brave, playing=${media.waitForBrave(3_000)}")
+                    val session = media.braveSession()
+                    Log.d(TAG, "after speech: " + (session?.let { media.resumeBrave(it) } ?: "Brave's player is gone"))
                 }
             }, "RayMusicResume").start()
         }
@@ -127,7 +127,7 @@ class RayMediaController(private val context: Context) {
     // Brave in the background freezes a paused page, and then its session ignores play; Brave on screen wakes it
     // up.  So: play; if nothing plays after 2.5 s, Brave comes to the front, play again (or tap the player's Play
     // button), and Ray's app comes back if it was on screen.  Blocking, at most about 10 s
-    private fun resumeBrave(session: MediaController): String {
+    fun resumeBrave(session: MediaController): String {
         session.transportControls.play()
         if (waitForBrave(2_500)) return "Playing. $SHORT"
         val wasShown = com.damirl.ray.MainActivity.shown

@@ -143,10 +143,12 @@ class AudioPlaybackService : Service() {
                     val notification = createNotification(text)
                     startForeground(NOTIFICATION_ID, notification)
                     acquireWakeLock()
+                    // before taking the audio: that pauses Brave, and the check would then find nothing playing
+                    // to resume (the song stayed stopped after his answer, 2026-11-03 21:57)
+                    com.damirl.ray.tools.RayMediaController.pauseForSpeech(this)
                     requestAudioFocus()
 
                     _isSpeakingState.value = true
-                    com.damirl.ray.tools.RayMediaController.pauseForSpeech(this)
                     com.damirl.ray.assistant.WakeWord.hold("speak")     // "Ok Ray" mustn't hear Ray
                     val play = {
                         serviceScope.launch {
