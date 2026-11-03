@@ -230,6 +230,7 @@ class Session:
         self.mode = "act"
         self.yolo = False
         self.effort: str | None = "auto"          # /effort: this session's thinking level; default auto
+        self.devices: dict[str, str] = {}         # origin -> where it types from (phone, pc, remote; the server says)
         self.last_auto: tuple[str, str] | None = None
         self.messages: list[dict] = [{"role": "system", "content": cli.build_dl_system_prompt(workspace, "act")}]
         self.events: list[dict] = []
@@ -661,6 +662,11 @@ class Session:
                     p["event"].set()
 
     # ---------------------------------------------------------------- input
+    def device_of(self, origin: str | None) -> str:
+        """Where a prompt was typed (phone, pc or remote): what the server said for this origin, else the Ray app's
+        origins are the phone and the rest (the terminal on this PC) the PC."""
+        return self.devices.get(origin or "") or cli.device_of(origin or "")
+
     def submit(self, text: str, origin: str = "", effort: str | None = None, voice: bool = False) -> dict:
         text = (text or "").strip()
         if not text:
@@ -808,7 +814,8 @@ class Session:
             current_effort = resolved_effort
             self.messages.append({"role": "user", "dl_turn": self._turn_seq,
                                   "content": cli.build_user_message_content(prompt, current_ws, voice=item["voice"],
-                                                                            thinking=resolved_effort != "none")})
+                                                                            thinking=resolved_effort != "none",
+                                                                            device=self.device_of(item.get("origin")))})
             if self.mcp.active:
                 self.mcp.route(prompt, origin=item.get("origin") or "")
             if dl_mcp.call_context():
@@ -889,7 +896,8 @@ class Session:
             resolved_budget = 0
         self.messages.append({"role": "user", "dl_turn": getattr(self, "_turn_seq", None),
                               "content": cli.build_user_message_content(prompt, self.workspace, voice=voice,
-                                                                        thinking=resolved_effort != "none")})
+                                                                        thinking=resolved_effort != "none",
+                                                                        device=self.device_of(getattr(self, "_turn_origin", "")))})
         ctx = {"workspace": self.workspace, "messages": self.messages, "mode": self.mode, "yolo": self.yolo,
                "plan_file": self.plan_file,
                "effort": resolved_effort,
@@ -1545,6 +1553,8 @@ class Handler(socketserver.StreamRequestHandler):
                         reply = ({"type": "error", "text": "no such queued message"} if removed is None
                                  else {"type": "ok", "item": removed})
                     else:
+                        if msg.get("device") in ("phone", "pc", "remote"):   # the server tells (serve/server.py _device)
+                            sess.devices[msg.get("origin") or client_id] = msg["device"]
                         res = sess.submit(raw_text, origin=msg.get("origin") or client_id,
                                           effort=msg.get("effort") if msg.get("effort") in EFFORTS else None,
                                           voice=msg.get("voice") is True)

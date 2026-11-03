@@ -166,7 +166,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_get_now_playing",
-        "description": "Get information about currently playing media (Spotify, YouTube, etc.) including title, artist, and playback state.",
+        "description": "Get information about currently playing media (Spotify, YouTube, etc.) including title, artist, and playback state. Use it when the message was sent from the phone, or the user names the phone (mobitel); when it was sent from the PC, the pc_ tools are for that, unless the user names the phone.",
         "inputSchema": {
             "type": "object",
             "properties": {}
@@ -174,7 +174,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_control_media",
-        "description": "Control what the phone is playing (YouTube Music in Brave, Spotify, ...): play, pause, next song, previous song, stop. Pause, next and previous work while the phone is locked; resuming a paused song may need it unlocked (Ray brings Brave to the front for a moment). To play a particular song, use phone_play_music.",
+        "description": "Control what the phone is playing (YouTube Music in Brave, Spotify, ...): play, pause, next song, previous song, stop. Pause, next and previous work while the phone is locked; resuming a paused song may need it unlocked (Ray brings Brave to the front for a moment). To play a particular song, use phone_play_music. Use it when the message was sent from the phone, or the user names the phone (mobitel); when it was sent from the PC, the pc_ tools are for that, unless the user names the phone.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -224,7 +224,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_play_music",
-        "description": "Find a song (or artist, album) on YouTube Music and play it on the phone, in the user's YouTube Music tab in Brave. Use it when the user asks to play, put on or search for a song or music. Without a query it plays the user's Liked songs (their default when they just say 'play music'). It starts by itself once Ray has finished talking and the phone is unlocked. For pause, skip or back, use phone_control_media.",
+        "description": "Find a song (or artist, album) on YouTube Music and play it on the phone, in the user's YouTube Music tab in Brave. Use it when the user asks to play, put on or search for a song or music. Without a query it plays the user's Liked songs (their default when they just say 'play music'). It starts by itself once Ray has finished talking and the phone is unlocked. For pause, skip or back, use phone_control_media. Use it when the message was sent from the phone, or the user names the phone (mobitel); when it was sent from the PC, the pc_ tools are for that, unless the user names the phone.",
         "inputSchema": {
             "type": "object",
             "properties": {

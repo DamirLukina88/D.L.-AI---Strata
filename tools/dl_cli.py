@@ -470,21 +470,30 @@ def user_profile() -> dict:
             if isinstance(data.get(k), str) and data[k].strip()}           # text only: a typo never breaks the prompt
 
 
-def now_line() -> str:
+def now_line(device: str = "") -> str:
     """The current time in front of every user message: the model has no clock (and the system prompt stays the
-    same, so the conversation cache keeps working)."""
+    same, so the conversation cache keeps working).  [device]: where the user wrote from ("phone" or "pc"), so a
+    "play music" plays there (phone_* or pc_* tools); "remote" (another computer) asks."""
     n = datetime.datetime.now()
     tomorrow = n + datetime.timedelta(days=1)
     tz = user_profile().get("timezone") or time.strftime("%Z")
+    where = {"phone": "; sent from: the phone", "pc": "; sent from: the PC",
+             "remote": "; sent from: another computer (for music, ask: the phone or the PC?)"}.get(device, "")
     return (f"[Now: {HR_DAYS[n.weekday()]}, {n:%d.%m.%Y.} {n:%H:%M} ({tz}) "
-            f"— sutra: {HR_DAYS[tomorrow.weekday()]}, {tomorrow:%d.%m.%Y.}]")
+            f"— sutra: {HR_DAYS[tomorrow.weekday()]}, {tomorrow:%d.%m.%Y.}{where}]")
+
+
+def device_of(origin: str) -> str:
+    """The device a session daemon prompt came from: the Ray app (its drawer, its chat) is the phone; the web app
+    and the terminal run on (or through) the PC."""
+    return "phone" if (origin or "").startswith("ray-android") else "pc"
 
 
 NOW_PREFIX = re.compile(r"^\[Now: [^\]\n]*\]\n")
 
 
-def with_now(text: str) -> str:
-    return f"{now_line()}\n{text}"
+def with_now(text: str, device: str = "") -> str:
+    return f"{now_line(device)}\n{text}"
 
 
 def profile_prompt_section() -> str:
@@ -1151,7 +1160,7 @@ def resolve_prompt_and_images(prompt: str, workspace: Path) -> tuple[str, list[s
 
 
 def build_user_message_content(prompt: str, workspace: Path, voice: bool = False,
-                               thinking: bool = True) -> str | list[dict]:
+                               thinking: bool = True, device: str = "") -> str | list[dict]:
     """Builds user message content. If attached images (or sampled video frames / PDF pages) exist,
     produces an OpenAI-compatible multimodal parts list (text + image_url blocks) for strata-vision;
     otherwise returns a formatted text string.  A spoken prompt gets voice_note(thinking)."""
@@ -1160,7 +1169,7 @@ def build_user_message_content(prompt: str, workspace: Path, voice: bool = False
     if images and not clean_user_text:
         resolved_prompt = f"{resolved_prompt.strip()}\nDescribe this media and identify its key elements."
 
-    base_text = with_now(resolved_prompt) + (f"\n\n{voice_note(thinking)}" if voice else "")
+    base_text = with_now(resolved_prompt, device) + (f"\n\n{voice_note(thinking)}" if voice else "")
     if not images:
         return base_text
 

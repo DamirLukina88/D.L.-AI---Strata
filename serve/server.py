@@ -5889,6 +5889,18 @@ def make_handler(svc: Service):
             finally:
                 conn.close()
 
+        def _device(self, origin: str) -> str:
+            """Where a Code tab prompt was typed, for "play music" (the phone's or the PC's tools): the Ray app is
+            the phone; a browser on this PC itself (localhost, not through the tunnel) is the PC; anything else
+            (another computer, through the domain or the LAN) is "remote", and Ray asks where to play."""
+            if origin.startswith("ray-android"):
+                return "phone"
+            host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]").lower()
+            local = self.client_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+            if local and host in ("localhost", "127.0.0.1", "::1") and not self.headers.get("Cf-Connecting-Ip"):
+                return "pc"
+            return "remote"
+
         def _session_op(self, msg: dict) -> dict:
             conn = socket.socket(socket.AF_UNIX)
             conn.settimeout(30)
@@ -6392,6 +6404,8 @@ def make_handler(svc: Service):
                     return
                 msg = {k: req[k] for k in ("op", "session", "text", "id", "origin", "effort", "voice", "query", "title")
                        if k in req}
+                if op == "input":
+                    msg["device"] = self._device(str(req.get("origin") or ""))
                 try:
                     self._json(200, self._session_op(msg))
                 except OSError as e:
