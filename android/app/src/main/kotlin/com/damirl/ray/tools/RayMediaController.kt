@@ -29,7 +29,12 @@ class RayMediaController(private val context: Context) {
         private val PLAY_LABELS = setOf("play", "start playback", "reproduciraj", "pokreni", "play video")
         // the model tends to explain a music command at length; the user wants a few words
         const val SHORT = "Confirm it to the user in a few words, nothing more."
-        private const val AUTOSTART_MS = 90_000L
+        // the tool said "Started" on a locked phone (the helmet, the phone in a pocket) and Ray told the user it
+        // played; it starts only once the phone is unlocked (Play is pressed on screen)
+        const val LOCKED_START = "Not playing yet: the phone is locked, and Brave starts it only once the user " +
+            "unlocks the phone (Ray presses Play on the screen; up to 5 minutes). Tell the user exactly that, in one " +
+            "short sentence."
+        private const val AUTOSTART_MS = 300_000L            // long enough to take the phone out and unlock it
         private val PLAYABLE = Regex("""^https://(music\.|www\.|m\.)?youtube\.com/.*|^https://youtu\.be/.*""")
     }
 
@@ -41,11 +46,12 @@ class RayMediaController(private val context: Context) {
             // the same app id each time: Brave reuses Ray's tab instead of opening a new one per song
             .putExtra(Browser.EXTRA_APPLICATION_ID, context.packageName)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val locked = (context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager)?.isDeviceLocked ?: true
         return try {
             context.startActivity(intent)
-            Log.d(TAG, "playUrl: opened in Brave")
+            Log.d(TAG, "playUrl: opened in Brave (locked=$locked)")
             Thread({ autostart() }, "RayMusicStart").start()
-            "Started."
+            if (locked) LOCKED_START else "Started."
         } catch (e: Exception) {
             Log.e(TAG, "Brave could not be opened", e)
             "Error: Brave could not be opened (${e.message}). Is it installed?"
@@ -184,11 +190,9 @@ class RayMediaController(private val context: Context) {
                 }
             }
 
-            if (audioManager?.isMusicActive == true) {
-                return "Media is currently playing, but metadata details could not be read."
-            }
-
-            "No media is currently playing."
+            // not "any audio is active": Ray's own voice and a headset's call link count as that ("something is
+            // playing" while nothing did)
+            "No music is playing or paused on the phone."
         } catch (e: SecurityException) {
             Log.w(TAG, "Notification listener permission needed for MediaSessionManager: ${e.message}")
             if (audioManager?.isMusicActive == true) {

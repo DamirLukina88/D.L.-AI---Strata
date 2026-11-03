@@ -20,6 +20,9 @@ object BluetoothMic {
     private const val TAG = "RayBtMic"
     private const val LINK_TIMEOUT_MS = 2500L      // go ahead anyway if the link hasn't come up by then
     private const val SETTLE_MS = 300L             // the routing switch is reported a little before audio flows
+    // a link that was down: a helmet (Sena) plays its own tone and needs about a second before the mic's audio
+    // flows; with 300 ms the recognizer's first listen heard the user's first words hardly or not at all
+    private const val COLD_SETTLE_MS = 1200L
     private const val RELEASE_DELAY_MS = 1000L
     private const val CONVERSATION_MS = 120_000L   // an answer within 2 min of speaking through the headset uses it
 
@@ -58,6 +61,7 @@ object BluetoothMic {
         }
         waiting[holder] = onReady
         if (pendingListener != null) return                     // already coming up: onReady runs with the others
+        val cold = !owned                                       // not held a moment ago (released, or never)
 
         val fire = { reason: String ->
             if (pendingListener != null || pendingTimeout != null) {
@@ -68,7 +72,7 @@ object BluetoothMic {
                     val ready = waiting.values.toList()
                     waiting.clear()
                     ready.forEach { it() }
-                }, SETTLE_MS)
+                }, if (cold) COLD_SETTLE_MS else SETTLE_MS)
             }
         }
         val listener = AudioManager.OnCommunicationDeviceChangedListener { device ->

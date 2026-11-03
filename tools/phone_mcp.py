@@ -393,6 +393,8 @@ class PhoneMcpServer:
             result = self._execute_on_phone(name, args)
             if result.startswith("Error"):
                 return result
+            if result.startswith("Not playing yet"):          # a locked phone: it starts once it is unlocked
+                return f"{found.replace('Playing ', 'Opened ', 1)} {result}"
             return f"{found} {SHORT_ANSWER}"
         return self._execute_on_phone(name, args)
 

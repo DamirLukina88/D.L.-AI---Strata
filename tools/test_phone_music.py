@@ -49,6 +49,12 @@ class PlayMusic(unittest.TestCase):
             res = self.server.execute_tool("phone_play_music", {"query": "bohemian rhapsody"})
         self.assertEqual(res, "Playing 'Bohemian Rhapsody' by Queen. " + phone_mcp.SHORT_ANSWER)
 
+    def test_a_locked_phone_is_not_playing_yet(self):
+        with mock.patch.object(phone_mcp, "find_song", return_value=phone_mcp.first_song(SEARCH)), \
+                mock.patch.object(self.server, "_execute_on_phone", return_value="Not playing yet: the phone is locked."):
+            res = self.server.execute_tool("phone_play_music", {"query": "bohemian rhapsody"})
+        self.assertTrue(res.startswith("Opened 'Bohemian Rhapsody' by Queen. Not playing yet"), res)
+
     def test_no_query_plays_the_liked_songs(self):
         with mock.patch.object(phone_mcp, "find_song") as search:
             args, found = self.server._resolve_song({})
