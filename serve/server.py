@@ -6032,12 +6032,12 @@ def make_handler(svc: Service):
                         self._ray_history(session_name)
                 return
             if path == "/api/phone/status":
-                if not (self._authorized() or not self._foreign_origin()):
+                if not self._authorized():                   # the key always (see the POST side)
                     return
                 self._json(200, PHONE_BRIDGE.get_status())
                 return
             if path == "/api/phone/tool/pending":
-                if not (self._authorized() or not self._foreign_origin()):
+                if not self._authorized():                   # the key always (see the POST side)
                     return
                 PHONE_BRIDGE.report_heartbeat()
                 call = PHONE_BRIDGE.pop_pending_call()
@@ -6394,10 +6394,10 @@ def make_handler(svc: Service):
                     self._json(503, {"error": {"message": f"the CLI session daemon is not running ({e})"}})
                 return
             if path in ("/api/phone/status", "/api/phone/tool/call", "/api/phone/tool/result"):
-                if path == "/api/phone/tool/call":
-                    if not self._authorized():
-                        return
-                elif not (self._authorized() or not self._foreign_origin()):
+                # all three need the key (the web app and the Android app send it): "authorized or not foreign" let a
+                # client without a key and without an Origin header through, after _authorized() had already sent its
+                # 401, so anyone on the LAN could fake the phone's heartbeat or a tool's result
+                if not self._authorized():
                     return
                 if path == "/api/phone/status":
                     PHONE_BRIDGE.report_heartbeat()
