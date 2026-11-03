@@ -146,6 +146,7 @@ class AudioPlaybackService : Service() {
                     requestAudioFocus()
 
                     _isSpeakingState.value = true
+                    com.damirl.ray.tools.RayMediaController.pauseForSpeech(this)
                     com.damirl.ray.assistant.WakeWord.hold("speak")     // "Ok Ray" mustn't hear Ray
                     val play = {
                         serviceScope.launch {
@@ -218,7 +219,9 @@ class AudioPlaybackService : Service() {
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .build()
 
-        val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+        // music pauses while Ray talks (not ducked under him: over a helmet's call link the ducked music sounded
+        // broken, and the user doesn't want him talking over it); RayMediaController resumes it afterwards
+        val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
             .setAudioAttributes(attrs)
             .setOnAudioFocusChangeListener { focusChange ->
                 Log.d(TAG, "AudioFocus changed: $focusChange")

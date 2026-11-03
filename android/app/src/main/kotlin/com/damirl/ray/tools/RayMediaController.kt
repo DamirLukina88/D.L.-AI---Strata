@@ -23,6 +23,23 @@ class RayMediaController(private val context: Context) {
 
     companion object {
         private const val TAG = "RayMedia"
+
+        @Volatile private var resumeAfterSpeech = false
+
+        /** Ray starts talking: if Brave plays, it is resumed once he is done (his voice takes the audio meanwhile). */
+        fun pauseForSpeech(context: Context) {
+            val media = RayMediaController(context.applicationContext)
+            if (!media.bravePlaying() || resumeAfterSpeech) return
+            resumeAfterSpeech = true
+            Thread({
+                media.waitForQuiet()
+                resumeAfterSpeech = false
+                if (!media.bravePlaying()) {
+                    media.braveSession()?.transportControls?.play()
+                    Log.d(TAG, "after speech: resumed Brave, playing=${media.waitForBrave(3_000)}")
+                }
+            }, "RayMusicResume").start()
+        }
         const val BRAVE = "com.brave.browser"
         // the player's Play button on music.youtube.com (English and Croatian page language)
         // (the round button itself has no label for screen readers, only its "Start playback" hint)
@@ -67,14 +84,12 @@ class RayMediaController(private val context: Context) {
         val end = SystemClock.uptimeMillis() + AUTOSTART_MS
         // the tool runs before Ray says his answer: wait for it to start (10 s at most; a typed chat may have none)
         // and to end, so the song doesn't start under his voice
+        waitForQuiet()                                        // he says his answer first, the page loads meanwhile
         val speaking = AudioPlaybackService.isSpeakingState
-        val answerBy = SystemClock.uptimeMillis() + 10_000
-        while (!speaking.value && SystemClock.uptimeMillis() < answerBy) Thread.sleep(250)
-        Thread.sleep(1_000)                                   // the page loads (and his last word ends)
         var tries = 0
         while (SystemClock.uptimeMillis() < end) {
             if (bravePlaying()) { if (wasShown) backToRay(); return }
-            val quiet = !speaking.value && !inCall()
+            val quiet = !speaking.value && !inCall() && com.damirl.ray.audio.BluetoothMic.idle()
             val locked = keyguard?.isDeviceLocked ?: true
             if (quiet && !locked && RayAccessibilityService.tapLabelled(BRAVE, PLAY_LABELS)) {
                 if (waitForBrave(2_500)) {
@@ -115,6 +130,19 @@ class RayMediaController(private val context: Context) {
             "user to press play there."
     }
 
+    // until Ray has said his answer (it starts within 8 s of the tool, or there is none: a typed chat) and the
+    // helmet's call link is handed back: music started earlier played under his voice, and the switch back from
+    // the call link stopped it
+    private fun waitForQuiet(maxMs: Long = 120_000) {
+        val speaking = AudioPlaybackService.isSpeakingState
+        val end = SystemClock.uptimeMillis() + maxMs
+        val answerBy = SystemClock.uptimeMillis() + 8_000
+        while (!speaking.value && SystemClock.uptimeMillis() < answerBy) Thread.sleep(250)
+        while ((speaking.value || !com.damirl.ray.audio.BluetoothMic.idle() || inCall()) &&
+            SystemClock.uptimeMillis() < end) Thread.sleep(250)
+        Thread.sleep(1_000)                                   // the helmet switches back to music
+    }
+
     private fun waitForBrave(ms: Long): Boolean {
         val end = SystemClock.uptimeMillis() + ms
         while (SystemClock.uptimeMillis() < end) {
@@ -124,7 +152,7 @@ class RayMediaController(private val context: Context) {
         return bravePlaying()
     }
 
-    private fun braveSession(): MediaController? = try {
+    fun braveSession(): MediaController? = try {
         sessionManager?.getActiveSessions(ComponentName(context, RayNotificationListenerService::class.java))
             .orEmpty().firstOrNull { it.packageName == BRAVE }
     } catch (_: SecurityException) {
@@ -141,7 +169,7 @@ class RayMediaController(private val context: Context) {
         it == AudioManager.MODE_IN_CALL || it == AudioManager.MODE_IN_COMMUNICATION
     }
 
-    private fun bravePlaying(): Boolean = try {
+    fun bravePlaying(): Boolean = try {
         val component = ComponentName(context, RayNotificationListenerService::class.java)
         sessionManager?.getActiveSessions(component).orEmpty()
             .any { it.packageName == BRAVE && it.playbackState?.state == PlaybackState.STATE_PLAYING }
@@ -224,7 +252,11 @@ class RayMediaController(private val context: Context) {
             val controls = active.transportControls
             val starts = normAction == "play" ||
                 (normAction == "play_pause" && active.playbackState?.state != PlaybackState.STATE_PLAYING)
-            if (starts && active.packageName == BRAVE) return resumeBrave(active)
+            if (starts && active.packageName == BRAVE) {
+                // after Ray's answer, not under it (see waitForQuiet)
+                Thread({ waitForQuiet(); Log.d(TAG, "deferred play: ${resumeBrave(active)}") }, "RayMusicPlay").start()
+                return "Playing (it starts as soon as Ray has finished speaking). $SHORT"
+            }
             when (normAction) {
                 "play" -> controls.play()
                 "pause" -> controls.pause()

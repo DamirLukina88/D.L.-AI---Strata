@@ -95,6 +95,9 @@ object BluetoothMic {
         handler.postDelayed(timeout, LINK_TIMEOUT_MS)
     }
 
+    /** No one holds the headset link and it is handed back: the music link (A2DP) plays again. */
+    fun idle(): Boolean = holders.isEmpty() && !owned
+
     /** Lets go for [holder]; the link is handed back to the phone shortly after the last holder lets go. */
     fun release(holder: String) {
         holders.remove(holder)
