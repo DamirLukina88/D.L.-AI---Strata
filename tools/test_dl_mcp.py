@@ -63,6 +63,23 @@ class Router(unittest.TestCase):
         self.assertEqual(list(self.r.enabled), ["fetch"])
         self.assertEqual([t["function"]["name"] for t in self.r.tools()], ["fetch__echo"])
 
+    def test_origin_turns_a_server_on_for_every_prompt_from_that_client(self):
+        import copy
+        cat = copy.deepcopy(CATALOG)
+        cat["servers"]["deepl"]["origins"] = ["ray-android"]
+        r = registry(catalog=cat)
+        try:
+            self.assertEqual([n for n, _ in r.route("what's my battery at?", origin="ray-android")], ["deepl"])
+            self.assertIn("deepl", r.enabled)
+        finally:
+            r.close()
+        r = registry(catalog=cat)
+        try:                                                # another client: only its words count
+            self.assertEqual(r.route("what's my battery at?", origin="web-1234"), [])
+            self.assertNotIn("deepl", r.enabled)
+        finally:
+            r.close()
+
     def test_words_in_three_languages(self):
         for text, want in (("prevedi ovo na njemački", "deepl"), ("Bitte übersetze das", "deepl"),
                            ("please translate this", "deepl"), ("pošalji mi izvještaj", "google"),

@@ -810,7 +810,7 @@ class Session:
                                   "content": cli.build_user_message_content(prompt, current_ws, voice=item["voice"],
                                                                             thinking=resolved_effort != "none")})
             if self.mcp.active:
-                self.mcp.route(prompt)
+                self.mcp.route(prompt, origin=item.get("origin") or "")
             if dl_mcp.call_context():
                 dl_mcp.CALL.ctx = {**dl_mcp.call_context(), "workspace": current_ws, "yolo": self.yolo,
                                    "request_time": time.time()}

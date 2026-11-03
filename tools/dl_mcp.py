@@ -5,7 +5,7 @@ Every tool schema D.L. CLI offers is sent again with every turn, and the local m
 the servers in ~/.config/dl-ai/mcp.json (DL_MCP_CONFIG overrides the path) are not loaded up front:
 
 - a router turns a server on before the model call when the user's message matches one of its `triggers` (regexes;
-  English, Croatian and German words), and the model can turn one on itself with the small `mcp` tool, whose
+  English, Croatian and German words) or comes from a client in its `origins` (e.g. "ray-android"), and the model can turn one on itself with the small `mcp` tool, whose
   description lists the catalogue in one line per server;
 - a server whose tools went unused for `idle_turns` user turns is turned off again (and one with `idle_s`, such as a
   browser, after that many idle seconds); `"default": "on"` servers stay;
@@ -77,6 +77,8 @@ class Entry:
         # arguments set here, hidden from the model and added to every call (e.g. the Google account)
         self.fixed_args = {str(k): v for k, v in (raw.get("fixed_args") or {}).items()}
         self.triggers = [re.compile(t, re.I) for t in raw.get("triggers") or []]
+        # clients whose every prompt turns this server on (the phone's tools for prompts from the Ray Android app)
+        self.origins = {str(o) for o in raw.get("origins") or []}
         # the router skips this entry when one of these matches (e.g. Proton's mail words, but the user named Gmail)
         self.unless = [re.compile(t, re.I) for t in raw.get("unless") or []]
         self.missing = [k for k in raw.get("env_from_secrets") or [] if not os.environ.get(k)]
@@ -400,8 +402,9 @@ class McpRegistry:
                 self.enable(name, "default")
 
     # ------------------------------------------------------------------ turns
-    def route(self, text: str) -> list[tuple[str, str]]:
-        """Start of a user turn: count it, turn on the default servers and every server a trigger matches."""
+    def route(self, text: str, origin: str = "") -> list[tuple[str, str]]:
+        """Start of a user turn: count it, turn on the default servers, every server a trigger matches and every
+        server that lists the prompt's origin (the client that sent it) in `origins`."""
         self.turn += 1
         if text:
             self.said.append(text)
@@ -409,6 +412,10 @@ class McpRegistry:
         hits = []
         for name, entry in self.catalog.items():
             if name in self.enabled or entry.unavailable(self.surface):
+                continue
+            if origin and origin in entry.origins:
+                if not self.enable(name, f"prompt from {origin}").startswith("error"):
+                    hits.append((name, origin))
                 continue
             if any(rx.search(text or "") for rx in entry.unless):
                 continue
