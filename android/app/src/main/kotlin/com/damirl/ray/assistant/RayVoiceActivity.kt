@@ -48,6 +48,7 @@ class RayVoiceActivity : ComponentActivity() {
                 )
             }
         }
+        VoiceDrawerController.closeOpen = { finish() }
         d.start()
     }
 
@@ -60,6 +61,7 @@ class RayVoiceActivity : ComponentActivity() {
     // closed, swiped away or covered by anything else: stop listening and talking, and go (it opens fresh next time)
     override fun onPause() {
         super.onPause()
+        VoiceDrawerController.closeOpen = null
         drawer?.close()
         if (!isFinishing) finish()
     }

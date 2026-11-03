@@ -25,6 +25,16 @@ import kotlinx.coroutines.launch
 class VoiceDrawerController(private val context: Context, private val scope: CoroutineScope) {
 
     companion object {
+        // the open drawer (the system overlay or RayVoiceActivity) closes itself with this; null when none is open
+        @Volatile var closeOpen: (() -> Unit)? = null
+
+        /** Closes the open drawer (main thread): it covers Brave, whose Play button Ray must reach to start a song. */
+        fun closeIfOpen(): Boolean {
+            val close = closeOpen ?: return false
+            android.os.Handler(android.os.Looper.getMainLooper()).post { close() }
+            return true
+        }
+
         private const val TAG = "RayVoiceDrawer"
         // Google's recognizer stops 5 s after the mic opens if nobody has started talking; listen once more before
         // giving up, so there are 10 s to start (holding the power button, then finding words, often takes longer)

@@ -85,6 +85,9 @@ class RayMediaController(private val context: Context) {
         // the tool runs before Ray says his answer: wait for it to start (10 s at most; a typed chat may have none)
         // and to end, so the song doesn't start under his voice
         waitForQuiet()                                        // he says his answer first, the page loads meanwhile
+        // the voice drawer covers Brave, and Ray's screen reading can't see the Play button under it (it played the
+        // moment the user closed the drawer): his answer is said, so the drawer closes
+        if (com.damirl.ray.assistant.VoiceDrawerController.closeIfOpen()) Thread.sleep(1_000)
         val speaking = AudioPlaybackService.isSpeakingState
         var tries = 0
         while (SystemClock.uptimeMillis() < end) {
@@ -117,6 +120,7 @@ class RayMediaController(private val context: Context) {
             return "Error: Brave didn't resume while the phone is locked (it freezes a paused page). Ask the user " +
                 "to unlock the phone, then try again."
         }
+        if (com.damirl.ray.assistant.VoiceDrawerController.closeIfOpen()) Thread.sleep(800)   // it covers Brave
         val launch = context.packageManager.getLaunchIntentForPackage(BRAVE)
             ?: return "Error: Brave could not be opened."
         context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

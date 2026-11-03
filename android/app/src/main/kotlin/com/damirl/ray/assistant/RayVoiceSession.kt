@@ -171,12 +171,14 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         Log.d(TAG, "RayVoiceSession onShow, showFlags=$showFlags")
+        VoiceDrawerController.closeOpen = { hide() }
         drawer?.start()
     }
 
     override fun onHide() {
         super.onHide()
         Log.d(TAG, "RayVoiceSession onHide")
+        VoiceDrawerController.closeOpen = null
         drawer?.close()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
