@@ -857,6 +857,12 @@ print(r.choices[0].message.content)
   call stays text. A block indented by four spaces or a tab after a blank line is code too, and a call written in it is not
   run. A call the model writes plainly, after a paragraph or after such a block has ended, is still a call. The other side:
   a real call the model wraps in a fence is shown and not run.
+- **A file that lists the closing tags is written whole** (ported from upstream 0.2.10, #4701). `</parameter>`, `</function>`
+  and `</tool_call>` on lines of their own inside a value end it only when what follows is the end of the turn, another call, or
+  text with no closing tag after it. Text followed by more closing tags is part of the file. While the answer streams, a call
+  that has closed is held until the turn ends, a new call starts or 1,500 characters follow. A call in the thinking, and a
+  bare call with no `<tool_call>` around it, keep the old rule. A call written as `tools.write`, `functions.write` or
+  `default_api.write` is the declared tool `write` (#4751); a tool that is declared under the dotted name keeps it.
 - **Tool calls in other forms (opt-in).** `"tool_call_recovery": true` in `strata-<model>.json` reads a call of a
   tool the request declared also when the model writes it as `<parameter=NAME>` instead of `<function=NAME>`, as JSON
   (`{"name": ..., "arguments": ...}`) inside `<tool_call>`, as a `<function=NAME>` block at the start of a line
