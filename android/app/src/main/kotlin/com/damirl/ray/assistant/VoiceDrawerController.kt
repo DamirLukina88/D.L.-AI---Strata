@@ -189,6 +189,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
 
         askJob = scope.launch {
             var accumulated = ""
+            var spokenFrom = 0          // read aloud: only what follows the last tool call (see below)
             var failed = false
             chatRepository.streamChat(messages, isVoice = true)
                 .catch { error ->
@@ -203,6 +204,10 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
                         is ChatDelta.Tool -> {
                             lastTool = piece.name
                             toolCalls++
+                            // the line before a tool ("Searching YouTube Music for it...") fills the silence in the
+                            // web app, which reads as it streams; the drawer speaks once at the end, so it was only
+                            // extra talk before the confirmation
+                            spokenFrom = accumulated.length
                             activeToolNote = toolNote(piece.name)
                         }
                         is ChatDelta.Text -> {
@@ -223,8 +228,9 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
             phase = VoicePhase.IDLE
             status = "Tap the mic to ask again"
 
-            if (accumulated.isNotBlank() && !closed) {
-                AudioPlaybackService.startSpeaking(context, accumulated)
+            val spoken = accumulated.substring(spokenFrom).ifBlank { accumulated }
+            if (spoken.isNotBlank() && !closed) {
+                AudioPlaybackService.startSpeaking(context, spoken)
             }
         }
     }

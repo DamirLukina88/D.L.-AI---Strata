@@ -266,7 +266,8 @@ BRAVE = "com.brave.browser"
 # YouTube Music's own search (the web player's API; no account or key), filtered to songs
 YTM_SEARCH = "https://music.youtube.com/youtubei/v1/search?prettyPrint=false"
 YTM_SONGS = "EgWKAQIIAWoKEAkQBRAKEAMQBA=="
-SHORT_ANSWER = "Confirm it to the user in a few words, nothing more."   # the model tended to talk at length
+# the model talked at length ("That opening riff should be loud enough... Say pause or next whenever you want")
+SHORT_ANSWER = "Say only that sentence to the user, word for word: no greeting, no comment, no offer."
 LIKED_SONGS = "https://music.youtube.com/watch?list=LM"          # the signed-in user's Liked songs
 
 
@@ -594,8 +595,8 @@ class PhoneMcpServer:
             # unlocked (am start alone only opened the page: it never played, but this said it did)
             locked = "isKeyguardShowing=true" in (self._run_adb_cmd(["shell", "dumpsys", "window"]) or "")
             return ("Not playing yet: the phone is locked, and Brave starts it only once the user unlocks the phone "
-                    "(Ray presses Play on the screen; up to 5 minutes). Tell the user exactly that, in one short "
-                    "sentence." if locked else "Started.")
+                    "(Ray presses Play on the screen; up to 5 minutes). Say only this to the user: "
+                    "\"It starts as soon as you unlock the phone.\"" if locked else "Started.")
 
         elif name == "phone_get_screen":
             out = self._run_adb_cmd(["shell", "uiautomator", "dump", "/dev/stdout"])

@@ -45,12 +45,12 @@ class RayMediaController(private val context: Context) {
         // (the round button itself has no label for screen readers, only its "Start playback" hint)
         private val PLAY_LABELS = setOf("play", "start playback", "reproduciraj", "pokreni", "play video")
         // the model tends to explain a music command at length; the user wants a few words
-        const val SHORT = "Confirm it to the user in a few words, nothing more."
+        const val SHORT = "Say only that sentence to the user, word for word: no greeting, no comment, no offer."
         // the tool said "Started" on a locked phone (the helmet, the phone in a pocket) and Ray told the user it
         // played; it starts only once the phone is unlocked (Play is pressed on screen)
         const val LOCKED_START = "Not playing yet: the phone is locked, and Brave starts it only once the user " +
-            "unlocks the phone (Ray presses Play on the screen; up to 5 minutes). Tell the user exactly that, in one " +
-            "short sentence."
+            "unlocks the phone (Ray presses Play on the screen; up to 5 minutes). Say only this to the user: " +
+            "\"It starts as soon as you unlock the phone.\""
         private const val AUTOSTART_MS = 300_000L            // long enough to take the phone out and unlock it
         private val PLAYABLE = Regex("""^https://(music\.|www\.|m\.)?youtube\.com/.*|^https://youtu\.be/.*""")
     }
@@ -255,7 +255,7 @@ class RayMediaController(private val context: Context) {
             if (starts && active.packageName == BRAVE) {
                 // after Ray's answer, not under it (see waitForQuiet)
                 Thread({ waitForQuiet(); Log.d(TAG, "deferred play: ${resumeBrave(active)}") }, "RayMusicPlay").start()
-                return "Playing (it starts as soon as Ray has finished speaking). $SHORT"
+                return "Playing. $SHORT"           // it starts once he has said it
             }
             when (normAction) {
                 "play" -> controls.play()
