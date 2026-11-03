@@ -48,10 +48,9 @@ class RayMediaController(private val context: Context) {
         const val SHORT = "Say only that sentence to the user, word for word: no greeting, no comment, no offer."
         // the tool said "Started" on a locked phone (the helmet, the phone in a pocket) and Ray told the user it
         // played; it starts only once the phone is unlocked (Play is pressed on screen)
-        const val LOCKED_START = "Not playing yet: the phone is locked, and Brave starts it only once the user " +
-            "unlocks the phone (Ray presses Play on the screen; up to 5 minutes). Say only this to the user: " +
-            "\"It starts as soon as you unlock the phone.\" (With the helmet set as a trusted device, Ray can start " +
-            "songs without that.)"
+        const val LOCKED_START = "Not playing yet: the phone is locked, and a song opened behind the lock screen " +
+            "doesn't play; it opens and plays as soon as the user unlocks the phone (within 5 minutes). Say only " +
+            "this to the user: \"It starts as soon as you unlock the phone.\""
         private const val AUTOSTART_MS = 300_000L            // long enough to take the phone out and unlock it
         private val PLAYABLE = Regex("""^https://(music\.|www\.|m\.)?youtube\.com/.*|^https://youtu\.be/.*""")
     }
@@ -64,18 +63,31 @@ class RayMediaController(private val context: Context) {
             // the same app id each time: Brave reuses Ray's tab instead of opening a new one per song
             .putExtra(Browser.EXTRA_APPLICATION_ID, context.packageName)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        val locked = (context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager)?.isDeviceLocked ?: true
-        return try {
-            context.startActivity(intent)
-            Log.d(TAG, "playUrl: opened in Brave (locked=$locked)")
-            Thread({ autostart() }, "RayMusicStart").start()
-            // Brave allowed to autoplay (its --autoplay-policy line, 2026-11-03) starts the song itself, locked
-            // too: only when it doesn't is the user told to unlock
-            if (locked && !waitForBrave(12_000)) LOCKED_START else "Started."
-        } catch (e: Exception) {
-            Log.e(TAG, "Brave could not be opened", e)
-            "Error: Brave could not be opened (${e.message}). Is it installed?"
+        val keyguard = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+        // a page opened behind the lock screen doesn't play in Brave (screen off: never starts; screen on under
+        // the drawer: YouTube stops it after ~13 s and then plays silence, 2026-11-03 22:00-22:04): it is opened
+        // once the user unlocks the phone (5 minutes at most), and then plays normally
+        if (keyguard?.isKeyguardLocked != false) {
+            Thread({
+                val end = SystemClock.uptimeMillis() + AUTOSTART_MS
+                while ((keyguard?.isKeyguardLocked != false) && SystemClock.uptimeMillis() < end) Thread.sleep(500)
+                if (keyguard?.isKeyguardLocked == false) open(intent) else Log.d(TAG, "playUrl: not unlocked in time")
+            }, "RayMusicAfterUnlock").start()
+            Log.d(TAG, "playUrl: locked, opens after the unlock")
+            return LOCKED_START
         }
+        return open(intent)
+    }
+
+    private fun open(intent: Intent): String = try {
+        context.startActivity(intent)
+        Log.d(TAG, "playUrl: opened in Brave")
+        Thread({ autostart() }, "RayMusicStart").start()
+        "Started."
+    } catch (e: Exception) {
+        Log.e(TAG, "Brave could not be opened", e)
+        "Error: Brave could not be opened (${e.message}). Is it installed?"
+    }
     }
 
     // Brave doesn't autoplay a page another app opened (it waits for a tap), so Ray taps Play himself (his screen
