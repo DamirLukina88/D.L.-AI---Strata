@@ -88,7 +88,6 @@ class RayMediaController(private val context: Context) {
         Log.e(TAG, "Brave could not be opened", e)
         "Error: Brave could not be opened (${e.message}). Is it installed?"
     }
-    }
 
     // Brave doesn't autoplay a page another app opened (it waits for a tap), so Ray taps Play himself (his screen
     // reading service): once he has finished talking (and no call is on), the phone is
