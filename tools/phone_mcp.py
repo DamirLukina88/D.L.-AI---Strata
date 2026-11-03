@@ -11,8 +11,8 @@ Provides Ray with autonomous smartphone capabilities:
 7. phone_get_2fa_code - Multilingual 2FA/SMS OTP extraction
 8. phone_get_now_playing - Media metadata (Spotify, YouTube)
 9. phone_control_media - Media playback (play, pause, next, previous)
-10. phone_camera_snap - open the camera for the user to take a photo
-11. phone_get_last_photo - that photo, into the workspace and shown to the model
+10. phone_camera_snap - take a photo (back camera, shutter sound) and show it to the model
+11. phone_get_last_photo - the newest photo again
 12. phone_get_screen - Accessibility screen inspection
 """
 import json
@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -186,20 +187,20 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_camera_snap",
-        "description": "Open the phone's camera so the user can take a photo. You can't see it yet: ask the user to take the photo and say when it's done, then call phone_get_last_photo.",
+        "description": "Take a photo with the phone's back camera and see it: the photo comes back to you as an image. The phone plays the shutter sound. Works only while Ray is on the phone's screen (the app or the voice drawer) and the phone is unlocked; point the phone first.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "prompt": {
                     "type": "string",
-                    "description": "What the photo is for (kept with the request; not analysed yet)."
+                    "description": "What the photo is for (optional)."
                 }
             }
         }
     },
     {
         "name": "phone_get_last_photo",
-        "description": "Get the photo the user took after phone_camera_snap: it is saved in the workspace (phone-photos/) and shown to you as an image, so you can look at it and answer about it. Only works while the phone is unlocked.",
+        "description": "Show the newest photo taken with phone_camera_snap again (it is in the workspace under phone-photos/). Only works while the phone is unlocked.",
         "inputSchema": {
             "type": "object",
             "properties": {}
@@ -283,9 +284,9 @@ class PhoneMcpServer:
             pass
         return None
 
-    # 8 s: the server waits up to 6 s for the phone (/api/phone/tool/call), so its answer (the result, or "the phone
-    # didn't answer") arrives before this side gives up
-    def _call_companion_api(self, tool_name: str, args: Dict[str, Any], timeout: float = 8.0) -> Optional[str]:
+    # 25 s: the server waits up to 20 s for the phone (/api/phone/tool/call; a photo takes a few seconds), so its
+    # answer (the result, or "the phone didn't answer") arrives before this side gives up
+    def _call_companion_api(self, tool_name: str, args: Dict[str, Any], timeout: float = 25.0) -> Optional[str]:
         """Attempt to dispatch the tool call to the active Ray companion session via server relay."""
         payload = json.dumps({"tool": tool_name, "args": args}).encode("utf-8")
         try:
@@ -471,14 +472,9 @@ class PhoneMcpServer:
             return f"Media action '{action}' executed."
 
         elif name == "phone_camera_snap":
-            prompt = args.get("prompt", "")
-            # Trigger snapshot via intent to Ray companion or system capture
-            self._run_adb_cmd([
-                "shell", "am", "broadcast",
-                "-a", "com.damirl.ray.ACTION_CAMERA_SNAP",
-                "--es", "prompt", prompt
-            ])
-            return "Opened the camera on the phone. The photo stays on the phone: you can't see it yet."
+            # the broadcast above made the app take the photo (if Ray is on screen); fetch it over adb
+            time.sleep(4)
+            return self._pull_last_photo()
 
         elif name == "phone_get_last_photo":
             return self._pull_last_photo()

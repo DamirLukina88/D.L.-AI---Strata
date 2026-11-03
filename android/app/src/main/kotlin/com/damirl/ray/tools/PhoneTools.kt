@@ -45,7 +45,10 @@ class PhoneTools(
 
     companion object {
         /** Tools that read what's private on the phone: refused while it is locked. */
-        val PRIVATE = setOf("phone_get_2fa_code", "phone_get_recent_notifications", "phone_get_screen", "phone_get_last_photo")
+        val PRIVATE = setOf(
+            "phone_get_2fa_code", "phone_get_recent_notifications", "phone_get_screen", "phone_get_last_photo",
+            "phone_camera_snap"                       // nobody takes photos through Ray with a locked phone
+        )
 
         const val LOCKED_ANSWER = "Error: the phone is locked. Codes, notifications, the screen and photos are only read once " +
             "the user has unlocked it, so ask them to unlock the phone and try again."

@@ -188,7 +188,6 @@
             <intent-filter>
                 <action android:name="com.damirl.ray.ACTION_EXECUTE_TOOL" />
                 <action android:name="com.damirl.ray.ACTION_TORCH" />
-                <action android:name="com.damirl.ray.ACTION_CAMERA_SNAP" />
             </intent-filter>
         </receiver>
 

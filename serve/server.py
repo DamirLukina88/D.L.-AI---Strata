@@ -6417,7 +6417,7 @@ def make_handler(svc: Service):
                     if not tool_name:
                         self._json(400, {"error": {"message": "missing tool name"}})
                         return
-                    res = PHONE_BRIDGE.enqueue_call(tool_name, tool_args, timeout=6.0)
+                    res = PHONE_BRIDGE.enqueue_call(tool_name, tool_args, timeout=20.0)   # a photo takes a few seconds
                     if res is not None:
                         self._json(200, {"result": res})
                     else:

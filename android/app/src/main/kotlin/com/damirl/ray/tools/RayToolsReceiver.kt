@@ -15,7 +15,6 @@ class RayToolsReceiver : BroadcastReceiver() {
         private const val TAG = "RayToolsReceiver"
         const val ACTION_EXECUTE_TOOL = "com.damirl.ray.ACTION_EXECUTE_TOOL"
         const val ACTION_TORCH = "com.damirl.ray.ACTION_TORCH"
-        const val ACTION_CAMERA_SNAP = "com.damirl.ray.ACTION_CAMERA_SNAP"
     }
 
     override fun onReceive(context: Context, intent: Intent?) {
@@ -29,11 +28,6 @@ class RayToolsReceiver : BroadcastReceiver() {
             ACTION_TORCH -> {
                 val enabled = intent.getBooleanExtra("enabled", false)
                 toolsManager.toggleTorch(enabled)
-            }
-            ACTION_CAMERA_SNAP -> {
-                val prompt = intent.getStringExtra("prompt") ?: ""
-                val cameraManager = CameraVisionManager(context)
-                cameraManager.snapPhoto(prompt)
             }
             ACTION_EXECUTE_TOOL -> {
                 val tool = intent.getStringExtra("tool") ?: return

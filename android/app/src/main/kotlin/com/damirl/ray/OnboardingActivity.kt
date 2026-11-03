@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material3.Button
@@ -112,6 +113,8 @@ fun PermissionsDashboard(
 
     fun micGranted() = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
         PackageManager.PERMISSION_GRANTED
+    fun cameraGranted() = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+        PackageManager.PERMISSION_GRANTED
     fun notificationsGranted() = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
     // from Android's list of switched-on services, so it reads right even while the service isn't running
     fun screenReadingOn() = (Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: "")
@@ -119,6 +122,7 @@ fun PermissionsDashboard(
         RayAccessibilityService.isRunning()
 
     var isMicGranted by remember { mutableStateOf(micGranted()) }
+    var isCameraGranted by remember { mutableStateOf(cameraGranted()) }
     var isBatteryIgnored by remember {
         mutableStateOf(powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true)
     }
@@ -128,6 +132,7 @@ fun PermissionsDashboard(
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         isMicGranted = micGranted()
+        isCameraGranted = cameraGranted()
         isBatteryIgnored = powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true
         isNotificationAccess = notificationsGranted()
         isAccessibilityActive = screenReadingOn()
@@ -137,9 +142,12 @@ fun PermissionsDashboard(
     val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         isMicGranted = granted
     }
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        isCameraGranted = granted
+    }
 
-    // Autostart counts where the phone lets Ray read it (Xiaomi); elsewhere only the other four
-    val checks = listOfNotNull(isMicGranted, autostart, isBatteryIgnored, isNotificationAccess, isAccessibilityActive)
+    // Autostart counts where the phone lets Ray read it (Xiaomi); elsewhere only the others
+    val checks = listOfNotNull(isMicGranted, isCameraGranted, autostart, isBatteryIgnored, isNotificationAccess, isAccessibilityActive)
     val total = checks.size
     val ready = checks.count { it }
 
@@ -195,6 +203,16 @@ fun PermissionsDashboard(
             isGranted = isMicGranted,
             actionLabel = "Allow microphone",
             onAction = { micLauncher.launch(Manifest.permission.RECORD_AUDIO) }
+        )
+
+        PermissionCard(
+            title = "Camera",
+            desc = "So Ray can take a photo when you ask him what he sees. Only while Ray is on screen and the phone " +
+                "is unlocked, always with the shutter sound.",
+            icon = Icons.Default.PhotoCamera,
+            isGranted = isCameraGranted,
+            actionLabel = "Allow camera",
+            onAction = { cameraLauncher.launch(Manifest.permission.CAMERA) }
         )
 
         PermissionCard(
