@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import com.damirl.ray.audio.AudioPlaybackService
 import com.damirl.ray.audio.SpeechRecognitionManager
 import com.damirl.ray.audio.VoiceOutput
+import com.damirl.ray.audio.VoiceTrace
 import com.damirl.ray.network.ChatDelta
 import com.damirl.ray.network.ChatMessage
 import com.damirl.ray.network.NetworkClient
@@ -47,6 +48,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
     private var noSpeechRetries = 0
     private var askJob: Job? = null
     private var retryJob: Job? = null
+    private var probeJob: Job? = null
     private var closed = false
 
     // UI state observable by Compose
@@ -75,6 +77,8 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
         private set
 
     init {
+        VoiceTrace.init(context)
+        com.damirl.ray.audio.BluetoothMic.init(context)
         // the live transcript and the mic level drive the drawer while it listens
         speechManager?.let { manager ->
             scope.launch { manager.partialText.collect { if (phase == VoicePhase.LISTENING) partialText = it } }
@@ -92,7 +96,9 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
         thinkingText = ""
         thoughtSeconds = null
         noSpeechRetries = 0
-        scope.launch { networkClient.probeAndSelectRoute() }
+        VoiceTrace.event("drawer_start")
+        // while you speak; ask() waits for it, so the question goes over the route found now (LAN or the tunnel)
+        probeJob = scope.launch { networkClient.probeAndSelectRoute() }
         listen()
     }
 
@@ -113,6 +119,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
         if (closed) return
         closed = true
         Log.d(TAG, "Drawer closed: stopping listening and speech")
+        VoiceTrace.event("drawer_close", "phase" to phase.name)
         WakeWord.release("drawer")
         retryJob?.cancel()
         askJob?.cancel()
@@ -136,6 +143,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
         userPrompt = ""
         partialText = ""
         activeToolNote = null
+        VoiceTrace.event("listen", "retry" to noSpeechRetries)
 
         speechManager?.startListening(
             onFinalResult = { transcribed ->
@@ -146,6 +154,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
             },
             onError = { err ->
                 Log.w(TAG, "Listening failed: $err")
+                VoiceTrace.event("listen_failed", "error" to err)
                 phase = VoicePhase.ERROR
                 status = "Couldn't listen: $err"
             },
@@ -160,6 +169,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
                         if (!closed && phase == VoicePhase.LISTENING) listen()
                     }
                 } else {
+                    VoiceTrace.event("listen_gave_up")
                     phase = VoicePhase.IDLE
                     status = "I didn't catch that"
                     partialText = ""
@@ -198,47 +208,74 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
         val askedAt = System.currentTimeMillis()
 
         askJob = scope.launch {
+            probeJob?.join()                                // the route the drawer is probing while you speak
             var accumulated = ""
             var spokenFrom = 0          // read aloud: only what follows the last tool call (see below)
             var failed = false
-            chatRepository.streamChat(messages, isVoice = true)
-                .catch { error ->
-                    failed = true
-                    phase = VoicePhase.ERROR
-                    assistantResponse = "Error: ${error.message}"
-                    status = "Can't reach the server"
-                }
-                .collect { piece ->
-                    when (piece) {
-                        is ChatDelta.Thinking -> thinkingText += piece.text
-                        is ChatDelta.Tool -> {
-                            lastTool = piece.name
-                            toolCalls++
-                            // the line before a tool ("Searching YouTube Music for it...") fills the silence in the
-                            // web app, which reads as it streams; the drawer speaks once at the end, so it was only
-                            // extra talk before the confirmation
-                            spokenFrom = accumulated.length
-                            activeToolNote = toolNote(piece.name)
+            for (attempt in 0..1) {
+                var received = false
+                var unreached: Throwable? = null
+                VoiceTrace.event("ask", "route" to NetworkClient.label(networkClient.currentRoute.value),
+                    "chars" to text.length, "attempt" to attempt)
+                chatRepository.streamChat(messages, isVoice = true)
+                    .catch { error ->
+                        // the server was never reached (the LAN gone, say): probe again and send it once more
+                        if (!received && attempt == 0 && NetworkClient.isConnectFailure(error)) {
+                            unreached = error
+                            return@catch
                         }
-                        is ChatDelta.Text -> {
-                            if (phase != VoicePhase.ANSWERING) {
-                                phase = VoicePhase.ANSWERING
-                                status = "Answering…"
-                                if (thinkingText.isNotBlank()) {
-                                    thoughtSeconds = ((System.currentTimeMillis() - askedAt) / 1000).toInt().coerceAtLeast(1)
-                                }
+                        failed = true
+                        VoiceTrace.event("answer_error", "error" to (error.message ?: error.javaClass.simpleName))
+                        phase = VoicePhase.ERROR
+                        assistantResponse = "Error: ${error.message}"
+                        status = "Can't reach the server"
+                    }
+                    .collect { piece ->
+                        if (!received) {
+                            received = true
+                            VoiceTrace.event("answer_first", "kind" to piece.javaClass.simpleName,
+                                "ms" to System.currentTimeMillis() - askedAt)
+                        }
+                        when (piece) {
+                            is ChatDelta.Thinking -> thinkingText += piece.text
+                            is ChatDelta.Tool -> {
+                                lastTool = piece.name
+                                toolCalls++
+                                VoiceTrace.event("answer_tool", "name" to piece.name)
+                                // the line before a tool ("Searching YouTube Music for it...") fills the silence in the
+                                // web app, which reads as it streams; the drawer speaks once at the end, so it was only
+                                // extra talk before the confirmation
+                                spokenFrom = accumulated.length
+                                activeToolNote = toolNote(piece.name)
                             }
-                            accumulated += piece.text
-                            assistantResponse = accumulated
+                            is ChatDelta.Text -> {
+                                if (phase != VoicePhase.ANSWERING) {
+                                    phase = VoicePhase.ANSWERING
+                                    status = "Answering…"
+                                    VoiceTrace.event("answer_text", "ms" to System.currentTimeMillis() - askedAt)
+                                    if (thinkingText.isNotBlank()) {
+                                        thoughtSeconds = ((System.currentTimeMillis() - askedAt) / 1000).toInt().coerceAtLeast(1)
+                                    }
+                                }
+                                accumulated += piece.text
+                                assistantResponse = accumulated
+                            }
                         }
                     }
-                }
+                val retryWith = unreached ?: break
+                Log.w(TAG, "Server not reached (${retryWith.message}); probing again")
+                VoiceTrace.event("ask_unreached", "error" to (retryWith.message ?: retryWith.javaClass.simpleName))
+                networkClient.probeAndSelectRoute()
+            }
 
             if (failed) return@launch
             phase = VoicePhase.IDLE
             status = "Tap the mic to ask again"
 
             val spoken = accumulated.substring(spokenFrom).ifBlank { accumulated }
+            VoiceTrace.event("answer_done", "chars" to accumulated.length, "spoken_chars" to spoken.length,
+                "ms" to System.currentTimeMillis() - askedAt,
+                "text" to if (com.damirl.ray.BuildConfig.DEBUG) spoken.take(400) else null)
             if (spoken.isNotBlank() && !closed) {
                 AudioPlaybackService.startSpeaking(context, spoken)
             }

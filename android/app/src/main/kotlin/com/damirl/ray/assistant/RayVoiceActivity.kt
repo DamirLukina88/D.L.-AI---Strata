@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.lifecycleScope
 import com.damirl.ray.MainActivity
+import com.damirl.ray.audio.VoiceTrace
 import com.damirl.ray.ui.theme.RayTheme
 
 // The voice drawer as an activity over whatever is on screen (the lock screen too).  RayAssistTrampolineActivity
@@ -26,6 +27,8 @@ class RayVoiceActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.d(TAG, "RayVoiceActivity onCreate, action=${intent?.action}")
+        VoiceTrace.init(this)
+        VoiceTrace.event("drawer_shown", "via" to "activity", "action" to intent?.action)
         setShowWhenLocked(true)
         setTurnScreenOn(true)
         enableEdgeToEdge(
@@ -55,12 +58,14 @@ class RayVoiceActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         Log.d(TAG, "RayVoiceActivity onNewIntent, action=${intent.action}")
+        VoiceTrace.event("drawer_shown", "via" to "activity again", "action" to intent.action)
         drawer?.start()
     }
 
     // closed, swiped away or covered by anything else: stop listening and talking, and go (it opens fresh next time)
     override fun onPause() {
         super.onPause()
+        VoiceTrace.event("drawer_hidden", "via" to "activity")
         VoiceDrawerController.closeOpen = null
         drawer?.close()
         if (!isFinishing) finish()

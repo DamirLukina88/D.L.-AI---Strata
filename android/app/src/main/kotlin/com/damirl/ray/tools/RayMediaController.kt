@@ -31,12 +31,17 @@ class RayMediaController(private val context: Context) {
             val media = RayMediaController(context.applicationContext)
             if (!media.bravePlaying() || resumeAfterSpeech) return
             resumeAfterSpeech = true
+            com.damirl.ray.audio.VoiceTrace.event("music_paused_for_speech")
             Thread({
                 media.waitForQuiet()
                 resumeAfterSpeech = false
                 if (!media.bravePlaying()) {
                     val session = media.braveSession()
-                    Log.d(TAG, "after speech: " + (session?.let { media.resumeBrave(it) } ?: "Brave's player is gone"))
+                    val result = session?.let { media.resumeBrave(it) } ?: "Brave's player is gone"
+                    Log.d(TAG, "after speech: $result")
+                    com.damirl.ray.audio.VoiceTrace.event("music_resume", "result" to result.take(80))
+                } else {
+                    com.damirl.ray.audio.VoiceTrace.event("music_resume", "result" to "already playing")
                 }
             }, "RayMusicResume").start()
         }

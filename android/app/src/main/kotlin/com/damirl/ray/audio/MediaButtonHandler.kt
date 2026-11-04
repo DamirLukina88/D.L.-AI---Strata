@@ -25,6 +25,8 @@ object MediaButtonHandler {
             TAG,
             "Media key event received: action=${keyEvent.action}, keyCode=${keyEvent.keyCode}, repeatCount=${keyEvent.repeatCount}"
         )
+        VoiceTrace.init(context)
+        VoiceTrace.event("media_key", "code" to keyEvent.keyCode, "action" to keyEvent.action, "repeat" to keyEvent.repeatCount)
 
         // Only handle key release to avoid double-processing down + up
         if (keyEvent.action != KeyEvent.ACTION_UP) {
@@ -62,6 +64,8 @@ object MediaButtonHandler {
             clickCount = 0
             lastClickTime = 0L
             Log.d(TAG, "Double-tap detected on media button -> Waking Ray Assistant! 🐾")
+            VoiceTrace.event("trigger", "action" to "media double tap", "via" to "media button",
+                *VoiceTrace.deviceState(context))
             triggerRayAssistant(context)
             return true
         } else {

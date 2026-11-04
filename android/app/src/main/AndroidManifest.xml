@@ -86,6 +86,15 @@
             android:turnScreenOn="true"
             android:exported="false" />
 
+        <!-- The headset mic test (MicProbeActivity): adb only (android.permission.DUMP), debug builds only -->
+        <activity
+            android:name=".audio.MicProbeActivity"
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+
         <!-- Translucent Trampoline Activity to handle Voice Commands, Earbud Triggers, & QS Shade collapse -->
         <activity
             android:name=".assistant.RayAssistTrampolineActivity"

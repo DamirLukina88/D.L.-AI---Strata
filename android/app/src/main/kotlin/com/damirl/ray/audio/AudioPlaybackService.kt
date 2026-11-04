@@ -24,6 +24,7 @@ import com.damirl.ray.network.NetworkClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -70,13 +71,17 @@ class AudioPlaybackService : Service() {
     private var audioFocusRequest: AudioFocusRequest? = null
     private var piperPlayer: PiperAudioPlayer? = null
     private var mediaSession: MediaSessionCompat? = null
+    private var speakGeneration = 0          // the answer being said; an older one's fetch or end is ignored
 
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "AudioPlaybackService created")
 
         createNotificationChannel()
-        piperPlayer = PiperAudioPlayer(this, NetworkClient())
+        VoiceTrace.init(this)
+        // the shared client: the route the drawer just probed (a client of its own always used the LAN address, so
+        // away from home Ray's voice waited 15 s and fell back to the phone's voice, 2026-11-04)
+        piperPlayer = PiperAudioPlayer(this, NetworkClient.shared)
 
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "RayAssistant:AudioWakeLock").apply {
@@ -150,17 +155,27 @@ class AudioPlaybackService : Service() {
 
                     _isSpeakingState.value = true
                     com.damirl.ray.assistant.WakeWord.hold("speak")     // "Ok Ray" mustn't hear Ray
+                    val generation = ++speakGeneration
+                    val headset = BluetoothMic.inHeadsetConversation()
+                    VoiceTrace.event("speak_start", "chars" to text.length, "headset" to headset)
+                    // his voice is fetched at once, while the headset's call link comes up (that took up to 3.7 s
+                    // before the fetch even started, 2026-11-04)
+                    val cleanText = SpeechCleaner.clean(text)
+                    val audio = serviceScope.async { piperPlayer?.fetch(cleanText) }
                     val play = {
                         serviceScope.launch {
-                            piperPlayer?.speak(text) {
+                            val file = audio.await()
+                            // stopped, or a newer answer, while it was fetched
+                            if (!_isSpeakingState.value || generation != speakGeneration) return@launch
+                            piperPlayer?.play(cleanText, file) {
                                 Log.d(TAG, "Speech playback finished")
-                                finishPlayback()
+                                if (generation == speakGeneration) finishPlayback()
                             }
                         }
                     }
                     // you spoke through a headset (helmet intercom): answer over its call link, which it plays even
                     // while the intercom is on; otherwise the usual output (the music link, or the phone)
-                    if (BluetoothMic.inHeadsetConversation()) {
+                    if (headset) {
                         Log.d(TAG, "Answering over the headset's call link")
                         BluetoothMic.acquire(this, "reply") { if (_isSpeakingState.value) play() }
                     } else {
@@ -227,6 +242,7 @@ class AudioPlaybackService : Service() {
             .setAudioAttributes(attrs)
             .setOnAudioFocusChangeListener { focusChange ->
                 Log.d(TAG, "AudioFocus changed: $focusChange")
+                VoiceTrace.event("speak_focus_change", "change" to focusChange)
                 if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {
                     finishPlayback()
                 }
@@ -236,6 +252,7 @@ class AudioPlaybackService : Service() {
         audioFocusRequest = req
         val result = am.requestAudioFocus(req)
         Log.d(TAG, "AudioFocus granted: ${result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED}")
+        VoiceTrace.event("speak_focus", "granted" to (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED))
     }
 
     private fun abandonAudioFocus() {
@@ -245,6 +262,7 @@ class AudioPlaybackService : Service() {
     }
 
     private fun finishPlayback() {
+        if (_isSpeakingState.value) VoiceTrace.event("speak_end")
         _isSpeakingState.value = false
         com.damirl.ray.assistant.WakeWord.release("speak")
         BluetoothMic.release("reply")

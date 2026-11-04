@@ -58,26 +58,40 @@ class SpeechRecognitionManager(private val context: Context) {
         try {
             val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
             var heardSpeech = false
+            var levels = 0                      // level callbacks so far: the first shows audio flowing
+            var loudAt = false                  // a level above silence was traced
+            var peak = -100f
+            VoiceTrace.event("stt_start")
             recognizer.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
                     Log.d(TAG, "SpeechRecognizer ready for speech")
+                    VoiceTrace.event("stt_ready")
                     _isListening.value = true
                     _partialText.value = ""
                 }
 
                 override fun onBeginningOfSpeech() {
                     Log.d(TAG, "User started speaking")
+                    VoiceTrace.event("stt_speech_start")
                     heardSpeech = true
                 }
 
                 override fun onRmsChanged(rmsdB: Float) {
                     _rmsLevel.value = rmsdB
+                    if (levels++ == 0) VoiceTrace.event("stt_audio", "level" to rmsdB)
+                    if (rmsdB > peak) peak = rmsdB
+                    // Google's levels run from about -2 (silence) to 10: the first clearly above silence
+                    if (!loudAt && rmsdB > 3f) {
+                        loudAt = true
+                        VoiceTrace.event("stt_loud", "level" to rmsdB)
+                    }
                 }
 
                 override fun onBufferReceived(buffer: ByteArray?) {}
 
                 override fun onEndOfSpeech() {
                     Log.d(TAG, "Speech ended")
+                    VoiceTrace.event("stt_speech_end", "peak" to peak)
                     _isListening.value = false
                 }
 
@@ -96,6 +110,8 @@ class SpeechRecognitionManager(private val context: Context) {
                         else -> "Speech recognition error ($error)"
                     }
                     Log.w(TAG, "SpeechRecognizer error: $message (speech heard: $heardSpeech)")
+                    VoiceTrace.event("stt_error", "code" to error, "message" to message, "heard" to heardSpeech,
+                        "peak" to peak)
                     _isListening.value = false
                     destroyRecognizer()
                     val silent = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
@@ -106,6 +122,8 @@ class SpeechRecognitionManager(private val context: Context) {
                     val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     val text = matches?.firstOrNull()?.trim() ?: ""
                     if (com.damirl.ray.BuildConfig.DEBUG) Log.d(TAG, "Final transcription: '$text'")
+                    VoiceTrace.event("stt_result", "chars" to text.length, "peak" to peak,
+                        "text" to if (com.damirl.ray.BuildConfig.DEBUG) text else null)
                     _isListening.value = false
                     _partialText.value = text
                     destroyRecognizer()

@@ -11,6 +11,7 @@ import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
 import android.view.KeyEvent
 import com.damirl.ray.audio.MediaButtonHandler
+import com.damirl.ray.audio.VoiceTrace
 
 class RayVoiceInteractionService : VoiceInteractionService() {
 
@@ -30,10 +31,12 @@ class RayVoiceInteractionService : VoiceInteractionService() {
             val service = instance
             if (service != null && isActiveService(service, ComponentName(service, RayVoiceInteractionService::class.java))) {
                 Log.d(TAG, "Requesting showSession on active VoiceInteractionService with flags=$flags, args=$args")
+                VoiceTrace.event("show_request", "ok" to true, "source" to args.getString("source"))
                 service.showSession(args, flags)
                 return true
             }
             Log.d(TAG, "VoiceInteractionService not ready or not active assistant (instance=${service != null})")
+            VoiceTrace.event("show_request", "ok" to false, "service" to (service != null))
             return false
         }
     }
@@ -44,6 +47,9 @@ class RayVoiceInteractionService : VoiceInteractionService() {
         super.onReady()
         instance = this
         Log.d(TAG, "RayVoiceInteractionService onReady: Registered as system assistant")
+        VoiceTrace.init(this)
+        com.damirl.ray.audio.BluetoothMic.init(this)               // the headset profile, before the first press
+        VoiceTrace.event("assist_ready")
         setupMediaSession()
     }
 
@@ -100,11 +106,13 @@ class RayVoiceInteractionService : VoiceInteractionService() {
     override fun onPrepareToShowSession(args: Bundle, showFlags: Int) {
         super.onPrepareToShowSession(args, showFlags)
         Log.d(TAG, "onPrepareToShowSession, showFlags=$showFlags")
+        VoiceTrace.event("show_prepare", "flags" to showFlags)
     }
 
     override fun onShowSessionFailed(args: Bundle) {
         super.onShowSessionFailed(args)
         Log.w(TAG, "onShowSessionFailed: $args")
+        VoiceTrace.event("show_failed", "args" to args.keySet().joinToString())
     }
 
     override fun onShutdown() {
@@ -116,5 +124,6 @@ class RayVoiceInteractionService : VoiceInteractionService() {
             instance = null
         }
         Log.d(TAG, "RayVoiceInteractionService onShutdown")
+        VoiceTrace.event("assist_shutdown")
     }
 }

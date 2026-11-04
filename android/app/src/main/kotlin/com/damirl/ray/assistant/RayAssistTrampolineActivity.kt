@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.WindowManager
+import com.damirl.ray.audio.VoiceTrace
 
 class RayAssistTrampolineActivity : Activity() {
 
@@ -17,6 +18,9 @@ class RayAssistTrampolineActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.d(TAG, "RayAssistTrampolineActivity launched with action=${intent?.action}")
+        VoiceTrace.init(this)
+        com.damirl.ray.audio.BluetoothMic.init(this)
+        VoiceTrace.event("trigger", "action" to intent?.action, "via" to "trampoline", *VoiceTrace.deviceState(this))
 
         // Allow showing over lockscreen if device is locked
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
@@ -41,6 +45,7 @@ class RayAssistTrampolineActivity : Activity() {
             // the assistant service isn't connected to this process (or Ray isn't the default assistant): the same
             // drawer as an activity, not the full app
             Log.d(TAG, "Voice interaction session unavailable -> RayVoiceActivity")
+            VoiceTrace.event("drawer_fallback", "reason" to "no assistant service")
             startActivity(Intent(this, RayVoiceActivity::class.java).apply {
                 action = intent?.action ?: Intent.ACTION_ASSIST
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP

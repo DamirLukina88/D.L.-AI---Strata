@@ -70,6 +70,7 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.damirl.ray.audio.AudioPlaybackService
+import com.damirl.ray.audio.VoiceTrace
 import com.damirl.ray.ui.components.RayAvatar
 import com.damirl.ray.ui.components.RayFaceView
 import com.damirl.ray.ui.components.RayMood
@@ -113,6 +114,7 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "RayVoiceSession onCreate")
+        VoiceTrace.event("session_create")
         savedStateRegistryController.performRestore(null)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         drawer = VoiceDrawerController(context, sessionScope)
@@ -171,6 +173,7 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         Log.d(TAG, "RayVoiceSession onShow, showFlags=$showFlags")
+        VoiceTrace.event("drawer_shown", "via" to "session", "flags" to showFlags)
         VoiceDrawerController.closeOpen = { hide() }
         drawer?.start()
     }
@@ -178,6 +181,7 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
     override fun onHide() {
         super.onHide()
         Log.d(TAG, "RayVoiceSession onHide")
+        VoiceTrace.event("drawer_hidden", "via" to "session")
         VoiceDrawerController.closeOpen = null
         drawer?.close()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
