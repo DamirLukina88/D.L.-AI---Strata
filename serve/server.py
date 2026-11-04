@@ -6760,9 +6760,10 @@ def make_handler(svc: Service):
                 self._json(500, {"error": {"type": "server_error", "message": f"transcription failed: {e}"}})
 
         def _audio_speech(self):
-            """POST /v1/audio/speech (serve/speech.py): local Piper speech as WAV, OpenAI-style
-            {"input", "voice", "speed"}.  Ray's voice and talking face in the web app use it."""
-            from serve.speech import SpeechError, synthesize
+            """POST /v1/audio/speech (serve/speech.py): local Piper speech, OpenAI-style {"input", "voice", "speed",
+            "response_format"}: "wav" (the default) or "opus" (Ogg Opus, needs ffmpeg; the phone on mobile data).  Ray's
+            voice and talking face in the web app use it."""
+            from serve.speech import SpeechError, synthesize, synthesize_opus
             try:
                 req = json.loads(self._body() or b"{}")
                 if not isinstance(req, dict):
@@ -6771,26 +6772,28 @@ def make_handler(svc: Service):
                 self._json(400, {"error": {"type": "invalid_request_error", "message": "body must be a JSON object"}})
                 return
             fmt = req.get("response_format") or "wav"
-            if fmt != "wav":
-                self._json(400, {"error": {"type": "invalid_request_error", "message": "response_format must be wav"}})
+            if fmt not in ("wav", "opus"):
+                self._json(400, {"error": {"type": "invalid_request_error",
+                                           "message": "response_format must be wav or opus"}})
                 return
             voice = req.get("voice")
             if voice in ("alloy", "nova", "shimmer", "echo", "fable", "onyx", "ray", "default"):
                 voice = None                                  # OpenAI's voice names: Ray's own voice
             try:
                 t0 = time.time()
-                wav = synthesize(str(req.get("input") or ""), voice=voice, speed=req.get("speed") or 1.0)
+                make = synthesize_opus if fmt == "opus" else synthesize
+                audio = make(str(req.get("input") or ""), voice=voice, speed=req.get("speed") or 1.0)
             except SpeechError as e:
                 self._json(400, {"error": {"type": "invalid_request_error", "message": str(e)}})
                 return
             print(f"[strata] tts: {len(str(req.get('input') or ''))} chars in {time.time() - t0:.2f}s, "
-                  f"{len(wav) // 1024} KB", flush=True)
+                  f"{len(audio) // 1024} KB" + (" opus" if fmt == "opus" else ""), flush=True)
             self.send_response(200)
-            self.send_header("Content-Type", "audio/wav")
+            self.send_header("Content-Type", "audio/ogg" if fmt == "opus" else "audio/wav")
             self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(wav)))
+            self.send_header("Content-Length", str(len(audio)))
             self.end_headers()
-            self.wfile.write(wav)
+            self.wfile.write(audio)
 
         def _props(self):
             model = parse_qs(urlsplit(self.path).query).get("model", [svc.model])[0]

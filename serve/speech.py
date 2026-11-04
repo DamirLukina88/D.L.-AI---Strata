@@ -2,17 +2,20 @@
 
 The web app plays this audio for Ray's voice, so the talking face can follow the real sound (its loudness) instead of
 guessing the browser's speech timing, and phones hear the same Piper voice as the PC.  Nothing leaves the PC: the
-`piper` program runs on the CPU, one short process per request.
+`piper` program runs on the CPU, one short process per request.  WAV is the default; the phone asks for Ogg Opus
+(ffmpeg), about a tenth of the size, so a long answer doesn't spend seconds on mobile data.
 
 Settings (environment): STRATA_PIPER (the piper program), STRATA_PIPER_VOICES (the folder with <voice>.onnx and
 <voice>.onnx.json), STRATA_TTS_VOICE (default en_US-hfc_male-medium, Ray's voice).
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import unicodedata
 from pathlib import Path
@@ -20,6 +23,11 @@ from pathlib import Path
 DEFAULT_VOICE = "en_US-hfc_male-medium"
 MAX_CHARS = 4000                     # one request; the web app sends sentence-sized chunks
 SENTENCE_SILENCE = 0.25              # seconds after each sentence, as speech-dispatcher's Piper had (0.2)
+# Ogg Opus settings, measured on 42 s of Ray's voice (2026-11-04): 212 KB against 1.8 MB of WAV.  At about 200 KB this
+# is 1.0-1.2 dB from the original in every Bark band; effort 10 at 40k is 0.2 dB closer below 2.7 kHz but 1.6-2.3 dB off
+# above it, where consonants are and where Ray's pitch moves more of his voice.  The "voip" mode was further off
+OPUS_BITRATE = "32k"
+OPUS_EFFORT = "5"
 _slots = threading.BoundedSemaphore(2)
 
 
@@ -46,6 +54,11 @@ def voices(env=None) -> list[str]:
         return sorted(p.name[:-5] for p in d.glob("*.onnx") if (d / (p.name + ".json")).is_file())
     except OSError:
         return []
+
+
+def ffmpeg_path(env=None) -> str | None:
+    env = os.environ if env is None else env
+    return shutil.which("ffmpeg", path=env.get("PATH"))
 
 
 def default_voice(env=None) -> str:
@@ -141,8 +154,8 @@ def clean_for_speech(text: str) -> str:
     return text.strip()
 
 
-def synthesize(text: str, voice: str | None = None, speed: float = 1.0, env=None, timeout: float = 60) -> bytes:
-    """WAV bytes (16-bit mono, the voice's own rate) for `text`; `speed` 1.0 is the voice's normal pace."""
+def _piper_command(text: str, voice: str | None, speed: float, env, output: list) -> tuple:
+    """(the piper command writing to `output`, its input, the voice's model); SpeechError when it can't be run."""
     text = clean_for_speech(text)
     if not text:
         raise SpeechError("no text to speak")
@@ -159,15 +172,61 @@ def synthesize(text: str, voice: str | None = None, speed: float = 1.0, env=None
     except (TypeError, ValueError):
         speed = 1.0
     model = voices_dir(env) / f"{voice}.onnx"
-    cmd = [exe, "-q", "-m", str(model), "-f", "-", "--length_scale", f"{1 / speed:.3f}",
+    cmd = [exe, "-q", "-m", str(model), *output, "--length_scale", f"{1 / speed:.3f}",
            "--sentence_silence", f"{SENTENCE_SILENCE / speed:.3f}"]   # pauses follow the pace
+    return cmd, text.encode("utf-8"), model
+
+
+def synthesize(text: str, voice: str | None = None, speed: float = 1.0, env=None, timeout: float = 60) -> bytes:
+    """WAV bytes (16-bit mono, the voice's own rate) for `text`; `speed` 1.0 is the voice's normal pace.  Piper writes
+    one WAV per line of `text`, one after the other, and players stop at the end of the first."""
+    cmd, data, _ = _piper_command(text, voice, speed, env, ["-f", "-"])
     with _slots:
         try:
-            r = subprocess.run(cmd, input=text.encode("utf-8"), capture_output=True, timeout=timeout)
+            r = subprocess.run(cmd, input=data, capture_output=True, timeout=timeout)
         except subprocess.TimeoutExpired:
             raise SpeechError("piper took too long") from None
         except OSError as e:
             raise SpeechError(f"piper could not start: {e}") from None
     if r.returncode != 0 or r.stdout[:4] != b"RIFF":
         raise SpeechError(f"piper failed: {r.stderr.decode('utf-8', 'replace').strip()[:200] or r.returncode}")
+    return r.stdout
+
+
+def synthesize_opus(text: str, voice: str | None = None, speed: float = 1.0, env=None, timeout: float = 60) -> bytes:
+    """Ogg Opus bytes for `text`, for mobile data.  Piper's raw samples go straight into ffmpeg, so every line of `text`
+    is in the file (raw has no WAV per line) and the encoding runs while Piper speaks (42 s of speech: 40 ms on top of
+    Piper, against 150 ms after it)."""
+    cmd, data, model = _piper_command(text, voice, speed, env, ["--output_raw"])
+    ffmpeg = ffmpeg_path(env)
+    if not ffmpeg:
+        raise SpeechError("opus needs ffmpeg, which is not installed")
+    try:
+        rate = int(json.loads(model.with_name(model.name + ".json").read_text(encoding="utf-8"))["audio"]["sample_rate"])
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        raise SpeechError(f"the voice's sample rate is unknown: {e!r}") from None
+    encode = [ffmpeg, "-v", "error", "-f", "s16le", "-ar", str(rate), "-ac", "1", "-i", "pipe:0", "-c:a", "libopus",
+              "-b:a", OPUS_BITRATE, "-application", "audio", "-compression_level", OPUS_EFFORT, "-f", "ogg", "pipe:1"]
+    # the text comes from a file: a pipe could wait on piper while piper waits on ffmpeg
+    with _slots, tempfile.TemporaryFile() as said:
+        said.write(data)
+        said.seek(0)
+        try:
+            piper = subprocess.Popen(cmd, stdin=said, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except OSError as e:
+            raise SpeechError(f"piper could not start: {e}") from None
+        with piper:
+            try:
+                r = subprocess.run(encode, stdin=piper.stdout, capture_output=True, timeout=timeout)
+                piper.stdout.close()                          # piper can't wait on an ffmpeg that stopped
+                piper.wait(timeout=5)
+                problem = piper.stderr.read() + r.stderr
+            except subprocess.TimeoutExpired:
+                raise SpeechError("piper took too long") from None
+            except OSError as e:
+                raise SpeechError(f"ffmpeg could not start: {e}") from None
+            finally:
+                piper.kill()                                  # nothing when it has ended
+    if piper.returncode != 0 or r.returncode != 0 or r.stdout[:4] != b"OggS":
+        raise SpeechError(f"opus failed: {problem.decode('utf-8', 'replace').strip()[:200] or r.returncode}")
     return r.stdout

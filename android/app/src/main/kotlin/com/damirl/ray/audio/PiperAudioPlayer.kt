@@ -29,9 +29,10 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
-// Ray's voice: Piper on the Strata server (/v1/audio/speech) over the route the drawer probed (LAN or the tunnel),
-// played at his pitch; the phone's own voice only when the server can't be reached.  Both play as the assistant
-// (USAGE_ASSISTANT), so they follow a headset's call link while one is held
+// Ray's voice: Piper on the Strata server (/v1/audio/speech) over the route the drawer probed (LAN or the tunnel), in
+// Ogg Opus (a tenth of the WAV, which took seconds on mobile data, and all of a long answer: MediaPlayer stops a WAV at
+// its first paragraph), played at his pitch; the phone's own voice only when the server can't be reached.  Both play
+// as the assistant (USAGE_ASSISTANT), so they follow a headset's call link while one is held
 class PiperAudioPlayer(
     private val context: Context,
     private val networkClient: NetworkClient
@@ -41,6 +42,12 @@ class PiperAudioPlayer(
         private const val PITCH_FACTOR = 1.5f // Ray's signature red panda cartoon pitch
         private const val SPEED_FACTOR = 1.05f
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        const val FORMAT_OPUS = "opus"
+        const val FORMAT_WAV = "wav"
+
+        /** What to ask for after [format] got HTTP [code], or null: a server without Opus refuses it and still has WAV. */
+        fun fallbackFormat(format: String, code: Int): String? =
+            if (format == FORMAT_OPUS && code == 400) FORMAT_WAV else null
 
         /** Long enough for the phone's voice to read [chars] characters (about 12 a second) and then some. */
         fun systemVoiceLimitMs(chars: Int): Long = 5_000L + chars * 90L
@@ -99,7 +106,7 @@ class PiperAudioPlayer(
     }
 
     /**
-     * Ray's voice for [cleanText] from the server, as a WAV file, or null when the server can't be reached.  On a
+     * Ray's voice for [cleanText] from the server, as an audio file, or null when the server can't be reached.  On a
      * failure the route is probed again and the request tried once more (the LAN gone, the tunnel there).
      */
     suspend fun fetch(cleanText: String): File? = withContext(Dispatchers.IO) {
@@ -110,8 +117,9 @@ class PiperAudioPlayer(
             val started = SystemClock.elapsedRealtime()
             VoiceTrace.event("tts_fetch", "route" to NetworkClient.label(route), "chars" to cleanText.length, "attempt" to attempt)
             try {
-                val file = fetchPiperWav(cleanText)
-                VoiceTrace.event("tts_fetched", "ms" to SystemClock.elapsedRealtime() - started, "bytes" to file.length())
+                val file = fetchPiperAudio(cleanText, FORMAT_OPUS)
+                VoiceTrace.event("tts_fetched", "ms" to SystemClock.elapsedRealtime() - started, "bytes" to file.length(),
+                    "format" to file.extension)
                 return@withContext file
             } catch (e: Exception) {
                 Log.w(TAG, "Piper server TTS failed (${e.message})")
@@ -133,7 +141,7 @@ class PiperAudioPlayer(
         _isPlaying.value = true
         if (file != null && file.exists()) {
             VoiceTrace.event("tts_play", "engine" to "piper")
-            playWavFile(file, onComplete)
+            playFile(file, onComplete)
         } else {
             Log.w(TAG, "No Piper audio: falling back to system TTS")
             VoiceTrace.event("tts_play", "engine" to "system")
@@ -141,11 +149,11 @@ class PiperAudioPlayer(
         }
     }
 
-    private fun fetchPiperWav(text: String): File {
+    private fun fetchPiperAudio(text: String, format: String): File {
         val payload = JSONObject().apply {
             put("input", text)
             put("voice", "en_US-hfc_male-medium")
-            put("response_format", "wav")
+            put("response_format", format)
             put("speed", 1.0)
         }
 
@@ -153,20 +161,24 @@ class PiperAudioPlayer(
             .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
 
-        ttsClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IllegalStateException("Piper server returned HTTP ${response.code}")
+        val next = ttsClient.newCall(request).execute().use { response ->
+            if (response.isSuccessful) {
+                val bytes = response.body?.bytes() ?: throw IllegalStateException("Empty audio response")
+                val extension = if (format == FORMAT_OPUS) "ogg" else format
+                val cacheFile = File(context.cacheDir, "ray_speech_${System.currentTimeMillis()}.$extension")
+                FileOutputStream(cacheFile).use { fos ->
+                    fos.write(bytes)
+                }
+                return cacheFile
             }
-            val bytes = response.body?.bytes() ?: throw IllegalStateException("Empty audio response")
-            val cacheFile = File(context.cacheDir, "ray_speech_${System.currentTimeMillis()}.wav")
-            FileOutputStream(cacheFile).use { fos ->
-                fos.write(bytes)
-            }
-            return cacheFile
+            fallbackFormat(format, response.code)
+                ?: throw IllegalStateException("Piper server returned HTTP ${response.code}")
         }
+        VoiceTrace.event("tts_refused", "format" to format)
+        return fetchPiperAudio(text, next)
     }
 
-    private suspend fun playWavFile(file: File, onComplete: () -> Unit) = withContext(Dispatchers.Main) {
+    private suspend fun playFile(file: File, onComplete: () -> Unit) = withContext(Dispatchers.Main) {
         try {
             val player = MediaPlayer().apply {
                 setAudioAttributes(assistantAudio)
@@ -201,9 +213,9 @@ class PiperAudioPlayer(
 
             mediaPlayer = player
             player.start()
-            Log.d(TAG, "AudioTrack playing Piper WAV at pitch $PITCH_FACTOR")
+            Log.d(TAG, "Playing Piper ${file.extension} at pitch $PITCH_FACTOR")
         } catch (e: Exception) {
-            Log.e(TAG, "Error playing WAV file", e)
+            Log.e(TAG, "Error playing ${file.name}", e)
             _isPlaying.value = false
             onComplete()
         }

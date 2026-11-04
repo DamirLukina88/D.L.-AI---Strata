@@ -3,6 +3,7 @@ package com.damirl.ray.network
 import com.damirl.ray.audio.PiperAudioPlayer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
@@ -48,6 +49,18 @@ class NetworkRouteTest {
         assertEquals("lan", NetworkClient.label(NetworkRoute.Lan(lan)))
         assertEquals("tunnel", NetworkClient.label(NetworkRoute.Remote(remote)))
         assertEquals("offline", NetworkClient.label(NetworkRoute.Offline))
+    }
+
+    @Test
+    fun aServerWithoutOpusGetsAskedForWav() {
+        assertEquals(PiperAudioPlayer.FORMAT_WAV, PiperAudioPlayer.fallbackFormat(PiperAudioPlayer.FORMAT_OPUS, 400))
+    }
+
+    @Test
+    fun otherServerFailuresAreNotAFormatProblem() {
+        assertNull(PiperAudioPlayer.fallbackFormat(PiperAudioPlayer.FORMAT_WAV, 400))     // WAV refused: nothing left
+        assertNull(PiperAudioPlayer.fallbackFormat(PiperAudioPlayer.FORMAT_OPUS, 401))
+        assertNull(PiperAudioPlayer.fallbackFormat(PiperAudioPlayer.FORMAT_OPUS, 500))
     }
 
     @Test
