@@ -15,7 +15,6 @@ import com.damirl.ray.BuildConfig
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.io.RandomAccessFile
 import kotlin.math.log10
 import kotlin.math.sqrt
 
@@ -117,7 +116,7 @@ class MicProbeActivity : Activity() {
                 put("frame_ms", 100)
                 put("levels_db", levels)
             }.let { File(filesDir, "mic_probe.json").writeText(it.toString()) }
-            writeWav(File(filesDir, "mic_probe.wav"), pcm, got)
+            Wav.write(File(filesDir, "mic_probe.wav"), pcm, got, RATE)
         } catch (e: Exception) {
             Log.e(TAG, "Mic test failed", e)
             VoiceTrace.event("probe_failed", "error" to (e.message ?: e.javaClass.simpleName))
@@ -129,22 +128,6 @@ class MicProbeActivity : Activity() {
                 label.text = "Mic test done"
                 label.postDelayed({ finish() }, 500)
             }
-        }
-    }
-
-    private fun writeWav(file: File, pcm: ShortArray, samples: Int) {
-        RandomAccessFile(file, "rw").use { f ->
-            f.setLength(0)
-            val dataBytes = samples * 2
-            val header = java.nio.ByteBuffer.allocate(44).order(java.nio.ByteOrder.LITTLE_ENDIAN).apply {
-                put("RIFF".toByteArray()); putInt(36 + dataBytes); put("WAVE".toByteArray())
-                put("fmt ".toByteArray()); putInt(16); putShort(1); putShort(1); putInt(RATE); putInt(RATE * 2)
-                putShort(2); putShort(16); put("data".toByteArray()); putInt(dataBytes)
-            }
-            f.write(header.array())
-            val body = java.nio.ByteBuffer.allocate(dataBytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-            for (i in 0 until samples) body.putShort(pcm[i])
-            f.write(body.array())
         }
     }
 }

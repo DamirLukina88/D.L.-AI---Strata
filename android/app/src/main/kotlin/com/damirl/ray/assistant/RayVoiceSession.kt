@@ -98,6 +98,8 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
 
     companion object {
         private const val TAG = "RayVoiceSession"
+        // the system hid the drawer this soon after it showed, while it still listened: it opens again as an activity
+        private const val REOPEN_WINDOW_MS = 3_000L
     }
 
     private val lifecycleRegistry = LifecycleRegistry(this)
@@ -110,6 +112,13 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
 
     private val sessionScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var drawer: VoiceDrawerController? = null
+    private var shownAt = 0L
+    private var hidingOurselves = false     // our close button, Expand, back, or Ray closing it for a song
+
+    private fun hideOurselves() {
+        hidingOurselves = true
+        hide()
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -147,13 +156,13 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
                     drawer?.let { d ->
                         VoiceDrawer(
                             drawer = d,
-                            onDismiss = { hide() },
+                            onDismiss = { hideOurselves() },
                             onExpand = {
                                 val intent = android.content.Intent(context, com.damirl.ray.MainActivity::class.java).apply {
                                     flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
                                 }
                                 context.startActivity(intent)
-                                hide()
+                                hideOurselves()
                             }
                         )
                     }
@@ -174,16 +183,36 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         Log.d(TAG, "RayVoiceSession onShow, showFlags=$showFlags")
         VoiceTrace.event("drawer_shown", "via" to "session", "flags" to showFlags)
-        VoiceDrawerController.closeOpen = { hide() }
+        shownAt = android.os.SystemClock.elapsedRealtime()
+        hidingOurselves = false
+        VoiceDrawerController.closeOpen = { hideOurselves() }
         drawer?.start()
     }
 
+    override fun onBackPressed() {
+        hidingOurselves = true
+        super.onBackPressed()
+    }
+
+    // Measured 2026-11-04: a helmet press on a dozing phone (always-on display) showed the drawer, which turned the
+    // screen on; the doze screen closed and Android hid the drawer 0.5 s later while it listened ("nothing opens").
+    // A hide we didn't ask for, that soon and while listening, opens the same drawer as an activity, which stays
     override fun onHide() {
         super.onHide()
-        Log.d(TAG, "RayVoiceSession onHide")
-        VoiceTrace.event("drawer_hidden", "via" to "session")
+        val sinceShow = android.os.SystemClock.elapsedRealtime() - shownAt
+        val reopen = !hidingOurselves && drawer?.phase == VoicePhase.LISTENING && sinceShow < REOPEN_WINDOW_MS
+        Log.d(TAG, "RayVoiceSession onHide (ours=$hidingOurselves, after $sinceShow ms, reopen=$reopen)")
+        VoiceTrace.event("drawer_hidden", "via" to "session", "ours" to hidingOurselves, "after_ms" to sinceShow,
+            "reopen" to reopen)
+        hidingOurselves = false
         VoiceDrawerController.closeOpen = null
         drawer?.close()
+        if (reopen) {
+            context.startActivity(android.content.Intent(context, RayVoiceActivity::class.java).apply {
+                action = android.content.Intent.ACTION_VOICE_COMMAND
+                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+            })
+        }
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
     }

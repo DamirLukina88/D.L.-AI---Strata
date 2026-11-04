@@ -65,11 +65,38 @@ RECHECK = [
     {"id": "tunnel-unlocked", "net": "mobile", "lock": "unlocked", "prompt": "What day is it today?"},
     {"id": "tunnel-locked", "net": "mobile", "lock": "screen_off", "prompt": "Tell me a fun fact about red pandas."},
 ]
-STEP_SETS = {"baseline": BASELINE, "recheck": RECHECK}
+# Round 2 on the fixed build: music playing (does it pause for Ray and come back?), the lock screen showing, and more
+# plain presses for the old "sometimes nothing opens"
+ROUND2 = [
+    {"id": "lan-unlocked-music", "net": "wifi", "lock": "unlocked", "music": True, "prompt": "What time is it?"},
+    {"id": "lan-locked-music", "net": "wifi", "lock": "screen_off", "music": True, "prompt": "What day is it today?"},
+    {"id": "lan-lockscreen", "net": "wifi", "lock": "lock_screen", "prompt": "Tell me a short joke."},
+    {"id": "lan-unlocked", "net": "wifi", "lock": "unlocked", "prompt": "What time is it?"},
+    {"id": "lan-locked", "net": "wifi", "lock": "screen_off", "prompt": "What's the date today?"},
+    {"id": "tunnel-locked-music", "net": "mobile", "lock": "screen_off", "music": True, "prompt": "What time is it?"},
+    {"id": "tunnel-unlocked", "net": "mobile", "lock": "unlocked", "prompt": "What day is it today?"},
+    {"id": "tunnel-locked", "net": "mobile", "lock": "screen_off", "prompt": "Tell me a short joke."},
+]
+# Round 3: three with music, three without; locked steps wait 10 s so the phone dozes (the drawer the system hid,
+# round 2)
+ROUND3 = [
+    {"id": "lan-locked-music", "net": "wifi", "lock": "screen_off", "doze": True, "music": True, "prompt": "What time is it?"},
+    {"id": "lan-locked", "net": "wifi", "lock": "screen_off", "doze": True, "music": False, "prompt": "What day is it today?"},
+    {"id": "lan-unlocked-music", "net": "wifi", "lock": "unlocked", "music": True, "prompt": "Tell me a short joke."},
+    {"id": "tunnel-locked-music", "net": "mobile", "lock": "screen_off", "doze": True, "music": True, "prompt": "What time is it?"},
+    {"id": "tunnel-locked", "net": "mobile", "lock": "screen_off", "doze": True, "music": False, "prompt": "What's the date today?"},
+    {"id": "tunnel-unlocked", "net": "mobile", "lock": "unlocked", "music": False, "prompt": "What day is it today?"},
+]
+STEP_SETS = {"baseline": BASELINE, "recheck": RECHECK, "round2": ROUND2, "round3": ROUND3}
 SETUP = {
     "baseline": "Hold the helmet in front of the Snowball and talk into the helmet's mic; keep the phone on the desk.",
     "recheck": "Wear the helmet as when you ride, near the PC (the Snowball hears your voice); keep the phone on the "
                "desk. Don't change the phone's Wi-Fi yourself: the tool does it.",
+    "round2": "Wear the helmet as when you ride, near the PC; keep the phone on the desk. Don't change the phone's "
+              "Wi-Fi yourself: the tool does it. Music steps: play a song in YouTube Music (Brave) first.",
+    "round3": "Wear the helmet as when you ride, near the PC; keep the phone on the desk. Don't change the phone's "
+              "Wi-Fi yourself: the tool does it. Music steps: play a song in YouTube Music (Brave) first; in the "
+              "other steps pause it first.",
 }
 
 LOCK_HOW = {
@@ -141,6 +168,15 @@ class Phone:
             m = re.search(r"NetworkAgentInfo\{network\{%s\}.*?ni\{(\w+)" % default.group(1), conn)
             transport = m.group(1) if m else None
         return {"wifi_on": wifi_on, "default": transport}
+
+    def brave_playing(self) -> bool | None:
+        """True when Brave's media session (YouTube Music) is PLAYING, from dumpsys media_session."""
+        dump = self.shell("dumpsys media_session")
+        block = dump.split("package=com.brave.browser", 1)
+        if len(block) < 2:
+            return None
+        m = re.search(r"state=PlaybackState \{state=(\w+)", block[1])
+        return m.group(1).startswith("PLAYING") if m else None
 
     def helmet(self) -> dict:
         """The active headset (HFP) and music (A2DP) devices' names, from the Bluetooth dump."""
@@ -479,11 +515,23 @@ def run_steps(phone: Phone, rec: Recording, steps: list[dict]) -> None:
     for n, step in enumerate(steps, 1):
         ensure_network(phone, rec, step["net"])
         print(f"\n=== Step {n} of {len(steps)}: {NET_NAME[step['net']]}, {step['lock'].replace('_', ' ')} ===")
+        if step.get("music"):
+            print("    First play a song in YouTube Music (Brave) so you hear it in the helmet, and leave it playing.")
+        if step.get("music") is False:
+            print("    Pause the music first (no song playing in this step).")
         print(f"    {LOCK_HOW[step['lock']]}")
+        if step.get("doze"):
+            print("    Then wait 10 seconds before pressing Enter (the phone goes into its always-on screen).")
         rec.mark("shown", step=step["id"], n=n)
         while True:
             ask("    Done? Press Enter. ")
             state = phone.lock_state()
+            playing = phone.brave_playing() if step.get("music") else None
+            if step.get("music") and playing is not True:
+                print("    Brave isn't playing yet. Start the song, then press Enter (or type s and Enter to go on anyway).")
+                if ask("    ").strip().lower() == "s":
+                    break
+                continue
             if lock_ok(state, step["lock"]):
                 break
             print(f"    The phone looks different (lock screen showing: {state['keyguard']}, screen: "
@@ -493,9 +541,12 @@ def run_steps(phone: Phone, rec: Recording, steps: list[dict]) -> None:
         rec.mark("ready", step=step["id"], **state)
         print(f"\n    NOW: hold the helmet's button until the two beeps, then say:  «{step['prompt']}»")
         print("    Speak as you normally would. When Ray has answered (or nothing happened for 20 s), come back here.")
+        if step.get("music"):
+            print("    After his answer, wait 5 s: does the song come back in the helmet?")
         rec.mark("go", step=step["id"], prompt=step["prompt"])
         note = ask("    What happened? Type a note (or just Enter if it all worked): ")
-        rec.mark("done", step=step["id"], note=note.strip())
+        rec.mark("done", step=step["id"], note=note.strip(),
+                 brave_playing=phone.brave_playing() if step.get("music") else None)
         print("    Saving the phone's state…")
         rec.snapshot(step["id"])
         rec.clock(step["id"])
