@@ -301,6 +301,11 @@ def first_song(data: Any) -> Optional[Dict[str, str]]:
     return None
 
 
+# While this file exists (tools/helmet_test.py makes it during a helmet test) the adb fallback is off: phone tools go
+# only through the app, as on the road, where there is no adb.  Without the file nothing changes
+ADB_OFF_FLAG = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "dl-ai" / "phone-adb-off"
+
+
 class PhoneMcpServer:
     """Phone MCP Server implementation handling tools/list, tools/call, and device communication."""
 
@@ -338,7 +343,7 @@ class PhoneMcpServer:
         return False
 
     def _is_adb_connected(self) -> bool:
-        if not self.adb_enabled:
+        if not self.adb_enabled or ADB_OFF_FLAG.exists():
             return False
         try:
             res = subprocess.run(["adb", "get-state"], capture_output=True, text=True, timeout=2.0)

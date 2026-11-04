@@ -135,6 +135,23 @@ class TestPhoneMcpServer(unittest.TestCase):
         self.assertIn("unreachable", text.lower())
         self.assertIn("companion app", text.lower())
 
+    def test_adb_off_flag(self):
+        """While the helmet test's flag file exists, adb is never tried; without it, it is."""
+        import tempfile
+        from unittest import mock
+        server = M.PhoneMcpServer(base_url="http://127.0.0.1:9999", adb_enabled=True)
+        with tempfile.TemporaryDirectory() as d:
+            flag = Path(d) / "phone-adb-off"
+            with mock.patch.object(M, "ADB_OFF_FLAG", flag), mock.patch.object(M.subprocess, "run") as run:
+                run.return_value = mock.Mock(returncode=0, stdout="device\n")
+                flag.touch()
+                self.assertFalse(server._is_adb_connected())
+                self.assertIsNone(server._run_adb_cmd(["shell", "true"]))
+                run.assert_not_called()
+                flag.unlink()
+                self.assertTrue(server._is_adb_connected())
+                run.assert_called()
+
     def test_multilingual_otp_extraction(self):
         """Verify regex extraction for Croatian and English 2FA / OTP codes."""
         cases = [
