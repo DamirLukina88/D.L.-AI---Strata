@@ -1,12 +1,15 @@
 package com.damirl.ray.audio
 
+import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothHeadset
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
+import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
+import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
@@ -43,6 +46,11 @@ object BluetoothMic {
     // a voice-recognition link: the mic is reported up when audio flows (to be measured with MicProbeActivity)
     private const val VR_SETTLE_MS = 300L
     private const val POLL_MS = 50L
+    // music playing to the helmet when you press: on a locked phone its mic sent silence or garbled sound in 5 of 6
+    // such listens (2026-11-04), when the phone paused the music link and opened the mic link 10 ms later.  Ray
+    // pauses the song first, waits for the music link to stop (1.5 s at most) and gives the helmet a moment
+    private const val MUSIC_STOP_MS = 1500L
+    private const val MUSIC_SETTLE_MS = 400L
     private const val RELEASE_DELAY_MS = 1000L
     private const val CONVERSATION_MS = 120_000L   // an answer within 2 min of speaking through the headset uses it
 
@@ -59,6 +67,8 @@ object BluetoothMic {
 
     // voice recognition: the headset profile, and the device we started it on (null: not started by us)
     @Volatile private var headset: BluetoothHeadset? = null
+    @Volatile private var a2dp: BluetoothA2dp? = null
+    private var musicFocus: AudioFocusRequest? = null           // held from the press until the listen is over
     private var proxyRequested = false
     private var vrDevice: BluetoothDevice? = null
     private var vrUp = false
@@ -74,16 +84,20 @@ object BluetoothMic {
         proxyRequested = true
         try {
             val adapter: BluetoothAdapter? = context.getSystemService(BluetoothManager::class.java)?.adapter
-            adapter?.getProfileProxy(context.applicationContext, object : BluetoothProfile.ServiceListener {
+            val listener = object : BluetoothProfile.ServiceListener {
                 override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
-                    headset = proxy as? BluetoothHeadset
-                    Log.d(TAG, "Headset profile connected")
+                    if (profile == BluetoothProfile.HEADSET) headset = proxy as? BluetoothHeadset
+                    if (profile == BluetoothProfile.A2DP) a2dp = proxy as? BluetoothA2dp
+                    Log.d(TAG, "Bluetooth profile $profile connected")
                 }
 
                 override fun onServiceDisconnected(profile: Int) {
-                    headset = null
+                    if (profile == BluetoothProfile.HEADSET) headset = null
+                    if (profile == BluetoothProfile.A2DP) a2dp = null
                 }
-            }, BluetoothProfile.HEADSET)
+            }
+            adapter?.getProfileProxy(context.applicationContext, listener, BluetoothProfile.HEADSET)
+            adapter?.getProfileProxy(context.applicationContext, listener, BluetoothProfile.A2DP)
         } catch (e: SecurityException) {
             Log.w(TAG, "No Bluetooth permission for the headset profile", e)
         }
@@ -151,14 +165,67 @@ object BluetoothMic {
         waiting[holder] = onReady
         if (vrDevice == device) return true                     // coming up: onReady runs with the others
         if (owned) clearCallLink()                              // the call link would fight the voice-recognition one
+        vrDevice = device                                       // coming up (joined by any other holder meanwhile)
+        vrUp = false
 
+        val pressedAt = SystemClock.elapsedRealtime()
+        if (holder == "listen" && musicPlaying(device)) {
+            pauseMusic()
+            val wait = object : Runnable {
+                override fun run() {
+                    if (vrDevice != device) return              // let go meanwhile
+                    val waited = SystemClock.elapsedRealtime() - pressedAt
+                    if (musicPlaying(device) && waited < MUSIC_STOP_MS) { handler.postDelayed(this, POLL_MS); return }
+                    VoiceTrace.event("listen_music_paused", "stopped" to !musicPlaying(device), "ms" to waited,
+                        "settle_ms" to MUSIC_SETTLE_MS)
+                    handler.postDelayed({ if (vrDevice == device) startVoiceRecognition(hs, device, sco, holder) }, MUSIC_SETTLE_MS)
+                }
+            }
+            handler.post(wait)
+            return true
+        }
+        startVoiceRecognition(hs, device, sco, holder)          // refused: the holders waiting get the call link
+        return true
+    }
+
+    // music to the helmet over its music link (A2DP) right now
+    private fun musicPlaying(device: BluetoothDevice): Boolean =
+        try { a2dp?.isA2dpPlaying(device) == true } catch (_: SecurityException) { false }
+
+    // the song pauses while Ray listens (and resumes when he lets go: the player regains the audio focus)
+    private fun pauseMusic() {
+        val am = audioManager ?: return
+        if (musicFocus != null) return
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+            .setAudioAttributes(AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build())
+            .setOnAudioFocusChangeListener { }
+            .build()
+        musicFocus = request
+        am.requestAudioFocus(request)
+    }
+
+    private fun resumeMusic() {
+        musicFocus?.let { audioManager?.abandonAudioFocusRequest(it) }
+        musicFocus = null
+    }
+
+    // starts voice recognition on [device] for the holders waiting; when the headset refuses, they get the call link
+    private fun startVoiceRecognition(hs: BluetoothHeadset, device: BluetoothDevice, sco: AudioDeviceInfo, holder: String): Boolean {
         val askedAt = SystemClock.elapsedRealtime()
         val started = try { hs.startVoiceRecognition(device) } catch (e: SecurityException) { false }
         VoiceTrace.event("link_acquire", "holder" to holder, "mode" to "vr", "started" to started,
             "device" to sco.productName?.toString())
         if (!started) {
             Log.w(TAG, "startVoiceRecognition refused; using the call link")
-            waiting.remove(holder)
+            vrDevice = null
+            val am = audioManager
+            val pending = waiting.toMap()
+            waiting.clear()
+            if (am == null) pending.values.forEach { it() }
+            else pending.forEach { (h, ready) -> acquireCallLink(am, sco, h, ready) }
             return false
         }
         vrDevice = device
@@ -259,6 +326,7 @@ object BluetoothMic {
         if (holders.isNotEmpty()) return
         if (vrDevice != null) stopVoiceRecognition("released")
         if (owned) clearCallLink()
+        resumeMusic()
     }
 
     private fun clearCallLink() {

@@ -87,13 +87,23 @@ ROUND3 = [
     {"id": "tunnel-locked", "net": "mobile", "lock": "screen_off", "doze": True, "music": False, "prompt": "What's the date today?"},
     {"id": "tunnel-unlocked", "net": "mobile", "lock": "unlocked", "music": False, "prompt": "What day is it today?"},
 ]
-STEP_SETS = {"baseline": BASELINE, "recheck": RECHECK, "round2": ROUND2, "round3": ROUND3}
+# Round 4: the case that failed 5 of 6 times (locked, dozing, music playing), with Ray pausing the song before he
+# opens the helmet's mic (BluetoothMic: listen_music_paused in the trace)
+ROUND4 = [
+    {"id": "lan-locked-music-1", "net": "wifi", "lock": "screen_off", "doze": True, "music": True, "prompt": "What time is it?"},
+    {"id": "lan-locked-music-2", "net": "wifi", "lock": "screen_off", "doze": True, "music": True, "prompt": "What day is it today?"},
+    {"id": "tunnel-locked-music-1", "net": "mobile", "lock": "screen_off", "doze": True, "music": True, "prompt": "Tell me a short joke."},
+    {"id": "tunnel-locked-music-2", "net": "mobile", "lock": "screen_off", "doze": True, "music": True, "prompt": "What's the date today?"},
+]
+STEP_SETS = {"baseline": BASELINE, "recheck": RECHECK, "round2": ROUND2, "round3": ROUND3, "round4": ROUND4}
 SETUP = {
     "baseline": "Hold the helmet in front of the Snowball and talk into the helmet's mic; keep the phone on the desk.",
     "recheck": "Wear the helmet as when you ride, near the PC (the Snowball hears your voice); keep the phone on the "
                "desk. Don't change the phone's Wi-Fi yourself: the tool does it.",
     "round2": "Wear the helmet as when you ride, near the PC; keep the phone on the desk. Don't change the phone's "
               "Wi-Fi yourself: the tool does it. Music steps: play a song in YouTube Music (Brave) first.",
+    "round4": "Wear the helmet as when you ride, near the PC; keep the phone on the desk. Don't change the phone's "
+              "Wi-Fi yourself: the tool does it. Every step: a song playing in YouTube Music (Brave), phone locked.",
     "round3": "Wear the helmet as when you ride, near the PC; keep the phone on the desk. Don't change the phone's "
               "Wi-Fi yourself: the tool does it. Music steps: play a song in YouTube Music (Brave) first; in the "
               "other steps pause it first.",
