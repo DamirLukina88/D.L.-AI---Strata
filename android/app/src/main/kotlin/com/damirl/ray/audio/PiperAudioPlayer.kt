@@ -72,6 +72,8 @@ class PiperAudioPlayer(
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var mediaPlayer: MediaPlayer? = null
+    private var playbackPitch = PITCH_FACTOR
+    private var playbackSpeed = SPEED_FACTOR
     private var playingFile: File? = null
     private var systemTts: TextToSpeech? = null
     private val isTtsInitialized = AtomicBoolean(false)
@@ -109,6 +111,12 @@ class PiperAudioPlayer(
         } catch (e: Exception) {
             Log.w(TAG, "Failed to initialize system TTS fallback", e)
         }
+    }
+
+    /** The voice for the next answer: the page's sliders, or Ray's usual pitch and speed for 0. */
+    fun setVoice(pitch: Float, rate: Float) {
+        playbackPitch = if (pitch > 0f) pitch else PITCH_FACTOR
+        playbackSpeed = if (rate > 0f) rate else SPEED_FACTOR
     }
 
     /** Fetches and plays [text] (cleaned for speech); [onComplete] runs once when it has been said or failed. */
@@ -247,8 +255,8 @@ class PiperAudioPlayer(
 
                 try {
                     val params = PlaybackParams().apply {
-                        pitch = PITCH_FACTOR
-                        speed = SPEED_FACTOR
+                        pitch = playbackPitch
+                        speed = playbackSpeed
                     }
                     playbackParams = params
                 } catch (e: Exception) {

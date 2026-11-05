@@ -383,7 +383,9 @@ const TTSController = {
   // audio plays through Web Audio, so the face's waveform follows the voice; a failure falls back to the browser voice.
   serverTTS: null,
   isServerVoiceOn() { return store.get("tts_server", true) !== false; },
-  useServer() { return this.isServerVoiceOn() && !!(this.serverTTS && this.serverTTS.available) && !this.serverFailed; },
+  // in the Android app the voice is played natively (speakNative): a WebView's audio can only use the media volume
+  useServer() { return !this.nativeQueue() && this.isServerVoiceOn() && !!(this.serverTTS && this.serverTTS.available) && !this.serverFailed; },
+  nativeQueue() { return !!(window.RayAndroid && typeof window.RayAndroid.speakQueued === "function"); },
 
   clean(rawText) {
     return cleanForSpeech(rawText, this.getCodeMode());
@@ -463,6 +465,7 @@ const TTSController = {
   },
 
   startAudioKeepAlive() {
+    if (this.nativeQueue()) return;                  // the app's voice is native; this would hold the media volume
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
@@ -623,7 +626,7 @@ const TTSController = {
 
   // keep the first `keep` pieces of the queue (never the one playing)
   streamDrop(keep) {
-    const n = Math.max(keep, this.currentIndex + 1);
+    const n = Math.max(keep, this.currentIndex + 1, this.nativeQueue() ? this.nativeSent : 0);
     if (this.queue.length > n) { this.queue.length = n; this.prefetch.length = Math.min(this.prefetch.length, n); }
   },
 
@@ -734,14 +737,31 @@ const TTSController = {
     try { if (window.RayAndroid && typeof window.RayAndroid.holdHeadsetForSpeech === "function") window.RayAndroid.holdHeadsetForSpeech(on); } catch (e) {}
   },
   nativeTimer: null,
+  nativeSent: 0,                                    // chunks of this queue handed to the app's voice
+  nativeSend() {
+    let sent = "";
+    while (this.nativeSent < this.queue.length) {
+      const chunk = this.queue[this.nativeSent++];
+      window.RayAndroid.speakQueued(chunk, this.getRate(), this.getPitch());
+      sent += (sent ? " " : "") + chunk;
+    }
+    if (sent && this.orb()) RayFace.speakText(sent, this.getRate());
+  },
   speakNative(chunk) {
     const queue = this.queue, orb = this.orb(), t0 = Date.now();
     let started = false;
-    window.RayAndroid.speak(chunk);
-    if (orb) RayFace.speakText(chunk, this.getRate());
+    const queued = this.nativeQueue();
+    if (queued) {
+      this.nativeSent = this.currentIndex;
+      this.nativeSend();
+    } else {
+      window.RayAndroid.speak(chunk);
+      if (orb) RayFace.speakText(chunk, this.getRate());
+    }
     clearInterval(this.nativeTimer);
     this.nativeTimer = setInterval(() => {
       if (!this.speaking || this.queue !== queue) { clearInterval(this.nativeTimer); this.nativeTimer = null; return; }
+      if (queued) this.nativeSend();                 // chunks of a reply still being written
       let busy = false;
       try { busy = typeof window.RayAndroid.isSpeaking === "function" ? window.RayAndroid.isSpeaking() : false; } catch (e) {}
       if (busy) { started = true; return; }
@@ -749,7 +769,7 @@ const TTSController = {
       clearInterval(this.nativeTimer);
       this.nativeTimer = null;
       if (orb) RayFace.chunkEnd();
-      this.currentIndex++;
+      this.currentIndex = queued ? this.nativeSent : this.currentIndex + 1;
       this.speakNext();
     }, 250);
   },

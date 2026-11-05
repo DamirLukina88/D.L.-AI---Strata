@@ -41,14 +41,24 @@ class AudioPlaybackService : Service() {
         const val ACTION_SPEAK = "com.damirl.ray.action.SPEAK"
         const val ACTION_STOP = "com.damirl.ray.action.STOP"
         const val EXTRA_TEXT = "extra_text"
+        const val EXTRA_APPEND = "extra_append"
+        const val EXTRA_PITCH = "extra_pitch"
+        const val EXTRA_RATE = "extra_rate"
 
         private val _isSpeakingState = MutableStateFlow(false)
         val isSpeakingState: StateFlow<Boolean> = _isSpeakingState.asStateFlow()
 
-        fun startSpeaking(context: Context, text: String) {
+        /**
+         * Says [text].  With [append] (the app's page, reading a reply) it follows what is being said without a gap, or
+         * starts if nothing is.  [pitch] and [rate] are the page's voice sliders; 0 keeps Ray's usual voice.
+         */
+        fun startSpeaking(context: Context, text: String, append: Boolean = false, pitch: Float = 0f, rate: Float = 0f) {
             val intent = Intent(context, AudioPlaybackService::class.java).apply {
                 action = ACTION_SPEAK
                 putExtra(EXTRA_TEXT, text)
+                putExtra(EXTRA_APPEND, append)
+                putExtra(EXTRA_PITCH, pitch)
+                putExtra(EXTRA_RATE, rate)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -74,6 +84,8 @@ class AudioPlaybackService : Service() {
     private var speakGeneration = 0          // the answer being said; an older one's fetch or end is ignored
     private var answerJob: Job? = null       // its pieces being fetched and said
     private var answerPieces: List<PiperAudioPlayer.Piece> = emptyList()
+    private var answerScope: CoroutineScope? = null
+    private val moreToSay = ArrayDeque<List<PiperAudioPlayer.Piece>>()   // appended while the answer is being said
 
     override fun onCreate() {
         super.onCreate()
@@ -145,7 +157,15 @@ class AudioPlaybackService : Service() {
         when (action) {
             ACTION_SPEAK -> {
                 val text = intent.getStringExtra(EXTRA_TEXT) ?: ""
-                if (text.isNotBlank()) {
+                val scope = answerScope
+                if (text.isNotBlank() && intent.getBooleanExtra(EXTRA_APPEND, false) && _isSpeakingState.value && scope != null) {
+                    // fetched now, said right after what is playing
+                    val more = piperPlayer?.fetchAhead(scope, SpeechCleaner.clean(text)).orEmpty()
+                    moreToSay.addLast(more)
+                    answerPieces = answerPieces + more
+                    VoiceTrace.event("speak_append", "chars" to text.length)
+                } else if (text.isNotBlank()) {
+                    piperPlayer?.setVoice(intent.getFloatExtra(EXTRA_PITCH, 0f), intent.getFloatExtra(EXTRA_RATE, 0f))
                     updateMediaPlaybackState(PlaybackStateCompat.STATE_PLAYING)
                     val notification = createNotification(text)
                     startForeground(NOTIFICATION_ID, notification)
@@ -165,16 +185,20 @@ class AudioPlaybackService : Service() {
                     val cleanText = SpeechCleaner.clean(text)
                     dropAnswer()
                     val job = SupervisorJob(serviceScope.coroutineContext[Job])
-                    val answerScope = CoroutineScope(serviceScope.coroutineContext + job)
+                    val answer = CoroutineScope(serviceScope.coroutineContext + job)
+                    answerScope = answer
                     answerJob = job
-                    answerPieces = piperPlayer?.fetchAhead(answerScope, cleanText).orEmpty()
+                    answerPieces = piperPlayer?.fetchAhead(answer, cleanText).orEmpty()
                     val pieces = answerPieces
                     val play = {
-                        answerScope.launch {
-                            piperPlayer?.playAll(pieces) {
-                                Log.d(TAG, "Speech playback finished")
-                                if (generation == speakGeneration) finishPlayback()
+                        answer.launch {
+                            var next: List<PiperAudioPlayer.Piece>? = pieces
+                            while (next != null) {
+                                piperPlayer?.playAll(next) {}
+                                next = moreToSay.removeFirstOrNull()
                             }
+                            Log.d(TAG, "Speech playback finished")
+                            if (generation == speakGeneration) finishPlayback()
                         }
                     }
                     // you spoke through a headset (helmet intercom): answer over its call link, which it plays even
@@ -268,6 +292,8 @@ class AudioPlaybackService : Service() {
     private fun dropAnswer() {
         answerJob?.cancel()
         answerJob = null
+        answerScope = null
+        moreToSay.clear()
         piperPlayer?.discard(answerPieces)
         answerPieces = emptyList()
     }

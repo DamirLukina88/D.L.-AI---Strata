@@ -70,6 +70,16 @@ class RayNativeBridge(
         }
     }
 
+    // The app's replies: the same native voice as the drawer, on the assistant volume (a WebView's own audio always
+    // plays on the media volume).  Each chunk follows the last without a gap; [rate] and [pitch] are the page's sliders
+    @JavascriptInterface
+    fun speakQueued(text: String, rate: Float, pitch: Float) {
+        if (!trusted("speakQueued")) return
+        val cleaned = SpeechCleaner.clean(text)
+        if (cleaned.isBlank()) return
+        AudioPlaybackService.startSpeaking(context, cleaned, append = true, pitch = pitch, rate = rate)
+    }
+
     // The web app's reply (the server voice through Web Audio) goes over a headset's call link too, after you spoke
     // through the headset (BluetoothMic): TTSController holds it while it reads aloud and lets go when it stops
     @JavascriptInterface
