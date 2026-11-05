@@ -18,8 +18,9 @@ The app asks for Ogg Opus (`response_format: "opus"`) on every route and falls b
 and fixes a bigger problem found on the way: answers were cut off after their first paragraph. Code: branch
 `claude/friendly-tereshkova-9694ef`.
 
-**Status (2026-11-04 23:55): Opus over the real tunnel is not measured yet.** That needs the server change running as
-`strata-server`. No listening test yet either.
+**Status (2026-11-05): live.** Measured on the real tunnel, Opus starts a long answer 0.8 s sooner than WAV, on a fast
+5 am link. The target was about 2 s and this run did not reach it: the saving can only be the WAV's download time, and
+Piper's own 2.3 s stays. Answers now play to their end. No listening test yet.
 
 ## The lost second paragraph
 
@@ -39,14 +40,20 @@ idle; phone a Xiaomi 17 Ultra, debug build.
 
 | Where | Format | Size | Request to playing | Played |
 | --- | --- | --- | --- | --- |
-| Tunnel, LTE, 23:45, 3 runs | WAV | 1.85 MB | 3.9, 4.0, 4.4 s (server 2.4-2.6 s) | not timed |
-| Tunnel, the running server refusing Opus, 3 runs | WAV after the 400 | 1.85 MB | 4.1, 4.1, 4.4 s | not timed |
+| Tunnel, LTE, 2026-11-05 04:58, 5 runs | Opus | 213 KB | median 2.61 s (2.54-2.82; server 2.31 s) | 40.9 s, the whole answer |
+| Tunnel, the same, alternating | WAV | 1.84 MB | median 3.38 s (3.01-4.18; server 2.22 s) | not timed |
+| Tunnel, 43 characters, 3 runs each | Opus / WAV | 16 / 132 KB | 0.56 / 0.65 s | |
+| Home Wi-Fi, 05:10, 3 runs each | Opus / WAV | 213 / 1841 KB | 2.46 / 2.44 s | |
+| Home Wi-Fi, 43 characters, 2 runs each | Opus / WAV | 16 / 134 KB | 0.45 / 0.47 s | |
+| Tunnel, LTE, 2026-11-04 23:45, old server, 3 runs | WAV | 1.85 MB | 3.9, 4.0, 4.4 s (server 2.4-2.6 s) | not timed |
+| Tunnel, old server refusing Opus, 3 runs | WAV after the 400 | 1.85 MB | 4.1, 4.1, 4.4 s | not timed |
 | USB (`adb reverse` to this server code) | Opus | 220 KB | 2.46 s | 41.9 s, the whole answer |
 | USB (the same) | WAV | 1.9 MB | 2.44 s | 19.2 s, the first paragraph |
 | PC only, medians of 5 | WAV / Opus | 1850 / 212 KB | 2.21 / 2.16 s | |
 
-- The saving can't be bigger than the WAV download: 2.2 s in the helmet re-check (0.8 MB/s), 1.6 s at 23:45 (1.15 MB/s). Piper's
-  own 2.4 s stays. The first sentence alone takes 0.57 s to make and is 27 KB, so starting Ray before the whole answer is
+- The saving can't be bigger than the WAV download: 2.2 s in the helmet re-check (0.8 MB/s), 1.6 s at 23:45 (1.15 MB/s),
+  1.2 s at 04:58 (1.6 MB/s). Over the tunnel Opus spends 0.3 s beyond Piper, so a slower link gains more *(inferred: about
+  1.9 s at the re-check's speed, not measured on a link that slow)*. Piper's own 2.3 s stays. The first sentence alone takes 0.57 s to make and is 27 KB, so starting Ray before the whole answer is
   ready is what could cut the wait further.
 - During Opus, `dumpsys media.player` shows `audio/opus`, `c2.android.opus.decoder`, offloading 0, speed 1.05 and stream 11
   (assistant). Pitch is set in the same call as speed.
@@ -64,6 +71,9 @@ idle; phone a Xiaomi 17 Ultra, debug build.
 - `PiperAudioPlayer.stop()` doesn't delete the audio file: each interrupted answer leaves its file in the app's cache (15
   files, 14 MB, from 2-3 November).
 - The helmet test page was uncommitted in the main checkout, so these numbers are here.
+- `cmd media_session volume --stream 11 --set 0` is silently ignored on this phone: don't count on it to mute a test.
+- Two sessions sharing the phone: an APK installed by the other one removes a test build's hook. `MicProbeActivity` with
+  an unknown extra starts its default 8 s mic recording, so check the installed APK's hash before a scripted run.
 
 ## Related
 
@@ -71,7 +81,7 @@ idle; phone a Xiaomi 17 Ultra, debug build.
 
 ## Sources
 
-1. Runs of 2026-11-04 23:44-23:51: the app's `voice_trace.jsonl`, the `strata-server` journal, `dumpsys media.player`,
+1. Runs of 2026-11-04 23:44-23:51 and 2026-11-05 04:57-05:11: the app's `voice_trace.jsonl`, the `strata-server` journal, `dumpsys media.player`,
    driven over adb with a temporary test build (not committed).
 2. `~/.local/share/dl-ai/helmet-tests/2026-11-04_201509`: the phone's trace, log and server journal of the 704-character
    answer.
