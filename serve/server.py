@@ -52,7 +52,7 @@ import urllib.request
 import uuid
 from http.client import HTTPException
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Iterator, Protocol
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -128,12 +128,13 @@ class PhoneBridge:
         with self.lock:
             now = time.time()
             for cid, entry in list(self.pending_calls.items()):
+                if entry.get("dispatched"):
+                    continue                 # the phone is running it (a photo can take over 10 s); enqueue_call ends it
                 if now - entry["created"] > 10.0:
                     self.pending_calls.pop(cid, None)
                     continue
-                if not entry.get("dispatched"):
-                    entry["dispatched"] = True
-                    return {"id": entry["id"], "tool": entry["tool"], "args": entry["args"]}
+                entry["dispatched"] = True
+                return {"id": entry["id"], "tool": entry["tool"], "args": entry["args"]}
         return None
 
     def post_result(self, call_id: str, result: str) -> bool:
@@ -149,6 +150,20 @@ class PhoneBridge:
 
 
 PHONE_BRIDGE = PhoneBridge()
+# The app's own way in, for the voice drawer (com.damirl.ray PhoneToolRelay).  Cloudflare Access answers /api/* itself
+# unless the caller has its login cookie, which only the web page has; /v1/* passes it and needs the API key.  So on the
+# road, with the phone locked, the app can reach these and not /api/phone/* or /api/workspace/upload
+PHONE_PENDING_PATH = "/v1/ray/phone/pending"
+PHONE_RESULT_PATH = "/v1/ray/phone/result"
+PHONE_UPLOAD_PATH = "/v1/ray/phone/upload"
+
+
+def is_phone_photo(name: str) -> bool:
+    """A path under phone-photos/: all the app's upload may write (the web app's upload stays behind Access)."""
+    parts = PurePosixPath(name or "").parts
+    return len(parts) >= 2 and parts[0] == "phone-photos" and ".." not in parts
+
+
 _download_tickets: dict[str, tuple[Path, float]] = {}
 _download_tickets_lock = threading.Lock()
 
@@ -6114,7 +6129,7 @@ def make_handler(svc: Service):
                     return
                 self._json(200, PHONE_BRIDGE.get_status())
                 return
-            if path == "/api/phone/tool/pending":
+            if path in ("/api/phone/tool/pending", PHONE_PENDING_PATH):
                 if not self._authorized():                   # the key always (see the POST side)
                     return
                 PHONE_BRIDGE.report_heartbeat()
@@ -6381,7 +6396,7 @@ def make_handler(svc: Service):
                     return
                 self._json(200, {"url": f"api/workspace/download?ticket={new_download_ticket(target)}"})
                 return
-            if path == "/api/workspace/upload":
+            if path in ("/api/workspace/upload", PHONE_UPLOAD_PATH):
                 if self._foreign_origin():
                     self._json(403, {"error": {"message": "workspace files can only be uploaded from Strata's own page (or a trusted origin)"}})
                     return
@@ -6420,6 +6435,9 @@ def make_handler(svc: Service):
                         self._json(400, {"error": {"message": "missing filename in query or X-Filename header"}})
                         return
                     data = self._body()
+                if path == PHONE_UPLOAD_PATH and not is_phone_photo(filename):
+                    self._json(403, {"error": {"message": "this path only takes files under phone-photos/"}})
+                    return
                 target = safe_workspace_path(filename)
                 if not target:
                     self._json(400, {"error": {"message": "invalid or unsafe filename"}})
@@ -6477,7 +6495,7 @@ def make_handler(svc: Service):
                 except OSError as e:
                     self._json(503, {"error": {"message": f"the CLI session daemon is not running ({e})"}})
                 return
-            if path in ("/api/phone/status", "/api/phone/tool/call", "/api/phone/tool/result"):
+            if path in ("/api/phone/status", "/api/phone/tool/call", "/api/phone/tool/result", PHONE_RESULT_PATH):
                 # all three need the key (the web app and the Android app send it): "authorized or not foreign" let a
                 # client without a key and without an Origin header through, after _authorized() had already sent its
                 # 401, so anyone on the LAN could fake the phone's heartbeat or a tool's result
@@ -6503,7 +6521,7 @@ def make_handler(svc: Service):
                     else:
                         self._json(504, {"error": {"message": "phone tool call timed out or phone is offline"}})
                     return
-                if path == "/api/phone/tool/result":
+                if path in ("/api/phone/tool/result", PHONE_RESULT_PATH):
                     try:
                         req = json.loads(self._body() or b"{}")
                     except ValueError:

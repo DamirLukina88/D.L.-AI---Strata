@@ -131,7 +131,8 @@ class CameraVisionManager(private val context: Context) {
         }
         return try {
             val request = networkClient.newAuthenticatedRequestBuilder(
-                "/api/workspace/upload?file=" + URLEncoder.encode(rel, "UTF-8")
+                // the app's own /v1 path: Cloudflare Access answers /api/* itself for a client without its login cookie
+                "/v1/ray/phone/upload?file=" + URLEncoder.encode(rel, "UTF-8")
             )
                 .header("X-Filename", rel)
                 .post(jpeg.toRequestBody("application/octet-stream".toMediaType()))

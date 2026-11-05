@@ -15,6 +15,9 @@ class RayToolsReceiver : BroadcastReceiver() {
         private const val TAG = "RayToolsReceiver"
         const val ACTION_EXECUTE_TOOL = "com.damirl.ray.ACTION_EXECUTE_TOOL"
         const val ACTION_TORCH = "com.damirl.ray.ACTION_TORCH"
+        // debug builds: the next drawer asks this instead of listening (tools/helmet_test.py ask).  Here and nowhere
+        // else: this phone's daily app is a debug build, so only this receiver's DUMP permission keeps other apps out
+        const val ACTION_SCRIPTED_PROMPT = "com.damirl.ray.ACTION_SCRIPTED_PROMPT"
     }
 
     override fun onReceive(context: Context, intent: Intent?) {
@@ -28,6 +31,11 @@ class RayToolsReceiver : BroadcastReceiver() {
             ACTION_TORCH -> {
                 val enabled = intent.getBooleanExtra("enabled", false)
                 toolsManager.toggleTorch(enabled)
+            }
+            ACTION_SCRIPTED_PROMPT -> {
+                if (com.damirl.ray.BuildConfig.DEBUG) {
+                    com.damirl.ray.assistant.VoiceDrawerController.scriptedPrompt = intent.getStringExtra("text")
+                }
             }
             ACTION_EXECUTE_TOOL -> {
                 val tool = intent.getStringExtra("tool") ?: return

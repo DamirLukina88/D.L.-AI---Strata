@@ -5,8 +5,8 @@ import android.content.Context
 import org.json.JSONObject
 
 // Ray's 14 phone tools by name, with their arguments' defaults: the one place that runs them, for the web app's
-// relay (RayNativeBridge.executeTool) and the adb fallback (RayToolsReceiver).  The names and arguments match the
-// schemas in tools/phone_mcp.py (tools/test_phone_tool_parity.py checks it)
+// relay (RayNativeBridge.executeTool), the voice drawer's (PhoneToolRelay) and the adb fallback (RayToolsReceiver).
+// The names and arguments match the schemas in tools/phone_mcp.py (tools/test_phone_tool_parity.py checks it)
 class PhoneTools(
     private val context: Context,
     // whether the phone is locked (PIN, pattern or fingerprint not yet given); unknown counts as locked
