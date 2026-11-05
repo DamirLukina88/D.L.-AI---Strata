@@ -1,5 +1,6 @@
 package com.damirl.ray.assistant
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,6 +9,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
@@ -28,14 +32,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.vosk.Model
 import org.vosk.Recognizer
-import org.vosk.android.RecognitionListener
-import org.vosk.android.SpeechService
 import java.io.File
 
 // "Ok Ray": listens on the phone for the wake phrase with Vosk, offline (nothing leaves the phone), and opens the voice
 // drawer when it hears it.  A foreground service of type microphone with a quiet notification, which Android needs for
-// a mic in the background.  The recognizer only knows the phrases in WakeWord.PHRASES (and "[unk]" for anything else).
-// It lets go of the mic while the drawer, a recognizer or Ray's voice is busy (WakeWord.held)
+// a mic in the background.  The recognizer only knows WakeWord.GRAMMAR (the phrases, their look-alikes and "[unk]") and
+// only runs on sound that SpeechGate lets through; a final result must pass WakeWord.accepts.  It lets go of the mic
+// while the drawer, a recognizer or Ray's voice is busy (WakeWord.held)
 class HotwordListenerService : Service() {
 
     companion object {
@@ -43,6 +46,9 @@ class HotwordListenerService : Service() {
         private const val NOTIFICATION_ID = 2002
         private const val CHANNEL_ID = "ray_hotword_channel"
         private const val SAMPLE_RATE = 16000f
+        private const val PRE_ROLL_FRAMES = 20                     // 400 ms kept from before the gate opens
+        private const val GATE_LOG_FRAMES = 3000                   // one minute
+        private const val CLIP_SECONDS = 4
         const val ACTION_START = "com.damirl.ray.action.START_HOTWORD"
         const val ACTION_STOP = "com.damirl.ray.action.STOP_HOTWORD"
 
@@ -67,7 +73,8 @@ class HotwordListenerService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var model: Model? = null
-    private var speech: SpeechService? = null
+    private var micThread: Thread? = null
+    @Volatile private var micOn = false
     private var watchJob: Job? = null
     private var lastWake = 0L
 
@@ -113,46 +120,119 @@ class HotwordListenerService : Service() {
 
     private fun listen() {
         val m = model ?: return
-        if (speech != null) return
-        try {
-            val grammar = JSONArray(WakeWord.PHRASES + "[unk]").toString()
-            val rec = Recognizer(m, SAMPLE_RATE, grammar)
-            speech = SpeechService(rec, SAMPLE_RATE).also { it.startListening(listener) }
-            Log.d(TAG, "Listening for Ok Ray")
-        } catch (e: Exception) {
-            Log.e(TAG, "Could not open the mic for Ok Ray", e)
-            speech = null
-        }
+        if (micThread != null) return
+        micOn = true
+        micThread = Thread({ micLoop(m) }, "RayWakeMic").also { it.start() }
+        Log.d(TAG, "Listening for Ok Ray")
     }
 
     private fun stopListening() {
-        speech?.let {
-            it.stop()
-            it.shutdown()
-            Log.d(TAG, "Ok Ray paused (mic or speaker busy: ${WakeWord.held.value})")
-        }
-        speech = null
+        val t = micThread ?: return
+        micOn = false
+        t.join(1500)
+        micThread = null
+        Log.d(TAG, "Ok Ray paused (mic or speaker busy: ${WakeWord.held.value})")
     }
 
-    private val listener = object : RecognitionListener {
-        override fun onPartialResult(hypothesis: String?) = check(hypothesis, "partial")
-        override fun onResult(hypothesis: String?) = check(hypothesis, "text")
-        override fun onFinalResult(hypothesis: String?) = check(hypothesis, "text")
-        override fun onError(exception: Exception?) {
-            Log.w(TAG, "Ok Ray listener error: ${exception?.message}")
-            stopListening()
-            scope.launch { delay(2000); if (WakeWord.held.value.isEmpty()) listen() }
+    // Reads the mic in 200 ms blocks and gives Vosk only what the gate lets through, with the moment before the gate
+    // opened so the start of "ok" isn't lost.  Only final results count: partial ones are guesses that often change
+    @SuppressLint("MissingPermission")                             // the service only runs after the app was given it
+    private fun micLoop(m: Model) {
+        val rate = SAMPLE_RATE.toInt()
+        val frame = rate / 50                                      // 20 ms
+        val block = ShortArray(frame * 10)
+        val preRoll = Array(PRE_ROLL_FRAMES) { ShortArray(frame) }
+        var preRollAt = 0
+        val gate = SpeechGate()
+        val clip = if (WakeWord.savesClips(this)) ClipRing(rate * CLIP_SECONDS) else null
+        var openFrames = 0
+        var allFrames = 0
+        var rec: Recognizer? = null
+        var mic: AudioRecord? = null
+        try {
+            rec = Recognizer(m, SAMPLE_RATE, JSONArray(WakeWord.GRAMMAR).toString()).apply { setWords(true) }
+            val size = maxOf(
+                AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT),
+                block.size * 2 * 2
+            )
+            mic = AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION, rate, AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT, size
+            )
+            check(mic.state == AudioRecord.STATE_INITIALIZED) { "the mic is in use" }
+            mic.startRecording()
+            while (micOn) {
+                val got = mic.read(block, 0, block.size)
+                check(got >= 0) { "mic read failed: $got" }
+                clip?.add(block, got)
+                var at = 0
+                while (at + frame <= got) {
+                    val wasOpen = gate.open
+                    val open = gate.push(SpeechGate.levelDb(block, at, frame))
+                    if (open && !wasOpen) {
+                        for (i in preRoll.indices) rec.acceptWaveForm(preRoll[(preRollAt + i) % PRE_ROLL_FRAMES], frame)
+                    }
+                    if (open) {
+                        val tmp = block.copyOfRange(at, at + frame)
+                        if (rec.acceptWaveForm(tmp, frame)) judge(rec.result, clip)
+                        openFrames++
+                    } else {
+                        block.copyInto(preRoll[preRollAt], 0, at, at + frame)
+                        preRollAt = (preRollAt + 1) % PRE_ROLL_FRAMES
+                        if (wasOpen) {
+                            judge(rec.finalResult, clip)
+                            rec.reset()
+                        }
+                    }
+                    allFrames++
+                    at += frame
+                }
+                if (allFrames >= GATE_LOG_FRAMES) {
+                    Log.d(TAG, "Vosk ran ${openFrames * 100 / allFrames}% of the last minute (room ${gate.floorDb.toInt()} dB)")
+                    openFrames = 0
+                    allFrames = 0
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Ok Ray listener error: ${e.message}")
+            scope.launch {
+                micThread = null
+                delay(2000)
+                if (WakeWord.held.value.isEmpty()) listen()
+            }
+        } finally {
+            runCatching { mic?.stop() }
+            mic?.release()
+            rec?.close()
         }
-        override fun onTimeout() {}
     }
 
-    private fun check(hypothesis: String?, key: String) {
-        val text = runCatching { JSONObject(hypothesis ?: "{}").optString(key) }.getOrDefault("")
+    private fun judge(json: String, clip: ClipRing?) {
+        val result = runCatching { JSONObject(json) }.getOrNull() ?: return
+        val text = result.optString("text")
         if (!WakeWord.matches(text)) return
+        val list = result.optJSONArray("result")
+        val words = (0 until (list?.length() ?: 0)).map { i ->
+            val w = list!!.getJSONObject(i)
+            WakeWord.Heard(w.optString("word"), w.optDouble("start"), w.optDouble("end"))
+        }
+        val summary = "$text in %.2f s".format((words.lastOrNull()?.end ?: 0.0) - (words.firstOrNull()?.start ?: 0.0))
+        if (!WakeWord.accepts(text, words)) {
+            Log.d(TAG, "Wrong length, ignored: $summary")
+            return
+        }
+        val sound = clip?.snapshot()
+        scope.launch { heard(summary, text, sound) }
+    }
+
+    private fun heard(summary: String, text: String, sound: ShortArray?) {
         val now = System.currentTimeMillis()
         if (now - lastWake < 3000) return
         lastWake = now
-        Log.d(TAG, "Heard \"$text\": opening the drawer")
+        Log.d(TAG, "Heard Ok Ray ($summary): opening the drawer")
+        if (sound != null) {
+            scope.launch(Dispatchers.IO) { WakeClips.save(this@HotwordListenerService, sound, SAMPLE_RATE.toInt(), text) }
+        }
         stopListening()
         openDrawer()
     }
@@ -220,7 +300,10 @@ class HotwordListenerService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_tile_paw)
             .setContentTitle("Listening for “Ok Ray”")
-            .setContentText("On the phone only; switch it off in About")
+            .setContentText(
+                if (WakeWord.savesClips(this)) "On the phone only; test mode saves each wake as a clip"
+                else "On the phone only; switch it off in About"
+            )
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setOngoing(true)
