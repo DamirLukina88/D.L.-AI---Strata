@@ -1,7 +1,7 @@
 ---
 title: "Upstream Strata v0.2.10 Review and Port Plan (2026-11-03)"
 type: artifact
-description: "708 commits since 0.2.9: DFlash2 and the split engine do not apply here; port parser and server fixes first, then the HIP #4677 and #4350 engine fixes with a benchmark"
+description: "708 commits since 0.2.9: port parser/server fixes first, then HIP #4677 and #4350 engine fixes with an A/B benchmark"
 status: active
 tags: [upstream, review, plan, v0.2.10]
 created: 2026-11-03

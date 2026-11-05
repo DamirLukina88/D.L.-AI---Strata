@@ -106,6 +106,8 @@ Debugging recipe: debug builds expose `webview_devtools_remote_<pid>`; `adb forw
 ## Related
 - [Ray Companion Validation (2026-11-02)](../artifacts/ray-companion-validation-2026-11-02.md) — What was tested on the phone and the results
 - [Session Transcript & Development Handoff (2026-11-02)](../artifacts/session-transcript-2026-11-02-companion-handoff.md) — Complete transcript and Claude Code technical handoff dossier covering root-cause diagnoses and live verification.
+- [Ray's Voice as Ogg Opus (2026-11-04)](../artifacts/ray-voice-opus-2026-11-04.md) — Phone Piper voice moving from WAV to Ogg Opus and sentence splitting
+- [Ray / Strata Audit (2026-11-03)](../artifacts/strata-audit-2026-11.md) — Security, correctness, performance and docs audit of the Ray fork
 
 - 2026-11-03: **phone_get_gallery_image** (13th tool): the newest camera photo (`kind: photo`, DCIM/Camera), screenshot (`screenshot`, any `*Screenshots*` folder) or any image, from MediaStore by `DATE_ADDED`, uploaded as `phone-photos/GALLERY[_SCREENSHOT]_<time>.jpg` with the `[[image:]]` marker. Needs READ_MEDIA_IMAGES (Photos card on the setup screen); private (refused while locked). Why: asked for "my latest photo/screenshot", Ray used camera_snap or get_last_photo (which auto-snaps) and took a new photo; the descriptions of both now point to the gallery tool. The adb fallback reads the gallery folders directly and skips the app broadcast (one copy). Triggers added: gallery, galerij*, screenshot(s), snimka zaslona.
 
