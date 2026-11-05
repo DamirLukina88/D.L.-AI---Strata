@@ -12,11 +12,16 @@ import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import com.damirl.ray.network.NetworkClient
 import com.damirl.ray.network.NetworkRoute
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -59,8 +64,15 @@ class PiperAudioPlayer(
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
+    /** One piece of an answer (SpeechPieces): its text, and its audio on the way. */
+    class Piece(val text: String) {
+        lateinit var audio: Deferred<File?>
+        @Volatile var file: File? = null
+    }
+
     private val mainHandler = Handler(Looper.getMainLooper())
     private var mediaPlayer: MediaPlayer? = null
+    private var playingFile: File? = null
     private var systemTts: TextToSpeech? = null
     private val isTtsInitialized = AtomicBoolean(false)
     // the phone's voice reports its end through the listener: the one utterance being read and what to call then
@@ -105,6 +117,50 @@ class PiperAudioPlayer(
         play(cleanText, fetch(cleanText), onComplete)
     }
 
+    /** Starts fetching [cleanText] piece by piece, each after the one before, in [scope]: cancel it to stop. */
+    fun fetchAhead(scope: CoroutineScope, cleanText: String): List<Piece> {
+        var before: Deferred<File?>? = null
+        return SpeechPieces.split(cleanText).map { text ->
+            val previous = before
+            Piece(text).also { piece ->
+                piece.audio = scope.async {
+                    previous?.join()
+                    fetch(text).also { piece.file = it }
+                }
+                before = piece.audio
+            }
+        }
+    }
+
+    /**
+     * Says [pieces] in order, each as soon as the one before has ended, then runs [onComplete].  A piece that can't be
+     * fetched means the server is gone: the phone's voice reads the rest.
+     */
+    suspend fun playAll(pieces: List<Piece>, onComplete: () -> Unit) {
+        for ((i, piece) in pieces.withIndex()) {
+            val file = piece.audio.await()
+            val said = CompletableDeferred<Unit>()
+            if (file == null) {
+                pieces.drop(i + 1).forEach { it.audio.cancel() }
+                play(pieces.drop(i).joinToString(" ") { it.text }, null) { said.complete(Unit) }
+                said.await()
+                break
+            }
+            VoiceTrace.event("tts_piece", "index" to i, "of" to pieces.size, "chars" to piece.text.length)
+            play(piece.text, file) { said.complete(Unit) }
+            said.await()
+        }
+        onComplete()
+    }
+
+    /** Deletes what [pieces] left behind when the answer was stopped: pieces made but not said. */
+    fun discard(pieces: List<Piece>) {
+        pieces.forEach { piece ->
+            piece.audio.cancel()
+            try { piece.file?.delete() } catch (_: Exception) {}
+        }
+    }
+
     /**
      * Ray's voice for [cleanText] from the server, as an audio file, or null when the server can't be reached.  On a
      * failure the route is probed again and the request tried once more (the LAN gone, the tunnel there).
@@ -118,6 +174,10 @@ class PiperAudioPlayer(
             VoiceTrace.event("tts_fetch", "route" to NetworkClient.label(route), "chars" to cleanText.length, "attempt" to attempt)
             try {
                 val file = fetchPiperAudio(cleanText, FORMAT_OPUS)
+                if (!isActive) {                                  // stopped while it was on its way
+                    file.delete()
+                    return@withContext null
+                }
                 VoiceTrace.event("tts_fetched", "ms" to SystemClock.elapsedRealtime() - started, "bytes" to file.length(),
                     "format" to file.extension)
                 return@withContext file
@@ -212,6 +272,7 @@ class PiperAudioPlayer(
             }
 
             mediaPlayer = player
+            playingFile = file
             player.start()
             Log.d(TAG, "Playing Piper ${file.extension} at pitch $PITCH_FACTOR")
         } catch (e: Exception) {
@@ -259,6 +320,8 @@ class PiperAudioPlayer(
                 it.release()
             }
             mediaPlayer = null
+            playingFile?.delete()                                  // an interrupted answer left its file in the cache
+            playingFile = null
             pendingUtterance.set(null)                             // a stop isn't the end of a new utterance
             systemTts?.stop()
         } catch (e: Exception) {

@@ -18,9 +18,27 @@ The app asks for Ogg Opus (`response_format: "opus"`) on every route and falls b
 and fixes a bigger problem found on the way: answers were cut off after their first paragraph. Code: branch
 `claude/friendly-tereshkova-9694ef`.
 
-**Status (2026-11-05): live.** Measured on the real tunnel, Opus starts a long answer 0.8 s sooner than WAV, on a fast
-5 am link. The target was about 2 s and this run did not reach it: the saving can only be the WAV's download time, and
-Piper's own 2.3 s stays. Answers now play to their end. No listening test yet.
+**Status (2026-11-05): Ray starts 1.9 s sooner on the tunnel.** Opus alone gave 0.8 s on a fast 5 am link: it can only save
+the WAV's download, and Piper's own 2.3 s stays. So the app now also splits an answer into pieces and starts on the first
+(`SpeechPieces`): 0.71 s against 2.65 s to start the 704-character answer, on the same link, alternating. No listening test
+yet, and not yet tried with the helmet worn.
+
+## Pieces
+
+An answer is cut at sentence ends: at least 80 characters first, each next limit 4 times the last. Pieces are fetched in
+order, each as soon as the one before is fetched; a new `MediaPlayer` plays each when the last ends. The server didn't change.
+
+| Tunnel, LTE, 2026-11-05 05:20, 5 runs each | Size of what starts | Request to playing |
+| --- | --- | --- |
+| Pieces (89, 352, 260 characters) | 28 KB | median 0.71 s (0.65-0.73) |
+| Whole answer, Opus | 215 KB | median 2.65 s (2.40-2.72) |
+
+- All of it played: 40.93 s in pieces, 40.87 s as one file, so the joins add nothing measurable. By ear: not checked.
+- Each next piece was fetched more than 2 s before it was needed. Rule of thumb: Piper makes ~320 characters a second, Ray says ~17.
+- A new answer mid-speech: the old answer's later pieces never played. A stopped answer leaves no files (this also ended the
+  cache leak noted below).
+- The piece no longer holds a line break, so the WAV fallback no longer stops at the first paragraph on the phone.
+- Not tried: the server failing mid-answer (by the code, the phone's voice reads the rest).
 
 ## The lost second paragraph
 
@@ -68,8 +86,8 @@ idle; phone a Xiaomi 17 Ultra, debug build.
 
 ## Gotchas
 
-- `PiperAudioPlayer.stop()` doesn't delete the audio file: each interrupted answer leaves its file in the app's cache (15
-  files, 14 MB, from 2-3 November).
+- Before pieces, `PiperAudioPlayer.stop()` didn't delete the audio file: 15 files, 14 MB, from 2-3 November are still in
+  the cache, left alone.
 - The helmet test page was uncommitted in the main checkout, so these numbers are here.
 - `cmd media_session volume --stream 11 --set 0` is silently ignored on this phone: don't count on it to mute a test.
 - Two sessions sharing the phone: an APK installed by the other one removes a test build's hook. `MicProbeActivity` with
@@ -81,7 +99,7 @@ idle; phone a Xiaomi 17 Ultra, debug build.
 
 ## Sources
 
-1. Runs of 2026-11-04 23:44-23:51 and 2026-11-05 04:57-05:11: the app's `voice_trace.jsonl`, the `strata-server` journal, `dumpsys media.player`,
+1. Runs of 2026-11-04 23:44-23:51 and 2026-11-05 04:57-05:23: the app's `voice_trace.jsonl`, the `strata-server` journal, `dumpsys media.player`,
    driven over adb with a temporary test build (not committed).
 2. `~/.local/share/dl-ai/helmet-tests/2026-11-04_201509`: the phone's trace, log and server journal of the 704-character
    answer.

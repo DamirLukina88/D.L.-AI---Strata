@@ -23,8 +23,8 @@ import com.damirl.ray.R
 import com.damirl.ray.network.NetworkClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -72,6 +72,8 @@ class AudioPlaybackService : Service() {
     private var piperPlayer: PiperAudioPlayer? = null
     private var mediaSession: MediaSessionCompat? = null
     private var speakGeneration = 0          // the answer being said; an older one's fetch or end is ignored
+    private var answerJob: Job? = null       // its pieces being fetched and said
+    private var answerPieces: List<PiperAudioPlayer.Piece> = emptyList()
 
     override fun onCreate() {
         super.onCreate()
@@ -161,13 +163,15 @@ class AudioPlaybackService : Service() {
                     // his voice is fetched at once, while the headset's call link comes up (that took up to 3.7 s
                     // before the fetch even started, 2026-11-04)
                     val cleanText = SpeechCleaner.clean(text)
-                    val audio = serviceScope.async { piperPlayer?.fetch(cleanText) }
+                    dropAnswer()
+                    val job = SupervisorJob(serviceScope.coroutineContext[Job])
+                    val answerScope = CoroutineScope(serviceScope.coroutineContext + job)
+                    answerJob = job
+                    answerPieces = piperPlayer?.fetchAhead(answerScope, cleanText).orEmpty()
+                    val pieces = answerPieces
                     val play = {
-                        serviceScope.launch {
-                            val file = audio.await()
-                            // stopped, or a newer answer, while it was fetched
-                            if (!_isSpeakingState.value || generation != speakGeneration) return@launch
-                            piperPlayer?.play(cleanText, file) {
+                        answerScope.launch {
+                            piperPlayer?.playAll(pieces) {
                                 Log.d(TAG, "Speech playback finished")
                                 if (generation == speakGeneration) finishPlayback()
                             }
@@ -261,12 +265,20 @@ class AudioPlaybackService : Service() {
         audioFocusRequest = null
     }
 
+    private fun dropAnswer() {
+        answerJob?.cancel()
+        answerJob = null
+        piperPlayer?.discard(answerPieces)
+        answerPieces = emptyList()
+    }
+
     private fun finishPlayback() {
         if (_isSpeakingState.value) VoiceTrace.event("speak_end")
         _isSpeakingState.value = false
         com.damirl.ray.assistant.WakeWord.release("speak")
         BluetoothMic.release("reply")
         updateMediaPlaybackState(PlaybackStateCompat.STATE_STOPPED)
+        dropAnswer()
         piperPlayer?.stop()
         releaseWakeLock()
         abandonAudioFocus()
