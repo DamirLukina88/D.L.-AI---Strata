@@ -15,6 +15,8 @@ Newest entries first.
 
 ## Log
 
+- **2026-11-05:** Update. decisions/rx-7600-xt-cachyos-deployment.md. (Agent: Antigravity)
+- **2026-11-05:** Ingestion. artifacts/upstream-v0-2-11-review-and-benchmark-2026-11-05.md. (Agent: Antigravity)
 - **2026-11-05:** Ingestion. artifacts/ok-ray-detection-test-2026-11-05.md. (Agent: Claude Code)
 - **2026-11-05:** Update. artifacts/helmet-voice-test-2026-11-04.md, decisions/cloudflare-access-login-auth.md, decisions/ray-hybrid-webview-companion-and-phone-mcp.md, decisions/github-fork-and-sanitization.md. (Agent: Claude Code)
 - **2026-11-05:** Ingestion. artifacts/ray-voice-opus-2026-11-04.md. (Agent: Claude Code)
