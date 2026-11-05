@@ -53,10 +53,19 @@ class PiperAudioPlayer(
         // and the voice ends ~0.5 s before the file does (Piper's closing silence)
         private const val SOUND_LAG_MS = 60L
         private const val CLOSING_SILENCE_S = 0.5
+        // the helmet's call link: measured the same way, his voice came 0.11-0.14 s after his mouth, at both ends
+        private const val CALL_LINK_LAG_MS = 100L
+        // with that delay his mouth ran 0.13-0.20 s past his voice on the call link: measured, not derived
+        private const val CALL_LINK_END_TRIM_S = 0.18
+
+        /** How long after the position moves his mouth opens. */
+        fun mouthDelayMs(overCallLink: Boolean): Long = SOUND_LAG_MS + if (overCallLink) CALL_LINK_LAG_MS else 0L
 
         /** How long his mouth moves for a piece with [playingSeconds] left to play. */
-        fun mouthSeconds(playingSeconds: Double): Double =
-            maxOf(playingSeconds - SOUND_LAG_MS / 1000.0 - CLOSING_SILENCE_S, playingSeconds * 0.5)
+        fun mouthSeconds(playingSeconds: Double, overCallLink: Boolean = false): Double {
+            val trim = SOUND_LAG_MS / 1000.0 + CLOSING_SILENCE_S + if (overCallLink) CALL_LINK_END_TRIM_S else 0.0
+            return maxOf(playingSeconds - trim, playingSeconds * 0.5)
+        }
         const val FORMAT_OPUS = "opus"
         const val FORMAT_WAV = "wav"
 
@@ -82,6 +91,8 @@ class PiperAudioPlayer(
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var mediaPlayer: MediaPlayer? = null
+    /** This answer goes over a headset's call link, where the sound comes a little later. */
+    @Volatile var overCallLink = false
     private var spokenText = ""
     private var soundWatch: Runnable? = null
     private var playbackPitch = PITCH_FACTOR
@@ -271,12 +282,12 @@ class PiperAudioPlayer(
                     return
                 }
                 val left = try { player.duration - position } catch (_: IllegalStateException) { return }
-                val seconds = mouthSeconds(left / 1000.0 / speed)
+                val seconds = mouthSeconds(left / 1000.0 / speed, overCallLink)
                 val open = Runnable {
                     if (mediaPlayer === player) VoiceOutput.setSounding(VoiceOutput.Piece(text, seconds))
                 }
                 soundWatch = open
-                mainHandler.postDelayed(open, SOUND_LAG_MS)
+                mainHandler.postDelayed(open, mouthDelayMs(overCallLink))
             }
         }
         soundWatch = watch

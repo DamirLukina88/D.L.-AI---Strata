@@ -179,6 +179,7 @@ class AudioPlaybackService : Service() {
                     com.damirl.ray.assistant.WakeWord.hold("speak")     // "Ok Ray" mustn't hear Ray
                     val generation = ++speakGeneration
                     val headset = BluetoothMic.inHeadsetConversation()
+                    piperPlayer?.overCallLink = headset
                     VoiceTrace.event("speak_start", "chars" to text.length, "headset" to headset)
                     // his voice is fetched at once, while the headset's call link comes up (that took up to 3.7 s
                     // before the fetch even started, 2026-11-04)

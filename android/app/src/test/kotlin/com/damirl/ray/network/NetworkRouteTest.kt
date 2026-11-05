@@ -70,6 +70,13 @@ class NetworkRouteTest {
     }
 
     @Test
+    fun hisMouthWaitsLongerForTheHelmetsCallLink() {
+        assertEquals(60L, PiperAudioPlayer.mouthDelayMs(false))
+        assertEquals(160L, PiperAudioPlayer.mouthDelayMs(true))
+        assertEquals(3.86, PiperAudioPlayer.mouthSeconds(4.6, overCallLink = true), 0.001)
+    }
+
+    @Test
     fun thePhoneVoiceGetsTimeForTheWholeAnswer() {
         assertEquals(5_000L, PiperAudioPlayer.systemVoiceLimitMs(0))
         assertTrue(PiperAudioPlayer.systemVoiceLimitMs(200) >= 200 * 1000L / 12)   // about 12 characters a second
