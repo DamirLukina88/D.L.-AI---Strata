@@ -49,6 +49,14 @@ class PiperAudioPlayer(
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private const val SOUND_POLL_MS = 15L
         private const val SOUND_WAIT_MS = 1_000L
+        // Measured 2026-11-05 on the phone's speaker with the Snowball: sound starts ~0.1 s after the position moves,
+        // and the voice ends ~0.5 s before the file does (Piper's closing silence)
+        private const val SOUND_LAG_MS = 60L
+        private const val CLOSING_SILENCE_S = 0.5
+
+        /** How long his mouth moves for a piece with [playingSeconds] left to play. */
+        fun mouthSeconds(playingSeconds: Double): Double =
+            maxOf(playingSeconds - SOUND_LAG_MS / 1000.0 - CLOSING_SILENCE_S, playingSeconds * 0.5)
         const val FORMAT_OPUS = "opus"
         const val FORMAT_WAV = "wav"
 
@@ -263,7 +271,12 @@ class PiperAudioPlayer(
                     return
                 }
                 val left = try { player.duration - position } catch (_: IllegalStateException) { return }
-                VoiceOutput.setSounding(VoiceOutput.Piece(text, left / 1000.0 / speed))
+                val seconds = mouthSeconds(left / 1000.0 / speed)
+                val open = Runnable {
+                    if (mediaPlayer === player) VoiceOutput.setSounding(VoiceOutput.Piece(text, seconds))
+                }
+                soundWatch = open
+                mainHandler.postDelayed(open, SOUND_LAG_MS)
             }
         }
         soundWatch = watch

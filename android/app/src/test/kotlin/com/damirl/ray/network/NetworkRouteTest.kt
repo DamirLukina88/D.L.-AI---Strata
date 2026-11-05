@@ -64,6 +64,12 @@ class NetworkRouteTest {
     }
 
     @Test
+    fun hisMouthLeavesOutTheClosingSilence() {
+        assertEquals(4.04, PiperAudioPlayer.mouthSeconds(4.6), 0.001)
+        assertEquals(0.3, PiperAudioPlayer.mouthSeconds(0.6), 0.001)        // a very short piece keeps half
+    }
+
+    @Test
     fun thePhoneVoiceGetsTimeForTheWholeAnswer() {
         assertEquals(5_000L, PiperAudioPlayer.systemVoiceLimitMs(0))
         assertTrue(PiperAudioPlayer.systemVoiceLimitMs(200) >= 200 * 1000L / 12)   // about 12 characters a second
