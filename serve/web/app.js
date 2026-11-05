@@ -739,13 +739,15 @@ const TTSController = {
   nativeTimer: null,
   nativeSent: 0,                                    // chunks of this queue handed to the app's voice
   nativeSend() {
-    let sent = "";
     while (this.nativeSent < this.queue.length) {
-      const chunk = this.queue[this.nativeSent++];
-      window.RayAndroid.speakQueued(chunk, this.getRate(), this.getPitch());
-      sent += (sent ? " " : "") + chunk;
+      window.RayAndroid.speakQueued(this.queue[this.nativeSent++], this.getRate(), this.getPitch());
     }
-    if (sent && this.orb()) RayFace.speakText(sent, this.getRate());
+  },
+  // the app's voice: a piece really sounding for `seconds`, or null when the sound stops (RayNativeBridge)
+  voicePiece(text, seconds) {
+    if (!this.speaking || !this.orb() || typeof RayFace === "undefined") return;
+    if (text === null) RayFace.chunkEnd();
+    else RayFace.speakTimed(text, seconds);
   },
   speakNative(chunk) {
     const queue = this.queue, orb = this.orb(), t0 = Date.now();
@@ -754,6 +756,7 @@ const TTSController = {
     if (queued) {
       this.nativeSent = this.currentIndex;
       this.nativeSend();
+      if (orb) RayFace.thinking(true);               // until his voice arrives (voicePiece)
     } else {
       window.RayAndroid.speak(chunk);
       if (orb) RayFace.speakText(chunk, this.getRate());

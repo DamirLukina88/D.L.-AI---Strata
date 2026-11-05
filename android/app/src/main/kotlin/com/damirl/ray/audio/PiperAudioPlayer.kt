@@ -47,6 +47,8 @@ class PiperAudioPlayer(
         private const val PITCH_FACTOR = 1.5f // Ray's signature red panda cartoon pitch
         private const val SPEED_FACTOR = 1.05f
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        private const val SOUND_POLL_MS = 15L
+        private const val SOUND_WAIT_MS = 1_000L
         const val FORMAT_OPUS = "opus"
         const val FORMAT_WAV = "wav"
 
@@ -72,6 +74,8 @@ class PiperAudioPlayer(
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var mediaPlayer: MediaPlayer? = null
+    private var spokenText = ""
+    private var soundWatch: Runnable? = null
     private var playbackPitch = PITCH_FACTOR
     private var playbackSpeed = SPEED_FACTOR
     private var playingFile: File? = null
@@ -209,6 +213,7 @@ class PiperAudioPlayer(
         _isPlaying.value = true
         if (file != null && file.exists()) {
             VoiceTrace.event("tts_play", "engine" to "piper")
+            spokenText = cleanText
             playFile(file, onComplete)
         } else {
             Log.w(TAG, "No Piper audio: falling back to system TTS")
@@ -246,6 +251,31 @@ class PiperAudioPlayer(
         return fetchPiperAudio(text, next)
     }
 
+    // start() returns before there is sound: his mouth starts when the position moves, with the time really left
+    private fun watchForSound(player: MediaPlayer, text: String, speed: Float) {
+        val startedAt = SystemClock.elapsedRealtime()
+        val watch = object : Runnable {
+            override fun run() {
+                if (mediaPlayer !== player) return
+                val position = try { player.currentPosition } catch (_: IllegalStateException) { return }
+                if (position <= 0 && SystemClock.elapsedRealtime() - startedAt < SOUND_WAIT_MS) {
+                    mainHandler.postDelayed(this, SOUND_POLL_MS)
+                    return
+                }
+                val left = try { player.duration - position } catch (_: IllegalStateException) { return }
+                VoiceOutput.setSounding(VoiceOutput.Piece(text, left / 1000.0 / speed))
+            }
+        }
+        soundWatch = watch
+        mainHandler.post(watch)
+    }
+
+    private fun soundEnded() {
+        soundWatch?.let { mainHandler.removeCallbacks(it) }
+        soundWatch = null
+        VoiceOutput.setSounding(null)
+    }
+
     private suspend fun playFile(file: File, onComplete: () -> Unit) = withContext(Dispatchers.Main) {
         try {
             val player = MediaPlayer().apply {
@@ -265,6 +295,7 @@ class PiperAudioPlayer(
 
                 setOnCompletionListener {
                     Log.d(TAG, "MediaPlayer completed playback")
+                    soundEnded()
                     _isPlaying.value = false
                     try { file.delete() } catch (_: Exception) {}
                     onComplete()
@@ -272,6 +303,7 @@ class PiperAudioPlayer(
 
                 setOnErrorListener { _, what, extra ->
                     Log.e(TAG, "MediaPlayer error: what=$what, extra=$extra")
+                    soundEnded()
                     _isPlaying.value = false
                     try { file.delete() } catch (_: Exception) {}
                     onComplete()
@@ -282,6 +314,7 @@ class PiperAudioPlayer(
             mediaPlayer = player
             playingFile = file
             player.start()
+            watchForSound(player, spokenText, playbackSpeed)
             Log.d(TAG, "Playing Piper ${file.extension} at pitch $PITCH_FACTOR")
         } catch (e: Exception) {
             Log.e(TAG, "Error playing ${file.name}", e)
@@ -305,6 +338,7 @@ class PiperAudioPlayer(
         }
         val id = "ray_tts_${System.currentTimeMillis()}"
         pendingUtterance.set(id to onComplete)
+        VoiceOutput.setSounding(VoiceOutput.Piece(text, text.length / 12.0))   // this voice doesn't report its timing
         // in case the engine never reports back: Ray's turn still ends
         mainHandler.postDelayed({ utteranceEnded(id, "timed out") }, systemVoiceLimitMs(text.length))
         if (tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id) != TextToSpeech.SUCCESS) utteranceEnded(id, "refused")
@@ -314,12 +348,14 @@ class PiperAudioPlayer(
         val pending = pendingUtterance.get() ?: return
         if (pending.first != utteranceId || !pendingUtterance.compareAndSet(pending, null)) return
         Log.d(TAG, "System TTS $how")
+        soundEnded()
         VoiceTrace.event("tts_system_end", "how" to how)
         _isPlaying.value = false
         mainHandler.post { pending.second() }
     }
 
     fun stop() {
+        soundEnded()
         try {
             mediaPlayer?.let {
                 if (it.isPlaying) {

@@ -36,6 +36,7 @@ fun RayFaceView(
     prompt: String,
     toolCalls: Int,
     lastTool: String?,
+    sounding: com.damirl.ray.audio.VoiceOutput.Piece? = null,
     modifier: Modifier = Modifier,
     width: Dp = 84.dp,
     height: Dp = 73.dp
@@ -97,9 +98,16 @@ fun RayFaceView(
         when (mood) {
             RayMood.LISTENING -> run("RayFace.listen()")
             RayMood.THINKING -> run("RayFace.thinking()")
-            RayMood.TALKING -> run("RayFace.speakText(${JSONObject.quote(speech)}, 1)")
+            RayMood.TALKING -> {}                         // his mouth follows `sounding`, below
             RayMood.IDLE -> run("RayFace.end()")
         }
+    }
+
+    // the voice's real start, length and end
+    LaunchedEffect(ready, sounding) {
+        val piece = sounding
+        if (piece != null) run("RayFace.speakTimed(${JSONObject.quote(piece.text)}, ${piece.seconds})")
+        else run("RayFace.chunkEnd()")
     }
 
     DisposableEffect(Unit) {

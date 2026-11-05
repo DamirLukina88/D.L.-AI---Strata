@@ -50,6 +50,13 @@ class RayNativeBridge(
                 wv.post { wv.evaluateJavascript("if (typeof TTSController !== 'undefined' && TTSController.speaking) TTSController.stop();", null) }
             }
         }
+        // Ray's mouth in the page starts and stops with his voice: the page's TTSController only knows what it sent
+        VoiceOutput.onSounding = { piece ->
+            webViewProvider()?.let { wv ->
+                val args = if (piece == null) "null, 0" else "${JSONObject.quote(piece.text)}, ${piece.seconds}"
+                wv.post { wv.evaluateJavascript("if (typeof TTSController !== 'undefined') TTSController.voicePiece($args);", null) }
+            }
+        }
         try {
             speechManager = SpeechRecognitionManager(context)
         } catch (e: Exception) {

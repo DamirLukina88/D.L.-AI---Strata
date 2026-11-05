@@ -232,8 +232,15 @@ class RayVoiceSession(context: Context) : VoiceInteractionSession(context),
 @Composable
 fun VoiceDrawer(drawer: VoiceDrawerController, onDismiss: () -> Unit, onExpand: () -> Unit) {
     val speaking by AudioPlaybackService.isSpeakingState.collectAsState()
+    val sounding by com.damirl.ray.audio.VoiceOutput.sounding.collectAsState()
+    // his voice is on its way until the first sound: he goes on thinking until then, and talks between pieces
+    var voiced by remember { mutableStateOf(false) }
+    LaunchedEffect(speaking, sounding) {
+        if (!speaking) voiced = false else if (sounding != null) voiced = true
+    }
     val mood = when {
-        speaking -> RayMood.TALKING
+        speaking && voiced -> RayMood.TALKING
+        speaking -> RayMood.THINKING
         drawer.phase == VoicePhase.LISTENING -> RayMood.LISTENING
         drawer.phase == VoicePhase.THINKING || drawer.phase == VoicePhase.ANSWERING -> RayMood.THINKING
         else -> RayMood.IDLE
@@ -245,7 +252,8 @@ fun VoiceDrawer(drawer: VoiceDrawerController, onDismiss: () -> Unit, onExpand: 
                 speech = drawer.assistantResponse,
                 prompt = drawer.userPrompt,
                 toolCalls = drawer.toolCalls,
-                lastTool = drawer.lastTool
+                lastTool = drawer.lastTool,
+                sounding = sounding
             )
         },
         thinking = drawer.thinkingText,

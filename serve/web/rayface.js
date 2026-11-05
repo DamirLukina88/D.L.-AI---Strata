@@ -1180,6 +1180,16 @@ const RayFace = (() => {
     paused = false;
   }
 
+  // a piece of voice sounding now for exactly `seconds` (the phone's native player reports both)
+  function speakTimed(text, seconds) {
+    dropBreak();
+    show();
+    const p = plan(text);
+    line = {...p, start: performance.now(), rate: p.total * speed / Math.max(seconds, 0.05), anchorIdx: 0, anchorT: 0, timed: true};
+    mode = "text";
+    paused = false;
+  }
+
   // the browser voice reports the word at charIndex starting now
   function boundary(charIndex) {
     if (!line || charIndex == null || charIndex >= line.text.length) return;
@@ -1188,7 +1198,10 @@ const RayFace = (() => {
   }
 
   function chunkEnd() {
-    if (mode === "text" && line) {
+    if (mode === "text" && line && line.timed) {       // the sound stopped: so does his mouth, at once
+      line = null;
+      level = 0;
+    } else if (mode === "text" && line) {
       const real = (performance.now() - line.start) / 1000 * line.rate;
       if (line.total > 0.6 && real > 0.3) speed = Math.max(0.6, Math.min(1.8, speed * 0.6 + (real / line.total) * 0.4));
       line = null;
@@ -1289,7 +1302,7 @@ const RayFace = (() => {
     return true;
   }
 
-  return {thinking, speakAudio, speakText, boundary, chunkEnd, pause, end, leave, listen, moodOf, cocoa, taskStart, taskTool,
+  return {thinking, speakAudio, speakText, speakTimed, boundary, chunkEnd, pause, end, leave, listen, moodOf, cocoa, taskStart, taskTool,
           taskError, work: startWork,
           // the Android voice drawer sets this: he stays after speaking instead of fading out (the website never does)
           set stay(on) { stay = !!on; },
