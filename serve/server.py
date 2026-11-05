@@ -351,6 +351,10 @@ RATE_MIN_SPAN_S = 0.25      # younger than this there is no rate yet: the mean s
 # server (the engine's main thread waits, untimed, for its next command): the engine is ended and the request fails;
 # the next request starts it again.  The config's "engine_silence_s" sets it (0: wait forever, as before).
 ENGINE_SILENCE_S = 300.0
+# #4271: a streaming client that stops reading (a hung process, a network that dropped) leaves the thread that writes to
+# it blocked once the socket buffers are full - and that thread holds the engine's turn.  A write that makes no progress
+# for this long ends the request as a disconnect (the engine is stopped, the turn given back).  0: no limit, as before.
+STREAM_WRITE_TIMEOUT_S = float(os.environ.get("STRATA_STREAM_WRITE_TIMEOUT_S", "60") or 0)
 # Disk sessions: the longest allowance an engine may announce (`SWAIT <phase> <s>`) for one step that blocks in a
 # single call (a file flush, the host->device transfer); the engine's own bound is the same (session_phase_limit_s).
 SESSION_WAIT_MAX_S = 3600
@@ -424,6 +428,15 @@ def calculate_start_wait(cfg: dict | None = None, model_path: str | None = None)
     if model_gb > 40.0:
         return min(MAX_START_WAIT, 600.0 + (model_gb - 40.0) * 8.0)
     return float(ENGINE_READY_S or 900.0)
+
+
+def batch_slots_on(engine) -> bool:
+    """Does this engine run requests in batch slots ("parallel", whose `BT` lines carry no LP lines)?"""
+    return any(int(getattr(e, "batch", 0) or 0) for e in (getattr(engine, "engines", None) or [engine]))
+
+
+def died_note(e: EngineDied) -> str:
+    return f"{e}; the next request restarts it" if getattr(e, "restarts", True) else str(e)
 
 
 # ------------------------------------------------------------------------------------------------ engines
@@ -710,6 +723,23 @@ def transient_start_failure(log: str | None, offset: int, elapsed_s: float, rc: 
     return not engine_lines and rc != 1 and not engine_crashed(rc)
 
 
+def end_leftover_engines(exe: str) -> None:
+    """Before an engine starts: end the ones a lost server left running (strata_control/procs.py)."""
+    if os.environ.get("STRATA_KEEP_LEFTOVERS") == "1":
+        return
+    try:
+        from strata_control import procs
+        say = lambda text: print(text, flush=True)        # noqa: E731
+        settle = float(os.environ.get("STRATA_LEFTOVER_SETTLE_S", "10") or 10)
+        stuck = [r["pid"] for r in procs.end_leftovers(say=say, settle=settle)["stuck"]]
+        stuck += [r["pid"] for r in procs.end_orphans(exe, say=say, settle=settle) if r["outcome"] == "stuck"]
+        if stuck:
+            print(f"[strata] WARNING: the engine from an earlier run (process {', '.join(map(str, stuck))}) was told to stop "
+                  f"but still holds its memory after {settle:.0f} s.", flush=True)
+    except Exception:
+        pass
+
+
 def echo_requests(log_path: str, offset: int) -> None:
     """STRATA_REQUEST_LINES=1: one stdout line per finished request, from the engine's own summary in its log.
 
@@ -817,6 +847,7 @@ class ConvCacheLog:
 
     def __init__(self):
         self.key, self.pos = None, 0
+        self.lock = threading.Lock()                    # polls come from several request / monitor threads at once
         self.reset()
 
     def reset(self):
@@ -824,7 +855,12 @@ class ConvCacheLog:
                       "last_tokens": None, "last_at": None}
 
     def poll(self, path, start) -> dict:
-        """The state after the log's new lines; `start` is where the engine's current run began in it."""
+        """The state after the log's new lines; `start` is where the engine's current run began in it.  One poll at a
+        time: a second one moved `pos` between the size check and the seek and raised ValueError (negative seek)."""
+        with self.lock:
+            return self._poll(path, start)
+
+    def _poll(self, path, start) -> dict:
         if not path or start is None:
             return dict(self.state)
         if self.key != (path, start):                   # another start of the engine: its cache starts empty
@@ -940,7 +976,7 @@ class StrataEngine:
 
     def __init__(self, exe: str, args: list[str], cwd: str | None = None, log: str | None = None,
                  env: dict | None = None, lazy: bool = False, cpus: list[int] | None = None, _attempt: int = 0,
-                 cfg: dict | None = None):
+                 cfg: dict | None = None, retry_args=None, **kw):
         self.cfg = cfg
         self.spawn = (exe, list(args), cwd, log, env, False, cpus)   # to start it again after it died (issue #27)
         self.session_save_reclaim = '--session-save-reclaim' in args
@@ -990,8 +1026,9 @@ class StrataEngine:
             pin["preexec_fn"] = lambda: os.sched_setaffinity(0, cpus)
         spawned_at = time.monotonic()
         self.proc = popen("the Strata engine", [exe, "--serve", *args], cwd=cwd, stdin=subprocess.PIPE,
-                          stdout=subprocess.PIPE, stderr=self.log, text=True, encoding="utf-8", bufsize=1, env=env, **pin)
+                          stdout=subprocess.PIPE, stderr=self.log, text=True, encoding="utf-8", errors="replace", bufsize=1, env=env, **pin)
         contain(self.proc)                               # ends with the server, however it ends (Windows)
+        proc = self.proc                                 # THIS start's process: a close() from another thread may set self.proc to None meanwhile (#4792)
         # the READY read has a timeout (#1317): the lines come from a thread, up to READY, so the rest of the stream
         # stays for _pump (one reader at a time)
         ready_q: queue.Queue = queue.Queue()
@@ -1023,21 +1060,21 @@ class StrataEngine:
         if self.max_context <= 0:
             if timed_out:                               # still loading, or hung: end it, so the turn is not held for good
                 try:
-                    self.proc.kill()
+                    proc.kill()
                 except OSError:
                     pass
             try:                                        # its pipes and our handle on its log (the log stays)
-                self.proc.wait(timeout=5)
-                self.proc.stdin.close()
-                self.proc.stdout.close()
+                proc.wait(timeout=5)
+                proc.stdin.close()
+                proc.stdout.close()
                 if log:
                     self.log.close()
             except (OSError, subprocess.TimeoutExpired):
                 pass
             if not timed_out and _attempt < START_RETRIES and \
-                    transient_start_failure(log, log_start, time.monotonic() - spawned_at, self.proc.returncode):
+                    transient_start_failure(log, log_start, time.monotonic() - spawned_at, proc.returncode):
                 wait_s = 2.0 * (2 ** _attempt)              # 2, 4, 8 s: the previous process's GPU queues go away
-                exit_words = engine_exit_words(self.proc.returncode)
+                exit_words = engine_exit_words(proc.returncode)
                 if start_log_marks(log, log_start):         # the runtime said so itself (hsa_exception ...)
                     print(f"[strata] the engine stopped while the GPU runtime was starting (most often right after "
                           f"another engine exited, whose GPU queues were still being released"
@@ -1055,7 +1092,7 @@ class StrataEngine:
                    "the engine exited before it was ready")
             # EngineDied, not bare RuntimeError: a request waiting on this load must end with a 503
             # through the request path's handler - a RuntimeError there left the turn with no answer (#1527)
-            note = "" if timed_out else start_exit_note(self.proc.returncode)
+            note = "" if timed_out else start_exit_note(proc.returncode)
             tail = start_log_tail(log, log_start)
             lines = [x for x in tail.split("\n")[2:] if x.strip()]
             if tail and lines and all(x.strip().startswith("[strata]") for x in lines):
@@ -1632,7 +1669,12 @@ class StrataEngine:
                     turn = False                        # the lines: not the engine this request was meant for
                 if not turn:
                     with self.slot_cv:
-                        self.slot_cv.wait(timeout=0.5)
+                        # #4738 (PR #4738's approach): the turn was read, and the lock given up, before this wait: a
+                        # notification sent in between is gone.  Read it again under the lock and only wait when this
+                        # request still has to.
+                        eligible = after_epoch is None or self.ctl_epoch > after_epoch or self.waiting <= 1
+                        if not eligible or not self.alive():
+                            self.slot_cv.wait(timeout=0.5)
                 if cancel.is_set():
                     return False
                 if time.monotonic() - beat >= 10.0:     # a heartbeat every 10 s, as the engine's own wait
@@ -1640,9 +1682,13 @@ class StrataEngine:
                     yield None
         finally:
             with self.slot_cv:
+                previous_waiting = self.waiting
                 self.waiting = max(0, self.waiting - 1)
                 if entry in self.wait_lens:
                     self.wait_lens.remove(entry)
+                if previous_waiting > 1 and self.waiting <= 1:
+                    # a waiter that leaves (cancelled, closed) can make another one the next in turn: tell it
+                    self.slot_cv.notify_all()
         with self.slot_cv:
             self.ctl_epoch += 1
             self.slot_cv.notify_all()
@@ -3831,6 +3877,24 @@ class Service:
                 with self.status_lock:
                     self.status["queued"] -= 1
 
+    def end_engine_if_unchanged(self, born) -> bool:
+        """End the engine after a request that ended without its end event (#3961), but only if it is still the engine process that request ran on
+        (`born`, the engine's gen) and nobody is on it: the turn is taken without waiting, and held while the engine is ended, so a request admitted
+        right after the lost one is never killed by it. A server with batch slots shares the engine between requests, so it is left alone. True when
+        the engine was ended (the next request then starts it again)."""
+        end = getattr(self.engine, "end_for_restart", None)
+        if end is None or born is None or batch_slots_on(self.engine):
+            return False
+        if not self.fifo.acquire(blocking=False):              # the next request is already generating on it
+            return False
+        try:
+            if getattr(self.engine, "gen", None) != born:      # it was ended or restarted since: that is another process
+                return False
+            end()
+            return True
+        finally:
+            self.fifo.release()
+
     UNLOAD_WAIT_S = 300.0       # #1997: POST /unload?wait=1 waits this long for the running turn (wait=<s> to choose)
 
     def unload_waiting(self, wait_s: float) -> str:
@@ -5366,7 +5430,10 @@ def openai_chunks(svc: Service, req: dict, ids, thinking, tools, max_new, cancel
     calls = 0
     streamed = {}                                  # tool call id -> index, for calls sent piece by piece
     finished = set()                               # ... and the ones whose final tool_call came (#211)
+    answered_done = False                          # the run's own end (its "done" event) arrived
+    born = getattr(svc.engine, "gen", None)        # the engine process this request is on (read again with every event: a start inside the run is its own)
     for kind, x in run if run is not None else svc.run(ids, thinking, tools, max_new, req, cancel, force=force, declared_only=True):
+        born = getattr(svc.engine, "gen", born)
         if kind == "ping":
             # a PP line: the prompt is being read and there is nothing to say yet.  It used to be only the SSE comment;
             # now it carries the progress when the client asked, and stays the comment when there is nothing to report.
@@ -5397,6 +5464,7 @@ def openai_chunks(svc: Service, req: dict, ids, thinking, tools, max_new, cancel
                                                           "arguments": json.dumps(ev.call.arguments, ensure_ascii=False)}}]})
                 calls += 1
         else:
+            answered_done = True
             # a streamed call without its final tool_call is one the output ended inside: not "tool_calls" (#211)
             whole = calls and streamed.keys() <= finished
             finish = "tool_calls" if whole and x["finish"] == "stop" else {"cancel": "stop"}.get(x["finish"], x["finish"])
@@ -5411,6 +5479,17 @@ def openai_chunks(svc: Service, req: dict, ids, thinking, tools, max_new, cancel
             if x.get("rejected_tool_calls"):
                 last["strata_rejected_tool_calls"] = x["rejected_tool_calls"]     # #3796: only when a call was refused as undeclared
             yield last
+    if not answered_done and not cancel.is_set():
+        # A generator that raised an unhandled exception inside svc.run (or an engine error that slipped through without a
+        # finish_reason, in 0.2 s, while the engine never logged the request: #3961) used to read to the client as an empty answer that worked, and
+        # /health stayed ok. It is an error now, counted in the log, so a client's retry can tell it from an answer.
+        print("[strata] a request ended without an answer and without a finish reason; it is answered as an error", flush=True)
+        # the engine is ended so "the next request restarts it" is true - but only that engine process, and only while nobody is on it (the turn is taken
+        # without waiting): this runs after the run released its turn, and a request admitted since must not be killed by it
+        restarts = svc.end_engine_if_unchanged(born)
+        err = EngineDied("the engine ended the request without an answer")
+        err.restarts = restarts
+        raise err
 
 
 def _is_json(text: str) -> bool:
@@ -6645,7 +6724,7 @@ def make_handler(svc: Service):
                                   "message": f"the request is malformed ({type(e).__name__}: {e})"}}
                 self._json(400, responses_error_body(body["error"]["message"]) if path == "/v1/responses" else body)
             except EngineDied as e:                          # before the answer started (not streamed)
-                body = {"error": {"type": "server_error", "message": f"{e}; the next request restarts it"}}
+                body = {"error": {"type": "server_error", "message": died_note(e)}}
                 if getattr(self, "answer_started", False):
                     self._note(error=body["error"])
                     self.wfile.write(b"data: " + json.dumps(body).encode() + b"\n\ndata: [DONE]\n\n")
@@ -6973,6 +7052,11 @@ def make_handler(svc: Service):
             self.send_header("X-Accel-Buffering", "no")   # nginx and similar proxies pass each event at once
             self._cors()
             self.end_headers()
+            if STREAM_WRITE_TIMEOUT_S > 0:
+                try:
+                    self.connection.settimeout(STREAM_WRITE_TIMEOUT_S)     # (#4271) a stuck write ends as OSError: disconnected
+                except OSError:
+                    pass
 
         def _capture(self, items, api):
             """Retain bounded input/output for the monitor without changing the API response (the items as they
@@ -7312,7 +7396,7 @@ def make_handler(svc: Service):
                 cancel.set()                                 # client went away: stop the engine
                 chunks.close()
             except (EngineDied, EngineStuck) as e:
-                err = {"error": {"type": "server_error", "message": f"{e}; the next request restarts it"}}
+                err = {"error": {"type": "server_error", "message": died_note(e)}}
                 self._note(error=err["error"])
                 try:
                     self.wfile.write(b"data: " + json.dumps(err).encode() + b"\n\ndata: [DONE]\n\n")
@@ -7445,7 +7529,7 @@ def make_handler(svc: Service):
                 cancel.set()
                 stream_chunks.close()
             except (EngineDied, EngineStuck) as e:           # mid-stream: say so, then end the stream properly
-                err = {"error": {"type": "server_error", "message": f"{e}; the next request restarts it"}}
+                err = {"error": {"type": "server_error", "message": died_note(e)}}
                 self._note(error=err["error"])
                 try:
                     self.wfile.write(b"data: " + json.dumps(err).encode() + b"\n\ndata: [DONE]\n\n")
@@ -7526,7 +7610,7 @@ def make_handler(svc: Service):
                     return self._json(502, responses_error_body(str(e), "server_error",
                                                                 code="structured_output_failed"))
                 except EngineDied as e:
-                    return self._json(503, responses_error_body(f"{e}; the next request restarts it", "server_error",
+                    return self._json(503, responses_error_body(died_note(e), "server_error",
                                                                 code="server_error"))
                 except EngineNonFinite as e:                 # #879, twice: not the request's fault
                     return self._json(503, responses_error_body(str(e), "server_error", code="server_error"))
@@ -7559,7 +7643,7 @@ def make_handler(svc: Service):
                 cancel.set()                                 # client went away: stop the engine
                 items.close()
             except EngineDied as e:                          # mid-stream: response.failed, then the stream ends
-                self._responses_failed(asm, f"{e}; the next request restarts it", "server_error", send)
+                self._responses_failed(asm, died_note(e), "server_error", send)
             except StructuredOutputError as e:
                 self._responses_failed(asm, str(e), "structured_output_failed", send)
             except ValueError as e:                          # the engine's ERR after the stream started
@@ -7680,7 +7764,7 @@ def make_handler(svc: Service):
                 cancel.set()
                 events.close()
             except EngineDied as e:                          # mid-stream: Anthropic's error event
-                err = {"type": "error", "error": {"type": "api_error", "message": f"{e}; the next request restarts it"}}
+                err = {"type": "error", "error": {"type": "api_error", "message": died_note(e)}}
                 self._note(error=err["error"])
                 self.wfile.write(b"event: error\ndata: " + json.dumps(err).encode() + b"\n\n")
             except ValueError as e:                          # the engine's ERR after the stream started
@@ -8217,6 +8301,17 @@ def default_model_name(cfg: dict) -> str:
 
 
 def main() -> int:
+    """The server.  Its console output goes through a bounded queue (serve/nonblocking_out.py, #4479 / #2481): a console
+    that stops taking output must not hold a request's turn, a cancel or an admission.  STRATA_BLOCKING_CONSOLE=1 turns
+    it off (testers)."""
+    if os.environ.get("STRATA_BLOCKING_CONSOLE") == "1":
+        return _main()
+    from serve.nonblocking_out import decoupled_console
+    with decoupled_console():
+        return _main()
+
+
+def _main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--engine", choices=["mock", "strata"], default="mock")
     ap.add_argument("--config", help="strata engine config (JSON: exe, args, cwd, tokenizer, model_name), "
