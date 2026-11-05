@@ -14,6 +14,9 @@ import com.damirl.ray.network.ChatDelta
 import com.damirl.ray.network.ChatMessage
 import com.damirl.ray.network.NetworkClient
 import com.damirl.ray.network.RayChatRepository
+import com.damirl.ray.tools.HttpPhoneRelayLink
+import com.damirl.ray.tools.PhoneToolRelay
+import com.damirl.ray.tools.PhoneTools
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -28,6 +31,10 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
     companion object {
         // the open drawer (the system overlay or RayVoiceActivity) closes itself with this; null when none is open
         @Volatile var closeOpen: (() -> Unit)? = null
+
+        // debug builds, from adb only (RayToolsReceiver): what the next drawer asks instead of listening.  Its answer
+        // isn't spoken, so a test can run at night with no headset; the trace has it
+        @Volatile var scriptedPrompt: String? = null
 
         /** Closes the open drawer (main thread): it covers Brave, whose Play button Ray must reach to start a song. */
         fun closeIfOpen(): Boolean {
@@ -44,12 +51,17 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
 
     private val networkClient = NetworkClient.shared
     private val chatRepository = RayChatRepository(networkClient)
+    // runs Ray's phone tools during a turn; nothing else does with the phone locked and away from home
+    private val phoneRelay by lazy {
+        PhoneToolRelay(HttpPhoneRelayLink(networkClient), PhoneTools(context.applicationContext)::execute)
+    }
     private var speechManager: SpeechRecognitionManager? = SpeechRecognitionManager(context)
     private var noSpeechRetries = 0
     private var askJob: Job? = null
     private var retryJob: Job? = null
     private var probeJob: Job? = null
     private var closed = false
+    private var silent = false                  // a scripted prompt: nothing is said aloud
 
     // UI state observable by Compose
     var phase by mutableStateOf(VoicePhase.LISTENING)
@@ -99,7 +111,15 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
         VoiceTrace.event("drawer_start")
         // while you speak; ask() waits for it, so the question goes over the route found now (LAN or the tunnel)
         probeJob = scope.launch { networkClient.probeAndSelectRoute() }
-        listen()
+        val scripted = scriptedPrompt.takeIf { com.damirl.ray.BuildConfig.DEBUG }
+        scriptedPrompt = null
+        silent = scripted != null
+        if (scripted != null) {
+            userPrompt = scripted
+            ask(scripted)
+        } else {
+            listen()
+        }
     }
 
     fun onMicTap() {
@@ -209,6 +229,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
 
         askJob = scope.launch {
             probeJob?.join()                                // the route the drawer is probing while you speak
+            val relay = launch { phoneRelay.run() }         // a child: closing the drawer stops it too
             var accumulated = ""
             var spokenFrom = 0          // read aloud: only what follows the last tool call (see below)
             var failed = false
@@ -267,6 +288,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
                 VoiceTrace.event("ask_unreached", "error" to (retryWith.message ?: retryWith.javaClass.simpleName))
                 networkClient.probeAndSelectRoute()
             }
+            relay.cancel()                                  // the turn is over: no more tool calls
 
             if (failed) return@launch
             phase = VoicePhase.IDLE
@@ -276,7 +298,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
             VoiceTrace.event("answer_done", "chars" to accumulated.length, "spoken_chars" to spoken.length,
                 "ms" to System.currentTimeMillis() - askedAt,
                 "text" to if (com.damirl.ray.BuildConfig.DEBUG) spoken.take(400) else null)
-            if (spoken.isNotBlank() && !closed) {
+            if (spoken.isNotBlank() && !closed && !silent) {
                 AudioPlaybackService.startSpeaking(context, spoken)
             }
         }

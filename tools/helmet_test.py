@@ -5,6 +5,8 @@
     python3 tools/helmet_test.py record [--steps baseline]   records while you do the steps it shows
     python3 tools/helmet_test.py restore                undoes the test-time phone settings (also done on exit)
     python3 tools/helmet_test.py probe [--modes vr,call,vr]  records the helmet's mic each way while you count aloud
+    python3 tools/helmet_test.py ask [--adb-off] "prompt"    one drawer turn without a voice (debug build); nothing is
+                                                             said aloud; prints what happened, from the app's trace
 
 You hold the helmet in front of the Blue Snowball and talk into the helmet's mic; the Snowball hears your voice and the
 helmet's speaker (Ray's answer, the helmet's own tones, music).  Meanwhile it records, into
@@ -32,6 +34,7 @@ import datetime
 import json
 import os
 import re
+import shlex
 import shutil
 import socket
 import subprocess
@@ -95,7 +98,14 @@ ROUND4 = [
     {"id": "tunnel-locked-music-1", "net": "mobile", "lock": "screen_off", "doze": True, "music": True, "prompt": "Tell me a short joke."},
     {"id": "tunnel-locked-music-2", "net": "mobile", "lock": "screen_off", "doze": True, "music": True, "prompt": "What's the date today?"},
 ]
-STEP_SETS = {"baseline": BASELINE, "recheck": RECHECK, "round2": ROUND2, "round3": ROUND3, "round4": ROUND4}
+# Phone tools as on the road: no adb fallback in tools/phone_mcp.py, so they go through the drawer's relay or not at all
+TOOLS = [
+    {"id": "tunnel-locked-battery", "net": "mobile", "lock": "screen_off", "adb_off": True, "prompt": "What's my battery?"},
+    {"id": "tunnel-locked-pause", "net": "mobile", "lock": "screen_off", "adb_off": True, "music": True, "prompt": "Pause the music."},
+    {"id": "tunnel-locked-skip", "net": "mobile", "lock": "screen_off", "adb_off": True, "music": True, "prompt": "Next song."},
+    {"id": "lan-locked-battery", "net": "wifi", "lock": "screen_off", "adb_off": True, "prompt": "What's my battery?"},
+]
+STEP_SETS = {"baseline": BASELINE, "recheck": RECHECK, "round2": ROUND2, "round3": ROUND3, "round4": ROUND4, "tools": TOOLS}
 SETUP = {
     "baseline": "Hold the helmet in front of the Snowball and talk into the helmet's mic; keep the phone on the desk.",
     "recheck": "Wear the helmet as when you ride, near the PC (the Snowball hears your voice); keep the phone on the "
@@ -104,6 +114,8 @@ SETUP = {
               "Wi-Fi yourself: the tool does it. Music steps: play a song in YouTube Music (Brave) first.",
     "round4": "Wear the helmet as when you ride, near the PC; keep the phone on the desk. Don't change the phone's "
               "Wi-Fi yourself: the tool does it. Every step: a song playing in YouTube Music (Brave), phone locked.",
+    "tools": "Wear the helmet as when you ride; keep the phone in your pocket if you can, locked. The tool turns the "
+             "phone's Wi-Fi off and on and the PC's adb fallback off. Music steps: play a song in YouTube Music first.",
     "round3": "Wear the helmet as when you ride, near the PC; keep the phone on the desk. Don't change the phone's "
               "Wi-Fi yourself: the tool does it. Music steps: play a song in YouTube Music (Brave) first; in the "
               "other steps pause it first.",
@@ -521,6 +533,55 @@ def lock_ok(state: dict, want: str) -> bool:
     return state["keyguard"] is True and state["wakefulness"] == "Awake"
 
 
+def adb_off() -> None:
+    """Phone tools as on the road, until restore(): tools/phone_mcp.py skips adb while the flag exists."""
+    note_pending(adb_off=True)
+    ADB_OFF_FLAG.touch()
+
+
+def trace_since(phone: Phone, since_ms: float) -> list[dict]:
+    """The app's trace events from since_ms (the phone's clock) on."""
+    out = sh(["adb", "-s", phone.serial, "exec-out", "run-as", PACKAGE, "cat", "files/voice_trace.jsonl"], 15)
+    events = []
+    for line in out.splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if ev.get("t", 0) >= since_ms:
+            events.append(ev)
+    return events
+
+
+def scripted_ask(phone: Phone, prompt: str, timeout: float = 120) -> int:
+    """One drawer turn opened the way the helmet opens it, with prompt in place of speech (a debug build, adb only)."""
+    since = (time.time() + (phone.clock_offset(3)["offset"] or 0)) * 1000
+    phone.shell(f"am broadcast -a {PACKAGE}.ACTION_SCRIPTED_PROMPT -n {PACKAGE}/.tools.RayToolsReceiver "
+                f"--es text {shlex.quote(prompt)}")
+    phone.shell(f"am start -a android.intent.action.VOICE_COMMAND -n {PACKAGE}/.assistant.RayAssistTrampolineActivity")
+    end = time.time() + timeout
+    events: list[dict] = []
+    while time.time() < end:
+        time.sleep(1)
+        events = trace_since(phone, since)
+        if any(e["ev"] in ("answer_done", "answer_error") for e in events):
+            time.sleep(0.5)                              # relay_stop follows
+            events = trace_since(phone, since)
+            break
+    phone.shell("input keyevent 4")                      # closes the drawer
+    if not events:
+        print("No trace: is a debug build installed?")
+        return 1
+    start = events[0]["up"]
+    keep = {"trigger", "drawer_shown", "route", "ask", "relay_start", "relay_poll_failed", "relay_call", "relay_result",
+            "relay_result_lost", "relay_stop", "answer_tool", "answer_error", "answer_done", "drawer_hidden"}
+    for e in events:
+        if e["ev"] in keep:
+            fields = {k: v for k, v in e.items() if k not in ("t", "up", "ev") and v is not None}
+            print(f"{(e['up'] - start) / 1000:7.2f} s  {e['ev']}  {json.dumps(fields, ensure_ascii=False)}")
+    return 0 if any(e["ev"] == "answer_done" for e in events) else 1
+
+
 def run_steps(phone: Phone, rec: Recording, steps: list[dict]) -> None:
     for n, step in enumerate(steps, 1):
         ensure_network(phone, rec, step["net"])
@@ -564,7 +625,9 @@ def run_steps(phone: Phone, rec: Recording, steps: list[dict]) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["check", "record", "restore", "probe"])
+    ap.add_argument("command", choices=["check", "record", "restore", "probe", "ask"])
+    ap.add_argument("prompt", nargs="?", help="ask: what to ask Ray")
+    ap.add_argument("--adb-off", action="store_true", help="ask: no adb fallback in phone_mcp.py during this turn")
     ap.add_argument("--serial", help="the phone's adb serial (default: its USB serial)")
     ap.add_argument("--steps", default="baseline", choices=sorted(STEP_SETS))
     ap.add_argument("--modes", default="vr,call,vr", help="probe: the link modes to test, in order")
@@ -579,6 +642,18 @@ def main() -> int:
     if args.command == "check":
         print(json.dumps(check(serial), indent=2))
         return 0
+    if args.command == "ask":
+        if not serial or not args.prompt:
+            print("ask needs the phone on USB and a prompt.")
+            return 1
+        phone = Phone(serial)
+        if args.adb_off:
+            adb_off()
+        try:
+            return scripted_ask(phone, args.prompt)
+        finally:
+            if args.adb_off:
+                restore(phone)
     if args.command == "probe":
         if not serial:
             print("No phone on USB.")
@@ -608,6 +683,8 @@ def main() -> int:
     note_pending(serial=serial, log_size=log_size(phone), battery=True)
     sh(["adb", "-s", serial, "logcat", "-G", TEST_LOG_SIZE])
     phone.shell("dumpsys battery unplug")
+    if any(step.get("adb_off") for step in steps):
+        adb_off()
     rec = Recording(phone, source, out)
     print(f"Recording into {out}")
     print(SETUP.get(args.steps, SETUP["baseline"]))

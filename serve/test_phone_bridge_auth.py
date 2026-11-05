@@ -6,8 +6,11 @@ Run from the repo root: python -m unittest serve.test_phone_bridge_auth
 """
 import json
 import sys
+import threading
+import time
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -50,6 +53,19 @@ class PhoneRelayNeedsTheKey(unittest.TestCase):
             with e:
                 return e.code, {}
 
+    def upload(self, name, key=None):
+        headers = {"Content-Type": "application/octet-stream"}
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        req = urllib.request.Request(f"{self.base}{server.PHONE_UPLOAD_PATH}?file={urllib.parse.quote(name)}",
+                                     method="POST", headers=headers, data=b"jpeg")
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            with e:
+                return e.code, {}
+
     def test_no_key_no_heartbeat(self):
         for method, path in (("GET", "/api/phone/status"), ("POST", "/api/phone/status"),
                              ("GET", "/api/phone/tool/pending")):
@@ -76,6 +92,61 @@ class PhoneRelayNeedsTheKey(unittest.TestCase):
         self.assertTrue(body["connected"])
         status, body = self.call("GET", "/api/phone/tool/pending", key=KEY)
         self.assertEqual((status, body.get("pending")), (200, None))
+
+    # the app's own paths: /v1/* is what passes Cloudflare Access with only the key (the voice drawer, phone locked)
+    def test_the_apps_paths_need_the_key(self):
+        self.assertEqual(self.call("GET", server.PHONE_PENDING_PATH)[0], 401)
+        self.assertEqual(self.call("POST", server.PHONE_RESULT_PATH, {"id": "c1", "result": "fake"})[0], 401)
+        self.assertFalse(server.PHONE_BRIDGE.get_status()["connected"])
+
+    def test_the_apps_paths_carry_a_tool_call(self):
+        bridge = server.PHONE_BRIDGE
+        self.assertEqual(self.call("GET", server.PHONE_PENDING_PATH, key=KEY)[0], 200)     # the heartbeat
+        self.assertTrue(bridge.get_status()["connected"])
+        answers = []
+        caller = threading.Thread(target=lambda: answers.append(bridge.enqueue_call("phone_get_battery", {}, 5.0)))
+        caller.start()
+        call = None
+        for _ in range(100):
+            call = self.call("GET", server.PHONE_PENDING_PATH, key=KEY)[1].get("pending")
+            if call:
+                break
+            time.sleep(0.01)
+        self.assertEqual(call["tool"], "phone_get_battery")
+        self.assertEqual(self.call("POST", server.PHONE_RESULT_PATH, {"id": call["id"], "result": "Battery: 86%"},
+                                   key=KEY)[0], 200)
+        caller.join(5)
+        self.assertEqual(answers, ["Battery: 86%"])
+
+    def test_a_slow_tool_outlives_the_other_pollers(self):
+        # the drawer's relay runs a photo for over 10 s while the web page keeps polling: its result still counts
+        bridge = server.PHONE_BRIDGE
+        with bridge.lock:
+            bridge.pending_calls["c1"] = {"id": "c1", "tool": "phone_camera_snap", "args": {},
+                                          "created": time.time() - 11, "event": threading.Event(), "result": None,
+                                          "dispatched": True}
+        self.assertIsNone(bridge.pop_pending_call())
+        self.assertIn("c1", bridge.pending_calls)
+
+    def test_a_call_nobody_took_still_expires(self):
+        bridge = server.PHONE_BRIDGE
+        with bridge.lock:
+            bridge.pending_calls["c1"] = {"id": "c1", "tool": "phone_get_battery", "args": {},
+                                          "created": time.time() - 11, "event": threading.Event(), "result": None,
+                                          "dispatched": False}
+        self.assertIsNone(bridge.pop_pending_call())
+        self.assertNotIn("c1", bridge.pending_calls)
+
+    def test_the_apps_upload_only_takes_phone_photos(self):
+        for name, want in (("phone-photos/RAY_SNAP_1.jpg", True), ("phone-photos/a/b.jpg", True),
+                           ("phone-photos/../secrets.txt", False), ("notes.txt", False), ("phone-photos", False),
+                           ("", False), ("/phone-photos/a.jpg", False)):
+            with self.subTest(name=name):
+                self.assertEqual(server.is_phone_photo(name), want)
+        status, _ = self.upload("notes.txt", key=KEY)
+        self.assertEqual(status, 403)
+        status, _ = self.upload("phone-photos/x.jpg")
+        self.assertEqual(status, 401)
 
 
 class PageRefusesFrames(PhoneRelayNeedsTheKey):
