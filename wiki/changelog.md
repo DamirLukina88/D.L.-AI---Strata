@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-11-05 (night):** Update. decisions/github-fork-and-sanitization.md. (Agent: Antigravity)
 - **2026-11-05:** Update. decisions/rx-7600-xt-cachyos-deployment.md. (Agent: Antigravity)
 - **2026-11-05:** Ingestion. artifacts/upstream-v0-2-11-review-and-benchmark-2026-11-05.md. (Agent: Antigravity)
 - **2026-11-05:** Ingestion. artifacts/ok-ray-detection-test-2026-11-05.md. (Agent: Claude Code)

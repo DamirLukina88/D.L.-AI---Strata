@@ -90,3 +90,4 @@ The customized Strata platform (featuring the authenticated Claude Code Web Term
 1. User, chat, 2026-10-13.
 
 - 2026-11-05: pushed from `4e3ca937` (32 commits including this wiki one, fast-forward, `main` only, no force): the helmet voice fixes, the Opus voice, phone tools without adb, one assistant volume and the panda's mouth sync. `scan_secrets_in_text` over the 65 changed files: 0 findings (it returns `(True, None)` when clean, and a planted fake key was caught). Private-string check: only the generic `~/.local/share/dl-ai/helmet-tests` path.
+- 2026-11-05 (night): Pushed 4 commits (`41c57bb1..HEAD`, fast-forward, `main` only, no force): the Ok Ray hotword listener and speech gate, upstream v0.2.11 server robustness/streaming timeouts, C++/HIP Q5_0 dot precision fix, and paired A/B benchmark docs. `scan_secrets_in_text` ran across all changed files: 0 findings.
