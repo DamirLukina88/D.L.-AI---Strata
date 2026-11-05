@@ -103,6 +103,7 @@ TOOLS = [
     {"id": "tunnel-locked-battery", "net": "mobile", "lock": "screen_off", "adb_off": True, "prompt": "What's my battery?"},
     {"id": "tunnel-locked-pause", "net": "mobile", "lock": "screen_off", "adb_off": True, "music": True, "prompt": "Pause the music."},
     {"id": "tunnel-locked-skip", "net": "mobile", "lock": "screen_off", "adb_off": True, "music": True, "prompt": "Next song."},
+    {"id": "tunnel-unlocked-pause", "net": "mobile", "lock": "unlocked", "adb_off": True, "music": True, "prompt": "Pause the music."},
     {"id": "lan-locked-battery", "net": "wifi", "lock": "screen_off", "adb_off": True, "prompt": "What's my battery?"},
 ]
 STEP_SETS = {"baseline": BASELINE, "recheck": RECHECK, "round2": ROUND2, "round3": ROUND3, "round4": ROUND4, "tools": TOOLS}
