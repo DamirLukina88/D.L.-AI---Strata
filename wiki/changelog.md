@@ -5,7 +5,7 @@ description: "Record of every change the agent made to this wiki"
 status: active
 tags: [meta, changelog]
 created: 2026-10-05
-updated: 2026-11-03
+updated: 2026-11-05
 last_verified: 2026-10-05
 ---
 
@@ -15,6 +15,12 @@ Newest entries first.
 
 ## Log
 
+- **2026-11-05:** Update. artifacts/helmet-voice-test-2026-11-04.md, decisions/cloudflare-access-login-auth.md, decisions/ray-hybrid-webview-companion-and-phone-mcp.md. (Agent: Claude Code)
+- **2026-11-05:** Ingestion. artifacts/ray-voice-opus-2026-11-04.md. (Agent: Claude Code)
+- **2026-11-04:** Ingestion. artifacts/helmet-voice-test-2026-11-04.md. (Agent: Claude Code)
+- **2026-11-04:** Update. decisions/home-assistant-strata-mcp.md, decisions/ray-hybrid-webview-companion-and-phone-mcp.md. (Agent: Claude Code)
+- **2026-11-03:** Upstream v0.2.10 review and port plan. (Agent: Claude Code)
+- **2026-11-03:** Ingestion. artifacts/upstream-v0-2-10-review-2026-11-03.md. (Agent: Claude Code)
 - **2026-11-03:** Update. decisions/cloudflare-tunnel-remote-exposure.md. (Agent: Claude Code)
 - **2026-11-03:** Ingestion. artifacts/strata-audit-2026-11.md. (Agent: Claude Code)
 - **2026-11-03:** Update. decisions/ray-hybrid-webview-companion-and-phone-mcp.md, artifacts/session-transcript-2026-11-02-companion-handoff.md, decisions/github-fork-and-sanitization.md. (Agent: Claude Code)

@@ -81,8 +81,12 @@ The customized Strata platform (featuring the authenticated Claude Code Web Term
 - [GitHub Fork Sanitization and Push Plan](../artifacts/github-fork-sanitization-and-push-plan.md)
 - [Public Secret Leak and Rotation (2026-10-13)](secret-leak-rotation-2026-10.md)
 
+- 2026-11-03: pushed `ead9228e..4e3ca937` (10 commits: phone camera photos, gallery tool, YouTube Music control). Secret scan: only the known fake OAuth fixtures in `tools/test_dl_mcp.py` (already on the fork, not added); private-string check clean.
+
 ## Sources
 - GitHub Fork: [https://github.com/DamirLukina88/D.L.-AI---Strata](https://github.com/DamirLukina88/D.L.-AI---Strata)
 - Upstream: [https://github.com/Niko1221/Strata](https://github.com/Niko1221/Strata)
 - Systemd user service: `~/.config/systemd/user/claude-terminal.service`
 1. User, chat, 2026-10-13.
+
+- 2026-11-05: pushed from `4e3ca937` (32 commits including this wiki one, fast-forward, `main` only, no force): the helmet voice fixes, the Opus voice, phone tools without adb, one assistant volume and the panda's mouth sync. `scan_secrets_in_text` over the 65 changed files: 0 findings (it returns `(True, None)` when clean, and a planted fake key was caught). Private-string check: only the generic `~/.local/share/dl-ai/helmet-tests` path.

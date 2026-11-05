@@ -93,6 +93,14 @@ Home Assistant Core is installed on dedicated storage (`/mnt/data/homeassistant`
    - Now 34 patterns. Unambiguous words stay as whole words (Home Assistant, hass, Bambu, 3D print, filament, AMS unit/slot/tray/spool, Zigbee, Xiaomi, purifier, humidity, Gree, the Croatian words). Lights, cameras, plugs, sockets, printers, temperature and the air conditioners need context: a switching verb, on/off, a room, a snapshot or stream, a print word, or a room or sensor temperature. Game-camera and UI words (`camera position`, `light mode`) are excluded.
    - Backup of the old file: `mcp.json.bak-20261021-ha-triggers`. Test: class `HomeAssistantTriggers` in `tools/test_dl_mcp.py`, which reads this machine's config: 16 code phrases must not match and 19 smart-home requests must. It fails on the old config.
 
+5. **Tuya, Met.no and Radio Browser "Failed to set up" after a boot (fixed 2026-11-04)**:
+   - The unit had `After=network-online.target` without `Wants=`, so nothing pulled the target in and HA started
+     before the network (06:18:41 on 2026-11-03, DNS not ready). Tuya, Met.no and Radio Browser failed with a
+     name-resolution error that HA does not retry, so Ray could not switch any Tuya light or plug.
+   - Fix: `Wants=network-online.target` added to `/etc/systemd/system/homeassistant.service`. A failed entry comes
+     back without a restart via `POST /api/config/config_entries/entry/<entry_id>/reload`.
+   - Google Home was never an HA integration here (the `google_translate` entry is TTS); lights go through Tuya.
+
 ## Verification
 
 - Automated test suite: `python3 -m unittest tools/test_homeassistant_mcp.py -v` (6 tests passing: handshake, error handling, tool dispatch, area registry & filtering, outlet power enrichment & units, mock REST endpoints).
