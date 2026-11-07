@@ -5,7 +5,7 @@ description: "Record of every change the agent made to this wiki"
 status: active
 tags: [meta, changelog]
 created: 2026-10-05
-updated: 2026-11-05
+updated: 2026-11-07
 last_verified: 2026-10-05
 ---
 
@@ -15,6 +15,18 @@ Newest entries first.
 
 ## Log
 
+- **2026-11-07:** Artifact Backup. Saved Ray curled-in-tail sleeping and waking animation walkthrough. (Agent: Antigravity)
+- **2026-11-07:** Ingestion. artifacts/ray-lazy-load-sleeping-animation-walkthrough-2026-11-07.md. (Agent: Antigravity)
+- **2026-11-07:** Update. Implemented Ray's natural curled-in-bushy-tail sleeping and late-paw-yawn waking animations (`serve/web/rayface.js`, `serve/web/app.js`, `tools/make_ray_media.py`, `docs/media/ray/sleeping.gif`, `docs/media/ray/waking.gif`) and documented loading lifecycle in `decisions/ray-talking-face.md`. (Agent: Antigravity)
+- **2026-11-07:** Update. Submitted upstream community benchmark PR #5486 (pr/community-benchmark-rx-7600-xt, 4219bff0) and recorded link in upstream-v0-2-12-review-and-benchmark-2026-11-07.md, decisions/cloudflare-access-login-auth.md. (Agent: Antigravity)
+- **2026-11-07:** Linting. Refreshed index with --write-index, resolved orphan warning by cross-linking v0.2.12 plan and benchmark, verified 0 errors across 136 pages. (Agent: Antigravity)
+- **2026-11-07:** Artifact Backup. Saved strata-v0212-port-and-validation-plan-2026-11-07.md and upstream-v0-2-12-review-and-benchmark-2026-11-07.md. (Agent: Antigravity)
+- **2026-11-07:** Ingestion. artifacts/strata-v0212-port-and-validation-plan-2026-11-07.md. (Agent: Antigravity)
+- **2026-11-07:** Update. decisions/rx-7600-xt-cachyos-deployment.md. (Agent: Antigravity)
+- **2026-11-07:** Ingestion. artifacts/upstream-v0-2-12-review-and-benchmark-2026-11-07.md. (Agent: Antigravity)
+- **2026-11-07:** Artifact Backup. Saved Upstream PR #5477 and Issue #4677 submission report; updated fork decision. (Agent: Antigravity)
+- **2026-11-07:** Update. decisions/github-fork-and-sanitization.md. (Agent: Antigravity)
+- **2026-11-07:** Ingestion. artifacts/upstream-pr-5477-and-issue-4677-submission-2026-11-07.md. (Agent: Antigravity)
 - **2026-11-05:** Linting. Resolved orphan warnings for ray-voice-opus and strata-audit, trimmed v0.2.10 description, refreshed index. (Agent: Antigravity)
 - **2026-11-05:** Update. artifacts/upstream-v0-2-10-review-2026-11-03.md. (Agent: Antigravity)
 - **2026-11-05 (night):** Update. decisions/github-fork-and-sanitization.md. (Agent: Antigravity)

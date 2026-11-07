@@ -1,20 +1,24 @@
 ---
 title: "Ray's Avatar: Red Panda on the Input Box (Thinking and Talking)"
 type: decision
-description: "Dot-matrix red panda on the Code tab input box: thinks while the model works, animates to Piper server audio, About switches, and avatar history"
+description: "Dot-matrix red panda on the Code input box: thinking, Piper server audio talking, curled sleeping while unloaded, and avatar evolution."
 status: active
 tags: [web, tts, ray, code-tab]
 created: 2026-10-28
-updated: 2026-11-01
-last_verified: 2026-11-01
+updated: 2026-11-07
+last_verified: 2026-11-07
 ---
 
 # Ray's Avatar: Red Panda on the Input Box (Thinking and Talking)
 
 ## Summary
 
-**Current (2026-10-28):**
+**Current (2026-11-07):**
 - **Look:** Ray is a red panda drawn in dots (`serve/web/rayface.js`), sitting on the top-left edge of the Code tab's input box, with no box around him.
+- **Sleeping & Waking (`live.state === "unloaded"`):**
+  - While the model is unloaded, Ray stays visible on the input box curled into a natural red panda ball — russet C-shaped back on the left, head bowed face-down on the upper right with white fuzzy ears visible, and nose/mouth/eyes tucked inside his striped bushy tail wrapped across the bottom and right, with two blue `ZzZ` floaters rising above his head.
+  - He remains curled up asleep while model weights load from disk into RAM/VRAM (`"Loading model…"` in the header pill), then plays a `2.6 s` waking animation as soon as loading completes: uncurling and lifting his head from his tail, stretching with a wide yawn, and bringing his left paw up a beat late to cover his open mouth before transitioning to `think`, `warm` (if pre-loaded with no active prompt), or `leave`.
+  - Clicking sleeping Ray twitches his ears and calls `POST /load` to pre-load the model in the background.
 - **Thinking:** paw on his chin, with question marks rising.
   - A typed prompt shows him from Send until the first answer text (he stays through tool calls), then a quick fade.
   - A spoken prompt shows him thinking, then talking to the Piper server audio, then a warm goodbye.
@@ -271,6 +275,28 @@ Added 2026-10-28 in serve/web/rayface.js (commit 616ec4c6). Choices made with th
 
 - **The user's request:** "The Rey avatar border on white is to thin. Thicken it up."
 - **How:** In `serve/web/rayface.js`, light-theme detection (`lightPage`) renders an outline around lit and dark dots for contrast against bright backgrounds. The stroke width was increased from `Math.max(1.5, P * 0.32)` to `Math.max(2.5, P * 0.78)` of dot pitch `P` (with minimum 2.5px), providing crisp, bold contrast and clear definition on white and light themes.
+
+## Curled-in-tail sleeping and waking while model is unloaded (2026-11-07)
+
+- **The user's request:** When the model is unloaded (`lazy_load` / `idle_unload_s`), show Ray curled up and sleeping naturally like a real red panda — head tucked into his bushy tail, with no human props (no blanket, pillow, or hat) — and wake him with a stretch and a yawn where his paw moves up a beat late to cover his open mouth.
+- **Visual design (`serve/web/rayface.js`):**
+  - Driven by `pose.curl` (`0..1`), `pose.sleepEye` (`0..1`), and `pose.yawn` (`0..1`); when all three are `0`, `pandaCell` is byte-identical to the upright sitting render.
+  - As `curl` approaches `1`: his body rounds into a C-shaped russet back (`C.orange`) on the left/top with a dark tucked shoulder (`C.arm`) in the middle; his head moves to the upper-right and bows face-down (`bow = Math.max(0, (curl - 0.15) / 0.85)`) so his eyes, nose, and mouth drop below and behind the tail while his two white fuzzy ears (`earCell`, drawn in front of the tail when `curl > 0.35`) and a small peek of his left white cheek remain visible above the tail.
+  - His thick striped bushy tail (`tailCell` front pass when `curl > 0.25`) wraps across the bottom from left to right and curves up the right side, with radial segments (`seg % 4 === 1` dark rings) and a soft inner seam (`C.shade`).
+  - Two well-spaced sky-blue `ZzZ` floaters (`Z_SM`, `Z_MD`, `Z_LG` in `floaters()`) drift up and right on a `3.6 s` cycle, and his left ear gives a tiny dream-twitch every `6.5 s`.
+- **Loading lifecycle & state machine (`serve/web/app.js` + `serve/web/rayface.js`):**
+  - **Initial load while unloaded:** `render(m)` sees `live.state === "unloaded"` on the first poll and calls `RayFace.sleep(true)` (appears immediately curled up).
+  - **Live idle unload:** When `live.state` transitions from `"idle"` to `"unloaded"`, `render(m)` calls `RayFace.sleep(false)` for a `1.0 s` curl-to-sleep transition (head bows into tail, tail wraps around, then `ZzZ` begins).
+  - **While weights load from disk (`ensure_loaded`):** Sending a prompt or clicking sleeping Ray sets `modelLoading = true` and shows `"Loading model…"` in the header pill (`#pill`) and Monitor state label (`#state-label`), while Ray stays curled up asleep until weights finish loading (`live.state` leaves `"unloaded"` or the first `"thinking"` / `"tool_call"` / `"text"` event arrives).
+  - **Waking (`RayFace.wake(into)`):** Plays a `2.6 s` sequence — `0.0–0.65 s` uncurling and lifting his head out of his tail with closed eyes (`sleepEye = 1`), `0.65–1.95 s` stretching his ears back and opening his mouth in a wide yawn (`pose.yawn`, showing pink tongue `C.tongue`) while his left paw rushes up a beat late (`t = 0.90–1.28 s`, `yawnPaw` in `pandaCell`) to cover his open mouth, and `1.95–2.60 s` closing the yawn, blinking his eyes open, and transitioning to `wakeNext` (`"think"`, `"warm"` when pre-loaded into idle with no active prompt, or `"leave"` if fast reply text already started so the yawn is never cut off mid-animation).
+  - **Click to wake:** Clicking `#ray-face` in `mode === "sleep"` twitches his ears and invokes `RayFace.onWake` (`POST /load`).
+  - **Media:** `tools/make_ray_media.py` renders `docs/media/ray/sleeping.gif` and `docs/media/ray/waking.gif`.
+  - **Walkthrough:** [Ray Curled-in-Tail Sleeping and Late-Paw-Yawn Waking Animation](../artifacts/ray-lazy-load-sleeping-animation-walkthrough-2026-11-07.md).
+
+## Related
+
+- [Ray Curled-in-Tail Sleeping and Late-Paw-Yawn Waking Animation](../artifacts/ray-lazy-load-sleeping-animation-walkthrough-2026-11-07.md)
+- [Ray: Assistant Name, Voice and Persona](ray-assistant-persona.md)
 
 ## Sources
 

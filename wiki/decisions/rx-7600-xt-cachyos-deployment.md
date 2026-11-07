@@ -121,8 +121,18 @@ The host machine features a high-capacity second NVMe SSD on `/mnt/data` (460 GB
 - **Paired A/B Benchmark:** 4 alternating legs under `MemorySwapMax=0` verified 0 swap usage, 0 errors, flat chat decode (22.5–23.0 tok/s), +1.1% 4K prompt gain (295.6 vs 292.4 tok/s), and intact agent conversation cache hit rate (67.1%).
 - Full report: [Upstream Strata v0.2.11 Review and A/B Benchmark (2026-11-05)](../artifacts/upstream-v0-2-11-review-and-benchmark-2026-11-05.md).
 
+### 2026-11-07: Upstream v0.2.12 Sync, Correctness Guards and A/B Benchmark
+
+- **Engine Correctness Guards:** Integrated MMQ row table margin guard (`#5108`, `mmq_ids_table_rows`) in `src/prefill/prefill.cpp` and `src/prefill/moe_mmq.cu` to prevent page-boundary over-read faults, and Adaptive PCIe overlap Flag-B ordering (`#5096`, `raise_flag_b_ordered`) in `src/core/verify.cpp` to prevent empty plans from overtaking in-flight DMA expert uploads.
+- **Parser & Tooling Synchronization:** Integrated tail lookback bounds (`_PREFIX_LOOKBACK = 256`, `#5409`), MCP suffix member matching (`#5281`), Anthropic parallel tool result pairing by `tool_use_id` (`#5096`), and programmatic tool prefixes (`#4751`). Verified with 70/70 unit tests passing.
+- **Engine Deployment:** Built native HIP binary `build-hip/strata` for `gfx1102` and deployed to `engine/strata` (`0.1.44.1+0.2.12-fixes`). Rollback backup preserved at `engine/strata.bak-20261107`.
+- **4-Leg Interleaved A/B Benchmark:** Verified under `MemorySwapMax=0`: 0 swap usage (0 B), 0 errors, 4K prompt prefill 306.3 tok/s (+0.4%), 16K prompt prefill 333.2 tok/s, chat decode 24.2–26.3 tok/s, and preserved 67.2% agent cache hit rate.
+- Full report: [Upstream Strata v0.2.12 Review and A/B Benchmark (2026-11-07)](../artifacts/upstream-v0-2-12-review-and-benchmark-2026-11-07.md).
+
 ## Related
 
+- Upstream v0.2.12 Benchmark: [Upstream Strata v0.2.12 Review and A/B Benchmark (2026-11-07)](../artifacts/upstream-v0-2-12-review-and-benchmark-2026-11-07.md)
+- Upstream v0.2.12 Plan: [Strata v0.2.12 Port and Validation Plan](../artifacts/strata-v0212-port-and-validation-plan-2026-11-07.md)
 - Lifecycle: [Lazy Loading and GUI Force Restart](lazy-loading-and-gui-force-restart.md)
 - Optimization: [Strata v0.1.43 Performance Switches and Memory Hygiene](strata-v0-1-43-performance-and-memory-optimizations.md)
 - Engine: [Strata](../entities/strata.md)
