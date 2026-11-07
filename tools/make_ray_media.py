@@ -71,7 +71,8 @@ const R = new Function(src.replace("return {thinking, speakAudio",
        if ("mem" in o) Object.assign(mem, o.mem);
        if ("moodAt" in o) { moodAt = o.moodAt; mood = "neutral"; }
      },
-     get mood() { return mood; }},
+     get mood() { return mood; },
+     get mode() { return mode; }},
    thinking, speakAudio`) + "; return RayFace;")();
 const X = R.__x;
 
@@ -125,7 +126,7 @@ function scene(ms, mode, setup, extra, before) {
     X.step(t);
     if (n % 4) continue;
     let qa = 0, qy = 0;
-    if (mode === "think" && !X.pose.cup && !X.pose.work) {
+    if (X.mode === "think" && !X.pose.cup && !X.pose.work) {
       const qt = (t / 1000 % 2.6) / 2.6;
       qa = X.pose.paw > 0.5 ? Math.sin(Math.PI * qt) : 0; qy = 3 - qt * 2;
     }
@@ -158,6 +159,8 @@ for (const name of job.home) {
   out["home-" + name] = scene(len(W.intro) + len(W.core) + len(W.outro) + 1800, "think",
     () => X.set({work: {name, t0: 0}, task: {at: 0, tools: 0, kind: null}}));
 }
+out.sleeping = scene(4200, "sleep", () => R.sleep(true));
+out.waking = scene(3600, "wake", () => R.wake("think"));
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -285,6 +288,8 @@ def main() -> int:
     sheet.save(OUT / "moods.png", optimize=True)
 
     gif(res["thinking"], OUT / "thinking.gif")
+    gif(res["sleeping"], OUT / "sleeping.gif")
+    gif(res["waking"], OUT / "waking.gif")
     if "talking" in res:
         gif(res["talking"], OUT / "talking.gif")
     gif([g for g, _ in res["goodbye"]], OUT / "goodbye.gif", alphas=[a for _, a in res["goodbye"]])

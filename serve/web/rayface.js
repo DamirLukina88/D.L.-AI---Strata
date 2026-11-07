@@ -78,88 +78,165 @@ const RayFace = (() => {
   //   for the usual arms)
   const newPose = () => ({dy: 0, rot: 0, sx: 1, sy: 1, blink: 0, eye: 1, happy: 0.1, lookX: 0, lookY: 0,
                           ears: 0, earL: 0, earR: 0, mouth: 0, paw: 0, tilt: 0, breath: 0, tail: 0, glow: 0,
-                          cup: null, pawL: null, pawR: null, tongue: 0, work: null});
+                          cup: null, pawL: null, pawR: null, tongue: 0, work: null,
+                          curl: 0, sleepEye: 0, yawn: 0});
   const inEll = (x, y, cx, cy, rx, ry) => ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2;
 
-  // the head, in its own coordinates: centre (22, 14.6), chin near y 24
-  function headCell(hx, hy, s) {
-    const hd = inEll(hx, hy, 22, 14.6, 14, 9.6);
-    if (hd < 1) {
-      for (const side of [-1, 1]) {
-        const ex = 22 + side * 7.6 + s.lookX * 0.8, ey = 13.6 + s.lookY * 0.6;
-        // white brow marks above the eyes, slanted (outer end higher), lifting with the ears
-        const bxc = 22 + side * 7.4, byc = 9.4 - s.ears * 0.5 - (side > 0 ? s.earR : s.earL) * 0.4;
-        if (inEll(hx, hy + (hx - bxc) * side * 0.3, bxc, byc, 2, 1.1) < 1) return C.white;
-        // eyes: large round navy dots with a small white highlight; a happy squint turns them into soft arcs
-        const r = 2.15 * s.eye, ry = Math.max(0.4, r * (1 - s.blink) * (1 - 0.5 * s.happy));
-        if (s.happy > 0.55 && s.blink < 0.5) {
-          const ar = Math.hypot((hx - ex) / 2.2, (hy - (ey + 1.2)) / 1.9);
-          if (hy < ey + 1.1 && Math.abs(ar - 1) < 0.38) return C.navy;
-        } else if (inEll(hx, hy, ex, ey + s.happy * 0.5, r, ry) < 1) {
-          if (s.blink < 0.5 && s.eye > 0.6 && inEll(hx, hy, ex - 0.8 + s.lookX * 0.3, ey - 0.9, 0.6, 0.6) < 1) return C.white;
-          return C.navy;
-        }
-      }
-      // nose, a short line down from it, and a small frown; the frown opens only as an accent
-      if (inEll(hx, hy, 22, 16.1, 1.55, 0.85) < 1) return C.navy;
-      if (s.mouth > 0.15) {
-        if (inEll(hx, hy, 22, 19.3, 1.1 + s.mouth * 0.5, 0.6 + s.mouth * 0.7) < 1) return C.navy;
-        if (hy > 16.8 && hy < 18.4 && Math.abs(hx - 22) < 0.6) return C.navy;
-      } else {
-        if (hy > 16.8 && hy < 18.9 && Math.abs(hx - 22) < 0.6) return C.navy;
-        if (hy >= 18.9 && hy < 20 && Math.abs(Math.abs(hx - 22) - 1.5) < 0.6) return C.navy;
-      }
-      // white muzzle, white cheek patches at the sides, a dusky blush between eye and cheek
-      // concentration: the tip of his tongue at the corner of his mouth
-      if (s.tongue > 0.5 && inEll(hx, hy, 23.6, 20.6, 0.95, 0.8) < 1) return C.tongue;
-      if (inEll(hx, hy, 22, 18.7, 5.6, 4.5) < 1) return C.white;
-      for (const side of [-1, 1]) {
-        if (inEll(hx, hy, 22 + side * 12.4, 18.6, 3.6, 4.2) < 1) return C.white;
-        if (inEll(hx, hy, 22 + side * 10.6, 16.4, 1.6 + s.glow * 0.5, 0.8 + s.glow * 0.3) < 1) return C.blush;
-      }
-      if (hd > 0.72 && hy > 19) return C.shade;                 // the darker lower rim
-      if (hd < 0.45 && hy < 9.5) return C.light;                // the lit top of the head
-      return C.orange;
-    }
-    // a small tuft of darker fur on top of the head, right of centre
-    if (hy > 3.6 && hy < 5.4 && hx > 24.2 && hx < 28.4 && ((hx - 24.2) % 1.4) < 0.9 - (5.4 - hy) * 0.25) return C.shade;
-    // ears: big, white, rounded triangles leaning outward, with orange fur at their base
+  function earCell(hx, hy, s, bow) {
     for (const side of [-1, 1]) {
       const lift = s.ears + (side > 0 ? s.earR : s.earL);
-      const bx = 22 + side * 10.4, by = 7.8;
-      const a = side * (0.55 - lift * 0.2);                // lean outward; a droop leans them further out and down
+      const bx = 22 + side * (10.4 + ((side < 0 ? 6.8 : 5.8) - 10.4) * bow);
+      const by = 7.8 + ((side < 0 ? 12.6 : 14.0) - 7.8) * bow;
+      const a = side * (0.55 + ((side < 0 ? 0.68 : 0.90) - 0.55) * bow - lift * 0.2);
       const ca = Math.cos(a), sa = Math.sin(a);
-      const ux = (hx - bx) * ca + (hy - by) * sa, uy = -(hx - bx) * sa + (hy - by) * ca;   // ear space, tip up (-y)
-      const h = 7 + lift * 0.8;
+      const ux = (hx - bx) * ca + (hy - by) * sa, uy = -(hx - bx) * sa + (hy - by) * ca;
+      const h = 7 - 0.8 * bow + lift * 0.8;
       if (uy < 1.5 && uy > -h) {
-        const half = 4.1 * Math.sqrt(Math.max(0, 1 + uy / h)) + 0.3;   // a rounded tip
-        if (Math.abs(ux) < half) return uy > -2.2 ? C.orange : C.white;
+        const half = (4.1 - 0.6 * bow) * Math.sqrt(Math.max(0, 1 + uy / h)) + 0.3;
+        if (Math.abs(ux) < half) {
+          if (bow > 0.35) {
+            if (uy > 0.4) return C.shade;
+            if (uy > -0.8 && Math.abs(ux) < 1.25) return uy > -0.1 ? C.paw : C.light;
+            return C.white;
+          }
+          return uy > -2.2 ? C.orange : C.white;
+        }
       }
     }
     return null;
   }
 
-  // the tail: a thick curve from the hip out to the right and up, orange with dark rings, swaying about its root
-  function tailCell(x, y, s) {
-    const bx = 27.5, by = 34.5;
+  // the head, in its own coordinates: centre (22, 14.6), chin near y 24
+  function headCell(hx, hy, s) {
+    const bow = s.curl || 0;
+    if (bow > 0.35) {
+      const ec = earCell(hx, hy, s, bow);
+      if (ec) return ec;
+    }
+    const hd = inEll(hx, hy, 22, 14.6, 14 - 2.6 * bow, 9.6 - 0.1 * bow);
+    if (hd < 1) {
+      const fy = bow ? hy - 10.2 * (bow ** 1.15) : hy;
+      if (bow < 0.75) {
+        for (const side of [-1, 1]) {
+          const ex = 22 + side * (7.6 - 1.6 * bow) + s.lookX * 0.8, ey = 13.6 + s.lookY * 0.6;
+          // white brow marks above the eyes, slanted (outer end higher), lifting with the ears
+          const bxc = 22 + side * (7.4 - 1.8 * bow), byc = 9.4 + 2.5 * bow - s.ears * 0.5 - (side > 0 ? s.earR : s.earL) * 0.4;
+          if (bow < 0.65 && inEll(hx, fy + (hx - bxc) * side * 0.3, bxc, byc, 2, 1.1) < 1) return C.white;
+          // eyes: large round navy dots with a small white highlight; a happy squint turns them into soft arcs
+          const r = 2.15 * s.eye, ry = Math.max(0.4, r * (1 - s.blink) * (1 - 0.5 * s.happy));
+          if (s.sleepEye > 0.5) {
+            const ar = Math.hypot((hx - ex) / 2.2, (fy - (ey - 0.7)) / 1.85);
+            if (fy > ey - 0.6 && Math.abs(ar - 1) < 0.38) return C.navy;
+          } else if (s.happy > 0.55 && s.blink < 0.5) {
+            const ar = Math.hypot((hx - ex) / 2.2, (fy - (ey + 1.2)) / 1.9);
+            if (fy < ey + 1.1 && Math.abs(ar - 1) < 0.38) return C.navy;
+          } else if (inEll(hx, fy, ex, ey + s.happy * 0.5, r, ry) < 1) {
+            if (s.blink < 0.5 && s.eye > 0.6 && inEll(hx, fy, ex - 0.8 + s.lookX * 0.3, ey - 0.9, 0.6, 0.6) < 1) return C.white;
+            return C.navy;
+          }
+        }
+        // nose, a short line down from it, and a small frown; the frown opens only as an accent (or wide on a yawn)
+        if (inEll(hx, fy, 22, 16.1, 1.55, 0.85) < 1) return C.navy;
+        if (s.yawn > 0.1) {
+          const rxM = 1.2 + s.yawn * 1.6, ryM = 0.7 + s.yawn * 1.6, cyM = 19.3 + s.yawn * 0.5;
+          if (inEll(hx, fy, 22, cyM, rxM, ryM) < 1) {
+            if (fy > cyM + 0.2 && inEll(hx, fy, 22, cyM + ryM * 0.45, rxM * 0.75, ryM * 0.6) < 1) return C.tongue;
+            return C.navy;
+          }
+          if (fy > 16.8 && fy < 18.2 && Math.abs(hx - 22) < 0.6) return C.navy;
+        } else if (s.mouth > 0.15) {
+          if (inEll(hx, fy, 22, 19.3, 1.1 + s.mouth * 0.5, 0.6 + s.mouth * 0.7) < 1) return C.navy;
+          if (fy > 16.8 && fy < 18.4 && Math.abs(hx - 22) < 0.6) return C.navy;
+        } else {
+          if (fy > 16.8 && fy < 18.9 && Math.abs(hx - 22) < 0.6) return C.navy;
+          if (fy >= 18.9 && fy < 20 && Math.abs(Math.abs(hx - 22) - 1.5) < 0.6) return C.navy;
+        }
+        // concentration: the tip of his tongue at the corner of his mouth
+        if (s.tongue > 0.5 && inEll(hx, fy, 23.6, 20.6, 0.95, 0.8) < 1) return C.tongue;
+      }
+      // white muzzle, white cheek patches at the sides, a dusky blush between eye and cheek
+      if (inEll(hx, fy, 22, 18.7, 5.6, 4.5) < 1) return C.white;
+      for (const side of [-1, 1]) {
+        const cheekY = 18.6 - (side < 0 ? 5.0 * bow : 2.5 * bow);
+        const cheekX = 22 + side * (12.4 + ((side < 0 ? 8.6 : 8.0) - 12.4) * bow);
+        if (inEll(hx, fy, cheekX, cheekY, 3.6 + 0.2 * bow, 4.2 + 0.4 * bow) < 1) return C.white;
+        if (bow < 0.6 && inEll(hx, fy, 22 + side * 10.6, 16.4, 1.6 + s.glow * 0.5, 0.8 + s.glow * 0.3) < 1) return C.blush;
+      }
+      if (bow > 0.35) {
+        if (hy < 9.6 && hd < 0.65) return C.light;
+        if (hy > 19.0 && Math.abs(hx - 21.5) < 4.5) return hy > 20.4 ? C.white : C.light;
+        if (hy > 12.0 && hy < 20.0 && Math.abs(hx - 21.8) < 5.2) {
+          if (Math.floor(Math.abs(hx - 21.8) * 1.6 + (hy - 12.0) * 0.7) % 3 === 0) return C.shade;
+        }
+        if (hd > 0.78 && hy > 14.5) return C.shade;
+        return C.orange;
+      }
+      if (hd > 0.72 && fy > 19) return C.shade;                 // the darker lower rim
+      if (hd < 0.45 && fy < 9.5) return C.light;                // the lit top of the head
+      return C.orange;
+    }
+    // a small tuft of darker fur on top of the head, right of centre
+    if (bow <= 0.35 && hy > 3.6 && hy < 5.4 && hx > 24.2 && hx < 28.4 && ((hx - 24.2) % 1.4) < 0.9 - (5.4 - hy) * 0.25) return C.shade;
+    // ears: big, white, rounded triangles leaning outward, with orange fur at their base
+    if (bow <= 0.35) return earCell(hx, hy, s, bow);
+    return null;
+  }
+
+  // the tail: a thick curve from the hip out to the right and up, orange with dark rings, swaying about its root;
+  // when curled up asleep, wraps across the bottom front and up the right side in front of his bowed snout
+  function tailCell(x, y, s, frontPass = false) {
+    const curl = s.curl || 0;
+    if (!curl) {
+      if (frontPass) return null;
+      const bx = 27.5, by = 34.5;
+      let best = 1e9, bu = 0;
+      for (let k = 0; k <= 24; k++) {
+        const u = k / 24, a = s.tail * u;
+        const tx = 11 * u, ty = -5.5 * u ** 1.4;               // the curve before sway
+        const px = bx + tx * Math.cos(a) - ty * Math.sin(a), py = by + tx * Math.sin(a) + ty * Math.cos(a);
+        const fur = 0.35 * Math.sin(Math.atan2(y - py, x - px) * 5 + u * 9);   // a tufted edge
+        const d = Math.hypot(x - px, y - py) - (3.9 - 0.6 * u + fur);
+        if (d < best) { best = d; bu = u; }
+      }
+      if (best > 0.15) return null;
+      if (bu > 0.9) return C.dark;                              // a dark tip
+      return Math.floor(bu * 5 + 0.5) % 2 ? C.dark : C.orange;
+    }
+    if (frontPass && curl < 0.25) return null;
+    const cx = 23.3, cy = 24.4 - s.breath * 0.12;
     let best = 1e9, bu = 0;
-    for (let k = 0; k <= 24; k++) {
-      const u = k / 24, a = s.tail * u;
-      const tx = 11 * u, ty = -5.5 * u ** 1.4;               // the curve before sway
-      const px = bx + tx * Math.cos(a) - ty * Math.sin(a), py = by + tx * Math.sin(a) + ty * Math.cos(a);
-      const fur = 0.35 * Math.sin(Math.atan2(y - py, x - px) * 5 + u * 9);   // a tufted edge
-      const d = Math.hypot(x - px, y - py) - (3.9 - 0.6 * u + fur);
+    for (let k = 0; k <= 34; k++) {
+      const u = k / 34, a = s.tail * u;
+      const tx = 11 * u, ty = -5.5 * u ** 1.4;
+      const sitX = 27.5 + tx * Math.cos(a) - ty * Math.sin(a);
+      const sitY = 34.5 + tx * Math.sin(a) + ty * Math.cos(a);
+      const ang = 0.22 + (Math.PI + 0.40 - 0.22) * u;
+      const curlX = cx - 13.5 * Math.cos(ang), curlY = cy + 8.6 * Math.sin(ang);
+      const px = sitX + (curlX - sitX) * curl;
+      const py = sitY + (curlY - sitY) * curl + Math.sin(curl * Math.PI) * 2.0 * (1 - u);
+      const rad = (3.9 - 0.6 * u) + ((4.45 - 0.55 * (u - 0.45) ** 2) - (3.9 - 0.6 * u)) * curl;
+      const fur = 0.35 * Math.sin(Math.atan2(y - py, x - px) * 6 + u * 11);
+      const d = Math.hypot(x - px, y - py) - (rad + fur);
       if (d < best) { best = d; bu = u; }
     }
     if (best > 0.15) return null;
-    if (bu > 0.9) return C.dark;                              // a dark tip
+    if (curl > 0.25) {
+      const innerSeam = x > 13.5 && x < 33.8 && y < 29.0;
+      if (best > -0.38) return innerSeam ? C.shade : C.dark;
+      const ringVal = Math.sin(bu * Math.PI * 6.5 - 0.3);
+      if (ringVal > 0.22 && bu < 0.90) return best > -1.6 ? C.brown : C.shade;
+      if (best < -1.7) return C.light;
+      return C.orange;
+    }
+    if (bu > 0.89) return C.dark;
     return Math.floor(bu * 5 + 0.5) % 2 ? C.dark : C.orange;
   }
 
   // the whole panda: head (with its own nod, tilt and squash about the neck), body, arms, feet and tail
   function pandaCell(x, y, s) {
-    // during a cocoa break: dark paws, then the mug, then the forearms, all in front of him
-    if (s.pawL || s.pawR || s.cup || s.work) {
+    const curl = s.curl || 0;
+    // during a cocoa break or work: dark paws, then the mug, then the forearms, all in front of him
+    if ((s.pawL && (s.cup || s.work || s.pawR)) || s.pawR || s.cup || s.work) {
       for (const p of [s.pawL, s.pawR]) {
         if (!p) continue;
         const pd = inEll(x, y, p.x, p.y + s.dy * 0.3, 2.4, 2.1);
@@ -178,44 +255,78 @@ const RayFace = (() => {
         if (pd < 1) return pd > 0.6 ? C.brown : C.paw;
       }
     }
-    // the raised paw is in front of everything
-    const pawX = 15.6 + s.paw * 2.6, pawY = 31.8 - s.paw * 8.8;
-    if (s.paw > 0.05 && !s.pawL) {
+    // the raised paw (covering his mouth on a yawn or resting on his chin while thinking) is in front of everything
+    const soloPawL = s.pawL && !s.cup && !s.work && !s.pawR;
+    if (soloPawL || (s.paw > 0.05 && !s.pawL)) {
+      const pawX = soloPawL ? s.pawL.x : 15.6 + s.paw * 2.6;
+      const pawY = soloPawL ? s.pawL.y : 31.8 - s.paw * 8.8;
       const pd = inEll(x, y, pawX, pawY + s.dy * 0.5, 2.8, 2.2);
       if (pd < 1) return pd > 0.6 ? C.brown : C.paw;
       // the forearm from the shoulder up to the paw
       const ax = 14.6, ay = 30, vx = pawX - ax, vy = pawY - ay, len = Math.hypot(vx, vy) || 1;
       const t = Math.max(0, Math.min(1, ((x - ax) * vx + (y - ay) * vy) / (len * len)));
-      if (Math.hypot(x - ax - vx * t, y - ay - vy * t) < 2.3) return C.paw;
+      const dArm = Math.hypot(x - ax - vx * t, y - ay - vy * t);
+      if (dArm < 2.3) return soloPawL && dArm > 1.7 ? C.dark : C.paw;
     }
     // the head: grid -> head space (head centre 22, 14.6 sits at 21, 15.5), undoing nod, tilt and squash
-    let px = x - 21, py = y - 24.9 - s.dy - s.breath * 0.25;
-    const c = Math.cos(-s.rot), sn = Math.sin(-s.rot);
+    let px = x - (21 + 3.2 * curl), py = y - (24.9 + 5.6 * curl) - s.dy + s.breath * (0.25 + 0.25 * curl);
+    const rot = s.rot + 0.25 * curl;
+    const c = Math.cos(-rot), sn = Math.sin(-rot);
     [px, py] = [px * c - py * sn, px * sn + py * c];
-    const head = headCell(px / s.sx + 22, py / s.sy + 24, s);
+    const hxH = px / s.sx + 22, hyH = py / s.sy + 24;
+    // when curled up, keep the two white fuzzy ears in front of the tail, and wrap the bushy tail in front of the bowed snout
+    if (curl > 0.35) {
+      const ec = earCell(hxH, hyH, s, curl);
+      if (ec) return ec;
+    }
+    if (curl >= 0.25) {
+      const ct = tailCell(x, y, s, true);
+      if (ct && (y > 25.5 || x > 32.0 || x < 13.5)) return ct;
+    }
+    const head = headCell(hxH, hyH, s);
     if (head) return head;
-    // feet, forward at the bottom, with light pads
-    for (const side of [-1, 1]) {
-      const fx = 21 + side * 5.6, fy = 37.4;
-      if (inEll(x, y, fx, fy, 3.4, 2.3) < 1) {
-        if (inEll(x, y, fx, fy + 0.6, 1.4, 0.8) < 1) return C.light;           // the big pad
-        if (inEll(x, y, fx + side * 1.6, fy - 0.7, 0.6, 0.5) < 1) return C.light; // a toe
-        return C.paw;
+    // feet and resting arms (tucked smoothly inside the ball when curled up asleep)
+    if (curl < 0.55) {
+      const tuck = curl ? ease(curl / 0.55) : 0;
+      for (const side of [-1, 1]) {
+        const fx = 21 + side * (5.6 - 1.5 * tuck), fy = 37.4 - 4.2 * tuck;
+        if (inEll(x, y, fx, fy, 3.4, 2.3) < 1) {
+          if (inEll(x, y, fx, fy + 0.6, 1.4, 0.8) < 1) return C.light;           // the big pad
+          if (inEll(x, y, fx + side * 1.6, fy - 0.7, 0.6, 0.5) < 1) return C.light; // a toe
+          return C.paw;
+        }
+      }
+      for (const side of [-1, 1]) {
+        if (side < 0 && (s.paw > 0.05 || s.pawL)) continue;
+        if (side > 0 && s.pawR) continue;
+        const ad = inEll(x, y, 21 + side * (6.4 - 1.5 * tuck), 30.4 - 1.5 * tuck + s.breath * 0.1, 2.5, 3.6);
+        if (ad < 1) return ad > 0.62 ? C.dark : C.paw;
       }
     }
-    // arms resting on the belly (the left one only while it is not raised)
-    for (const side of [-1, 1]) {
-      if (side < 0 && (s.paw > 0.05 || s.pawL)) continue;
-      if (side > 0 && s.pawR) continue;
-      const ad = inEll(x, y, 21 + side * 6.4, 30.4 + s.breath * 0.1, 2.5, 3.6);
-      if (ad < 1) return ad > 0.62 ? C.dark : C.paw;
+    // the body: brown belly when sitting; C-shaped russet back and dark tucked shoulder on the left/top when curled
+    if (!curl) {
+      const by = 31.2 - s.breath * 0.15;
+      const bd = inEll(x, y, 21, by, 10.2, 7 * (1 + s.breath * 0.02));
+      const tuft = 0.07 * Math.sin(Math.atan2(y - by, x - 21) * 11);              // fur at the edge
+      if (bd < 1 + tuft) return bd > 0.82 + tuft ? C.dark : C.brown;
+      return tailCell(x, y, s, false);
     }
-    // the body: brown, darker at its edge, breathing
-    const by = 31.2 - s.breath * 0.15;
-    const bd = inEll(x, y, 21, by, 10.2, 7 * (1 + s.breath * 0.02));
-    const tuft = 0.07 * Math.sin(Math.atan2(y - by, x - 21) * 11);              // fur at the edge
-    if (bd < 1 + tuft) return bd > 0.82 + tuft ? C.dark : C.brown;
-    return tailCell(x, y, s);
+    const bx = 21 - 2.2 * curl, by = 31.2 - 8.4 * curl - s.breath * (0.15 + 0.35 * curl);
+    const rx = (10.2 + 1.2 * curl) * (1 + s.breath * 0.03 * curl);
+    const ry = (7 + 2.8 * curl) * (1 + s.breath * (0.02 + 0.03 * curl));
+    const bd = inEll(x, y, bx, by, rx, ry);
+    const tuft = 0.07 * Math.sin(Math.atan2(y - by, x - bx) * 11);
+    if (bd < 1 + tuft) {
+      if (bd > 0.84 + tuft) return C.dark;
+      if (curl > 0.35) {
+        const shD = inEll(x, y, bx - 1.4, by - 0.2, 4.6, 5.8);
+        if (shD < 1 && bd < 0.62) return shD < 0.6 ? C.dark : C.brown;
+        if ((x < bx + 1.5 || y < by - 2.5) && bd > 0.45) return (y < by - 3.8 || x < bx - 6.0) ? C.light : C.orange;
+        return bd > 0.25 ? C.orange : C.shade;
+      }
+      return C.brown;
+    }
+    return tailCell(x, y, s, false);
   }
 
   // the mug, on whole cells around its centre (9 x 8, a handle on the right) so it never shimmers as it moves.  In front
@@ -776,13 +887,19 @@ const RayFace = (() => {
     return cy >= 0 && cy < 7 && cx >= 0 && cx < 5 && QMARK[cy][cx] === "1";
   }
 
+  // small "z" / "Z" glyphs for the sleeping state
+  const Z_SM = ["111", "010", "111"];
+  const Z_MD = ["1111", "0010", "0100", "1111"];
+  const Z_LG = ["11111", "00010", "00100", "01000", "11111"];
+
   // ---------------------------------------------------------------------------------------------------------------
-  let el = null, canvas = null, g = null, raf = 0, visible = false, hideTimer = 0, warmTimer = 0, onStop = null;
+  let el = null, canvas = null, g = null, raf = 0, visible = false, hideTimer = 0, warmTimer = 0, onStop = null, onWake = null;
   const geo = {pitch: 3, cols: COLS, rows: ROWS, offX: 0, offY: 0, laidW: 0, laidH: 0};
   const pose = newPose();
   let target = calm("neutral");
   let stay = false;                          // see the stay setter at the end
-  let level = 0, paused = false, mode = "idle";   // "think" | "audio" | "text" | "warm" | "leave" | "idle"
+  let level = 0, paused = false, mode = "idle";   // "sleep" | "wake" | "think" | "audio" | "text" | "warm" | "leave" | "idle"
+  let sleepAt = 0, sleepClock0 = 0, sleepImmediate = true, wakeAt = 0, wakeNext = "think";
   let analyser = null, tbuf = null;
   let line = null;                            // the chunk being spoken: {text, times[], amp[], sentences[], total, …}
   let audioText = null, audioStart = 0, audioDur = 0, audioCtx = null;
@@ -802,15 +919,32 @@ const RayFace = (() => {
     target = calm(name);
   }
 
+  function updateA11y() {
+    if (!el) return;
+    const label = mode === "sleep" ? "Wake Ray up (load model into memory)" : "Stop reading aloud";
+    el.title = label;
+    el.setAttribute("aria-label", label);
+  }
+
+  function onActivate() {
+    if (mode === "sleep") {
+      mem.twitchStart = performance.now();
+      if (onWake) onWake();
+      return;
+    }
+    if (mode === "wake") return;
+    if (onStop) onStop();
+  }
+
   function mount() {
     if (el) return true;
     el = document.getElementById("ray-face");
     if (!el) return false;
     canvas = el.querySelector("canvas");
     g = canvas.getContext("2d");
-    el.addEventListener("click", () => onStop && onStop());
+    el.addEventListener("click", onActivate);
     el.addEventListener("keydown", (e) => {
-      if ((e.key === "Enter" || e.key === " ") && onStop) { e.preventDefault(); onStop(); }
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onActivate(); }
     });
     return true;
   }
@@ -912,14 +1046,75 @@ const RayFace = (() => {
     pose.breath = Math.sin(now / 1000 * Math.PI * 2 / 4.2);           // a 4.2 s breath
     const tw = now - mem.twitchStart;
     const twitch = tw >= 0 && tw < 260 ? Math.sin(tw / 260 * Math.PI) : 0;
+
+    if (mode === "sleep") {
+      const st = (now - sleepAt) / 1000;
+      const c = sleepImmediate ? 1 : ease(Math.min(1, st / 1.0));
+      pose.curl = c; pose.sleepEye = c > 0.2 ? 1 : 0; pose.yawn = 0;
+      pose.paw = 0; pose.pawL = null; pose.pawR = null; pose.cup = null; pose.work = null;
+      pose.dy = 0; pose.sy = 1; pose.sx = 1; pose.rot = 0; pose.ears = -0.2 * c;
+      pose.earL = mem.twitchSide < 0 ? 0.35 * twitch : 0;
+      pose.earR = mem.twitchSide > 0 ? 0.35 * twitch : 0;
+      return;
+    }
+    if (mode === "wake") {
+      const wt = (now - wakeAt) / 1000;
+      if (wt < 1.1) {
+        const p = wt / 1.1, e = ease(p);
+        pose.curl = 1 - e;
+        pose.sleepEye = p < 0.35 ? 1 : 0;
+        pose.blink = p >= 0.35 ? Math.sin(p * Math.PI) * 0.5 : 0;
+        pose.eye = 0.7 + 0.2 * e; pose.happy = 0.5 - 0.25 * e; pose.ears = -0.2 * (1 - e);
+        pose.dy = 0; pose.sy = 1; pose.sx = 1; pose.rot = 0; pose.yawn = 0;
+        pose.paw = 0; pose.pawL = null; pose.pawR = null; pose.cup = null; pose.work = null;
+        return;
+      }
+      if (wt < 2.6) {
+        const p = (wt - 1.1) / 1.5;
+        const yp = p < 0.55 ? p / 0.55 : (1 - p) / 0.45, ypE = ease(yp);
+        const ym = p < 0.28 ? ease(p / 0.28) : p < 0.68 ? 1 : ease((1 - p) / 0.32);
+        let pawL = null;
+        if (p >= 0.20 && p < 0.46) {
+          const pe = ease((p - 0.20) / 0.26);
+          pawL = {x: 14.6 + (21.2 - 14.6) * pe, y: 30.4 + (20.0 - 30.4) * pe};
+        } else if (p >= 0.46 && p < 0.72) {
+          pawL = {x: 21.2, y: 20.0};
+        } else if (p >= 0.72) {
+          const pe = ease((p - 0.72) / 0.28);
+          const toX = wakeNext === "think" ? 18.2 : 14.6, toY = wakeNext === "think" ? 23.0 : 30.4;
+          pawL = {x: 21.2 + (toX - 21.2) * pe, y: 20.0 + (toY - 20.0) * pe};
+        }
+        pose.curl = 0; pose.sleepEye = 0; pose.blink = 0;
+        pose.dy = -0.8 * ypE; pose.sy = 1 + 0.07 * ypE; pose.sx = 1 / pose.sy;
+        pose.yawn = ym; pose.happy = 0.88 * ym + 0.1 * (1 - ym);
+        pose.eye = 0.95 - 0.2 * ym; pose.ears = 0.3 * ypE;
+        pose.paw = 0; pose.pawL = pawL; pose.pawR = null; pose.rot = 0;
+        return;
+      }
+      pose.curl = 0; pose.sleepEye = 0; pose.yawn = 0; pose.pawL = null;
+      if (wakeNext === "leave") {
+        mode = "think"; updateA11y(); leave(); return;
+      }
+      if (wakeNext === "warm") {
+        mode = "think"; updateA11y(); end(true); return;
+      }
+      mode = "think";
+      updateA11y();
+      thinkAt = now;
+      pose.paw = 1; pose.paw_v = 0;
+      target = calm("neutral");
+      breakDue = !lastHadBreak && !calmMotion() && Math.random() < BREAK_CHANCE ? thinkAt + BREAK_AFTER : Infinity;
+      lastHadBreak = false;
+    }
+
     const t = (now - thinkAt) / 1000;
 
     // thinking: paw to the chin, eyes up and to the side, drifting; a small slow tilt
-    let tgt = think ? {...target, lookX: 0.7 + 0.25 * Math.sin(t / 2.4), lookY: -0.75, tilt: -0.06 + 0.03 * Math.sin(t / 3.1)} : target;
+    let tgt = think || mode === "think" ? {...target, lookX: 0.7 + 0.25 * Math.sin(t / 2.4), lookY: -0.75, tilt: -0.06 + 0.03 * Math.sin(t / 3.1)} : target;
     // a cocoa break, once its time has come in this think
     // a long task: a round of work (instead of a cocoa break), then 20 s of plain thinking, then the next pick
-    const due = think && !calmMotion() && task.at > 0 && (now - task.at >= WORK_AFTER || task.tools >= WORK_TOOLS);
-    if (!think) work = null;
+    const due = (think || mode === "think") && !calmMotion() && task.at > 0 && (now - task.at >= WORK_AFTER || task.tools >= WORK_TOOLS);
+    if (mode !== "think") work = null;
     else if (homeDue && !calmMotion()) {
       if (brk && sip) mugOut = {cup: sip.cup, t0: now};               // the mug goes, the panel comes
       brk = null; sip = null;
@@ -933,7 +1128,7 @@ const RayFace = (() => {
     let wp = work && workPhase(WORKS[work.name], (now - work.t0) / 1000);
     if (work && !wp) { work = null; workRestUntil = now + WORK_REST * 1000; }
     wf = wp ? WORKS[work.name].frame(wp, now) : null;
-    if (think && !brk && !work && now >= breakDue) startBreak(now);
+    if (mode === "think" && !brk && !work && now >= breakDue) startBreak(now);
     sip = brk ? breakAt(STYLES[brk.style], brk.phases, (now - brk.t0) / 1000, now) : null;
     if (brk && !sip) brk = null;
     if (sip) {
@@ -953,7 +1148,8 @@ const RayFace = (() => {
     pose.work = wf;
     const f = (sip && sip.face) || (wf && wf.face) || {};
     pose.tongue = f.tongue || 0;
-    spring(pose, "paw", think ? 1 : 0, 0.08, 0.75);
+    pose.curl = 0; pose.sleepEye = 0; pose.yawn = 0;
+    spring(pose, "paw", mode === "think" ? 1 : 0, 0.08, 0.75);
 
     // squash and stretch (volume kept), the nod, the settle
     spring(pose, "sy", 1 - 0.035 * level, 0.25, 0.62);
@@ -967,7 +1163,7 @@ const RayFace = (() => {
     spring(pose, "ears", tgt.ears, 0.04, 0.82);
     const wig = f.wiggle || 0;                                         // the ears take turns after an "ahh"
     spring(pose, "earL", 0.18 * stressK + (mem.twitchSide < 0 ? 0.5 * twitch : 0) + 0.5 * Math.max(0, wig), 0.18, 0.68);
-    spring(pose, "earR", 0.25 * stressK + (think ? 0.2 : 0) + (mem.twitchSide > 0 ? 0.5 * twitch : 0) + 0.5 * Math.max(0, -wig), 0.18, 0.68);
+    spring(pose, "earR", 0.25 * stressK + (mode === "think" ? 0.2 : 0) + (mem.twitchSide > 0 ? 0.5 * twitch : 0) + 0.5 * Math.max(0, -wig), 0.18, 0.68);
     spring(pose, "tail", 0.1 * Math.sin(now / 1600) - 0.12 * Math.exp(-(now - mem.stressAt - 120) / 300) * (now > mem.stressAt + 120 ? 1 : 0), 0.05, 0.85);
     spring(pose, "lookX", tgt.lookX + mem.glance.x, 0.08, 0.8);
     spring(pose, "lookY", tgt.lookY + mem.glance.y, 0.08, 0.8);
@@ -992,6 +1188,30 @@ const RayFace = (() => {
   // sparkles.  On a light page white turns warm grey or amber, which would otherwise vanish
   function floaters(now, light) {
     const out = [];
+    if (mode === "sleep" || mode === "wake") {
+      const zFade = mode === "sleep"
+        ? (sleepImmediate ? 1 : Math.max(0, Math.min(1, ((now - sleepAt) / 1000 - 0.7) / 0.3)))
+        : Math.max(0, 1 - (now - wakeAt) / 900);
+      if (zFade > 0.02) {
+        const ts = (now - sleepClock0) / 1000, cycle = 4.2;
+        const rgb = light ? [2, 132, 199] : [56, 189, 248];
+        for (const off of [0, 2.1]) {
+          const p = (((ts + off) % cycle) + cycle) % cycle / cycle;
+          if (p > 0.88) continue;
+          const pn = p / 0.88;
+          const fadeIn = Math.min(1, pn / 0.18), fadeOut = Math.max(0, Math.min(1, (1 - pn) / 0.25));
+          const a = fadeIn * fadeOut * 0.88 * zFade;
+          if (a < 0.05) continue;
+          const glyph = pn < 0.33 ? Z_SM : pn < 0.66 ? Z_MD : Z_LG;
+          const cy = 11.5 - pn * 11.5, cx = 34.5 + pn * 6.0 + Math.sin(pn * Math.PI * 2) * 0.8;
+          for (let gy = 0; gy < glyph.length; gy++) {
+            for (let gx = 0; gx < glyph[gy].length; gx++) {
+              if (glyph[gy][gx] === "1") out.push({x: Math.floor(cx + gx), y: Math.floor(cy + gy), rgb, a});
+            }
+          }
+        }
+      }
+    }
     if (pose.cup && pose.cup.sc > 0.3) {
       const ts = now / 1000, top = pose.cup.y - 5 * pose.cup.sc;
       const heat = Math.min(1, (pose.cup.sc - 0.3) / 0.7) * (1 + 0.6 * (sip ? sip.puff : 0)), wind = sip ? sip.wind : 0;
@@ -1069,7 +1289,7 @@ const RayFace = (() => {
       g.fill();
     }
     // while thinking, a question mark every 2.6 s rises beside his head and fades (no outline, no backing)
-    const thinkingNow = pose.paw > 0.5 && (sip ? sip.q : !mugOut) && !wf;
+    const thinkingNow = mode === "think" && pose.paw > 0.5 && (sip ? sip.q : !mugOut) && !wf;
     const qt = ((now - thinkAt) / 1000 % 2.6) / 2.6, qa = thinkingNow ? Math.sin(Math.PI * qt) : 0, qy = 3 - qt * 2;
     if (qa > 0.25) {
       g.fillStyle = qa > 0.6 ? C.white : C.rim;
@@ -1109,15 +1329,19 @@ const RayFace = (() => {
     if (composer) el.style.setProperty("--ray-face-bottom", `${composer.offsetHeight - 3}px`);
   }
 
-  function show() {
+  function show(asleep = false) {
     if (!mount()) return;
     clearTimeout(hideTimer); clearTimeout(warmTimer);
     if (visible && el.classList.contains("is-on")) return;
     place();
     mood = "neutral"; moodAt = 0; target = calm("neutral");
     const now = performance.now();
-    // anticipation: he arrives a little stretched and raised, and settles
-    Object.assign(pose, newPose(), {dy: -1.2, sy: 1.06, sx: 1 / 1.06, earL: 0.4, earR: 0.4});
+    if (asleep) {
+      Object.assign(pose, newPose());
+    } else {
+      // anticipation: he arrives a little stretched and raised, and settles
+      Object.assign(pose, newPose(), {dy: -1.2, sy: 1.06, sx: 1 / 1.06, earL: 0.4, earR: 0.4});
+    }
     Object.assign(mem, {wasTalking: false, lastLoud: now, blinkAt: now - 2000, nextIdleBlink: now + 2500, stressAt: -1e9,
                         settleAt: -1e9, twitchAt: now + 2500, twitchStart: -1e9, glance: {x: 0, y: 0}, glanceNext: {x: 0, y: 0}});
     el.hidden = false;
@@ -1130,13 +1354,52 @@ const RayFace = (() => {
 
   // --- what the web app calls ---
 
+  // the model is unloaded: he curls into a tight ball with his head bowed into his bushy tail and sleeps
+  function sleep(immediate = false) {
+    if ((mode === "audio" || mode === "text") && !immediate) return;
+    if (mode === "sleep" && visible) return;
+    dropBreak();
+    line = null; analyser = null; audioText = null;
+    const now = performance.now();
+    sleepAt = now;
+    sleepClock0 = now - 600;
+    sleepImmediate = !!immediate;
+    show(true);
+    mode = "sleep";
+    updateA11y();
+    if (sleepImmediate) {
+      pose.curl = 1; pose.sleepEye = 1; pose.ears = -0.2; pose.yawn = 0; pose.paw = 0;
+    } else {
+      pose.curl = 0; pose.sleepEye = 0; pose.yawn = 0;
+    }
+    kick();
+  }
+
+  // the model finished loading: he uncurls, lifts his head from his tail, stretches and yawns (paw covering his mouth a beat late)
+  function wake(into = "think") {
+    wakeNext = into || "think";
+    if (mode === "wake" && visible) return;
+    dropBreak();
+    const now = performance.now();
+    if (!sleepClock0) sleepClock0 = now - 1800;
+    wakeAt = now;
+    show(true);
+    mode = "wake";
+    updateA11y();
+    pose.curl = 1; pose.sleepEye = 1; pose.ears = -0.2; pose.yawn = 0; pose.paw = 0;
+    kick();
+  }
+
   // the model is working (every prompt, or only spoken ones with "Show Ray thinking on every prompt" off): he appears
   // in his thinking pose until he speaks (or the turn ends)
   function thinking(force = false) {
     if ((mode === "audio" || mode === "text") && !force) return;   // already speaking (force: between spoken sentences)
+    if (mode === "sleep" && visible) { wake("think"); return; }
+    if (mode === "wake" && visible) { wakeNext = "think"; return; }
     if (mode === "think" && visible) return;           // already thinking: keep his pose going
     show();
     mode = "think";
+    updateA11y();
     thinkAt = performance.now();
     target = calm("neutral");
     // a cocoa break 8 s into this think, by chance, never on two thinks in a row, and not with reduced motion
@@ -1163,30 +1426,36 @@ const RayFace = (() => {
   // a chunk of server audio starts playing through `an`; `text` and `duration` give the sentence moods their timing
   function speakAudio(an, text, ctx, startAt, duration) {
     dropBreak();
+    pose.curl = 0; pose.sleepEye = 0; pose.yawn = 0;
     show();
     analyser = an;
     audioText = plan(text || "");
     audioCtx = ctx; audioStart = startAt; audioDur = duration;
     mode = "audio";
+    updateA11y();
     paused = false;
   }
 
   // a chunk starts with the browser's voice
   function speakText(text, rate = 1) {
     dropBreak();
+    pose.curl = 0; pose.sleepEye = 0; pose.yawn = 0;
     show();
     line = {...plan(text), start: performance.now(), rate: rate || 1, anchorIdx: 0, anchorT: 0};
     mode = "text";
+    updateA11y();
     paused = false;
   }
 
   // a piece of voice sounding now for exactly `seconds` (the phone's native player reports both)
   function speakTimed(text, seconds) {
     dropBreak();
+    pose.curl = 0; pose.sleepEye = 0; pose.yawn = 0;
     show();
     const p = plan(text);
     line = {...p, start: performance.now(), rate: p.total * speed / Math.max(seconds, 0.05), anchorIdx: 0, anchorT: 0, timed: true};
     mode = "text";
+    updateA11y();
     paused = false;
   }
 
@@ -1212,10 +1481,12 @@ const RayFace = (() => {
 
   // Ray stopped talking (or the turn ended): happy eyes and a small nod that settles, then he fades out slowly
   function end(finished = true) {
-    if (!visible || !el || mode === "leave") return;
+    if (!visible || !el || mode === "leave" || mode === "sleep") return;
+    if (mode === "wake") { wakeNext = "warm"; return; }
     dropBreak();
     line = null; analyser = null; audioText = null;
     mode = "warm";
+    updateA11y();
     target = {...EXPR.warm};
     mood = "warm";
     mem.stressAt = performance.now();          // the nod
@@ -1240,16 +1511,20 @@ const RayFace = (() => {
   // he listens (the Android voice drawer while it hears you): there, attentive, a curious tilt, nothing in his paws
   function listen() {
     dropBreak();
+    pose.curl = 0; pose.sleepEye = 0; pose.yawn = 0;
     line = null; analyser = null; audioText = null;
     show();
     mode = "idle";
+    updateA11y();
     mood = "curious"; moodAt = performance.now();
     target = calm("curious");
   }
 
   // the answer of a typed prompt starts: he stops thinking and fades out at once, without the goodbye
-  function leave() {
-    if (!visible || !el || mode !== "think") return;
+  function leave(force = false) {
+    if (!visible || !el) return;
+    if (!force && mode === "wake") { wakeNext = "leave"; return; }
+    if (!force && mode !== "think") return;
     dropBreak();
     mode = "leave";
     target = calm("neutral");
@@ -1302,12 +1577,13 @@ const RayFace = (() => {
     return true;
   }
 
-  return {thinking, speakAudio, speakText, speakTimed, boundary, chunkEnd, pause, end, leave, listen, moodOf, cocoa, taskStart, taskTool,
+  return {thinking, speakAudio, speakText, speakTimed, boundary, chunkEnd, pause, end, leave, listen, sleep, wake, moodOf, cocoa, taskStart, taskTool,
           taskError, work: startWork,
           // the Android voice drawer sets this: he stays after speaking instead of fading out (the website never does)
           set stay(on) { stay = !!on; },
           get visible() { return visible; },
           get state() { return {...pose, mode, level, mood, cocoa: brk && brk.style, phase: sip && sip.name,
             work: work && work.name, task: {...task}}; },
-          set onStop(fn) { onStop = fn; }};
+          set onStop(fn) { onStop = fn; },
+          set onWake(fn) { onWake = fn; }};
 })();

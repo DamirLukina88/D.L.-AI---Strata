@@ -908,7 +908,10 @@ const TTSController = {
         toast("info", `Auto-speak ${next ? "enabled" : "disabled"}`, next ? "Voice prompts (dictated via STT) will be read aloud automatically." : "Tap the speaker icon on any message to listen.", 2500);
       };
     }
-    if (typeof RayFace !== "undefined") RayFace.onStop = () => { this.stop(); RayFace.end(false); };   // a click stops it
+    if (typeof RayFace !== "undefined") {
+      RayFace.onStop = () => { this.stop(); RayFace.end(false); };   // a click stops it
+      RayFace.onWake = () => wakeModelFromSleep();
+    }
     // the server's Piper voice: find out once whether it is there; Web Audio may only start after a tap (phones)
     fetch("v1/audio/speech/status", {headers: headers()}).then((r) => (r.ok ? r.json() : null))
       .then((st) => { this.serverTTS = st; }).catch(() => {});
@@ -951,7 +954,10 @@ const TTSController = {
         const next = orbToggle.getAttribute("aria-checked") !== "true";
         orbToggle.setAttribute("aria-checked", String(next));
         store.set("tts_orb", next);
-        if (!next && typeof RayFace !== "undefined") RayFace.end(false);
+        if (typeof RayFace !== "undefined") {
+          if (!next) RayFace.leave(true);
+          else if (modelUnloaded) RayFace.sleep(true);
+        }
       };
     }
     const testBtn = $("tts-test-btn");
@@ -2359,8 +2365,16 @@ function codeSetState(st) {
   // Ray thinks while the session works on a turn: he appears when it gets busy. A typed turn's answer sends him away
   // (codeEvent); a spoken one keeps him until he reads it aloud (codeOnTurnEnd); this catches a turn with nothing to say
   if (typeof RayFace !== "undefined" && busy !== code.wasBusy) {
-    if (busy && TTSController.isThinkAllOn()) RayFace.thinking();
-    else if (!busy) setTimeout(() => { if (!TTSController.speaking && RayFace.state.mode === "think") RayFace.end(false); }, 400);
+    if (busy) {
+      if (modelUnloaded) {
+        modelLoading = true;
+        setPill("reading", "Loading model…");
+      } else if (TTSController.isThinkAllOn() && TTSController.isOrbOn()) {
+        RayFace.thinking();
+      }
+    } else {
+      setTimeout(() => { if (!TTSController.speaking && RayFace.state.mode === "think") RayFace.end(false); }, 400);
+    }
   }
   code.wasBusy = busy;
   codeBarFit();
@@ -2391,7 +2405,16 @@ function codeRayTyped(replay) {
 }
 
 function codeEvent(ev, replay) {
-  if (codeRayTyped(replay)) {
+  if (!replay && modelUnloaded &&
+      (ev.type === "thinking" || ev.type === "tool_call" || (ev.type === "text" && ev.text && ev.text.trim()))) {
+    modelUnloaded = false;
+    modelLoading = false;
+    if (typeof RayFace !== "undefined" && TTSController.isOrbOn() && RayFace.state.mode === "sleep") {
+      const wantThink = (TTSController.isThinkAllOn() || code.turnFromVoice) && !(ev.type === "text" && !code.turnFromVoice);
+      RayFace.wake(wantThink ? "think" : "leave");
+    }
+  }
+  if (codeRayTyped(replay) && !modelUnloaded) {
     if (ev.type === "text" && ev.text && ev.text.trim()) RayFace.leave();
     else if (ev.type === "thinking" || ev.type === "tool_call") RayFace.thinking();   // thinks again after a tool
   }
@@ -2426,7 +2449,8 @@ function codeEvent(ev, replay) {
         code.turnFromVoice = Boolean(ev.voice) && isOwnPrompt;
         codeSpeechEnd();
         if (code.turnFromVoice && TTSController.willAutoSpeak() && TTSController.orb() && typeof RayFace !== "undefined") {
-          RayFace.thinking();
+          if (modelUnloaded) { modelLoading = true; setPill("reading", "Loading model…"); }
+          else RayFace.thinking();
         }
       }
       {
@@ -2686,8 +2710,11 @@ async function codeSend(text) {
   const res = await codeOp("input", turn);
   if (res) {
     if (ta && ta.value.trim() === text) { ta.value = ""; ta.style.height = "auto"; }
-    // the answer will be read aloud: Ray thinks, paw on his chin, until then
-    if (!res.queued && fromVoice && TTSController.willAutoSpeak() && TTSController.orb()) RayFace.thinking();
+    // the answer will be read aloud: Ray thinks, paw on his chin, until then (or waits curled up while weights load)
+    if (!res.queued && fromVoice && TTSController.willAutoSpeak() && TTSController.orb()) {
+      if (modelUnloaded) { modelLoading = true; setPill("reading", "Loading model…"); }
+      else RayFace.thinking();
+    }
   }
 }
 
@@ -3137,11 +3164,31 @@ function setPill(state, text) {
   $("pill-text").textContent = text;
 }
 
+let modelUnloaded = false, modelLoading = false, firstPollDone = false;
+
+async function wakeModelFromSleep() {
+  if (!modelUnloaded || modelLoading) return;
+  modelLoading = true;
+  setPill("reading", "Loading model…");
+  toast("info", "Waking Ray up…", "Loading the model into memory.", 2500);
+  try {
+    await fetch("load", {method: "POST", headers: headers(true), body: "{}"});
+  } catch (e) {
+    modelLoading = false;
+  }
+}
+
 function render(m) {
   const live = m.live || {}, hw = m.hardware || {}, st = m.hardware_static || {}, eng = m.engine || {}, h = m.history || {};
   const last = (m.requests || [])[0];
+  const unloadedNow = live.state === "unloaded";
+  const loadingNow = unloadedNow && (modelLoading || !!(code.state && code.state.busy) || (live.queued || 0) > 0);
   // the header pill
-  if (live.state === "reading") {
+  if (loadingNow) {
+    setPill("reading", "Loading model…");
+  } else if (unloadedNow) {
+    setPill("idle", "Unloaded · sleeping");
+  } else if (live.state === "reading") {
     const pct = live.prompt_total ? Math.round((100 * live.prompt_read) / live.prompt_total) : null;
     setPill("reading", pct != null ? `Reading prompt · ${pct}%` : "Reading prompt");
   } else if (live.state === "generating") {
@@ -3149,7 +3196,29 @@ function render(m) {
   } else {
     setPill("idle", "Idle");
   }
-  if (live.queued > 0) setPill("queued", `${live.queued} queued`);
+  if (live.queued > 0 && !unloadedNow) setPill("queued", `${live.queued} queued`);
+  // Ray curls up in his bushy tail while the model is unloaded, and stretches + yawns when it finishes loading
+  if (unloadedNow) {
+    if (!firstPollDone) {
+      modelUnloaded = true;
+      if (typeof RayFace !== "undefined" && TTSController.isOrbOn()) RayFace.sleep(true);
+    } else if (!modelUnloaded) {
+      modelUnloaded = true;
+      modelLoading = false;
+      if (typeof RayFace !== "undefined" && TTSController.isOrbOn()) RayFace.sleep(false);
+    } else if (typeof RayFace !== "undefined" && TTSController.isOrbOn() && !TTSController.speaking && RayFace.state.mode !== "sleep") {
+      RayFace.sleep(true);
+    }
+  } else if (modelUnloaded) {
+    modelUnloaded = false;
+    modelLoading = false;
+    if (typeof RayFace !== "undefined" && TTSController.isOrbOn() && (RayFace.state.mode === "sleep" || !RayFace.visible)) {
+      const activeTurn = !!(code.state && code.state.busy) || live.state === "reading" || live.state === "generating";
+      const shouldThink = activeTurn && (TTSController.isThinkAllOn() || code.turnFromVoice);
+      RayFace.wake(shouldThink ? "think" : "warm");
+    }
+  }
+  firstPollDone = true;
   if (shown("monitor")) renderMonitor(live, hw, st, eng, h, last, m.requests || [], m.totals, m.requests_kept);
   if (shown("monitor")) renderConvCache(m.conversation_cache);
   if (shown("about")) renderAbout(eng, hw, st);
@@ -3203,7 +3272,12 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
   for (const b of document.querySelectorAll("#state-badges .st-badge")) b.classList.toggle("on", b.dataset.s === on || b.dataset.s === live.state);
   const prog = $("state-progress");
   let label = "Waiting for a request", detail = "", pct = 0;
-  if (live.state === "reading") {
+  if (live.state === "unloaded") {
+    const loadingNow = modelLoading || !!(code.state && code.state.busy) || (live.queued || 0) > 0;
+    label = loadingNow ? "Loading model into memory" : "Unloaded · sleeping";
+    if (loadingNow) prog.dataset.tone = "info";
+    else delete prog.dataset.tone;
+  } else if (live.state === "reading") {
     label = "Reading prompt";
     prog.dataset.tone = "info";
     if (live.prompt_total) {
