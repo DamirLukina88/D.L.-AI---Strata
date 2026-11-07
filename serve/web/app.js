@@ -11,6 +11,7 @@ const icon = (name, cls = "st-icon") => {
   return `<svg class="${cls}" aria-hidden="true"><use href="${SPRITE}#i-${name}"/></svg>`;
 };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const escapeHtml = esc;
 const fmt = (n, d = 0) => (n == null || Number.isNaN(n) ? "–" : Number(n).toLocaleString(undefined, {maximumFractionDigits: d, minimumFractionDigits: d}));
 const kfmt = (n) => (n == null ? "–" : n >= 1000 ? `${fmt(n / 1000, n >= 10000 ? 0 : 1)}k` : fmt(n));
 // a context size: 32768 -> "32K" (powers of two), else like kfmt
@@ -4550,7 +4551,7 @@ function renderSensorsTable() {
   }
 
   if (filtered.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" class="muted" style="text-align:center;padding:16px;">No sensors match filter '${escapeHtml(sensorActiveFilter)}'</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" class="muted" style="text-align:center;padding:16px;">No sensors match filter '${esc(sensorActiveFilter)}'</td></tr>`;
     return;
   }
 
@@ -4558,7 +4559,12 @@ function renderSensorsTable() {
   for (let i = 0; i < filtered.length; i++) {
     const s = filtered[i];
     const isAct = Boolean(s.active || (s.values && s.values.length > 0));
-    const valsStr = formatSensorValues(s);
+    let valsStr = "--";
+    try {
+      valsStr = formatSensorValues(s);
+    } catch (_) {
+      valsStr = "--";
+    }
     const badgeClass = isAct ? "st-badge--reading" : "";
     const badgeText = isAct ? "Active" : (s.wakeup ? "Wakeup" : "Standby");
 
@@ -4568,14 +4574,14 @@ function renderSensorsTable() {
     html += `<tr>
       <td class="muted small" style="width:40px;text-align:center;">${i + 1}</td>
       <td>
-        <strong style="color:var(--st-text);">${escapeHtml(s.name || "Unknown")}</strong>
-        <div class="muted small">${escapeHtml(s.vendor || "Android")}</div>
+        <strong style="color:var(--st-text);">${esc(s.name || "Unknown")}</strong>
+        <div class="muted small">${esc(s.vendor || "Android")}</div>
       </td>
       <td>
-        <code style="font-size:11px;background:var(--st-surface-variant);padding:2px 4px;border-radius:4px;">${escapeHtml(s.string_type || "type." + s.type)}</code>
+        <code style="font-size:11px;background:var(--st-surface-variant);padding:2px 4px;border-radius:4px;">${esc(s.string_type || "type." + s.type)}</code>
       </td>
       <td>
-        <span style="font-family:var(--st-font-mono,monospace);font-size:11.5px;font-weight:${valWeight};color:${valColor};">${escapeHtml(valsStr)}</span>
+        <span style="font-family:var(--st-font-mono,monospace);font-size:11.5px;font-weight:${valWeight};color:${valColor};">${esc(valsStr)}</span>
       </td>
       <td style="width:70px;text-align:center;">
         <span class="st-badge ${badgeClass}" style="font-size:10px;">${badgeText}</span>
