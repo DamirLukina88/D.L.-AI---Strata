@@ -1,4 +1,4 @@
-﻿# Strata Engine - top-level build (P1.S1).
+# Strata Engine - top-level build (P1.S1).
 #
 # Targets (phase-1 Ă‚Â§P1.S1): `strata_artifact` (no CUDA dependency), `tests`.  `strata_plan` and the C++
 # `strata-pack` are added when their sources exist - a target with no sources would make the build graph
@@ -1231,6 +1231,16 @@ if(STRATA_BUILD_TESTS OR STRATA_BUILD_CONVERSATION_TESTS)
   add_executable(batch_groups_test src/program/batch_groups_test.cpp)
   target_include_directories(batch_groups_test PRIVATE include)
   add_test(NAME batch_groups_test COMMAND batch_groups_test)
+
+  # PR #5108: the MMQ row table's over-read margin follows the backend tile bound; every fixup read stays inside (header-only, no GPU)
+  add_executable(mmq_ids_margin_test tests/prefill/mmq_ids_margin_test.cpp)
+  target_include_directories(mmq_ids_margin_test PRIVATE include)
+  add_test(NAME mmq_ids_margin_test COMMAND mmq_ids_margin_test)
+
+  # PR #4844: the adaptive tier's copy-in range across serial, pipelined and drained rounds (header-only, no GPU)
+  add_executable(adaptive_range_test tests/program/adaptive_range_test.cpp)
+  target_include_directories(adaptive_range_test PRIVATE include)
+  add_test(NAME adaptive_range_test COMMAND adaptive_range_test)
 endif()
 
 add_library(strata_kernels_cpu STATIC src/kernels/cpu/expert.cpp src/kernels/cpu/pool.cpp
