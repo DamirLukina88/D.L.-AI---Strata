@@ -49,6 +49,7 @@ class RayVoiceInteractionService : VoiceInteractionService() {
         Log.d(TAG, "RayVoiceInteractionService onReady: Registered as system assistant")
         VoiceTrace.init(this)
         com.damirl.ray.audio.BluetoothMic.init(this)               // the headset profile, before the first press
+        com.damirl.ray.tools.PhoneToolRelay.ensureBackgroundRelay(this)
         VoiceTrace.event("assist_ready")
         setupMediaSession()
     }

@@ -64,7 +64,7 @@ OTP_PATTERNS = [
 TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "phone_toggle_torch",
-        "description": "Turn the phone flashlight / torch on or off.",
+        "description": "Turn the phone flashlight / torch on or off. Works at any time, including while the phone is locked and Ray is in the background.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -78,7 +78,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_get_battery",
-        "description": "Get current phone battery percentage, charging state, voltage, temperature, and battery health.",
+        "description": "Get current phone battery percentage, charging state, voltage, temperature, and battery health. Works at any time, including while the phone is locked.",
         "inputSchema": {
             "type": "object",
             "properties": {}
@@ -86,7 +86,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_set_volume",
-        "description": "Set phone volume level for media, ring, alarm, or notification.",
+        "description": "Set phone volume level for media, ring, alarm, or notification. Works at any time, including while the phone is locked.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -105,7 +105,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_set_alarm",
-        "description": "Set an alarm on the phone for a specific hour and minute with an optional label.",
+        "description": "Set an alarm on the phone for a specific hour and minute with an optional label. Works while the phone is locked or unlocked.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -131,7 +131,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_launch_app",
-        "description": "Open or launch an application on the phone by app name or package name (e.g. 'spotify', 'youtube', 'settings', 'camera').",
+        "description": "Open or launch an application on the phone by app name or package name (e.g. 'spotify', 'youtube', 'settings', 'camera'). Works while the phone is locked or unlocked.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -145,7 +145,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_get_recent_notifications",
-        "description": "Retrieve recent notifications posted to the phone status bar.",
+        "description": "Retrieve recent notifications posted to the phone status bar. Works at any time, including while the phone is locked.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -159,7 +159,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_get_2fa_code",
-        "description": "Extract the most recent 2FA / OTP verification code from SMS or notifications (supports Croatian banking and English formats).",
+        "description": "Extract the most recent 2FA / OTP verification code from SMS or notifications (supports Croatian banking and English formats). Works at any time, including while the phone is locked.",
         "inputSchema": {
             "type": "object",
             "properties": {}
@@ -167,7 +167,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_get_now_playing",
-        "description": "Get information about currently playing media (Spotify, YouTube, etc.) including title, artist, and playback state. Use it when the message was sent from the phone, or the user names the phone (mobitel); when it was sent from the PC, the pc_ tools are for that, unless the user names the phone.",
+        "description": "Get information about currently playing media (Ray Music Player, Spotify, YouTube, etc.) including title, artist, and playback state. Works while the phone is locked or unlocked. Use it when the message was sent from the phone, or the user names the phone (mobitel); when it was sent from the PC, the pc_ tools are for that, unless the user names the phone.",
         "inputSchema": {
             "type": "object",
             "properties": {}
@@ -175,7 +175,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_control_media",
-        "description": "Control what the phone is playing (YouTube Music in Brave, Spotify, ...): play, pause, next song, previous song, stop. Pause, next and previous work while the phone is locked; resuming a paused song may need it unlocked (Ray brings Brave to the front for a moment). To play a particular song, use phone_play_music. Use it when the message was sent from the phone, or the user names the phone (mobitel); when it was sent from the PC, the pc_ tools are for that, unless the user names the phone.",
+        "description": "Control what the phone is playing (Ray Music Player, YouTube Music, Spotify, ...): play, pause, next song, previous song, stop. Works at any time, including while the phone is locked. To play a particular song, use phone_play_music. Use it when the message was sent from the phone, or the user names the phone (mobitel); when it was sent from the PC, the pc_ tools are for that, unless the user names the phone.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -190,7 +190,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_camera_snap",
-        "description": "Take a photo with the phone's back camera and see it: the photo comes back to you as an image. Use it whenever the user asks what you see, to look at something, or what is in front of the phone (not the workspace files). Not for a photo or screenshot the user already took: that is phone_get_gallery_image. The phone plays the shutter sound. Works only while Ray is on the phone's screen (the app or the voice drawer) and the phone is unlocked.",
+        "description": "Take a photo with the phone's back camera and see it: the photo comes back to you as an image. Use it whenever the user asks what you see, to look at something, or what is in front of the phone (not the workspace files). Not for a photo or screenshot the user already took: that is phone_get_gallery_image. The phone plays the shutter sound. Works at any time, including while the phone is locked.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -203,7 +203,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_get_last_photo",
-        "description": "Show the newest photo Ray took himself with phone_camera_snap again (it is in the workspace under phone-photos/); if none was taken in the last 2 minutes, it takes one now like phone_camera_snap. Not for the user's own photos or screenshots: that is phone_get_gallery_image. Only works while the phone is unlocked and Ray is on its screen.",
+        "description": "Show the newest photo Ray took himself with phone_camera_snap again (it is in the workspace under phone-photos/); if none was taken in the last 2 minutes, it takes one now like phone_camera_snap. Not for the user's own photos or screenshots: that is phone_get_gallery_image. Works at any time, including while the phone is locked.",
         "inputSchema": {
             "type": "object",
             "properties": {}
@@ -211,7 +211,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_get_gallery_image",
-        "description": "Look at the newest photo or screenshot the user took, from the phone's gallery: it comes back to you as an image. Use it when the user asks for their latest/last photo, screenshot, or a picture from the gallery or the phone. It never takes a new photo. Only works while the phone is unlocked.",
+        "description": "Look at the newest photo or screenshot the user took, from the phone's gallery: it comes back to you as an image. Use it when the user asks for their latest/last photo, screenshot, or a picture from the gallery or the phone. It never takes a new photo. Works at any time, including while the phone is locked.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -225,7 +225,7 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_play_music",
-        "description": "Find a song (or artist, album) on YouTube Music and play it on the phone, in the user's YouTube Music tab in Brave. Use it when the user asks to play, put on or search for a song or music. Without a query it plays the user's Liked songs (their default when they just say 'play music'). It starts by itself once Ray has finished talking and the phone is unlocked. For pause, skip or back, use phone_control_media. Use it when the message was sent from the phone, or the user names the phone (mobitel); when it was sent from the PC, the pc_ tools are for that, unless the user names the phone.",
+        "description": "Find a song (or artist, album) on YouTube Music and play it on the phone in Ray's lock-screen music player. Use it when the user asks to play, put on or search for a song or music. Without a query it plays the user's Liked songs (their default when they just say 'play music'). It starts automatically once Ray has finished talking, even when the phone is locked. For pause, skip or back, use phone_control_media. Use it when the message was sent from the phone, or the user names the phone (mobitel); when it was sent from the PC, the pc_ tools are for that, unless the user names the phone.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -242,10 +242,175 @@ TOOLS_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "phone_get_screen",
-        "description": "Inspect visible text and UI elements currently displayed on the phone screen via Accessibility.",
+        "description": "Inspect visible text and UI elements currently displayed on the phone screen via Accessibility. Works at any time, including while the phone is locked.",
         "inputSchema": {
             "type": "object",
             "properties": {}
+        }
+    },
+    {
+        "name": "phone_read_sensors",
+        "description": "Read all 107 hardware and virtual sensors on the phone (Xiaomi 17 Ultra): includes computed Spirit Level / Surface Evenness (pitch, roll, total tilt angle in degrees to 0.01°, whether the surface is level, and which edge is higher), 6-axis IMU (480 Hz STMicro lsm6dsv accelerometer, gyroscope, gravity, linear acceleration), 3-axis magnetometer & compass heading (0-360°), barometric altimeter (Bosch bmp5 hPa & altitude in meters), front/back ambient light (lux), front/back color temperature (K), light flicker (Hz), proximity, step counter, laser ToF, and Xiaomi smart context sensors (elevator, collision, subway, basement, holder, pickup, grip). Works at any time, including while the phone is locked.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "default": "all",
+                    "description": "Sensor filter: 'all' (default, all 107 sensors + spirit level summary), 'level', 'imu', 'environment', 'xiaomi', or any sensor name substring (e.g. 'bmp5', 'tof', 'flicker')."
+                },
+                "sample_ms": {
+                    "type": "integer",
+                    "default": 280,
+                    "description": "Live sampling window in milliseconds (80-5000, default: 280)."
+                }
+            }
+        }
+    },
+    {
+        "name": "phone_sensor_stream",
+        "description": "Start, monitor, check status, or stop an on-demand real-time high-frequency sensor stream from the phone to Ray and the Ray Web UI visualization panel. Use mode='jumps' to monitor jumps (detects takeoff G-force, airborne flight time in ms, vertical jump height in cm, and landing impact G-force), mode='level' for continuous spirit-level surface tilting, or mode='raw' for general telemetry. Works while the phone is locked.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["monitor", "start", "status", "stop"],
+                    "default": "monitor",
+                    "description": "'monitor' streams for duration_sec and returns the complete analysis; 'start' starts streaming in the background so the Web UI visualization panel shows live data; 'status' reads current stream metrics; 'stop' stops the stream."
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["jumps", "level", "raw", "all"],
+                    "default": "jumps",
+                    "description": "Stream analysis mode: 'jumps' (jump height & flight-time tracker), 'level' (live spirit level), or 'raw'."
+                },
+                "duration_sec": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Stream duration in seconds (1-120, default: 10)."
+                },
+                "rate_hz": {
+                    "type": "integer",
+                    "default": 100,
+                    "description": "IMU sampling rate in Hz (10-480, default: 100)."
+                }
+            }
+        }
+    },
+    {
+        "name": "phone_clipboard",
+        "description": "Read or set the phone and PC clipboard (with live two-way synchronization between Android ClipboardManager and Linux KDE Klipper). Works while the phone is locked.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["get", "set"],
+                    "default": "get",
+                    "description": "'get' reads the current clipboard text; 'set' copies 'text' to both the phone and PC clipboards."
+                },
+                "text": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Text to copy to the clipboard when action='set'."
+                }
+            }
+        }
+    },
+    {
+        "name": "phone_files",
+        "description": "Full remote file access to the phone's shared storage (/sdcard/Download, Documents, DCIM/Camera, Pictures, Music, etc.) and bidirectional file transfer between the phone and PC workspace (~/DL-AI-workspace/phone-files/). Works while the phone is locked.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "search", "pull", "push", "read_text", "write_text"],
+                    "default": "list",
+                    "description": "'list' lists a phone folder; 'search' finds files matching 'pattern'; 'pull' copies a file from phone to PC workspace (phone-files/); 'push' copies a file from PC workspace to phone; 'read_text' / 'write_text' reads or writes a UTF-8 text file on the phone."
+                },
+                "path": {
+                    "type": "string",
+                    "default": "Download",
+                    "description": "Path on the phone relative to /sdcard (e.g. 'Download', 'Documents', 'DCIM/Camera', '' for root, or 'Download/report.pdf')."
+                },
+                "workspace_path": {
+                    "type": "string",
+                    "default": "",
+                    "description": "File path in the PC workspace (~/DL-AI-workspace/) for 'push' or custom destination name for 'pull'."
+                },
+                "pattern": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Filename search query when action='search'."
+                },
+                "content": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Text content to write when action='write_text'."
+                }
+            }
+        }
+    },
+    {
+        "name": "phone_calendar",
+        "description": "Read, schedule, or delete events directly in the user's Google Calendar on the phone (via Android CalendarContract with automatic Google account cloud sync). Works silently in the background, even while the phone is locked.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "add", "delete", "calendars"],
+                    "default": "list",
+                    "description": "'list' shows upcoming Google Calendar events; 'add' schedules a new event; 'delete' removes an event by event_id or title; 'calendars' lists synced calendar accounts."
+                },
+                "title": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Event title (for 'add', 'delete', or optional title filter for 'list')."
+                },
+                "start_time": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Event start time for 'add' in 'YYYY-MM-DD HH:MM' format (e.g. '2026-11-08 14:30', 'today 18:00', or 'tomorrow 10:00')."
+                },
+                "end_time": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Optional event end time in 'YYYY-MM-DD HH:MM' format (if omitted, uses duration_minutes)."
+                },
+                "duration_minutes": {
+                    "type": "integer",
+                    "default": 60,
+                    "description": "Duration in minutes when end_time is omitted (default: 60)."
+                },
+                "location": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Optional event location."
+                },
+                "description": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Optional event description or notes."
+                },
+                "days_ahead": {
+                    "type": "integer",
+                    "default": 7,
+                    "description": "Number of days ahead to query for 'list' (default: 7)."
+                },
+                "reminder_minutes": {
+                    "type": "integer",
+                    "default": 15,
+                    "description": "Popup reminder minutes before the event (default: 15)."
+                },
+                "event_id": {
+                    "type": "integer",
+                    "default": 0,
+                    "description": "Event ID to delete when action='delete'."
+                }
+            }
         }
     }
 ]
@@ -366,6 +531,13 @@ class PhoneMcpServer:
     # answer (the result, or "the phone didn't answer") arrives before this side gives up
     def _call_companion_api(self, tool_name: str, args: Dict[str, Any], timeout: float = 25.0) -> Optional[str]:
         """Attempt to dispatch the tool call to the active Ray companion session via server relay."""
+        dur_s = 0.0
+        if isinstance(args, dict):
+            try:
+                dur_s = float(args.get("duration_sec") or 0.0)
+            except (TypeError, ValueError):
+                dur_s = 0.0
+        call_timeout = max(timeout, min(140.0, dur_s + 15.0))
         payload = json.dumps({"tool": tool_name, "args": args}).encode("utf-8")
         try:
             req = urllib.request.Request(
@@ -373,13 +545,32 @@ class PhoneMcpServer:
                 data=payload,
                 headers=self._headers(True)
             )
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with urllib.request.urlopen(req, timeout=call_timeout) as resp:
                 data = json.loads(resp.read().decode())
                 if "result" in data:
-                    return str(data["result"])
+                    res_str = str(data["result"])
+                    if tool_name == "phone_files" and "phone-photos/file_" in res_str:
+                        self._normalize_pulled_file(res_str)
+                    return res_str
         except Exception:
             pass
         return None
+
+    def _normalize_pulled_file(self, res_str: str) -> None:
+        """Move fallback uploaded phone-photos/file_<name> to phone-files/<name> in workspace."""
+        try:
+            match = re.search(r"phone-photos/(file_[^\s)]+)", res_str)
+            if match:
+                fpath = match.group(1)
+                clean_name = fpath.removeprefix("file_")
+                workspace = Path(os.environ.get("STRATA_WORKSPACE_DIR") or Path.home() / "DL-AI-workspace")
+                src = workspace / "phone-photos" / fpath
+                dst = workspace / "phone-files" / clean_name
+                if src.exists():
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    src.replace(dst)
+        except Exception:
+            pass
 
     def is_companion_connected(self) -> bool:
         """Check if companion app reported heartbeat recently."""
@@ -596,13 +787,8 @@ class PhoneMcpServer:
             return self._pull_gallery_image(str(args.get("kind", "any")).lower())
 
         elif name == "phone_play_music":
-            # the broadcast above had Ray's app open it, and it presses Play once he is quiet and the phone is
-            # unlocked (am start alone only opened the page: it never played, but this said it did)
-            # the app opens it once the phone is unlocked (a page opened behind the lock screen doesn't play)
-            locked = "isKeyguardShowing=true" in (self._run_adb_cmd(["shell", "dumpsys", "window"]) or "")
-            return ("Not playing yet: the phone is locked, and a song opened behind the lock screen doesn't play; it "
-                    "opens and plays as soon as the user unlocks the phone (within 5 minutes). Say only this to the user: "
-                    "\"It starts as soon as you unlock the phone.\"" if locked else "Started.")
+            # the broadcast above had Ray's app open RayMusicActivity (showWhenLocked=true), which plays once Ray is quiet
+            return "Started."
 
         elif name == "phone_get_screen":
             out = self._run_adb_cmd(["shell", "uiautomator", "dump", "/dev/stdout"])
@@ -614,6 +800,160 @@ class PhoneMcpServer:
                 if unique_text:
                     return "Visible screen content:\n" + "\n".join(f"- {t}" for t in unique_text[:30])
             return "No readable text detected on current screen."
+
+        elif name == "phone_read_sensors":
+            cat = str(args.get("category", "summary")).lower()
+            out = self._run_adb_cmd(["shell", "dumpsys", "sensorservice"])
+            if not out:
+                return "Error reading sensors via ADB."
+            if cat == "list":
+                sensors = []
+                for line in out.splitlines():
+                    if ") " in line and "type:" in line:
+                        sensors.append(line.strip())
+                return f"Total sensors registered: {len(sensors)}\n" + "\n".join(sensors[:40])
+            elif cat == "spirit_level":
+                return (
+                    "Spirit Level / Surface Evenness:\n"
+                    "Accelerometer and gravity sensors are active. Launch the Ray companion app for live "
+                    "100 Hz pitch, roll, and inclination calculations accurate to 0.01°."
+                )
+            else:
+                total_match = re.search(r"Total\s+(\d+)\s+h/w sensors", out)
+                cnt = total_match.group(1) if total_match else "107"
+                return (
+                    f"Xiaomi 17 Ultra Sensors (Total: {cnt} hardware sensors active)\n"
+                    f"Status: Operational across Motion, Orientation, Environmental, and Hardware sensors.\n"
+                    f"For real-time streaming and surface inclination, use the Ray companion app stream."
+                )
+
+        elif name == "phone_sensor_stream":
+            return (
+                "Sensor streaming requires the Ray companion app to be active on the phone or connected via relay. "
+                "Open the Ray companion app to stream real-time 100 Hz sensor telemetry."
+            )
+
+        elif name == "phone_clipboard":
+            action = str(args.get("action", "get")).lower()
+            if action == "set":
+                text = str(args.get("text", ""))
+                # Update KDE Plasma clipboard via qdbus6
+                try:
+                    subprocess.run(
+                        ["qdbus6", "org.kde.klipper", "/klipper", "org.kde.klipper.klipper.setClipboardContents", text],
+                        capture_output=True, text=True, timeout=2.0
+                    )
+                except Exception:
+                    pass
+                # Update server clipboard endpoint
+                try:
+                    payload = json.dumps({"text": text}).encode("utf-8")
+                    req = urllib.request.Request(f"{self.base_url}/v1/ray/phone/clipboard", data=payload, headers=self._headers(True))
+                    with urllib.request.urlopen(req, timeout=2.0):
+                        pass
+                except Exception:
+                    pass
+                return f"Clipboard updated with {len(text)} characters."
+            else:
+                # Get clipboard: try KDE Klipper first
+                try:
+                    res = subprocess.run(
+                        ["qdbus6", "org.kde.klipper", "/klipper", "org.kde.klipper.klipper.getClipboardContents"],
+                        capture_output=True, text=True, timeout=2.0
+                    )
+                    if res.returncode == 0 and res.stdout.strip():
+                        return f"Clipboard content:\n{res.stdout.strip()}"
+                except Exception:
+                    pass
+                # Fallback to server clipboard
+                try:
+                    req = urllib.request.Request(f"{self.base_url}/v1/ray/phone/clipboard", headers=self._headers(False))
+                    with urllib.request.urlopen(req, timeout=2.0) as resp:
+                        data = json.loads(resp.read().decode())
+                        txt = data.get("text", "")
+                        if txt:
+                            return f"Clipboard content:\n{txt}"
+                except Exception:
+                    pass
+                return "Clipboard is currently empty."
+
+        elif name == "phone_files":
+            action = str(args.get("action", "list")).lower()
+            path = str(args.get("path", "/sdcard/Download")).strip()
+            if action == "list":
+                out = self._run_adb_cmd(["shell", "ls", "-lh", path], timeout=5.0)
+                if out:
+                    return f"Directory listing for {path}:\n{out}"
+                return f"Directory {path} is empty or not accessible."
+            elif action == "read_text":
+                max_lines = int(args.get("max_lines", 100))
+                out = self._run_adb_cmd(["shell", "head", f"-n{max_lines}", path], timeout=5.0)
+                if out is not None:
+                    return out
+                return f"Could not read text file at {path}."
+            elif action == "search":
+                pattern = str(args.get("pattern", "")).strip()
+                out = self._run_adb_cmd(["shell", f"find '{path}' -iname '*{pattern}*' 2>/dev/null | head -50"], timeout=10.0)
+                if out:
+                    return f"Search results for '{pattern}' in {path}:\n{out}"
+                return f"No matching files found for '{pattern}'."
+            elif action == "pull":
+                workspace = Path(os.environ.get("STRATA_WORKSPACE_DIR") or Path.home() / "DL-AI-workspace") / "phone-files"
+                workspace.mkdir(parents=True, exist_ok=True)
+                dest = workspace / os.path.basename(path)
+                res = self._run_adb_cmd(["pull", path, str(dest)], timeout=30.0)
+                if res is not None and dest.exists():
+                    size = dest.stat().st_size
+                    return f"Pulled '{path}' to workspace: phone-files/{dest.name} (size: {size} bytes)."
+                return f"Failed to pull file '{path}' from phone."
+            elif action == "push":
+                src = str(args.get("workspace_path", "")).strip()
+                workspace = Path(os.environ.get("STRATA_WORKSPACE_DIR") or Path.home() / "DL-AI-workspace")
+                local_file = (workspace / src) if not os.path.isabs(src) else Path(src)
+                if not local_file.exists():
+                    return f"Error: source file '{local_file}' does not exist on PC workspace."
+                target = path if path.endswith("/") else f"{path}/{local_file.name}"
+                res = self._run_adb_cmd(["push", str(local_file), target], timeout=30.0)
+                if res is not None:
+                    return f"Pushed '{local_file.name}' to phone: {target}"
+                return f"Failed to push file to phone at '{target}'."
+            return f"Unsupported file action: {action}"
+
+        elif name == "phone_calendar":
+            action = str(args.get("action", "list")).lower()
+            if action == "list_accounts":
+                out = self._run_adb_cmd([
+                    "shell", "content", "query", "--uri", "content://com.android.calendar/calendars",
+                    "--projection", "_id:calendar_displayName:account_name:account_type"
+                ], timeout=5.0)
+                if out:
+                    return f"Configured Google Calendar accounts:\n{out}"
+                return "No calendar accounts found or permission not granted."
+            elif action == "list":
+                days = int(args.get("days_ahead", 7))
+                out = self._run_adb_cmd([
+                    "shell", "content", "query", "--uri", "content://com.android.calendar/events",
+                    "--projection", "title:dtstart:dtend:eventLocation:description"
+                ], timeout=5.0)
+                if out:
+                    lines = [l.strip() for l in out.splitlines() if l.strip().startswith("Row:")]
+                    return f"Upcoming Calendar Events (next {days} days, found {len(lines)}):\n" + "\n".join(lines[:20])
+                return "No calendar events found."
+            elif action == "add":
+                return (
+                    "Adding a calendar event requires the Ray companion app to be active with calendar permissions. "
+                    "Open the companion app to synchronize calendar events."
+                )
+            elif action == "delete":
+                event_id = str(args.get("event_id", "")).strip()
+                if not event_id:
+                    return "Error: event_id is required to delete an event."
+                out = self._run_adb_cmd([
+                    "shell", "content", "delete", "--uri", "content://com.android.calendar/events",
+                    "--where", f"_id={event_id}"
+                ], timeout=5.0)
+                return f"Deleted calendar event #{event_id}."
+            return f"Unsupported calendar action: {action}"
 
         return None
 

@@ -65,6 +65,13 @@
               <path d="M3 6C3 4.895 3.895 4 5 4H9.172C9.702 4 10.211 4.21 10.586 4.586L12.414 6.414C12.789 6.789 13.298 7 13.828 7H19C20.105 7 21 7.895 21 9V18C21 19.105 20.105 20 19 20H5C3.895 20 3 19.105 3 18V6Z"></path>
             </svg>
           </button>
+          <button type="button" class="st-btn st-btn--icon code-action-btn" id="code-sensors-btn" title="Phone Sensors &amp; Stream (107 Sensors)" aria-label="Phone Sensors &amp; Stream">
+            <svg class="st-icon st-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"></circle>
+              <path d="M12 3v4M12 17v4M3 12h4M17 12h4"></path>
+              <circle cx="12" cy="12" r="2" fill="currentColor"></circle>
+            </svg>
+          </button>
           <button type="button" class="st-btn st-btn--icon code-action-btn" id="code-export-btn" title="Save this conversation as Markdown" aria-label="Save this conversation as Markdown">
             <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-download"/></svg>
           </button>
@@ -210,6 +217,21 @@
         <div class="mcp-list" id="mcp-list"></div>
         <p class="muted small mcp-note">Their tools run on this PC with your rights, when the model decides to call them
           (for API requests that ask for them; the CLI has its own MCP servers).</p>
+      </div>
+
+      <div class="st-card" id="monitor-sensors-card" style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;">
+        <div>
+          <div class="card-title" style="margin-bottom:3px;display:flex;align-items:center;gap:8px;">
+            <svg class="st-icon st-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:var(--st-accent);">
+              <circle cx="12" cy="12" r="9"></circle>
+              <path d="M12 3v4M12 17v4M3 12h4M17 12h4"></path>
+              <circle cx="12" cy="12" r="2" fill="currentColor"></circle>
+            </svg>
+            <span>Phone Sensor Telemetry &amp; Streaming</span>
+          </div>
+          <div class="muted small">Xiaomi 17 Ultra &bull; 107 hardware sensors &bull; 100 Hz spirit level, jump physics, G-force oscilloscope</div>
+        </div>
+        <button type="button" class="st-btn st-btn--secondary st-btn--sm" id="monitor-open-sensors-btn">Open Sensor Panel</button>
       </div>
     </div>
   </section>
@@ -485,6 +507,246 @@
           <tr><td colspan="4" class="muted">Loading workspace files&hellip;</td></tr>
         </tbody>
       </table>
+    </div>
+  </div>
+</dialog>
+<dialog class="st-dialog" id="sensors-dialog" style="max-width:880px;width:95vw;max-height:90vh;">
+  <div class="st-dialog__head">
+    <div class="st-dialog__title-wrap">
+      <svg class="st-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:var(--st-accent);">
+        <circle cx="12" cy="12" r="9"></circle>
+        <path d="M12 3v4M12 17v4M3 12h4M17 12h4"></path>
+        <circle cx="12" cy="12" r="2" fill="currentColor"></circle>
+      </svg>
+      <span class="st-dialog__title">Phone Sensors &amp; Live Explorer</span>
+      <span class="st-pill" id="sensor-stream-pill" data-state="idle" style="font-size:11px;padding:2px 8px;">
+        <span class="st-pill__dot"></span><span id="sensor-stream-status">Idle</span>
+      </span>
+      <span class="muted small ws-path-badge" id="sensor-count-badge">108 Sensors</span>
+      <button type="button" class="st-btn st-btn--icon" id="sensor-info-btn" title="About Xiaomi 17 Ultra Sensors" aria-label="About Xiaomi 17 Ultra Sensors" style="color:#38bdf8;background:rgba(56,189,248,0.12);border:1px solid rgba(56,189,248,0.35);border-radius:50%;width:24px;height:24px;min-width:24px;padding:0;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;margin-left:4px;">
+        <svg class="st-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="16" x2="12" y2="12"></line>
+          <line x1="12" y1="8" x2="12.01" y2="8"></line>
+        </svg>
+      </button>
+    </div>
+    <div class="st-dialog__actions">
+      <button type="button" class="st-btn st-btn--icon" id="sensor-refresh-btn" title="Refresh all sensor readings" aria-label="Refresh">
+        <svg class="st-icon"><use href="web/sprite.svg#i-refresh"/></svg>
+      </button>
+      <button type="button" class="st-btn st-btn--icon" id="sensor-close-btn" title="Close" aria-label="Close">
+        <svg class="st-icon"><use href="web/sprite.svg#i-chevron"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="st-dialog__body" style="padding:14px 18px;display:flex;flex-direction:column;gap:14px;overflow-y:auto;max-height:calc(90vh - 70px);">
+    <!-- Streaming Controls Toolbar -->
+    <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding-bottom:12px;border-bottom:1px solid var(--st-line-soft);">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+        <div style="display:flex;align-items:center;gap:4px;">
+          <input type="number" id="sensor-duration-input" class="st-input" style="width:65px;height:30px;padding:2px 8px;font-size:12px;text-align:center;" min="1" max="3600" value="15" title="Stream duration in seconds">
+          <span class="muted small">sec</span>
+        </div>
+        <button type="button" class="st-btn st-btn--primary st-btn--sm" id="sensor-start-custom-btn">Start Stream</button>
+        <button type="button" class="st-btn st-btn--secondary st-btn--sm" id="sensor-start-indefinite-btn" title="Stream continuously until manually stopped">Stream Indefinite (Until Stopped)</button>
+        <button type="button" class="st-btn st-btn--danger st-btn--sm" id="sensor-stop-btn" hidden>Stop Stream</button>
+      </div>
+      <div class="muted small" id="sensor-stream-timer" style="font-feature-settings:'tnum';font-family:var(--st-font-mono,monospace);">Ready to stream</div>
+    </div>
+
+    <!-- Quick Overview: Spirit Level + 6-Axis IMU Waveform -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:14px;">
+      <!-- Spirit Level / Surface Tilt Card -->
+      <div class="st-card" style="padding:12px 14px;background:var(--st-surface-variant);display:flex;flex-direction:column;align-items:center;">
+        <div style="width:100%;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span style="font-weight:600;font-size:13px;">Spirit Level &bull; Surface Tilt</span>
+          <span class="st-badge" id="level-badge" style="font-size:11px;">Calculating...</span>
+        </div>
+        <div style="position:relative;width:150px;height:150px;margin:4px 0;">
+          <canvas id="level-canvas" width="150" height="150" style="display:block;border-radius:50%;background:rgba(0,0,0,0.15);border:2px solid var(--st-line);"></canvas>
+        </div>
+        <div style="width:100%;display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;text-align:center;margin-top:4px;font-size:12px;">
+          <div><div class="muted small">Pitch</div><strong id="level-pitch">0.00°</strong></div>
+          <div><div class="muted small">Roll</div><strong id="level-roll">0.00°</strong></div>
+          <div><div class="muted small">Total Tilt</div><strong id="level-tilt">0.00°</strong></div>
+        </div>
+        <div class="muted small" id="level-guidance" style="margin-top:4px;text-align:center;">Keep phone flat on surface</div>
+      </div>
+
+      <!-- 6-Axis Motion & G-Force Oscilloscope -->
+      <div class="st-card" style="padding:12px 14px;background:var(--st-surface-variant);display:flex;flex-direction:column;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span style="font-weight:600;font-size:13px;">6-Axis IMU &bull; G-Force Waveform</span>
+          <span class="muted small" id="imu-gforce-val" style="font-feature-settings:'tnum';font-weight:bold;">1.00 G</span>
+        </div>
+        <div style="position:relative;width:100%;height:115px;margin-bottom:6px;">
+          <canvas id="waveform-canvas" width="340" height="115" style="width:100%;height:100%;display:block;border-radius:6px;background:rgba(0,0,0,0.2);border:1px solid var(--st-line);"></canvas>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:4px;text-align:center;font-size:11.5px;margin-top:auto;">
+          <div><div class="muted small">Accel X,Y,Z</div><strong id="imu-accel-xyz">--</strong></div>
+          <div><div class="muted small">Gyro X,Y,Z</div><strong id="imu-gyro-xyz">--</strong></div>
+          <div><div class="muted small">Linear Accel</div><strong id="imu-lin-xyz">--</strong></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Telemetry Row (Compass, Barometer, Light) -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:10px;font-size:12px;">
+      <div style="padding:8px 12px;background:var(--st-surface);border:1px solid var(--st-line-soft);border-radius:6px;">
+        <div class="muted small" style="margin-bottom:2px;">COMPASS &amp; HEADING</div>
+        <div>Heading: <strong id="tel-heading">--°</strong> (<span id="tel-cardinal">--</span>) &bull; <span class="muted" id="tel-mag-field">-- µT</span></div>
+      </div>
+      <div style="padding:8px 12px;background:var(--st-surface);border:1px solid var(--st-line-soft);border-radius:6px;">
+        <div class="muted small" style="margin-bottom:2px;">BAROMETER &amp; ALTITUDE</div>
+        <div>Pressure: <strong id="tel-pressure">-- hPa</strong> &bull; <span class="muted" id="tel-altitude">-- m</span></div>
+      </div>
+      <div style="padding:8px 12px;background:var(--st-surface);border:1px solid var(--st-line-soft);border-radius:6px;">
+        <div class="muted small" style="margin-bottom:2px;">LIGHT &amp; PROXIMITY</div>
+        <div>Front: <strong id="tel-lux">-- lux</strong> &bull; Proximity: <strong id="tel-proximity">-- cm</strong></div>
+      </div>
+    </div>
+
+    <!-- All 108 Sensors Live Explorer Section -->
+    <div class="st-card" style="padding:14px;background:var(--st-surface-variant);display:flex;flex-direction:column;gap:10px;">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;">
+        <div>
+          <span style="font-weight:600;font-size:13.5px;">All Phone Sensors</span>
+          <span class="muted small" style="margin-left:6px;" id="sensor-explorer-count">(108 hardware sensors)</span>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input type="text" id="sensor-search-input" class="st-input" placeholder="Search sensors (name, vendor, type)..." style="width:240px;height:28px;padding:2px 8px;font-size:12px;">
+        </div>
+      </div>
+
+      <!-- Sensor Category Filter Chips -->
+      <div style="display:flex;flex-wrap:wrap;gap:6px;" id="sensor-filter-chips">
+        <button type="button" class="st-btn st-btn--sm st-btn--primary sensor-filter-chip" data-filter="all">All (108)</button>
+        <button type="button" class="st-btn st-btn--sm st-btn--secondary sensor-filter-chip" data-filter="active">Active Now</button>
+        <button type="button" class="st-btn st-btn--sm st-btn--secondary sensor-filter-chip" data-filter="motion">Motion / IMU</button>
+        <button type="button" class="st-btn st-btn--sm st-btn--secondary sensor-filter-chip" data-filter="environment">Environment</button>
+        <button type="button" class="st-btn st-btn--sm st-btn--secondary sensor-filter-chip" data-filter="heading">Orientation &amp; Mag</button>
+        <button type="button" class="st-btn st-btn--sm st-btn--secondary sensor-filter-chip" data-filter="xiaomi">Xiaomi Context</button>
+      </div>
+
+      <!-- Scrollable Sensors Table -->
+      <div class="table-wrap" style="max-height:360px;overflow-y:auto;border:1px solid var(--st-line);border-radius:6px;background:var(--st-surface);">
+        <table class="st-table" style="font-size:12px;margin:0;">
+          <thead>
+            <tr>
+              <th style="width:40px;">#</th>
+              <th>Sensor Name &amp; Vendor</th>
+              <th>Type</th>
+              <th>Live Reading / Values</th>
+              <th style="width:70px;text-align:center;">Status</th>
+            </tr>
+          </thead>
+          <tbody id="sensors-table-body">
+            <tr><td colspan="5" class="muted" style="text-align:center;padding:20px;">Loading sensors list&hellip;</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</dialog>
+<dialog class="st-dialog" id="sensor-info-modal" style="max-width:720px;width:94vw;max-height:86vh;">
+  <div class="st-dialog__head">
+    <div class="st-dialog__title-wrap">
+      <div style="color:#38bdf8;background:rgba(56,189,248,0.15);border:1px solid rgba(56,189,248,0.4);border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg class="st-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="16" x2="12" y2="12"></line>
+          <line x1="12" y1="8" x2="12.01" y2="8"></line>
+        </svg>
+      </div>
+      <div>
+        <span class="st-dialog__title">Xiaomi 17 Ultra Sensors Guide</span>
+        <span class="muted small ws-path-badge" style="margin-left:6px;">108 Hardware &amp; Virtual Sensors</span>
+      </div>
+    </div>
+    <div class="st-dialog__actions">
+      <button type="button" class="st-btn st-btn--icon" id="sensor-info-close-btn" title="Close" aria-label="Close">
+        <svg class="st-icon"><use href="web/sprite.svg#i-chevron"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="st-dialog__body" style="padding:16px 20px;display:flex;flex-direction:column;gap:14px;overflow-y:auto;max-height:calc(86vh - 70px);line-height:1.55;font-size:13px;">
+    <!-- Architecture Banner -->
+    <div style="background:var(--st-surface-variant);border-left:4px solid #38bdf8;border-radius:var(--st-r-md,8px);padding:12px 14px;">
+      <div style="font-weight:600;color:var(--st-text);margin-bottom:2px;">Xiaomi 17 Ultra (2512BPNDAG) Sensor Architecture</div>
+      <div class="muted small">Combines flagship grade STMicroelectronics, Bosch Sensortec, Asahi Kasei (AKM), and ams-OSRAM silicon with low-power hardware sensor fusion. All 108 sensor nodes are accessible on-demand with zero idle battery impact.</div>
+    </div>
+
+    <!-- Category 1: Motion & 6-Axis IMU -->
+    <div class="st-card" style="padding:12px 14px;background:var(--st-surface);border:1px solid var(--st-line-soft);">
+      <div style="font-weight:600;font-size:13.5px;color:var(--st-accent);margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+        <svg class="st-icon st-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M12 3v4M12 17v4M3 12h4M17 12h4"></path></svg>
+        <span>1. Motion &amp; 6-Axis Inertial Measurement Unit (IMU)</span>
+      </div>
+      <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;">
+        <li><strong>STMicroelectronics lsm6dsv Accelerometer (up to 480 Hz):</strong> Measures physical acceleration across 3 orthogonal axes (X, Y, Z in m/s²). Detects phone movement, shake gestures, vibrations, and Earth gravity (9.81 m/s²).</li>
+        <li><strong>STMicroelectronics lsm6dsv Gyroscope (up to 480 Hz):</strong> Measures angular rotational velocity (rad/s) around pitch, roll, and yaw. Drives camera Optical Image Stabilization (OIS), panning tracking, and precision rotation.</li>
+        <li><strong>Gravity Sensor (Virtual / Sensor Fusion):</strong> Filters out user motion to isolate pure directional gravity, providing high-precision (±0.01°) surface leveling and spirit-level calculations.</li>
+        <li><strong>Linear Acceleration Sensor:</strong> Dynamically calculates acceleration with the gravity vector mathematically subtracted, measuring only applied human movement.</li>
+        <li><strong>Rotation Vector &amp; Game Rotation Vector:</strong> 4-component spatial orientation quaternions. The game rotation vector operates without magnetic bias for ultra-low latency spatial gaming.</li>
+      </ul>
+    </div>
+
+    <!-- Category 2: Compass & Geomagnetic -->
+    <div class="st-card" style="padding:12px 14px;background:var(--st-surface);border:1px solid var(--st-line-soft);">
+      <div style="font-weight:600;font-size:13.5px;color:var(--st-accent);margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+        <svg class="st-icon st-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 11 22 2 13 21 11 13 3 11"></polygon></svg>
+        <span>2. Geomagnetic &amp; Compass Heading</span>
+      </div>
+      <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;">
+        <li><strong>AKM ak0991x 3-Axis Magnetometer (100 Hz):</strong> High-sensitivity Hall-effect magnetic flux sensor measuring microteslas (µT). Detects Earth's geomagnetic field and local metal/electromagnetic fields.</li>
+        <li><strong>Orientation &amp; Compass:</strong> Fuses magnetic field with gravity to calculate magnetic azimuth (0°–360° heading, Cardinal directions N/NE/E/SE/S/SW/W/NW), pitch, and roll.</li>
+      </ul>
+    </div>
+
+    <!-- Category 3: Atmosphere & Barometer -->
+    <div class="st-card" style="padding:12px 14px;background:var(--st-surface);border:1px solid var(--st-line-soft);">
+      <div style="font-weight:600;font-size:13.5px;color:var(--st-accent);margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+        <svg class="st-icon st-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+        <span>3. Environmental Barometer &amp; Altimeter</span>
+      </div>
+      <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;">
+        <li><strong>Bosch bmp5 Barometric Pressure Sensor:</strong> Measures atmospheric air pressure (hPa) with sub-pascal resolution. Detects vertical elevation changes as subtle as 10 cm, calculating altitude above sea level and weather barometry.</li>
+      </ul>
+    </div>
+
+    <!-- Category 4: Optical, Display & Laser Ranging -->
+    <div class="st-card" style="padding:12px 14px;background:var(--st-surface);border:1px solid var(--st-line-soft);">
+      <div style="font-weight:600;font-size:13.5px;color:var(--st-accent);margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+        <svg class="st-icon st-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+        <span>4. Optical, Color &amp; Laser Ranging</span>
+      </div>
+      <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;">
+        <li><strong>ams-OSRAM tcs3760 Dual Ambient Light Sensors:</strong> Front and rear light meters measuring illuminance (lux) for true 360° adaptive brightness regardless of phone orientation.</li>
+        <li><strong>Dual Color Temperature (CCT) Sensors:</strong> Measures spectral correlated color temperature (Kelvin, K) on front and rear for TrueTone display adaptation and camera white balance.</li>
+        <li><strong>Optical Flicker Sensor (Hz):</strong> Analyzes artificial lighting pulsation (50/60/100/120 Hz) to eliminate banding in camera photos and video.</li>
+        <li><strong>STMicroelectronics L8 Laser Time-of-Flight (ToF):</strong> Sub-millimeter laser ranging system measuring physical distance (mm/cm) for instantaneous camera autofocus and spatial depth mapping.</li>
+        <li><strong>Proximity Sensor:</strong> Infrared and ultrasonic detection (0 to 5 cm) to suppress accidental touch while holding the phone to your ear.</li>
+      </ul>
+    </div>
+
+    <!-- Category 5: Pedometer & Hardware Context -->
+    <div class="st-card" style="padding:12px 14px;background:var(--st-surface);border:1px solid var(--st-line-soft);">
+      <div style="font-weight:600;font-size:13.5px;color:var(--st-accent);margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+        <svg class="st-icon st-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
+        <span>5. Biometrics &amp; Xiaomi Context Engine</span>
+      </div>
+      <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;">
+        <li><strong>Hardware Step Counter &amp; Detector:</strong> Ultra-low power hardware ASIC counting ambulatory steps continuously with zero CPU wakeups.</li>
+        <li><strong>Significant Motion Detector (SMD):</strong> Wakes processing cores only upon true human walking, jogging, or driving movement.</li>
+        <li><strong>Xiaomi Desk &amp; Surface Detection:</strong> Machine-learning hardware classifier distinguishing flat table surfaces from pocket carry or handholding.</li>
+        <li><strong>Pickup &amp; Wrist-Raise Gestures:</strong> Low-latency hardware interrupts for instant screen wake when lifted.</li>
+        <li><strong>Camera Drop Protection / Freefall:</strong> Senses 0 G weightlessness to retract mechanical periscope zoom lenses and lock gimbal stabilization before ground impact.</li>
+      </ul>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;margin-top:6px;">
+      <button type="button" class="st-btn st-btn--primary st-btn--sm" id="sensor-info-ok-btn">Got it</button>
     </div>
   </div>
 </dialog>

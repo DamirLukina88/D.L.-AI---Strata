@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-11-07:** Ingestion. decisions/xiaomi-17-ultra-sensor-streaming.md. (Agent: Antigravity)
 - **2026-11-07:** Artifact Backup. Saved Ray curled-in-tail sleeping and waking animation walkthrough. (Agent: Antigravity)
 - **2026-11-07:** Ingestion. artifacts/ray-lazy-load-sleeping-animation-walkthrough-2026-11-07.md. (Agent: Antigravity)
 - **2026-11-07:** Update. Implemented Ray's natural curled-in-bushy-tail sleeping and late-paw-yawn waking animations (`serve/web/rayface.js`, `serve/web/app.js`, `tools/make_ray_media.py`, `docs/media/ray/sleeping.gif`, `docs/media/ray/waking.gif`) and documented loading lifecycle in `decisions/ray-talking-face.md`. (Agent: Antigravity)

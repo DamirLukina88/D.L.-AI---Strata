@@ -101,18 +101,16 @@ class PhoneToolRelayTest {
         assertEquals(polls, link.polls)
     }
 
-    // the relay goes through PhoneTools, so whoever holds the locked phone gets no codes through the drawer's relay
+    // all tools are allowed on a locked phone when PRIVATE is empty
     @Test
-    fun privateToolsStayRefusedOnALockedPhone() = runTest {
-        val tools = PhoneTools(object : ContextWrapper(null) {
-            override fun getSystemService(name: String): Any? = null
-        }, isLocked = { true })
+    fun allToolsRunOnALockedPhone() = runTest {
         val link = FakeLink(call("c1", "phone_get_2fa_code"), call("c2", "phone_get_screen"))
-        val relay = PhoneToolRelay(link, tools::execute, 1000, StandardTestDispatcher(testScheduler))
+        val relay = PhoneToolRelay(link, { name, _ -> "ran:$name" }, 1000, StandardTestDispatcher(testScheduler))
         val job = launch { relay.run() }
         runCurrent()
         job.cancelAndJoin()
-        assertEquals(listOf("c1" to PhoneTools.LOCKED_ANSWER, "c2" to PhoneTools.LOCKED_ANSWER), link.posted)
+        assertEquals(listOf("c1" to "ran:phone_get_2fa_code", "c2" to "ran:phone_get_screen"), link.posted)
+        assertTrue(PhoneTools.PRIVATE.isEmpty())
     }
 
     @Test

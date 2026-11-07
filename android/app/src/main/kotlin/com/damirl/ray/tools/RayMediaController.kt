@@ -26,16 +26,24 @@ class RayMediaController(private val context: Context) {
 
         @Volatile private var resumeAfterSpeech = false
 
-        /** Ray starts talking: if Brave plays, it is resumed once he is done (his voice takes the audio meanwhile). */
+        /** Ray starts talking: if Ray's player or Brave plays, it is resumed once he is done (his voice takes the audio meanwhile). */
         fun pauseForSpeech(context: Context) {
             val media = RayMediaController(context.applicationContext)
-            if (!media.bravePlaying() || resumeAfterSpeech) return
+            val rayPlaying = RayMusicActivity.isPlaying()
+            val bravePlaying = media.bravePlaying()
+            if ((!rayPlaying && !bravePlaying) || resumeAfterSpeech) return
             resumeAfterSpeech = true
+            if (rayPlaying) {
+                RayMusicActivity.setSpeechPaused(true)
+            }
             com.damirl.ray.audio.VoiceTrace.event("music_paused_for_speech")
             Thread({
                 media.waitForQuiet()
                 resumeAfterSpeech = false
-                if (!media.bravePlaying()) {
+                if (rayPlaying && RayMusicActivity.isActive()) {
+                    RayMusicActivity.setSpeechPaused(false)
+                    com.damirl.ray.audio.VoiceTrace.event("music_resume", "result" to "RayMusicActivity resumed")
+                } else if (!media.bravePlaying()) {
                     val session = media.braveSession()
                     val result = session?.let { media.resumeBrave(it) } ?: "Brave's player is gone"
                     Log.d(TAG, "after speech: $result")
@@ -60,28 +68,10 @@ class RayMediaController(private val context: Context) {
         private val PLAYABLE = Regex("""^https://(music\.|www\.|m\.)?youtube\.com/.*|^https://youtu\.be/.*""")
     }
 
-    /** Opens [url] (a YouTube Music song or the Liked songs, found by phone_mcp.py) in Brave, where it plays. */
+    /** Opens [url] (a YouTube Music song or the Liked songs, found by phone_mcp.py) in Ray's lock-screen player. */
     fun playUrl(url: String): String {
         if (!PLAYABLE.matches(url)) return "Error: only music.youtube.com or youtube.com links can be played."
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-            .setPackage(BRAVE)
-            // the same app id each time: Brave reuses Ray's tab instead of opening a new one per song
-            .putExtra(Browser.EXTRA_APPLICATION_ID, context.packageName)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        val keyguard = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
-        // a page opened behind the lock screen doesn't play in Brave (screen off: never starts; screen on under
-        // the drawer: YouTube stops it after ~13 s and then plays silence, 2026-11-03 22:00-22:04): it is opened
-        // once the user unlocks the phone (5 minutes at most), and then plays normally
-        if (keyguard?.isKeyguardLocked != false) {
-            Thread({
-                val end = SystemClock.uptimeMillis() + AUTOSTART_MS
-                while ((keyguard?.isKeyguardLocked != false) && SystemClock.uptimeMillis() < end) Thread.sleep(500)
-                if (keyguard?.isKeyguardLocked == false) open(intent) else Log.d(TAG, "playUrl: not unlocked in time")
-            }, "RayMusicAfterUnlock").start()
-            Log.d(TAG, "playUrl: locked, opens after the unlock")
-            return LOCKED_START
-        }
-        return open(intent)
+        return RayMusicActivity.open(context, url)
     }
 
     private fun open(intent: Intent): String = try {
@@ -231,6 +221,7 @@ class RayMediaController(private val context: Context) {
      * Get active media session metadata (title, artist, and playback state).
      */
     fun getNowPlaying(): String {
+        RayMusicActivity.getNowPlayingStatus()?.let { return it }
         return try {
             val component = ComponentName(context, RayNotificationListenerService::class.java)
             val controllers = sessionManager?.getActiveSessions(component) ?: emptyList()
@@ -278,6 +269,14 @@ class RayMediaController(private val context: Context) {
      */
     fun controlMedia(action: String): String {
         val normAction = action.lowercase().trim()
+        if (RayMusicActivity.isActive()) {
+            val starts = normAction == "play" || (normAction == "play_pause" && !RayMusicActivity.isPlaying())
+            if (starts) {
+                Thread({ waitForQuiet(); RayMusicActivity.control("play") }, "RayMusicPlay").start()
+                return "Playing. $SHORT"
+            }
+            return RayMusicActivity.control(normAction)
+        }
 
         try {
             val component = ComponentName(context, RayNotificationListenerService::class.java)

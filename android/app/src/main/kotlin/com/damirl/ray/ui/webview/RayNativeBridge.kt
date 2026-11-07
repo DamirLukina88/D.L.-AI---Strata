@@ -219,6 +219,40 @@ class RayNativeBridge(
     }
 
     @JavascriptInterface
+    fun getLiveSensors(): String {
+        if (!trusted("getLiveSensors")) return "{}"
+        return try {
+            com.damirl.ray.tools.PhoneSensorManager.getLiveDashboardJson(context)
+        } catch (_: Throwable) {
+            "{}"
+        }
+    }
+
+    @JavascriptInterface
+    fun startSensorStream(mode: String = "all", durationSec: Int = 15, rateHz: Int = 100): String {
+        if (!trusted("startSensorStream")) return "Error: refused"
+        return com.damirl.ray.tools.PhoneSensorManager.sensorStream(context, "start", mode, durationSec, rateHz)
+    }
+
+    @JavascriptInterface
+    fun stopSensorStream(): String {
+        if (!trusted("stopSensorStream")) return "Error: refused"
+        return com.damirl.ray.tools.PhoneSensorManager.sensorStream(context, "stop", "all", 0, 100)
+    }
+
+    @JavascriptInterface
+    fun refreshAllSensors(): String {
+        if (!trusted("refreshAllSensors")) return "{}"
+        Thread {
+            try {
+                com.damirl.ray.tools.PhoneSensorManager.readSensors(context, "all", 250)
+            } catch (_: Throwable) {
+            }
+        }.start()
+        return com.damirl.ray.tools.PhoneSensorManager.getLiveDashboardJson(context)
+    }
+
+    @JavascriptInterface
     fun executeTool(name: String, argsJson: String = "{}", callId: String = ""): String {
         if (!trusted("executeTool")) {
             return JSONObject().put("tool", name).put("callId", callId)

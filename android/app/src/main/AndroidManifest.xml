@@ -14,7 +14,18 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- phone_get_gallery_image: the newest photo or screenshot the user took -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!-- phone_read_sensors & phone_sensor_stream: all 107 sensors including step counter & 480 Hz IMU -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
+    <uses-permission android:name="android.permission.BODY_SENSORS" />
+    <!-- phone_calendar: direct Google Calendar integration via CalendarContract -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
@@ -84,6 +95,18 @@
             android:noHistory="true"
             android:showWhenLocked="true"
             android:turnScreenOn="true"
+            android:exported="false" />
+
+        <!-- In-app lock-screen music player (RayMusicActivity): plays YouTube Music over the lock screen without unlocking -->
+        <activity
+            android:name=".tools.RayMusicActivity"
+            android:theme="@style/Theme.Ray"
+            android:excludeFromRecents="false"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.damirl.ray.music"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation"
             android:exported="false" />
 
         <!-- The headset mic test (MicProbeActivity): adb only (android.permission.DUMP), debug builds only -->

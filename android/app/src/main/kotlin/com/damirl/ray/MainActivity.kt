@@ -33,6 +33,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         handleIntent(intent)
         com.damirl.ray.assistant.WakeWord.startIfOn(this)     // "Ok Ray", if it is switched on
+        com.damirl.ray.tools.PhoneToolRelay.ensureBackgroundRelay(this)
 
         enableEdgeToEdge(
             statusBarStyle = androidx.activity.SystemBarStyle.dark(

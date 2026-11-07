@@ -126,11 +126,19 @@ class RayAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        PhoneToolRelay.ensureBackgroundRelay(this)
+        PhoneClipboardManager.ensureListener(this)
         Log.d(TAG, "RayAccessibilityService connected")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Events monitored for screen updates
+        val ev = event ?: return
+        if (ev.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED ||
+            ev.eventType == AccessibilityEvent.TYPE_ANNOUNCEMENT ||
+            ev.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED
+        ) {
+            PhoneClipboardManager.onAccessibilityCopyCandidate(this)
+        }
     }
 
     override fun onInterrupt() {

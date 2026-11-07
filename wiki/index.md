@@ -62,6 +62,7 @@ Every page in this wiki is listed below. The list is generated; do not edit betw
 - [Weather Reasoning Benchmark for CLI Thinking Levels](decisions/weather-reasoning-benchmark.md) — Standalone benchmark tools/weather_reasoning_bench.py evaluating CLI thinking levels with location inference, table quality, and Proton Mail.
 - [Web App Split View: Code | Monitor](decisions/web-app-split-view.md) — From 1200 px wide the Code tab and Monitor sit side by side with a draggable divider; narrower screens keep the tabs
 - [Wiki Handoff Session Reset, Mid-Stream Recovery, and OOM Headroom](decisions/wiki-handoff-and-oom-fixes.md) — 4-section Wiki Handoff Diary + clean session reload, mid-stream error auto-retry, Monitor 50k/Show-all fixes, and 2.15 GiB RAM OOM headroom.
+- [Xiaomi 17 Ultra Live Sensor Streaming and Explorer](decisions/xiaomi-17-ultra-sensor-streaming.md) — Architecture for live streaming all 108 Xiaomi 17 Ultra sensors, flexible durations, and web UI explorer.
 
 ## Preferences
 

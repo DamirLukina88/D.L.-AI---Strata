@@ -37,9 +37,9 @@ class PhoneToolsLockTest {
         assertEquals("Error: Unknown tool 'phone_nope'.", tools.execute("phone_nope", JSONObject()))
     }
 
-    // no KeyguardManager (can't tell): counted as locked
+    // all tools are allowed while locked when PRIVATE is empty
     @Test
-    fun unknownLockStateCountsAsLocked() {
-        assertEquals(PhoneTools.LOCKED_ANSWER, PhoneTools(DummyContext()).execute("phone_get_2fa_code", JSONObject()))
+    fun unknownLockStateAllowsToolsWhenPrivateIsEmpty() {
+        assertNotEquals(PhoneTools.LOCKED_ANSWER, PhoneTools(DummyContext()).execute("phone_get_2fa_code", JSONObject()))
     }
 }

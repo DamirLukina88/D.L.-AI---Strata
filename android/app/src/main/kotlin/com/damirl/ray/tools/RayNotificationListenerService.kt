@@ -81,6 +81,11 @@ class RayNotificationListenerService : NotificationListenerService() {
         }
     }
 
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        PhoneToolRelay.ensureBackgroundRelay(this)
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         super.onNotificationPosted(sbn)
         val notif = sbn?.notification ?: return

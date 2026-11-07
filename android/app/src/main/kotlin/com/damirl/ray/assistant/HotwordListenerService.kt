@@ -88,6 +88,7 @@ class HotwordListenerService : Service() {
             this, NOTIFICATION_ID, createNotification(),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0
         )
+        com.damirl.ray.tools.PhoneToolRelay.ensureBackgroundRelay(this)
         if (!running) {
             running = true
             scope.launch { loadAndWatch() }

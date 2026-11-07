@@ -35,6 +35,12 @@ object AutoCamera {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             return "Error: Ray may not use the camera yet. In the app, About › Android settings › Camera: Allow."
         }
+        val needHold = !com.damirl.ray.MainActivity.shown &&
+            com.damirl.ray.assistant.VoiceDrawerController.closeOpen == null &&
+            !RayMusicActivity.isActive()
+        if (needHold) {
+            RayUnlockActivity.startCameraHold(context)
+        }
         val main = Handler(Looper.getMainLooper())
         val owner = OneShotLifecycle()
         val capture = ImageCapture.Builder()
@@ -92,6 +98,7 @@ object AutoCamera {
             try { provider.unbindAll() } catch (_: Exception) {}
             owner.stop()
         }
+        RayUnlockActivity.finishCameraHold()
     }
 
     // a lifecycle that is resumed for the one photo (the camera is bound to it), then destroyed

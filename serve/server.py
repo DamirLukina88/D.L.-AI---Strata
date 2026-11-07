@@ -97,6 +97,8 @@ class PhoneBridge:
         self.pending_calls: dict[str, dict] = {}
         self.last_seen = 0.0
         self.is_connected = False
+        self.sensor_stream: dict = {}
+        self.clipboard: dict = {"text": "", "hash": "", "source": "", "updated_ms": 0}
 
     def report_heartbeat(self):
         with self.lock:
@@ -156,12 +158,15 @@ PHONE_BRIDGE = PhoneBridge()
 PHONE_PENDING_PATH = "/v1/ray/phone/pending"
 PHONE_RESULT_PATH = "/v1/ray/phone/result"
 PHONE_UPLOAD_PATH = "/v1/ray/phone/upload"
+PHONE_DOWNLOAD_PATH = "/v1/ray/phone/download"
+PHONE_SENSORS_STREAM_PATH = "/v1/ray/phone/sensors/stream"
+PHONE_CLIPBOARD_PATH = "/v1/ray/phone/clipboard"
 
 
 def is_phone_photo(name: str) -> bool:
-    """A path under phone-photos/: all the app's upload may write (the web app's upload stays behind Access)."""
+    """A path under phone-photos/ or phone-files/: all the phone companion app's upload may write."""
     parts = PurePosixPath(name or "").parts
-    return len(parts) >= 2 and parts[0] == "phone-photos" and ".." not in parts
+    return len(parts) >= 2 and parts[0] in ("phone-photos", "phone-files") and ".." not in parts
 
 
 _download_tickets: dict[str, tuple[Path, float]] = {}
@@ -6248,7 +6253,62 @@ def make_handler(svc: Service):
                     return
                 PHONE_BRIDGE.report_heartbeat()
                 call = PHONE_BRIDGE.pop_pending_call()
-                self._json(200, {"pending": call})
+                # Check if desktop clipboard has newer content from KDE Klipper
+                try:
+                    res = subprocess.run(
+                        ["qdbus6", "org.kde.klipper", "/klipper", "org.kde.klipper.klipper.getClipboardContents"],
+                        capture_output=True, text=True, timeout=0.8
+                    )
+                    if res.returncode == 0 and res.stdout:
+                        ktxt = res.stdout.strip()
+                        khash = hashlib.sha256(ktxt.encode("utf-8")).hexdigest()
+                        with PHONE_BRIDGE.lock:
+                            if ktxt and khash != PHONE_BRIDGE.clipboard.get("hash"):
+                                PHONE_BRIDGE.clipboard = {
+                                    "text": ktxt,
+                                    "hash": khash,
+                                    "source": "desktop",
+                                    "updated_ms": int(time.time() * 1000)
+                                }
+                except Exception:
+                    pass
+                with PHONE_BRIDGE.lock:
+                    clip = dict(PHONE_BRIDGE.clipboard) if PHONE_BRIDGE.clipboard.get("text") else None
+                resp = {"pending": call}
+                if clip:
+                    resp["clipboard"] = clip
+                self._json(200, resp)
+                return
+            if path in ("/api/phone/sensors/stream", PHONE_SENSORS_STREAM_PATH):
+                if not self._authorized():
+                    return
+                with PHONE_BRIDGE.lock:
+                    data = dict(PHONE_BRIDGE.sensor_stream)
+                if not data:
+                    stream_file = WORKSPACE_DIR / "phone-photos" / "_ray_sensor_stream.json"
+                    if stream_file.is_file():
+                        try:
+                            data = json.loads(stream_file.read_text(encoding="utf-8"))
+                        except Exception:
+                            data = {}
+                self._json(200, data)
+                return
+            if path in ("/api/phone/clipboard", PHONE_CLIPBOARD_PATH):
+                if not self._authorized():
+                    return
+                with PHONE_BRIDGE.lock:
+                    clip = dict(PHONE_BRIDGE.clipboard)
+                self._json(200, clip)
+                return
+            if path == PHONE_DOWNLOAD_PATH:
+                if not self._authorized():
+                    return
+                qs = parse_qs(urlsplit(self.path).query)
+                target = safe_workspace_path((qs.get("file") or qs.get("path") or [""])[0])
+                if not target or not target.is_file():
+                    self._json(404, {"error": {"message": "file not found in workspace"}})
+                    return
+                self._send_file_download(target)
                 return
             if path in ("/api/workspace/files", "/api/workspace"):
                 if not self._authorized():
@@ -6609,7 +6669,9 @@ def make_handler(svc: Service):
                 except OSError as e:
                     self._json(503, {"error": {"message": f"the CLI session daemon is not running ({e})"}})
                 return
-            if path in ("/api/phone/status", "/api/phone/tool/call", "/api/phone/tool/result", PHONE_RESULT_PATH):
+            if path in ("/api/phone/status", "/api/phone/tool/call", "/api/phone/tool/result", PHONE_RESULT_PATH,
+                        "/api/phone/sensors/stream", PHONE_SENSORS_STREAM_PATH,
+                        "/api/phone/clipboard", PHONE_CLIPBOARD_PATH):
                 # all three need the key (the web app and the Android app send it): "authorized or not foreign" let a
                 # client without a key and without an Origin header through, after _authorized() had already sent its
                 # 401, so anyone on the LAN could fake the phone's heartbeat or a tool's result
@@ -6617,6 +6679,50 @@ def make_handler(svc: Service):
                     return
                 if path == "/api/phone/status":
                     PHONE_BRIDGE.report_heartbeat()
+                    self._json(200, {"status": "ok"})
+                    return
+                if path in ("/api/phone/sensors/stream", PHONE_SENSORS_STREAM_PATH):
+                    PHONE_BRIDGE.report_heartbeat()
+                    try:
+                        req = json.loads(self._body() or b"{}")
+                    except ValueError:
+                        req = {}
+                    if isinstance(req, dict):
+                        with PHONE_BRIDGE.lock:
+                            PHONE_BRIDGE.sensor_stream = req
+                        try:
+                            sf = WORKSPACE_DIR / "phone-photos" / "_ray_sensor_stream.json"
+                            sf.parent.mkdir(parents=True, exist_ok=True)
+                            sf.write_text(json.dumps(req), encoding="utf-8")
+                        except Exception:
+                            pass
+                    self._json(200, {"status": "ok"})
+                    return
+                if path in ("/api/phone/clipboard", PHONE_CLIPBOARD_PATH):
+                    PHONE_BRIDGE.report_heartbeat()
+                    try:
+                        req = json.loads(self._body() or b"{}")
+                    except ValueError:
+                        req = {}
+                    if isinstance(req, dict) and req.get("text"):
+                        text_val = str(req.get("text", ""))
+                        with PHONE_BRIDGE.lock:
+                            PHONE_BRIDGE.clipboard = {
+                                "text": text_val,
+                                "hash": str(req.get("hash", "")),
+                                "source": str(req.get("source", "phone")),
+                                "updated_ms": int(req.get("updated_ms") or (time.time() * 1000))
+                            }
+                        if req.get("source") != "desktop" and text_val:
+                            def _sync_to_klipper(t: str):
+                                try:
+                                    subprocess.run(
+                                        ["qdbus6", "org.kde.klipper", "/klipper", "org.kde.klipper.klipper.setClipboardContents", t],
+                                        capture_output=True, timeout=2.0
+                                    )
+                                except Exception:
+                                    pass
+                            threading.Thread(target=_sync_to_klipper, args=(text_val,), daemon=True).start()
                     self._json(200, {"status": "ok"})
                     return
                 if path == "/api/phone/tool/call":
@@ -6629,7 +6735,14 @@ def make_handler(svc: Service):
                     if not tool_name:
                         self._json(400, {"error": {"message": "missing tool name"}})
                         return
-                    res = PHONE_BRIDGE.enqueue_call(tool_name, tool_args, timeout=20.0)   # a photo takes a few seconds
+                    dur_s = 0.0
+                    if isinstance(tool_args, dict):
+                        try:
+                            dur_s = float(tool_args.get("duration_sec") or 0.0)
+                        except (TypeError, ValueError):
+                            dur_s = 0.0
+                    call_timeout = max(20.0, min(135.0, dur_s + 12.0))
+                    res = PHONE_BRIDGE.enqueue_call(tool_name, tool_args, timeout=call_timeout)
                     if res is not None:
                         self._json(200, {"result": res})
                     else:
