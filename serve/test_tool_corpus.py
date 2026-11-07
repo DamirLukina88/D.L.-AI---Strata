@@ -172,10 +172,8 @@ add("qwen-wrapper-close-left-out-two-calls", qwen("read", path="a.txt").replace(
 add("qwen-wrapper-close-left-out-two-calls-in-thinking", "Plan.\n\n" + qwen("read", path="a.txt").replace("\n</tool_call>", "") +
     "\n" + qwen("read", path="b.txt"), [("read", {"path": "a.txt"}), ("read", {"path": "b.txt"})], thinking=True,
     reasoning="Plan.\n\n\n", source="the same inside the thinking")
-# This fork keeps a well-formed call of an undeclared name a call when the request declared tools (the agent answers a
-# made-up name with its tool list; wiki: Upstream Strata 0.2.7 Review, the #3796 gotcha); upstream returns it as text.
-add("qwen-undeclared-name-is-a-call-here", qwen("format_disk", target="/"), [("format_disk", {"target": "/"})],
-    source="local rule: a well-formed call of an undeclared name stays a call when tools were declared")
+add("qwen-undeclared-name-is-text", qwen("format_disk", target="/"), content=qwen("format_disk", target="/"), unread=1,
+    source="by design: a call for a tool the request did not declare comes back as text (and is counted)")
 add("qwen-cut-inside-a-value", "<tool_call>\n<function=write_file>\n<parameter=path>\nout.txt\n</parameter>\n<parameter=content>\nhal",
     content="<tool_call>\n<function=write_file>\n<parameter=path>\nout.txt\n</parameter>\n<parameter=content>\nhal",
     finish="length", announced=True, source="an unterminated tag: the output stopped at the token limit; no call")

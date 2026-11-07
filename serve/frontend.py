@@ -627,12 +627,14 @@ def anthropic_to_messages(req: dict, think_unasked: bool = True) -> tuple[list[d
             elif kind == "thinking":
                 reasoning.append(block.get("thinking", ""))
             elif kind == "tool_use":
-                calls.append({"function": {"name": block.get("name"), "arguments": tool_arguments(block.get("input"))}})
+                calls.append({"function": {"name": block.get("name"), "arguments": tool_arguments(block.get("input"))},
+                              "_call_id": block.get("id")})
             elif kind == "tool_result":
                 # A tool's image (Claude Code's Read of a picture) reaches the encoder like a user's, as the OpenAI
                 # path's tool messages already do; a text-only result is one string, as before.
                 messages.append({"role": "tool", "content": _parts_of(_check_parts(
-                    block.get("content"), f"messages[{i}].content[{j}].content", TEXT_PARTS + IMAGE_PARTS))})
+                    block.get("content"), f"messages[{i}].content[{j}].content", TEXT_PARTS + IMAGE_PARTS)),
+                                 "_call_id": block.get("tool_use_id")})
         if text or calls or reasoning or parts:
             # an image sent beside tool results stays in this turn instead of being dropped
             out = {"role": m["role"], "content": _parts_of(parts) if _has_image(parts) else "".join(text)}
@@ -641,6 +643,8 @@ def anthropic_to_messages(req: dict, think_unasked: bool = True) -> tuple[list[d
             if calls:
                 out["tool_calls"] = calls
             messages.append(out)
+    # A client may send results in the order its tools finished (Claude Code does for parallel calls)
+    _order_chat_tool_results(messages)
     tools = [{"name": t["name"], "description": t.get("description", ""), "parameters": t.get("input_schema", {})}
              for t in _tool_list(req.get("tools"), None)] or None
     kwargs = {}
@@ -670,6 +674,34 @@ def anthropic_to_messages(req: dict, think_unasked: bool = True) -> tuple[list[d
     return _env_to_user(messages), tools, kwargs
 
 
+def _order_chat_tool_results(messages: list[dict]) -> None:
+    """The template pairs results by position, so restore call order while IDs are still available.
+
+    Only a complete, unambiguous run of results is reordered. Legacy or incomplete histories keep their
+    received order. IDs are private to this conversion and never reach the template.
+    """
+    i = 0
+    while i < len(messages):
+        if messages[i]["role"] != "tool":
+            i += 1
+            continue
+        j = i + 1
+        while j < len(messages) and messages[j]["role"] == "tool":
+            j += 1
+        prev = messages[i - 1] if i else {}
+        calls = [c.get("_call_id") for c in prev.get("tool_calls") or []] if prev.get("role") == "assistant" else []
+        results = [m.get("_call_id") for m in messages[i:j]]
+        if len(calls) == len(results) and all(isinstance(cid, str) and cid for cid in calls + results):
+            if len(set(calls)) == len(calls) and len(set(results)) == len(results) and set(calls) == set(results):
+                rank = {cid: n for n, cid in enumerate(calls)}
+                messages[i:j] = sorted(messages[i:j], key=lambda m: rank[m["_call_id"]])
+        i = j
+    for message in messages:
+        message.pop("_call_id", None)
+        for call in message.get("tool_calls") or []:
+            call.pop("_call_id", None)
+
+
 # ------------------------------------------------------------------------------------------------ output parser
 @dataclass
 class ToolCall:
@@ -696,6 +728,15 @@ FUNC_END = "</function>"
 # #3441: the opener a model writes when it drifts by a token inside the envelope the template documents:
 # `<=NAME>` (the word `function` dropped), `<function:NAME>`, `<function =NAME>`, or the bare `<NAME>`
 _LOOSE_OPEN = re.compile(r"<\s*(?:function\s*[=:]\s*|=\s*)?([A-Za-z0-9_.\-]+)\s*>")
+_PREFIX_LOOKBACK = 256     # how far before a new delta a prefixed name or a misspelt opener can start (see OutputParser._prefixed)
+# #5409: `<function=tools actio>` / `<function=tools>`; the prefixes are the ones of #4751
+_PREFIX_SPACED = re.compile(r"(<function=\s*(?:tools|functions|default_api)[ \t]+)([^<>\s]+)\s*>")
+_PREFIX_PART = re.compile(r"<function=\s*(?:tools|functions|default_api)[ \t]+[^<>\s]{0,80}\s*$")
+_PREFIX_BARE = re.compile(r"(<tool_call>\s*)<function=\s*(tools|functions|default_api)\s*>(.*?)</function>", re.S)
+_PREFIX_BARE_OPEN = re.compile(r"<tool_call>\s*<function=\s*(tools|functions|default_api)\s*>(?!.*</function>)", re.S)
+# #5276: `<toolcall>` / `<tool-call>` as the opener (then whitespace, `<function=NAME>`), and such an opener still arriving
+_MISSPELT_OPEN = re.compile(r"<tool-?call>(\s*)<function=(\s*[^<>\s]+\s*)>")
+_MISSPELT_PART = re.compile(r"<tool-?call>\s*<function=[^<>]{0,80}$|<tool-?call>\s*(?:<(?:f(?:u(?:n(?:c(?:t(?:i(?:o(?:n)?)?)?)?)?)?)?)?)?$")
 _LOOSE_PART = re.compile(r"<\s*(?:function[ \t]*[=:]?\s*|=\s*)?[A-Za-z0-9_.\-]*\s*$")
 
 
@@ -835,8 +876,8 @@ def forced_call(tool_choice, tools: list[dict] | None) -> str | None:
         return None
     if kind == "required" and len(names) == 1:     # one tool to call: name it, the model cannot invent another
         kind, name = "named", next(iter(names))
-    if kind == "required" and names:
-        return CALL_START + "\n<function="
+    if kind == "required" and names:               # the model writes "<function=NAME>": from a written "<function=", Qwen3.8 went on with names no tool has
+        return CALL_START + "\n"
     if kind == "named" and name in names:
         return CALL_START + f"\n<function={name}>\n"
     print(f"[strata] tool_choice {json.dumps(tool_choice)[:200]} is not supported here (or names no tool of the "
@@ -1082,23 +1123,50 @@ class OutputParser:
     until it is complete, so clients never see `<tool_` or `</thi`."""
 
     def __init__(self, thinking: bool = True, tools: list[dict] | None = None, stream_tools: bool = False,
-                 recover: bool = False, declared_only: bool = False):
+                 recover: bool = False, declared_only: bool = False, deferred: bool = False):
         self.state = "reasoning" if thinking else "content"
         self.buf = ""
         self.lead = False
-        self.schemas = {t.get("name"): t for t in tools or []}
-        # Accept the native namespace__member spelling without advertising duplicate tools.
+        self.schemas = {}
+        for t in tools or []:
+            if isinstance(t, dict):
+                name = t.get("name")
+                if name:
+                    self.schemas[name] = t
+                elif isinstance(t.get("function"), dict) and t["function"].get("name"):
+                    self.schemas[t["function"]["name"]] = t["function"]
+        # #4663: the request defers tools (Anthropic's tool search, see anthropic_tools): the client holds back more tools
+        # than it declares, so a call for an undeclared name is a call too - Claude Code runs it, where text ended the turn.
+        self.deferred = deferred
+        # #804/#3075: in the answer too, a call counts only for a tool the request declared.  With tools declared a
+        # call for another name stays text (the Responses spelling `namespace__tool` of a `namespace.tool` counts as
+        # that tool); `declared_only` extends the rule to a request that declared none (Chat Completions, Anthropic:
+        # the client has no tool to run).  The Responses route leaves it off: a Codex compaction request keeps its
+        # conversation's tools in the prompt only, and its calls come back as before.
+        self.declared_only = declared_only
+        # A declared namespace.member tool is also accepted as namespace__member (PR #3556),
+        # namespace=member (Qwen writes the <function= tag's equals sign into the name),
+        # namespace_member (one underscore dropped), and the bare member when exactly one
+        # declared tool has it. Only an unambiguous alias counts, and an exactly declared
+        # name always wins over an alias.
         aliases = {}
         for name in self.schemas:
             if isinstance(name, str) and "." in name:
                 namespace, member = name.rsplit(".", 1)
-                aliases.setdefault(f"{namespace}__{member}", set()).add(name)
+                for alias in (f"{namespace}__{member}", f"{namespace}={member}",
+                              f"{namespace}_{member}", member):
+                    aliases.setdefault(alias, set()).add(name)
         # #3796: the same tool written with every `__` collapsed to `_` (`mcp__playwright__browser_navigate` as
         # `mcp_playwright_browser_navigate`, the way Qwen often flattens a name) is that tool.  Only a spelling of a declared
         # name: a reordered or renamed tool (`server1_label_values` for `label_values_mcp_server1`) is not guessed.
         for name in self.schemas:
             if isinstance(name, str) and "__" in name:
                 aliases.setdefault(name.replace("__", "_"), set()).add(name)
+                # #5281: a namespaced MCP tool (`mcp__assets__get_asset_info`) written with its last segment only (`get_asset_info`),
+                # as the bare member of a dotted name is accepted above; only when exactly one declared tool ends that way
+                last = name.rsplit("__", 1)[1]
+                if last:
+                    aliases.setdefault(last, set()).add(name)
         # #4751: a programmatic-tool-calling harness (the DeepSeek Harness's PTC mode) shows the model its tools as `tools.write(...)`
         # inside code, and the model then writes the native call with that spelling (`tools.write`, also `functions.write`).  The
         # prefix is not part of the declared name; the same unambiguous-alias rule applies, an exactly declared name always wins.
@@ -1108,14 +1176,6 @@ class OutputParser:
                     aliases.setdefault(prefix + name, set()).add(name)
         self.aliases = {alias: next(iter(names)) for alias, names in aliases.items()
                         if len(names) == 1 and alias not in self.schemas}
-        # #804/#3075: in the answer too, a call counts only for a tool the request declared.  With tools declared a
-        # call for another name stays text (the Responses spelling `namespace__tool` of a `namespace.tool` counts as
-        # that tool); `declared_only` extends the rule to a request that declared none (Chat Completions, Anthropic:
-        # the client has no tool to run).  The Responses route leaves it off: a Codex compaction request keeps its
-        # conversation's tools in the prompt only, and its calls come back as before.
-        self.declared_only = declared_only
-        # every namespace__member spelling of a declared namespace.tool, ambiguous ones too (#2284 passes those through)
-        self._alias = set(aliases) | {k.replace(".", "__", 1) for k in self.schemas if isinstance(k, str) and "." in k}
         self.unread = 0              # #3441: `<tool_call>` blocks that opened like a call and were returned as text
         self.unread_names: list[str] = []   # the names (first few) of those that named a tool the request did not declare
         # stream_tools: a tool call is also reported while it is being written - "tool_start" (its name and id) as
@@ -1140,8 +1200,13 @@ class OutputParser:
         self.recover = recover
         self.bare = False            # the call being read opened with <function= alone (no <tool_call> around it)
         self.batch = False           # the call being finished is followed by another in the same wrapper
+        self._held = ""              # #5276/#5409: the end of a misspelt opener or a prefixed name still arriving (see _prefixed)
         self._final = False          # #4701: the turn has ended: a call held for what might follow it is decided now
         self._reset_scan()
+
+    @property
+    def empty(self) -> bool:
+        return not self.buf and not self._held
 
     def _ok_at(self, p: int) -> bool:
         """self.buf[p] would open a call: at the start of a line, outside a code fence and inline code."""
@@ -1151,14 +1216,23 @@ class OutputParser:
         self._restore(snap)
         return ok
 
+    def _opens_at(self, p: int) -> bool:
+        """self.buf[p] would open a call as `<tool_call>` does: in the reasoning at the start of a line outside code, in the answer
+        anywhere outside code (a fence, inline code, an indented block)."""
+        if self.state == "reasoning":
+            return self._ok_at(p)
+        snap = self._snap()
+        self._track(self.buf[:p])
+        ok = not self._in_code()
+        self._restore(snap)
+        return ok
+
     def _callable(self, name: str) -> bool:
-        """#3441: may a drifted opener (`<=NAME>`, `<function:NAME>`, `<NAME>`) be a call?  Only for a tool the request
-        declared (or its namespace__member spelling).  Local change: a well-formed `<function=NAME>` of an undeclared
-        name stays a call when the request declared tools (#2284 tests, and D.L. CLI corrects typos and answers a
-        made-up name with its tool list); upstream's #3075 text rule applies only to a request that declared none."""
+        """#3075: may a call for `name` be a call?  A tool the request declared (or its Responses spelling); with
+        none declared, only where `declared_only` is off."""
         if not self.schemas:
             return not self.declared_only
-        return name in self.schemas or name in self._alias
+        return name in self.schemas or name in self.aliases or self.deferred
 
     def _loose_open(self, after: str):
         """#3441: `after` (text after a `<tool_call>`, whitespace dropped) opens a call in a drifted form that names a
@@ -1173,7 +1247,7 @@ class OutputParser:
             bare = after[1:].strip().lstrip("=").strip()
             if after[1:].lstrip().startswith(("=", "function")):
                 return "wait"
-            if any(k.startswith(bare) for k in list(self.schemas) + list(self._alias) if isinstance(k, str)):
+            if any(k.startswith(bare) for k in list(self.schemas) + list(self.aliases) if isinstance(k, str)):
                 return "wait"
         return None
 
@@ -1476,8 +1550,87 @@ class OutputParser:
                     best = max(best, n)
         return best
 
+    def _prefixed(self, fresh: int) -> str:
+        """#5409: a call written `<function=tools NAME>` (a space for the dot of `tools.NAME`) is the call NAME, and one written
+        `<function=tools>` (the bare prefix) is the one declared tool that takes the call's parameters.  Rewrites the complete
+        ones in self.buf to `<function=NAME>` and returns the tail of a call still arriving, which feed() holds back until the next
+        delta.  Only a declared name is ever the result; with none, or with two that fit, the text is left as it was.
+        `fresh`: the length of the text just added; only the end of the buffer (that and a little before it) can hold a new match,
+        so a long call is not scanned again with every token."""
+        held = self._opener(fresh)
+        start = max(0, len(self.buf) - fresh - _PREFIX_LOOKBACK)
+        buf = self.buf[start:]
+        if "<function=" in buf:
+            def spaced(m):
+                name = m.group(2).strip()
+                return f"<function={name}>" if name in self.schemas else m.group(0)
+            buf = _PREFIX_SPACED.sub(spaced, buf)
+            m = _PREFIX_PART.search(buf)
+            if m and not held:
+                held, buf = buf[m.start():], buf[:m.start()]
+            if self.recover:
+                def bare(m):
+                    body = m.group(3)
+                    names = re.findall(r"<parameter=\s*([^<>\s]+?)\s*>", body)
+                    tool = None if m.group(2) in self.schemas else self._tool_by_params(names)
+                    return f"{m.group(1)}<function={tool}>{body}</function>" if tool else m.group(0)
+                buf = _PREFIX_BARE.sub(bare, buf)
+                m = _PREFIX_BARE_OPEN.search(buf)
+                if m and m.group(1) not in self.schemas and not held and len(buf) - m.start() <= RCALL_MAX:
+                    held, buf = buf[m.start():], buf[:m.start()]
+            if buf != self.buf[start:]:
+                self.buf = self.buf[:start] + buf
+        return held
+
+    def _opener(self, fresh: int) -> str:
+        """#5276: `<toolcall>` / `<tool-call>` (the opener written as text, misspelled) followed by `<function=NAME>` of a declared
+        tool is `<tool_call>`, where a `<tool_call>` would open a call (in the reasoning the start of a line, outside code; in the
+        answer outside code).  Prose that names the misspelled tag, or any other follower, is left as it was.  Returns the tail of
+        an opener still arriving (held back by feed)."""
+        start = max(0, len(self.buf) - fresh - _PREFIX_LOOKBACK)
+        if "<tool" not in self.buf[start:]:
+            return ""
+        buf = self.buf
+        pos, out = start, []
+        for m in _MISSPELT_OPEN.finditer(buf, start):
+            name = m.group(2).strip()
+            name = self.aliases.get(name, name)
+            if name in self.schemas and self._opens_at(m.start()):
+                out.append(buf[pos:m.start()] + CALL_START + m.group(1) + FUNC_START + m.group(2) + ">")
+                pos = m.end()
+        buf = buf[:start] + "".join(out) + buf[pos:] if out else buf
+        held = ""
+        m = _MISSPELT_PART.search(buf, start)
+        tail = buf[m.start():] if m else ""
+        if not tail:                                        # the opener itself still arriving: a prefix of `<toolcall>`
+            for k in range(min(len(buf), 11), 5, -1):
+                if any(w.startswith(buf[-k:]) for w in ("<toolcall>", "<tool-call>")) and buf[-k:] != "<tool_":
+                    tail = buf[-k:]
+                    break
+        if tail:
+            held, buf = tail, buf[:len(buf) - len(tail)]
+        self.buf = buf
+        return held
+
+    def _tool_by_params(self, names: list[str]) -> str | None:
+        """The one declared tool whose properties hold every one of `names` and whose required parameters are all in them."""
+        found = []
+        for tname, schema in self.schemas.items():
+            params = (schema or {}).get("parameters") or {}
+            props = params.get("properties") or {}
+            if names and all(n in props for n in names) and all(r in names for r in params.get("required") or []):
+                found.append(tname)
+        return found[0] if len(found) == 1 else None
+
     def feed(self, delta: str) -> list[Event]:
+        if self._held:
+            delta, self._held = self._held + delta, ""
         self.buf += delta
+        if self.schemas and delta:
+            self._held = self._prefixed(len(delta))
+        return self._feed()
+
+    def _feed(self) -> list[Event]:
         out: list[Event] = []
         while True:
             if self.state == "rcall":
@@ -1494,7 +1647,7 @@ class OutputParser:
                     try:
                         name = body[:end].strip()[len("<function="):].split(">", 1)[0].strip()
                         name = self.aliases.get(name, name)
-                        if name in self.schemas:
+                        if self._callable(name):
                             call = parse_tool_call(body[:end], self.schemas.get(name), self.notes)
                             call.name = name
                     except ValueError:
@@ -1685,8 +1838,8 @@ class OutputParser:
                         out.append(Event("content", self._track(self.buf[:j])))
                         self.buf = self.buf[j:]
                     return out
-                if not self.schemas and self.declared_only:
-                    # #3075 (local scope): a request that declared no tools gets no call; the name must be complete to tell
+                if self.schemas or self.declared_only:
+                    # #3075: a call counts only for a declared tool; the name must be complete to tell
                     gt = after.find(">")
                     nl = after.find("\n")
                     if gt < 0 and nl < 0:
@@ -1775,6 +1928,8 @@ class OutputParser:
         how the turn ended: calls waiting from the reasoning become real calls only on a natural stop (None = stop);
         a turn cut by max tokens (or cancelled, or failed) keeps them as reasoning text (#1058)."""
         out = []
+        if self._held:
+            self.buf, self._held = self.buf + self._held, ""
         if self.buf and self.state in ("call", "rcall"):
             self._final = True                  # #4701: a call held after its closing tags (could a file's text go on?) is whole now
             out += self.feed("")
@@ -1785,7 +1940,7 @@ class OutputParser:
             f = function_end(body)
             name = body.lstrip()[len(FUNC_START):].split(">", 1)[0].strip() if f >= 0 else ""
             name = self.aliases.get(name, name)
-            if f >= 0 and not body[f:].strip() and name in self.schemas:
+            if f >= 0 and not body[f:].strip() and self._callable(name):
                 try:
                     call = parse_tool_call(body[:f], self.schemas.get(name), self.notes)
                     call.name = name

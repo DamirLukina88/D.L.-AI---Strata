@@ -923,7 +923,7 @@ def main(argv=None) -> int:
     ap.add_argument("--url", help="use the server already running at this address (http://127.0.0.1:8080) instead of starting one")
     ap.add_argument("--port", type=int, help="the port to start the server on (default: the config's)")
     ap.add_argument("--gpu", help="start the server on this GPU only (as the server's --gpu)")
-    ap.add_argument("--api-key", default=os.environ.get("STRATA_KEY", ""), help="the server's API key, if it has one (or STRATA_KEY)")
+    ap.add_argument("--api-key", default=os.environ.get("STRATA_KEY") or os.environ.get("STRATA_API_KEY", ""), help="the server's API key, if it has one (or STRATA_KEY)")
     ap.add_argument("--runs", type=int, default=3, help="runs per test (default 3)")
     ap.add_argument("--clients", type=int, default=0, metavar="N", help="also send N requests at once")
     ap.add_argument("--long", action="store_true", help="also a prompt of about 32,768 tokens")

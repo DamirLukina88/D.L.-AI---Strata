@@ -6,10 +6,15 @@ import json
 import random
 import sys
 import unittest
+import urllib.error
+import urllib.request
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 from serve import cf_access  # noqa: E402
+from serve.frontend import ChatTemplate  # noqa: E402
+from serve.server import ByteTokenizer, MockEngine, Service, serve  # noqa: E402
 
 AUD = "a" * 64
 TEAM = "example"
@@ -119,6 +124,112 @@ class AccessJwt(unittest.TestCase):
         self.assertEqual(cf_access.token_of({"Cf-Access-Jwt-Assertion": "a.b.c"}), "a.b.c")
         self.assertEqual(cf_access.token_of({"Cookie": "x=1; CF_Authorization=d.e.f"}), "d.e.f")
         self.assertEqual(cf_access.token_of({}), "")
+
+    def test_non_dict_header(self):
+        for bad_hdr in (b"[]", b"123", b'"str"', b"null", b"true"):
+            h = _b64(bad_hdr)
+            p = _b64(json.dumps(self.claims()).encode())
+            self.assertIsNone(self.v.verify(f"{h}.{p}.sig"))
+
+    def test_failed_fetch_is_throttled(self):
+        now = [NOW]
+        calls = [0]
+
+        def failing_fetch(url):
+            calls[0] += 1
+            raise OSError("network down")
+
+        v = cf_access.AccessVerifier(TEAM, [AUD], fetch=failing_fetch, now=lambda: now[0])
+        tok = _sign(self.n, self.d, "k1", self.claims())
+        self.assertIsNone(v.verify(tok))
+        self.assertEqual(calls[0], 1)
+        # Immediate retry within REFETCH_MIN must not trigger another network fetch
+        now[0] += 10
+        self.assertIsNone(v.verify(tok))
+        self.assertEqual(calls[0], 1)
+        # After REFETCH_MIN passes, retry is permitted
+        now[0] += cf_access.REFETCH_MIN + 1
+        self.assertIsNone(v.verify(tok))
+        self.assertEqual(calls[0], 2)
+
+
+class AccessCsrfOriginCheck(unittest.TestCase):
+    """When authenticated via Cloudflare Access (cookie/header) rather than an explicit API key,
+    browser POSTs with an untrusted Origin header must still be rejected by _foreign_page()."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.n, cls.e, cls.d = _keypair(3)
+
+    def _start_server(self):
+        tok = ByteTokenizer()
+        svc = Service(MockEngine(tok, "</think>\n\nok", max_context=4096), tok,
+                      ChatTemplate(ROOT / "serve/chat_template.jinja"))
+        svc.api_key = "secret-api-key"
+        svc.cf_access = cf_access.AccessVerifier(
+            TEAM, [AUD],
+            fetch=lambda url: {"keys": [_jwk("k1", self.n, self.e)]},
+            now=lambda: NOW,
+        )
+        return serve(svc, port=0)
+
+    def test_untrusted_origin_with_cf_access_is_rejected(self):
+        httpd = self._start_server()
+        try:
+            port = httpd.server_address[1]
+            claims = {"aud": [AUD], "iss": ISS, "email": "me@example.com", "iat": NOW - 10, "nbf": NOW - 10, "exp": NOW + 600}
+            tok = _sign(self.n, self.d, "k1", claims)
+            body = json.dumps({"messages": [{"role": "user", "content": "hi"}], "stream": False}).encode()
+
+            # 1) Untrusted Origin + CF_Authorization cookie -> 403 Forbidden
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/v1/chat/completions", data=body,
+                headers={"Origin": "https://evil.example", "Content-Type": "application/json",
+                         "Cookie": f"CF_Authorization={tok}"},
+            )
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(req, timeout=5)
+            ctx.exception.close()
+            self.assertEqual(ctx.exception.code, 403)
+
+            # 2) Same-origin + text/plain Content-Type + CF_Authorization cookie -> 415 Unsupported Media Type
+            req_plain = urllib.request.Request(
+                f"http://127.0.0.1:{port}/v1/chat/completions", data=body,
+                headers={"Origin": f"http://127.0.0.1:{port}", "Content-Type": "text/plain",
+                         "Cookie": f"CF_Authorization={tok}"},
+            )
+            with self.assertRaises(urllib.error.HTTPError) as ctx_plain:
+                urllib.request.urlopen(req_plain, timeout=5)
+            ctx_plain.exception.close()
+            self.assertEqual(ctx_plain.exception.code, 415)
+
+            # 3) Same-origin + application/json + CF_Authorization cookie -> 200 OK
+            req_ok = urllib.request.Request(
+                f"http://127.0.0.1:{port}/v1/chat/completions", data=body,
+                headers={"Origin": f"http://127.0.0.1:{port}", "Content-Type": "application/json",
+                         "Cookie": f"CF_Authorization={tok}"},
+            )
+            with urllib.request.urlopen(req_ok, timeout=5) as r:
+                self.assertEqual(r.status, 200)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+    def test_explicit_api_key_bypasses_origin_check(self):
+        httpd = self._start_server()
+        try:
+            port = httpd.server_address[1]
+            body = json.dumps({"messages": [{"role": "user", "content": "hi"}], "stream": False}).encode()
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/v1/chat/completions", data=body,
+                headers={"Origin": "https://app.example", "Content-Type": "application/json",
+                         "Authorization": "Bearer secret-api-key"},
+            )
+            with urllib.request.urlopen(req, timeout=5) as r:
+                self.assertEqual(r.status, 200)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
 
 
 if __name__ == "__main__":
