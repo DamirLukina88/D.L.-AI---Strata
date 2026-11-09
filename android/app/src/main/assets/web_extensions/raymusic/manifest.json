@@ -1,13 +1,30 @@
 {
   "manifest_version": 2,
   "name": "Ray music player",
-  "version": "1.0",
+  "version": "1.1",
   "description": "Plays the song version instead of the music video in Ray's lock-screen player.",
-  "browser_specific_settings": { "gecko": { "id": "raymusic@damirl.com" } },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "raymusic@damirl.com"
+    }
+  },
   "content_scripts": [
     {
-      "matches": ["https://music.youtube.com/*"],
-      "js": ["audio_only.js"],
+      "matches": [
+        "https://music.youtube.com/*"
+      ],
+      "js": [
+        "always_visible.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://music.youtube.com/*"
+      ],
+      "js": [
+        "audio_only.js"
+      ],
       "run_at": "document_idle"
     }
   ]

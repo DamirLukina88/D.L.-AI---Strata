@@ -47,6 +47,8 @@ The customized Strata platform (featuring the authenticated Claude Code Web Term
 
 - 2026-11-09: Pushed `a09b5df3..357002be` (3 commits, fast-forward, `main` only, no force): the Xiaomi 17 Ultra sensor work and its web fix, and the GeckoView lock-screen player (Bluetooth controls, voice-turn pause, 144p videos). `scan_secrets_in_text` over all 35 changed files: all clean. It returns `(is_clean, details)`, so `False` means a finding. Of four planted fake keys only the `sk-proj-` one was caught (a GitHub `ghp_` token, an AWS secret key and a `password = "..."` line were not), so the scanner has gaps. The added lines have no home path, data-disk path, email, LAN IP or YouTube account name (one was taken out of the wiki before the commit). Pushed after the user's "git commit push".
 
+- 2026-11-09: **A DeepSeek API key was public on the fork for a month.** The scanner session (a full-history scan with `scan_secrets_in_text` over every blob in `origin/*` and not in `upstream/*`) found `sk-fb9…9b43` as a shell default (`DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-sk-…}"`) in `tools/run-code-session.sh`: added in `dd765210`, still there in `d0e51052`, removed in `5e9b5cbe` (all 2026-10-10, all reachable from `origin/main`). The 2026-10-13 scrub missed it. The user rotated the key on 2026-11-09. The history still holds the dead key, and no rewrite has been decided. Gotcha: in zsh, `git show $c:tools/…` reads `:t` as a modifier and fails (hidden by `2>/dev/null`), so a history search found nothing. Quote it: `"${c}:tools/…"`.
+
 ## Decisions & Configuration
 
 ### 1. Remote Layout

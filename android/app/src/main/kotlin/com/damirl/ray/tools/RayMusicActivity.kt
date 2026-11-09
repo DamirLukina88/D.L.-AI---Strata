@@ -77,6 +77,10 @@ class RayMusicActivity : Activity() {
         @Volatile private var turnGen = 0
         @Volatile private var releaseAfterSpeech = false
 
+        // the phone was locked when Ray was asked: once the song plays it locks again and the screen goes off
+        // (the user's rule, 2026-11-09: it used to stay awake over the lock screen)
+        @Volatile private var lockAfterStart = false
+
         fun isActive(): Boolean = instance != null
 
         fun isPlaying(): Boolean = instance != null && isCurrentlyPlaying
@@ -112,6 +116,9 @@ class RayMusicActivity : Activity() {
 
         fun open(context: Context, url: String): String {
             return try {
+                val keyguard = context.getSystemService(Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
+                val power = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                lockAfterStart = keyguard?.isKeyguardLocked == true || power?.isInteractive == false
                 turnHold = false                                // a new song waits for Ray on its own (below)
                 turnResume = false
                 holdForSpeech = true
@@ -431,6 +438,17 @@ class RayMusicActivity : Activity() {
             }
         }
         gs.navigationDelegate = object : GeckoSession.NavigationDelegate {
+            override fun onLocationChange(
+                session: GeckoSession,
+                url: String?,
+                perms: MutableList<GeckoSession.PermissionDelegate.ContentPermission>,
+                hasUserGesture: Boolean
+            ) {
+                // the song's own address (YouTube Music changes it without loading a page)
+                val v = url?.let { Regex("[?&]v=([A-Za-z0-9_-]{11})").find(it)?.groupValues?.get(1) }
+                VoiceTrace.event("music_location", "page" to url?.let { pageName(it) }, "v" to v)
+            }
+
             override fun onCanGoBack(session: GeckoSession, canGoBack: Boolean) {
                 this@RayMusicActivity.canGoBack = canGoBack
             }
@@ -471,6 +489,8 @@ class RayMusicActivity : Activity() {
             }
 
             override fun onMetadata(session: GeckoSession, mediaSession: MediaSession, meta: MediaSession.Metadata) {
+                // which song the page really plays (2026-11-09: Ray sent Thunderstruck and another song played)
+                VoiceTrace.event("music_meta", "title" to meta.title?.take(80), "artist" to meta.artist?.take(60))
                 meta.title?.takeIf { it.isNotBlank() }?.let { currentTitle = it.trim() }
                 currentArtist = meta.artist?.trim().orEmpty()
                 showState()
@@ -478,6 +498,8 @@ class RayMusicActivity : Activity() {
 
             override fun onPlay(session: GeckoSession, mediaSession: MediaSession) {
                 pageMedia = mediaSession
+                VoiceTrace.event("music_page_play", "hold" to (holdForSpeech || speechPaused || userPaused || turnHold),
+                    "title" to currentTitle.take(60))
                 // a song that started by itself while Ray is still talking waits for him
                 if (holdForSpeech || speechPaused || userPaused || turnHold) {
                     mediaSession.pause()
@@ -487,10 +509,19 @@ class RayMusicActivity : Activity() {
                 // the screen only had to stay on until the song started: in a pocket it drained the battery
                 // (2026-11-09: the song kept playing with the screen off and the phone locked)
                 window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                if (lockAfterStart) {
+                    lockAfterStart = false
+                    mainHandler.postDelayed({
+                        val locked = isCurrentlyPlaying && RayAccessibilityService.lockScreen()
+                        VoiceTrace.event("music_relock", "locked" to locked)
+                        if (!locked) Log.w(TAG, "Could not lock again (screen reading off, or the song stopped)")
+                    }, 800L)
+                }
                 showState()
             }
 
             override fun onPause(session: GeckoSession, mediaSession: MediaSession) {
+                VoiceTrace.event("music_page_pause", "title" to currentTitle.take(60))
                 isCurrentlyPlaying = false
                 showState()
             }
