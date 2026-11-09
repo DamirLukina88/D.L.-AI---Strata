@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-11-09:** Update. decisions/github-fork-and-sanitization.md: push a09b5df3..357002be and the secret scanner's gaps. (Agent: Claude Code)
 - **2026-11-09:** Update. decisions/ray-hybrid-webview-companion-and-phone-mcp.md: music videos at 144p via a built-in GeckoView extension; the Song/Video switch is disabled on this page. (Agent: Claude Code)
 - **2026-11-09:** Update. decisions/ray-hybrid-webview-companion-and-phone-mcp.md: player moved to GeckoView (signed in, mobile site, locked start, screen wake locks), voice-turn music pause. (Agent: Claude Code)
 - **2026-11-09:** Update. decisions/ray-hybrid-webview-companion-and-phone-mcp.md: Bluetooth buttons for the lock-screen player; why Google sign-in fails in its WebView. (Agent: Claude Code)
