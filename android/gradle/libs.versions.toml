@@ -18,6 +18,8 @@ okhttp = "4.12.0"
 kotlinxSerializationJson = "1.7.3"
 materialIconsExtended = "1.7.8"
 androidxMedia = "1.7.0"
+# the newest GeckoView whose AndroidX needs fit compileSdk 36 / AGP 9.0.1 (154+ need API 37 and AGP 9.1)
+geckoview = "153.0.20260810162159"
 camerax = "1.5.1"
 jna = "5.18.1"
 
@@ -51,6 +53,7 @@ androidx-camera-core = { module = "androidx.camera:camera-core", version.ref = "
 androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "camerax" }
 androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
 androidx-media = { module = "androidx.media:media", version.ref = "androidxMedia" }
+geckoview = { module = "org.mozilla.geckoview:geckoview", version.ref = "geckoview" }
 vosk-android = { module = "com.alphacephei:vosk-android", version.ref = "vosk" }
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 

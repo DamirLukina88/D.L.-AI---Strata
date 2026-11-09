@@ -141,6 +141,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
         Log.d(TAG, "Drawer closed: stopping listening and speech")
         VoiceTrace.event("drawer_close", "phase" to phase.name)
         WakeWord.release("drawer")
+        com.damirl.ray.tools.RayMusicActivity.releaseTurn(context, spoke = false, why = "drawer closed")
         retryJob?.cancel()
         askJob?.cancel()
         speechManager?.cancel()
@@ -164,6 +165,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
         partialText = ""
         activeToolNote = null
         VoiceTrace.event("listen", "retry" to noSpeechRetries)
+        com.damirl.ray.tools.RayMusicActivity.continueTurn()
 
         speechManager?.startListening(
             onFinalResult = { transcribed ->
@@ -177,6 +179,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
                 VoiceTrace.event("listen_failed", "error" to err)
                 phase = VoicePhase.ERROR
                 status = "Couldn't listen: $err"
+                com.damirl.ray.tools.RayMusicActivity.releaseTurn(context, spoke = false, why = "listen failed")
             },
             onNoSpeech = {
                 if (noSpeechRetries < NO_SPEECH_RETRIES) {
@@ -193,6 +196,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
                     phase = VoicePhase.IDLE
                     status = "I didn't catch that"
                     partialText = ""
+                    com.damirl.ray.tools.RayMusicActivity.releaseTurn(context, spoke = false, why = "nothing heard")
                 }
             }
         )
@@ -290,7 +294,10 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
             }
             relay.cancel()                                  // the turn is over: no more tool calls
 
-            if (failed) return@launch
+            if (failed) {
+                com.damirl.ray.tools.RayMusicActivity.releaseTurn(context, spoke = false, why = "answer failed")
+                return@launch
+            }
             phase = VoicePhase.IDLE
             status = "Tap the mic to ask again"
 
@@ -298,9 +305,11 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
             VoiceTrace.event("answer_done", "chars" to accumulated.length, "spoken_chars" to spoken.length,
                 "ms" to System.currentTimeMillis() - askedAt,
                 "text" to if (com.damirl.ray.BuildConfig.DEBUG) spoken.take(400) else null)
-            if (spoken.isNotBlank() && !closed && !silent) {
+            val speaks = spoken.isNotBlank() && !closed && !silent
+            if (speaks) {
                 AudioPlaybackService.startSpeaking(context, spoken)
             }
+            com.damirl.ray.tools.RayMusicActivity.releaseTurn(context, spoke = speaks, why = "answered")
         }
     }
 }

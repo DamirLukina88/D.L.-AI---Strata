@@ -23,6 +23,10 @@ dependencyResolutionManagement {
       }
     }
     mavenCentral()
+    // GeckoView (Mozilla's browser engine) for the lock-screen music player: Google refuses sign-in in a WebView
+    maven("https://maven.mozilla.org/maven2/") {
+      content { includeGroup("org.mozilla.geckoview") }
+    }
   }
 }
 

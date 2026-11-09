@@ -235,6 +235,7 @@ class HotwordListenerService : Service() {
             scope.launch(Dispatchers.IO) { WakeClips.save(this@HotwordListenerService, sound, SAMPLE_RATE.toInt(), text) }
         }
         stopListening()
+        com.damirl.ray.tools.RayMusicActivity.holdForTurn(this, "ok_ray")    // the song waits while you talk to Ray
         openDrawer()
     }
 

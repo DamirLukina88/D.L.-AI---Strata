@@ -168,6 +168,7 @@ dependencies {
 
   // MediaSessionCompat & MediaButton support
   implementation(libs.androidx.media)
+  implementation(libs.geckoview)
 
   // Ray's own photos (phone_camera_snap): CameraX, no camera app in between
   implementation(libs.androidx.camera.core)

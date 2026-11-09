@@ -15,6 +15,9 @@ Newest entries first.
 
 ## Log
 
+- **2026-11-09:** Update. decisions/ray-hybrid-webview-companion-and-phone-mcp.md: music videos at 144p via a built-in GeckoView extension; the Song/Video switch is disabled on this page. (Agent: Claude Code)
+- **2026-11-09:** Update. decisions/ray-hybrid-webview-companion-and-phone-mcp.md: player moved to GeckoView (signed in, mobile site, locked start, screen wake locks), voice-turn music pause. (Agent: Claude Code)
+- **2026-11-09:** Update. decisions/ray-hybrid-webview-companion-and-phone-mcp.md: Bluetooth buttons for the lock-screen player; why Google sign-in fails in its WebView. (Agent: Claude Code)
 - **2026-11-07:** Ingestion. decisions/xiaomi-17-ultra-sensor-streaming.md. (Agent: Antigravity)
 - **2026-11-07:** Artifact Backup. Saved Ray curled-in-tail sleeping and waking animation walkthrough. (Agent: Antigravity)
 - **2026-11-07:** Ingestion. artifacts/ray-lazy-load-sleeping-animation-walkthrough-2026-11-07.md. (Agent: Antigravity)
