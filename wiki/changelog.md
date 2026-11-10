@@ -5,7 +5,7 @@ description: "Record of every change the agent made to this wiki"
 status: active
 tags: [meta, changelog]
 created: 2026-10-05
-updated: 2026-11-07
+updated: 2026-11-10
 last_verified: 2026-10-05
 ---
 
@@ -15,6 +15,7 @@ Newest entries first.
 
 ## Log
 
+- **2026-11-10:** Update. decisions/ray-hybrid-webview-companion-and-phone-mcp.md: AdGuard filters the player's ads (user certificates trusted, HTTP/3 off, music_cert trace). (Agent: Claude Code)
 - **2026-11-09:** Update. decisions/github-fork-and-sanitization.md: DeepSeek key found in public history, rotated by the user, private/.env (DEEPSEEK_API_KEY). (Agent: Claude Code)
 - **2026-11-09:** Update. decisions/ray-hybrid-webview-companion-and-phone-mcp.md: song stopped on screen-off (visibility patch) and relock after a locked start. (Agent: Claude Code)
 - **2026-11-09:** Update. decisions/github-fork-and-sanitization.md: push a09b5df3..357002be and the secret scanner's gaps. (Agent: Claude Code)

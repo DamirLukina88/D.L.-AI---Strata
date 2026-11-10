@@ -87,9 +87,11 @@ class RayMusicActivity : Activity() {
 
         // a music video kept the screen on: the page holds the engine's 'video-playing' lock and asks for a
         // screen wake lock ('screen'), so the phone never slept in a pocket (measured 2026-11-09).  Both are off
+        // HTTP/3 is off because AdGuard filters HTTP/1.1 and HTTP/2 only: over HTTP/3 the page's ads pass unread
         private const val GECKO_PREFS = """prefs:
   media.video-wakelock: false
   dom.screenwakelock.enabled: false
+  network.http.http3.enable: false
 """
 
         private fun runtime(context: Context): GeckoRuntime = runtime ?: synchronized(this) {
@@ -101,6 +103,10 @@ class RayMusicActivity : Activity() {
                     GeckoRuntimeSettings.Builder()
                         .configFilePath(config.absolutePath)
                         .consoleOutput(true)            // the extension's "[ray-audio]" lines (tag GeckoConsole)
+                        // the player also trusts the certificates the user installed on the phone, so AdGuard can
+                        // read and filter its pages (2026-11-10).  The app's own traffic to the Strata server
+                        // still trusts the system's only (res/xml/network_security_config.xml)
+                        .enterpriseRootsEnabled(true)
                         .build()
                 ).also { rt ->
                     // plays the song version instead of the music video (assets/web_extensions/raymusic)
@@ -469,6 +475,16 @@ class RayMusicActivity : Activity() {
                 Log.d(TAG, "pop-up: ${pageName(uri)}")
                 if (allowedPage(uri)) session.loadUri(uri)
                 return null
+            }
+        }
+        gs.progressDelegate = object : GeckoSession.ProgressDelegate {
+            // who signed the page's certificate: AdGuard's name here means AdGuard filters the player
+            override fun onSecurityChange(
+                session: GeckoSession,
+                info: GeckoSession.ProgressDelegate.SecurityInformation
+            ) {
+                val issuer = info.certificate?.issuerX500Principal?.name?.take(120)
+                VoiceTrace.event("music_cert", "host" to info.host, "secure" to info.isSecure, "issuer" to issuer)
             }
         }
         gs.contentDelegate = object : GeckoSession.ContentDelegate {
