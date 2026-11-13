@@ -2,6 +2,9 @@
 """
 from __future__ import annotations
 
+import os as _os
+_os.environ.setdefault("RAY_MEMORY_DIR", "off")   # the shared memory store stays out of these tests
+
 import json
 import sys
 import tempfile

@@ -1,4 +1,7 @@
 """tools/test_dl_review_actions.py - tests for request_actions formatting and now_line formatting."""
+import os as _os
+_os.environ.setdefault("RAY_MEMORY_DIR", "off")   # the shared memory store stays out of these tests
+
 import re
 import unittest
 from pathlib import Path

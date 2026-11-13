@@ -5,6 +5,9 @@ through a temporary dl_sessiond driven by a fake model server (cut off at the tu
 """
 from __future__ import annotations
 
+import os as _os
+_os.environ.setdefault("RAY_MEMORY_DIR", "off")   # the shared memory store stays out of these tests
+
 import json
 import re
 import os

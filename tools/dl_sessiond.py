@@ -309,11 +309,18 @@ class Session:
             self._plan_mtime = mtime
             self.emit_state()
 
+    def memory_label(self) -> str:
+        """Where this session's memory lives: '<store> · <project>' for the shared store, else the wiki folder."""
+        store = cli.memory_store()
+        if store:
+            return f"{store} · {cli.dl_memory.resolve_project_slug(self.workspace, store)}"
+        return str(cli.resolve_wiki_root(self.workspace) or "")
+
     def state(self) -> dict:
         handoff_part, _, _, _ = cli._prior_handoff(self.messages)
         return {"type": "state", "session": self.name, "workspace": str(self.workspace), "mode": self.mode,
                 "settings": cli.chat_settings_summary(), "effort": self.effort, "yolo": self.yolo, "busy": self.busy,
-                "wiki": str(cli.resolve_wiki_root(self.workspace) or ""),
+                "wiki": self.memory_label(),
                 "mcp": [m for m in self.mcp.status() if m["on"]], "plan": self.plan_summary(),
                 "handoff": handoff_part,
                 "title": self.title or self.auto_title(), "saved": len(archive_list(self.name)),
@@ -1109,8 +1116,10 @@ class Session:
                 return None
             self.workspace = cand
             self._system()
-            wroot = cli.resolve_wiki_root(cand)
-            self.notice(f"Working directory: {cand}" + (f" · wiki {wroot}" if wroot else " · no wiki"))
+            label = self.memory_label()
+            store = cli.memory_store()
+            self.notice(f"Working directory: {cand}" + (f" · project memory {label.split(' · ')[-1]}" if store
+                                                         else f" · wiki {label}" if label else " · no wiki"))
             return None
         if cmd in ("/status", "/model"):
             out = cli.check_status(cli.DEFAULT_URL, cli.DEFAULT_API_KEY)
@@ -1149,6 +1158,9 @@ class Session:
             return None
         if cmd == "/test":
             self.output("Tests", cli.tool_smart_test_runner({"files": arg.split()} if arg else {}, self.workspace))
+            return None
+        if cmd in cli.MEMORY_SLASH and cli.memory_store():
+            self.output("Memory", cli.memory_slash(f"{cmd} {arg}".strip(), self.workspace, self.messages, mode=self.mode))
             return None
         if cmd == "/wiki":
             sub, _, q = arg.partition(" ")
@@ -1263,9 +1275,10 @@ Tools and jobs
                   when: 2026-10-16 09:00, tomorrow 07:00, fri 09:00, in 2h, daily 08:00, mon-fri 07:30, every 2h
 
 Workspace
-/cd <path>        Change the working directory (the wiki follows it)
+/cd <path>        Change the working directory (project memory follows it)
 /diff             Git diff audit (also /audit)   /secrets [path]  Secret scan (also /scan)
-/test [files]     Targeted tests                 /wiki [search|lint|digest]  Local Wiki
+/test [files]     Targeted tests                 /memory [search|history|diff|undo|lint]  Memory
+/remember [global] <fact>  Save to this project's (or global) memory   /recall <words>  Search memory
 !<command>        Run a shell command in the workspace
 
 Session
@@ -1273,7 +1286,7 @@ Session
 /continue         Go on after the agent stopped at its tool-round limit (DL_MAX_TURNS)
 /save [file]      Save the chat as Markdown in the workspace (also /export)
 /save full [file] The same with the whole run since /clear from the transcript, thinking included
-/handoff [p]      Write a wiki handoff brief and reload a clean session (with p, run it next)
+/handoff [p]      Write a handoff brief and reload a clean session (with p, run it next)
 /clear            Start a new conversation; the current one is saved (also /new, /reset)
 /sessions [words] Saved conversations, newest first; words search their titles and messages
 /resume N         Bring saved conversation N back (the current one is saved first)

@@ -3,6 +3,9 @@ and every prompt says where it was typed (phone, PC, another computer), so music
 
 Run from the repo root: python tools/test_pc_music.py
 """
+import os as _os
+_os.environ.setdefault("RAY_MEMORY_DIR", "off")   # the shared memory store stays out of these tests
+
 import sys
 import unittest
 from pathlib import Path

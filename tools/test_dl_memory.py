@@ -7,6 +7,9 @@ checks (done check, browser check, evidence check, reviewer) send the agent back
 """
 from __future__ import annotations
 
+import os as _os
+_os.environ.setdefault("RAY_MEMORY_DIR", "off")   # the shared memory store stays out of these tests
+
 import json
 import os
 import time
@@ -165,11 +168,17 @@ class Memory(unittest.TestCase):
         self.assertEqual((self.ws / "PLAN.md").read_text().strip(), PLAN.strip())
         self.assertEqual(len(list(self.ws.glob("PLAN.*.md"))), 1)       # the older plan is kept
 
-    def test_wiki_schema_lists_new_page_fields(self):
-        wiki = next(t for t in cli.DL_TOOLS if t["function"]["name"] == "local_wiki")
-        props = wiki["function"]["parameters"]["properties"]
-        for f in ("page_type", "slug", "title", "description"):
+    def test_memory_schema_lists_write_fields(self):
+        mem = next(t for t in cli.DL_TOOLS if t["function"]["name"] == "memory")
+        props = mem["function"]["parameters"]["properties"]
+        for f in ("page_type", "slug", "title", "description", "content", "scope", "path"):
             self.assertIn(f, props)
+        self.assertLessEqual(len(json.dumps(mem)), 1744, "no bigger than the local_wiki schema it replaced")
+
+    def test_local_wiki_name_still_works_without_the_store(self):
+        (self.ws / "wiki").mkdir()
+        out = cli.dispatch_dl_tool("local_wiki", {"action": "search", "query": "x"}, self.ws)
+        self.assertNotIn("Unknown tool", out)
 
 
 class FinishChecks(unittest.TestCase):

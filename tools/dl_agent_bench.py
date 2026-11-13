@@ -40,6 +40,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import os
 import queue
 import re
 import shutil
@@ -989,6 +990,8 @@ def cmd_compare(a) -> int:
 
 
 def main() -> int:
+    # the synthetic tasks score the workspace's own wiki/ and must never write the shared memory store
+    os.environ.setdefault("RAY_MEMORY_DIR", "off")
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="run tasks through the agent and score them")

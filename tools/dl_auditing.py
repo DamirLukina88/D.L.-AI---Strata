@@ -183,10 +183,30 @@ NOT_SECRET_NAME = re.compile(r"(_|^)(USER|USERNAME|LOGIN|EMAIL|ADDRESS|HOST|PORT
 EMAIL_VALUE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 
 
+def memory_private_env() -> Path | None:
+    """The shared memory store's credential vault (dl_memory.py env set), resolved like dl_memory does (that module
+    imports this one, so it is not imported here)."""
+    raw = os.environ.get("RAY_MEMORY_DIR")
+    if raw is None:
+        try:
+            cfg = Path(os.environ.get("RAY_MEMORY_CONFIG") or Path.home() / ".config" / "dl-ai" / "memory.json")
+            raw = str(json.loads(cfg.read_text(encoding="utf-8")).get("root") or "")
+        except (OSError, ValueError, AttributeError):
+            raw = ""
+    raw = raw.strip()
+    if not raw or raw.lower() in ("off", "none", "0", "false"):
+        return None
+    return Path(raw).expanduser() / "private" / ".env"
+
+
 def known_secret_values() -> List[Tuple[str, str]]:
     """[(label, value)] of the credentials stored on this PC, read fresh each time (access tokens change hourly)."""
     found: Dict[str, str] = {}
-    for env_file, where in ((SECRETS_ENV, "secrets.env"), (WIKI_PRIVATE_ENV, "wiki/private/.env")):
+    vaults = [(SECRETS_ENV, "secrets.env"), (WIKI_PRIVATE_ENV, "wiki/private/.env")]
+    mem_env = memory_private_env()
+    if mem_env is not None:
+        vaults.append((mem_env, "memory private/.env"))
+    for env_file, where in vaults:
         try:
             for line in env_file.read_text(encoding="utf-8", errors="replace").splitlines():
                 line = line.strip()

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Unit tests for multimodal image, video, PDF, audio and binary handling in D.L. CLI & Session Daemon."""
+import os as _os
+_os.environ.setdefault("RAY_MEMORY_DIR", "off")   # the shared memory store stays out of these tests
+
 import sys
 import unittest
 import tempfile

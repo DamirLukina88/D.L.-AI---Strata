@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # scan-secrets: fake-fixtures (the keys below are made up to test the scanner)
 """test_dl_auditing.py - Unit tests for D.L. CLI auditing and guardrail suite."""
+import os as _os
+_os.environ.setdefault("RAY_MEMORY_DIR", "off")   # the shared memory store stays out of these tests
+
 import sys
 import tempfile
 import unittest

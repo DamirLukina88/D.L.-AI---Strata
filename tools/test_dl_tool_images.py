@@ -3,6 +3,9 @@ the allowed tools may, and only image files inside the workspace count.
 
 Run from the repo root: python -m unittest tools.test_dl_tool_images
 """
+import os as _os
+_os.environ.setdefault("RAY_MEMORY_DIR", "off")   # the shared memory store stays out of these tests
+
 import os
 import sys
 import tempfile
