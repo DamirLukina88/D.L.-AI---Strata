@@ -1,3 +1,0 @@
-# Local Wiki: credentials and private data are never committed.
-private/
-*.env
