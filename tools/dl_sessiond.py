@@ -1031,7 +1031,7 @@ class Session:
             self.emit_state()
             if stats and stats.get("handoff"):
                 self.notice(
-                    f"Wiki handoff #{stats['handoff']} saved to {stats['diary']}: "
+                    f"Handoff #{stats['handoff']} saved to {stats['diary']}: "
                     f"{stats['before'] / 1000:.0f}k → {stats['after'] / 1000:.0f}k tokens "
                     f"({stats['removed']} earlier messages archived into clean session)."
                 )

@@ -78,6 +78,28 @@ class Store(unittest.TestCase):
         self.assertEqual(len(q), 1)
         self.assertIn(FAKE_TOKEN, q[0].read_text())
 
+    def test_token_recorded_by_a_direct_jj_command_is_purged(self):
+        self.write()
+        page = next((self.root / "projects").rglob("page-a.md"))
+        page.write_text(page.read_text() + "\nkey: " + FAKE_TOKEN + "\n")
+        subprocess.run([JJ, "--no-pager", "status"], cwd=self.root, capture_output=True)    # someone types jj st
+        self.assertIn(FAKE_TOKEN, self.jj("file", "show", "-r", "@", *M._fileset([page.relative_to(self.root).as_posix()])))
+        out = self.write(slug="page-b")
+        self.assertIn("purged", out)
+        git_dir = (self.root / ".jj/repo/store" / (self.root / ".jj/repo/store/git_target").read_text().strip()).resolve()
+        blobs = subprocess.run(["git", f"--git-dir={git_dir}", "cat-file", "--batch-all-objects", "--batch"],
+                               capture_output=True).stdout
+        self.assertNotIn(FAKE_TOKEN.encode(), blobs)
+        self.assertNotIn(FAKE_TOKEN, self.jj("log", "--no-graph", "-p", "-T", '""'))
+        self.assertIn("page-b", self.jj("log", "-r", "@-", "--no-graph", "-T", "description"))
+
+    def test_cli_in_the_home_folder_writes_no_project(self):
+        p = subprocess.run([sys.executable, str(HERE / "dl_memory.py"), "write", "decision", "x", "--title", "X",
+                            "--description", "d", "--content", "c"], cwd=Path.home(), capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL)
+        self.assertIn("no project folder", p.stdout)
+        self.assertFalse((self.root / "projects" / M.slugify(Path.home().name)).exists())
+
     def test_write_commits_only_its_own_paths(self):
         self.write()
         other = self.root / "projects" / "other.md"

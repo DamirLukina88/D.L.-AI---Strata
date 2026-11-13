@@ -290,7 +290,7 @@ def scan_secrets_in_text(content: str, file_path: Path | str = "") -> Tuple[bool
 
     if violations:
         msg = f"Potential secret leak detected in {p_name}:\n" + "\n".join(violations[:5])
-        msg += "\nRemediation: Store credentials in environment variables or 'wiki/private/.env'."
+        msg += "\nRemediation: Store credentials in environment variables or the memory store's vault (`dl_memory.py env set KEY VALUE`)."
         return False, msg
     return True, None
 

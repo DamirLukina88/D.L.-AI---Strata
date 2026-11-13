@@ -376,6 +376,7 @@ def _guard_working_copy(root: Path) -> list[str]:
     back (or nothing, for a new file); a global/ page deleted without approval is restored.  Returns one line per
     file it acted on."""
     reports: list[str] = []
+    leaked = False
     con = _connect_db(root)
     try:
         vetted = _vetted(con)
@@ -393,6 +394,7 @@ def _guard_working_copy(root: Path) -> list[str]:
             if prev and prev[0] == sha and (prev[1] or not is_global):
                 continue
             problem = secret_error(data.decode("utf-8", errors="replace"), rel)
+            leaked = leaked or bool(problem)
             if not problem and is_global:
                 problem = "global/ page changed without the user's approval"
             if not problem:
@@ -420,6 +422,8 @@ def _guard_working_copy(root: Path) -> list[str]:
                     reports.append(f"{rel}: deleted without the user's approval — restored")
     finally:
         con.close()
+    if leaked and (root / ".jj").is_dir():
+        reports.append(_purge_jj_records(root))
     if reports:
         try:
             log = root / MEMORY_DIR / "quarantine" / "log.txt"
@@ -430,6 +434,31 @@ def _guard_working_copy(root: Path) -> list[str]:
             pass
         _LAST_GUARD.extend(reports)
     return reports
+
+
+def _purge_jj_records(root: Path) -> str:
+    """A credential was found in a file, so a jj command run outside this module (someone typing `jj st` in the
+    store) may already have recorded it.  With the file restored: record the clean state, add one more operation so
+    no kept operation points at the leaky snapshot, drop every older operation (jj undo history, not commits), and
+    garbage-collect jj and git so the leaked text is gone from disk."""
+    jj = resolve_jj_bin() or "jj"
+    stamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    def run(*args: str) -> int:
+        return subprocess.run([jj, "--no-pager", *args], cwd=root, capture_output=True, text=True, timeout=120).returncode
+    run("status")                                          # the clean files, now that the leak is quarantined
+    run("describe", "-r", "@", "-m", f"working copy (history purged {stamp})")
+    run("op", "abandon", "..@-")
+    run("util", "gc", "--expire=now")
+    try:
+        target = (root / ".jj" / "repo" / "store" / "git_target").read_text(encoding="utf-8").strip()
+        git_dir = (root / ".jj" / "repo" / "store" / target).resolve()
+        subprocess.run(["git", f"--git-dir={git_dir}", "-c", "gc.reflogExpire=now", "-c",
+                        "gc.reflogExpireUnreachable=now", "gc", "--prune=now", "--quiet"],
+                       capture_output=True, timeout=300)
+    except (OSError, subprocess.SubprocessError):
+        return "jj records purged, but git gc did not run; run `git gc --prune=now` in the store's git folder"
+    return "jj operation history purged (commits kept) so the quarantined text is not left in jj or git"
 
 
 _LAST_GUARD: list[str] = []
@@ -556,8 +585,8 @@ def jj_undo(root: Path, rev: str = "@-", agent: str | None = None, *, approved: 
             _run_jj(root, ["op", "restore", prior_op], snapshot=True)
             return f"Error: reverting {rev} caused a conflict; cleanly restored prior operation ({prior_op})."
         _approve_paths(root, files, global_ok=True)        # before the next snapshot, or the guard would undo it
-        desc = info.split("|", 1)[1] if "|" in info else info
-        _run_jj(root, ["describe", "-r", "@-", "-m", f"{agent or detect_agent()}: revert {rev} ({desc[:80]})"],
+        cid, _, desc = info.partition("|")
+        _run_jj(root, ["describe", "-r", "@-", "-m", f"{agent or detect_agent()}: revert {cid} ({desc[:80]})"],
                 snapshot=True)
         sync_index(root)
         return (f"Reverted {info.replace('|', ' — ')} ({len(files)} file(s): {', '.join(files[:5])}); "
@@ -2052,7 +2081,7 @@ def _upkeep_direct_edits(root: Path, state: _HookState, agent: str) -> str | Non
     parts = []
     if guarded:
         parts.append("Ray Memory refused these edits (store credentials with `dl_memory.py env set`; change global/ "
-                     "only with the memory_write_global tool, which asks the user):\n" + "\n".join(f"- {g}" for g in guarded))
+                     "only with the memory_write_global tool, and only when the user asked):\n" + "\n".join(f"- {g}" for g in guarded))
     if mine:
         parts.append("Ray Memory lint found errors in pages you just changed; they are not committed until fixed:\n"
                      + "\n".join(f"- {e}" for e in mine[:10]))
@@ -2329,7 +2358,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Error: consolidated memory root not found.", file=sys.stderr)
         return 2
 
-    ws = (args.workspace or Path.cwd()).expanduser().resolve()
+    ws = args.workspace.expanduser().resolve() if args.workspace else _default_workspace()
     if args.cmd == "search":
         q = " ".join(args.terms)
         print(format_search_results(search(root, q, scope=args.scope, workspace=ws, limit=args.limit), q))
