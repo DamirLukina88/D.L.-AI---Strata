@@ -42,8 +42,9 @@ system RAM. Your conversations stay at home.
 - **Has a face.** A red panda drawn in dots sits on the input box. He puts a paw to his chin while thinking, moves
   with his voice, and takes cocoa breaks on long tasks ([meet him](docs/RAY_FEATURES.md#meet-ray)).
 
-**Speed:** about **24 tokens per second** when chatting, and about **335 tokens per second** when reading a long
-prompt. Both were measured on the RX 7600 XT above, with the full numbers in [docs/RAY_SPEED.md](docs/RAY_SPEED.md).
+**Speed:** about **26–30 tokens per second** when chatting (about **33 tok/s** in coding-agent sessions), and up to
+**383 tokens per second** when reading a long prompt (a 32K prompt is read in 84 s). Both were measured on the
+RX 7600 XT above on 2026-11-13 and 2026-11-14, with the full numbers in [docs/RAY_SPEED.md](docs/RAY_SPEED.md).
 
 ## Quick start
 
