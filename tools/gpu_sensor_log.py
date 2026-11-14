@@ -3,7 +3,9 @@
 
     python tools/gpu_sensor_log.py [--interval 2] [--dir ~/.local/state/dl-ai/gpu-log] [--keep-days 14]
 
-One CSV per day in --dir (2026-11-14.csv). Every line is flushed and fsync'ed, so after a hard reset the file ends at
+One CSV per day in --dir (2026-11-14.csv), and beside it the board's sensors (2026-11-14-board.csv: every input of
+the CPU (k10temp), the motherboard's Super I/O chips (it87xx/nct67xx, gigabyte_wmi), the NVMe drives and ACPI, with
+their labels as column names). Every line is flushed and fsync'ed, so after a hard reset the file ends at
 the last reading before the crash: `tail` the newest file after the next restart. Files older than --keep-days are
 deleted. Standard library only; reads /sys and changes nothing.
 """
@@ -31,6 +33,37 @@ def hwmon(name: str) -> Path | None:
     return None
 
 
+BOARD_CHIPS = ("k10temp", "zenpower", "it8", "nct6", "gigabyte_wmi", "asus", "nvme", "acpitz")
+
+
+def board_sensors() -> list[tuple[str, Path, float]]:
+    """(column, input file, scale) for every temperature (C), voltage (mV), fan (rpm) and power (W) input of the CPU,
+    the motherboard's sensor chips, the NVMe drives and ACPI; the GPU's own sensors are in the main file."""
+    out, seen = [], {}
+    for h in sorted(Path("/sys/class/hwmon").glob("hwmon*"), key=lambda x: int(x.name[5:] or 0)):
+        try:
+            name = (h / "name").read_text().strip()
+        except OSError:
+            continue
+        if not name.startswith(BOARD_CHIPS):
+            continue
+        seen[name] = seen.get(name, 0) + 1
+        chip = name if seen[name] == 1 else f"{name}{seen[name]}"
+        for f in sorted(h.glob("*_input")):
+            kind = f.name.split("_")[0].rstrip("0123456789")
+            if kind not in ("temp", "in", "fan", "power"):
+                continue
+            try:
+                label = (h / f.name.replace("_input", "_label")).read_text().strip()
+            except OSError:
+                label = ""
+            col = f"{chip}_{f.name[:-6]}" + (f"_{label}" if label else "")
+            col = "".join(c if c.isalnum() or c in "_+-." else "_" for c in col)
+            scale = {"temp": 1000.0, "in": 1.0, "fan": 1.0, "power": 1e6}[kind]
+            out.append((col, f, scale))
+    return out
+
+
 def read(p: Path | None, scale: float = 1.0, digits: int = 0) -> str:
     if p is None:
         return ""
@@ -50,13 +83,20 @@ def main() -> int:
     out = Path(a.dir).expanduser()
     out.mkdir(parents=True, exist_ok=True)
 
-    gpu = hwmon("amdgpu")
-    if gpu is None:
-        print("gpu_sensor_log: no amdgpu sensor found", file=sys.stderr)
-        return 1
-    dev = (gpu / "device").resolve()
     cpu = hwmon("k10temp")
-    power = gpu / "power1_average" if (gpu / "power1_average").exists() else gpu / "power1_input"
+    gpu = dev = power = None
+
+    def find_gpu():
+        """The amdgpu sensors, or None while the card is missing (a boot where it never came up is logged too:
+        rows with empty GPU columns and gpu_missing in the last column)."""
+        g = hwmon("amdgpu")
+        if g is None:
+            return None, None, None
+        return g, (g / "device").resolve(), (g / "power1_average" if (g / "power1_average").exists()
+                                              else g / "power1_input")
+    gpu, dev, power = find_gpu()
+    if gpu is None:
+        print("gpu_sensor_log: no amdgpu sensor found; logging empty GPU rows until it appears", file=sys.stderr)
 
     stop = False
 
@@ -66,7 +106,8 @@ def main() -> int:
     signal.signal(signal.SIGTERM, on_term)
     signal.signal(signal.SIGINT, on_term)
 
-    day, fh = None, None
+    board = board_sensors()
+    day, fh, bh = None, None, None
     while not stop:
         now = datetime.datetime.now()
         if now.date() != day:
@@ -78,23 +119,36 @@ def main() -> int:
             fh = open(path, "a", encoding="utf-8")
             if new:
                 fh.write(",".join(FIELDS) + "\n")
+            if bh:
+                bh.close()
+            bpath = out / f"{day.isoformat()}-board.csv"
+            head = ",".join(["time"] + [c for c, _, _ in board])
+            bh = open(bpath, "a", encoding="utf-8")
+            if not bpath.stat().st_size or bpath.read_text(encoding="utf-8").splitlines()[0] != head:
+                bh.write(head + "\n")          # a new file, or the sensor set changed: a new header line
             cutoff = time.time() - a.keep_days * 86400
             for old in out.glob("*.csv"):
                 if old.stat().st_mtime < cutoff:
                     old.unlink(missing_ok=True)
+        if gpu is None:
+            gpu, dev, power = find_gpu()
         row = [now.strftime("%Y-%m-%d %H:%M:%S"),
-               read(gpu / "temp1_input", 1000), read(gpu / "temp2_input", 1000), read(gpu / "temp3_input", 1000),
-               read(power, 1e6, 1), read(gpu / "power1_cap", 1e6), read(gpu / "in0_input"),
-               read(gpu / "freq1_input", 1e6), read(gpu / "freq2_input", 1e6),
-               read(gpu / "fan1_input"), read(gpu / "pwm1"),
-               read(dev / "gpu_busy_percent"), read(dev / "mem_busy_percent"),
-               read(cpu / "temp1_input" if cpu else None, 1000)]
+               *([read(gpu / "temp1_input", 1000), read(gpu / "temp2_input", 1000), read(gpu / "temp3_input", 1000),
+                  read(power, 1e6, 1), read(gpu / "power1_cap", 1e6), read(gpu / "in0_input"),
+                  read(gpu / "freq1_input", 1e6), read(gpu / "freq2_input", 1e6),
+                  read(gpu / "fan1_input"), read(gpu / "pwm1")] if gpu else [""] * 10),
+               read(dev / "gpu_busy_percent" if dev else None), read(dev / "mem_busy_percent" if dev else None),
+               read(cpu / "temp1_input" if cpu else None, 1000)] + (["gpu_missing"] if gpu is None else [])
         fh.write(",".join(row) + "\n")
         fh.flush()
         os.fsync(fh.fileno())
+        bh.write(",".join([row[0]] + [read(p, sc) for _, p, sc in board]) + "\n")
+        bh.flush()
+        os.fsync(bh.fileno())
         time.sleep(a.interval)
-    if fh:
-        fh.close()
+    for h in (fh, bh):
+        if h:
+            h.close()
     return 0
 
 
