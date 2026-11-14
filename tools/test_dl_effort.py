@@ -1,7 +1,11 @@
 """tools/test_dl_effort.py - Unit tests for tools/dl_effort.py rules and raise reasons."""
 from __future__ import annotations
 
+from pathlib import Path
+import sys
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dl_effort
 
 
@@ -14,6 +18,8 @@ class TestDlEffortPick(unittest.TestCase):
         cases = [
             "Check @tools/dl_cli.py",
             "Here is the diff: @patch.diff",
+            "change S to green and Z to red in tetris.html",
+            "inspect tools/dl_sessiond.py",
             "Look at this code:\n```python\nprint(1)\n```",
             "Traceback (most recent call last):\n  File 'x.py', line 1",
             "Failed with Error: file not found",
@@ -40,6 +46,9 @@ class TestDlEffortPick(unittest.TestCase):
             "plan the next release milestones",
             "why does this loop stall?",
             "why doesn't the model stop thinking?",
+            "update the function signature",
+            "add a unit test for the parser",
+            "remove the unused variable",
         ]
         for p in verbs:
             self.assertEqual(dl_effort.pick(p), ("high", "coding task"), f"Failed on {p!r}")

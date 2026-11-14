@@ -22,6 +22,11 @@ CODING_VERBS = (
     "migrate", "migrating", "design", "designing", "plan", "planning",
     "why does", "why doesn't", "why doesnt",
 )
+EDIT_VERBS = (
+    "change", "changing", "edit", "editing", "update", "updating",
+    "add", "adding", "remove", "removing", "delete", "deleting",
+    "replace", "replacing", "rename", "renaming",
+)
 COMPLAINTS = ("that's wrong", "thats wrong", "didn't work", "didnt work", "doesn't work", "doesnt work", "still", "why?")
 SMALL_TALK = (
     "hi", "hello", "hey", "thanks", "thank you", "good morning", "good afternoon", "good evening",
@@ -39,6 +44,11 @@ CODE_WORDS = (
     "bug", "patch", "diff",
 )
 AT_FILE_RE = re.compile(r"(?:^|\s)@[\w./-]+")
+URL_RE = re.compile(r"https?://\S+|\bwww\.\S+", re.I)
+CODE_FILE_RE = re.compile(
+    r"(?<![:/@\w])[A-Za-z0-9_][\w./-]*\.(?:py|js|ts|jsx|tsx|html|css|c|cc|cpp|h|hpp|cu|hip|rs|go|sh|json|ya?ml|toml|sql)\b",
+    re.I,
+)
 EXIT_CODE_RE = re.compile(r"\[Command exited with code (-?\d+)\]")
 
 BUDGET_TIERS: dict[str, int] = {
@@ -97,9 +107,10 @@ def pick(prompt: str, *, voice: bool = False, mode: str = "act", last_reply: str
     words = len(raw.split())
     v_slack = 6 if voice else 0
 
-    if AT_FILE_RE.search(raw) or any(h in low for h in CODE_HINTS):
+    no_urls = URL_RE.sub("", raw)
+    if AT_FILE_RE.search(raw) or CODE_FILE_RE.search(no_urls) or any(h in low for h in CODE_HINTS):
         return "high", "code or error"
-    if _has_any(raw, CODING_VERBS):
+    if _has_any(raw, CODING_VERBS) or (_has_any(raw, EDIT_VERBS) and _has_any(raw, CODE_WORDS)):
         return "high", "coding task"
 
     is_home = _has_any(raw, HOME_VERBS) and _has_any(raw, HOME_NOUNS)

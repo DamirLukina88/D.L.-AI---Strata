@@ -470,6 +470,13 @@ class PatchMode(Env):
         self.assertEqual(reg.calls[0]["system"], A.SYSTEM)
         self.assertIn("Root cause", note)
 
+    def test_oversized_files_fall_back_to_advice(self):
+        a, reg = stuck_advisor(yolo=True), FakeRegistry()
+        note = a.patch(reg, *a.stuck(), files={"big.js": "x" * 70000})
+        self.assertEqual(reg.calls[0]["system"], A.SYSTEM)
+        self.assertNotIn("## File big.js", reg.calls[0]["prompt"])
+        self.assertIn("Root cause", note)
+
     def test_target_files_are_the_ones_ray_works_on(self):
         ws = self.ws()
         (ws / "b.js").write_text("b")
@@ -622,6 +629,29 @@ class LeanThinking(Env):
         self.assertEqual(levels[:6], ["high", "medium", "medium", "high", "high", "medium"])
         self.assertEqual(efforts[1][1], 2048)
         self.assertTrue(ctx.get("raised"))
+
+    def test_bare_filename_or_model2vec_reason_still_enables_lean_thinking(self):
+        ws = Path(self.tmp.name) / "ws_bare"
+        ws.mkdir()
+        efforts, n = [], 0
+
+        def turn(messages, *a, **k):
+            nonlocal n
+            n += 1
+            efforts.append(k.get("effort"))
+            return reply("Done.") if n >= 3 else reply("", call(n, "run_command", {"CommandLine": f"true # {n}"}))
+
+        msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "x"}]
+        ctx = {"workspace": ws, "messages": msgs, "mode": "act", "yolo": True, "effort": "high",
+               "effort_auto": True, "effort_reason": "model2vec high", "reasoning_budget_tokens": 4096,
+               "user_text": "change S to green and Z to red in tetris.html", "mcp": None}
+        with patch.object(cli, "chat_turn_in_context", side_effect=turn), \
+             patch.object(cli, "tool_run_command", return_value="ok\n[Command exited with code 0]"), \
+             patch.object(cli, "get_active_tools", return_value=[]), \
+             patch.dict(os.environ, {"DL_REVIEW": "0", "DL_CHECKPOINTS": "0", "DL_BROWSER_CHECK": "0",
+                                     "DL_EVIDENCE": "0", "DL_ADVISOR": "0"}):
+            cli.execute_agent_loop(msgs, "http://127.0.0.1:1", "k", ws, max_turns=5, session_context=ctx)
+        self.assertEqual(efforts, ["high", "medium", "medium"])
 
 
 if __name__ == "__main__":

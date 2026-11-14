@@ -832,6 +832,10 @@ class Session:
                                   "content": cli.build_user_message_content(prompt, current_ws, voice=item["voice"],
                                                                             thinking=resolved_effort != "none",
                                                                             device=self.device_of(item.get("origin")))})
+            try:
+                self.save()
+            except OSError:
+                pass
             if self.mcp.active:
                 self.mcp.route(prompt, origin=item.get("origin") or "")
             if dl_mcp.call_context():
@@ -854,7 +858,7 @@ class Session:
             RUN_DIR.mkdir(parents=True, exist_ok=True)
             self._marker().write_text(json.dumps({"session": self.name, "workspace": str(self.workspace),
                                                   "text": text[:300], "ts": time.time(),
-                                                  "resumed": text == RESUME_TEXT}), encoding="utf-8")
+                                                  "resumed": text.startswith(RESUME_TEXT)}), encoding="utf-8")
         except OSError:
             pass
 
@@ -867,10 +871,13 @@ class Session:
     def resume_later(self, why: str) -> None:
         """Send RESUME_TEXT after RESUME_DELAY_S (the engine reloads on the request itself)."""
         self.notice(f"♻️ {why}; resuming the task in {int(RESUME_DELAY_S)} s (once).", "warn")
+        cut = getattr(self, "_cut_text", "")
+        self._cut_text = ""
+        msg = f"{RESUME_TEXT}\n\nCut-off request: {cut}" if cut else RESUME_TEXT
 
         def go():
             time.sleep(RESUME_DELAY_S)
-            self.submit(RESUME_TEXT, origin="dl-ai-resume")
+            self.submit(msg, origin="dl-ai-resume")
         threading.Thread(target=go, daemon=True).start()
 
     def _run(self, text: str, origin: str, effort: str | None = None, voice: bool = False) -> None:
@@ -889,10 +896,10 @@ class Session:
                     self._agent(prompt, effort, voice)
             except Exception as e:                    # a turn's failure never takes the daemon down
                 self.emit({"type": "error", "text": str(e)})
-                if self.messages and self.messages[-1].get("role") == "user":
-                    self.messages.pop()
-                if cli.TRANSIENT_ENGINE_ERR.search(str(e)) and text != RESUME_TEXT and not self.cancel.is_set():
+                if cli.TRANSIENT_ENGINE_ERR.search(str(e)) and not text.startswith(RESUME_TEXT) and not self.cancel.is_set():
                     resume = "The engine stopped mid-turn (likely out of RAM) and did not come back in time"
+                elif self.messages and self.messages[-1].get("role") == "user":
+                    self.messages.pop()
             with self.lock:
                 if not self.queue:
                     self.busy = False
@@ -950,6 +957,10 @@ class Session:
                               "content": cli.build_user_message_content(prompt, self.workspace, voice=voice,
                                                                         thinking=resolved_effort != "none",
                                                                         device=self.device_of(getattr(self, "_turn_origin", "")))})
+        try:
+            self.save()
+        except OSError:
+            pass
         ctx = {"workspace": self.workspace, "messages": self.messages, "mode": self.mode, "yolo": self.yolo,
                "plan_file": self.plan_file,
                "effort": resolved_effort,
@@ -958,6 +969,7 @@ class Session:
                "effort_reason": reason,
                "emit": self.emit, "cancel": self.cancel, "approve": self.approve, "mcp": self.mcp, "user_text": prompt,
                "voice": voice, "session": self,
+               "on_round": self.save,
                "on_handoff": lambda _msgs, part: self.snapshot_before_handoff(part)}
         ctx["take_queued"] = lambda ws, eff: self._take_queued(ws, eff, ctx)
         new_ws = cli.execute_agent_loop(messages=self.messages, url=cli.DEFAULT_URL, api_key=cli.DEFAULT_API_KEY,
@@ -1588,7 +1600,11 @@ class Registry:
                 continue
             name = str(info.get("session") or f.stem)
             try:
-                self.get(name).resume_later("The session daemon was stopped mid-turn (likely out of RAM)")
+                s = self.get(name)
+                cut = str(info.get("text") or "").strip()
+                if cut and not any(cut in str(m.get("content") or "") for m in s.messages if m.get("role") == "user"):
+                    s._cut_text = cut
+                s.resume_later("The session daemon was stopped mid-turn (likely out of RAM)")
                 done.append(name)
             except Exception:  # noqa: BLE001 - a session that cannot load is not resumed
                 continue

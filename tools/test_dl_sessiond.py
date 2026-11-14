@@ -822,6 +822,36 @@ class ResumeAfterKill(unittest.TestCase):
             self.wait_idle(s, 0.2)
             self.wait_idle(s, 0.3)
         self.assertEqual(prompts, ["fix it", self.sd.RESUME_TEXT])     # the resumed turn failing is not resumed again
+        self.assertTrue(any("fix it" in str(m.get("content", "")) for m in s.messages if m.get("role") == "user"))
+
+    def test_mid_turn_save_and_cut_text_fallback(self):
+        saves = []
+        s = self.sd.Session("t2", self.tmp)
+        orig_save = s.save
+        s.save = lambda: (saves.append(len(s.messages)), orig_save())
+
+        def loop(**kw):
+            kw["session_context"]["on_round"]()
+            return kw["workspace"]
+        with self.mock.patch.object(self.sd.cli, "execute_agent_loop", loop):
+            s.submit("build tetris")
+            self.wait_idle(s)
+        self.assertGreaterEqual(len(saves), 3)                          # on user append, on tool round, and at turn end
+
+        # If a daemon kill happened before the user message reached disk, the marker's text is carried into RESUME_TEXT
+        (self.tmp / "running").mkdir(exist_ok=True)
+        (self.tmp / "running" / "unsaved.json").write_text(json.dumps({
+            "session": "unsaved", "ts": time.time(), "text": "fix the wall kicks", "resumed": False
+        }))
+        seen = []
+        reg = self.sd.Registry(self.tmp)
+        with self.mock.patch.object(self.sd.cli, "execute_agent_loop",
+                                    lambda **kw: (seen.append(kw["session_context"]["user_text"]), kw["workspace"])[1]):
+            self.assertEqual(reg.resume_cut_turns(), ["unsaved"])
+            self.wait_idle(reg.get("unsaved"), 0.1)
+        self.assertEqual(len(seen), 1)
+        self.assertTrue(seen[0].startswith(self.sd.RESUME_TEXT))
+        self.assertIn("Cut-off request: fix the wall kicks", seen[0])
 
     def test_daemon_start_resumes_a_cut_turn(self):
         (self.tmp / "running").mkdir()

@@ -3928,11 +3928,11 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
 
     sc = session_context or {}
     kind = sc.get("effort_reason")
-    if kind is None and dl_effort is not None and sc.get("user_text"):
+    if (kind is None or str(kind).startswith("model2vec ")) and dl_effort is not None and sc.get("user_text"):
         try:
-            kind = dl_effort.pick(str(sc["user_text"]), mode=mode)[1]
+            kind = dl_effort.pick(str(sc["user_text"]), mode=mode, semantic=False)[1]
         except Exception:  # noqa: BLE001 - the watchdog is a helper; a classifier error must not stop the request
-            kind = None
+            pass
     coding = mode == "act" and (kind in CODING_REASONS or bool(sc.get("plan_file")))
     lean = (effort_auto and coding and effort == "high" and dl_effort is not None
             and os.environ.get("DL_LEAN_THINKING", "1") != "0")
@@ -4256,6 +4256,12 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
         else:
             changed_now = any((tc.get("function") or {}).get("name") in ("write_to_file", "replace_file_content")
                               for tc in res["tool_calls"])
+        on_round = (session_context or {}).get("on_round")
+        if callable(on_round):
+            try:
+                on_round()
+            except Exception:  # noqa: BLE001
+                pass
 
         start = finish.get("cp_start")
         approve_fn = (session_context or {}).get("approve") or terminal_approve

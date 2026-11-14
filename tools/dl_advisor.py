@@ -408,6 +408,8 @@ class Advisor:
                 continue                        # a cut file cannot be patched exactly; leave it out
             body.append(chunk)
             budget -= len(chunk)
+        if len(body) == 1:                      # no full file fit in the brief budget: ask for advice instead
+            return self.consult(registry, why, key, model, diff=diff, approve=approve, emit=emit)
         answer = self.consult(registry, why, key, model, approve=approve, emit=emit, prompt="\n\n".join(body),
                               system=PATCH_SYSTEM, note="{advice}")
         if answer is None:
