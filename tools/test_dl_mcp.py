@@ -627,5 +627,70 @@ class HomeAssistantTriggers(unittest.TestCase):
                 self.assertIsNotNone(self.hit(text))
 
 
+class CallExtras(unittest.TestCase):
+    """Per-server timeout, the fetch cache, and screenshots saved for the model (2026-11-14)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.r = registry(catalog={"servers": {"fetch": server(allow=["fetch"], timeout_s=330),
+                                               "pw": server(allow=["browser_take_screenshot"])},
+                                   "settings": {"timeout_s": 10}})
+        self.got = []
+        srv = mock.Mock()
+        srv.tools = []
+        srv.call = lambda tool, args, timeout, cancel=None: self.got.append((tool, args, timeout)) or self.answer
+        self.answer = {"content": [{"type": "text", "text": "# Page\nbody"}]}
+        for name, tool in (("fetch", "fetch"), ("pw", "browser_take_screenshot")):
+            self.r.routes[f"{name}__{tool}"] = (name, tool)
+            self.r.enabled[name] = {"turn": 0, "used": 0}
+            self.r.servers[name] = srv
+        for p in (mock.patch.object(dl_mcp, "FETCH_DIR", self.tmp / "fetch"),
+                  mock.patch.object(dl_mcp, "IMAGE_DIR", self.tmp / "img")):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_server_timeout_wins_over_the_default(self):
+        self.r.call("fetch__fetch", {"url": "https://a.test/x"})
+        self.r.call("pw__browser_take_screenshot", {})
+        self.assertEqual([t for _, _, t in self.got], [330.0, 10.0])
+
+    def test_a_page_fetched_again_comes_from_the_saved_copy(self):
+        first = self.r.call("fetch__fetch", {"url": "https://a.test/x"})
+        again = self.r.call("fetch__fetch", {"url": "https://a.test/x"})
+        other = self.r.call("fetch__fetch", {"url": "https://a.test/x", "start_index": 8000})
+        self.assertEqual(first, "# Page\nbody")
+        self.assertIn("Already fetched at", again)
+        saved = again.split("saved at ")[1].split(". Read")[0]
+        self.assertEqual(Path(saved).read_text(), "# Page\nbody")
+        self.assertEqual(other, "# Page\nbody")
+        self.assertEqual(len(self.got), 2)
+
+    def test_a_screenshot_saved_to_a_file_is_shown_too(self):
+        out_dir = self.tmp / "pw-out"
+        out_dir.mkdir()
+        (out_dir / "board.png").write_bytes(b"\x89PNG\r\n\x1a\nfile")
+        self.r.catalog["pw"].cfg["args"] = ["--headless", "--output-dir", str(out_dir)]
+        self.answer = {"content": [{"type": "text", "text": "### Result\n- [Screenshot of full page](./board.png)"}]}
+        out = self.r.call("pw__browser_take_screenshot", {"filename": "board.png"})
+        path = out.split("[[image: ")[1].rstrip("]")
+        self.assertTrue(path.startswith(str(self.tmp / "img")))
+        self.assertEqual(Path(path).read_bytes(), b"\x89PNG\r\n\x1a\nfile")
+
+    def test_a_screenshot_is_saved_and_marked(self):
+        import base64
+        png = base64.b64encode(b"\x89PNG\r\n\x1a\nfake").decode()
+        self.answer = {"content": [{"type": "text", "text": "Took the screenshot"},
+                                   {"type": "image", "mimeType": "image/png", "data": png}]}
+        out = self.r.call("pw__browser_take_screenshot", {})
+        path = out.split("[[image: ")[1].rstrip("]")
+        self.assertTrue(path.startswith(str(self.tmp / "img")))
+        self.assertTrue(Path(path).read_bytes().startswith(b"\x89PNG"))
+        sys.path.insert(0, str(HERE))
+        import dl_cli
+        with mock.patch.object(dl_cli.dl_mcp, "IMAGE_DIR", self.tmp / "img"):
+            urls = dl_cli.tool_result_images("pw__browser_take_screenshot", out, self.tmp / "ws")
+        self.assertEqual(urls, [f"file://{Path(path).resolve()}"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

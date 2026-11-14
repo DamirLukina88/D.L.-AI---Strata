@@ -74,6 +74,8 @@ class Entry:
         self.ask_full_args = [str(a) for a in raw.get("ask_full_args") or []]
         self.surfaces = list(raw.get("surfaces") or [])      # empty: everywhere
         self.idle_s = float(raw.get("idle_s") or 0)
+        # how long one call may take (0: the global timeout_s); DeepSeek's reasoning needs more than the default 120 s
+        self.timeout_s = float(raw.get("timeout_s") or 0)
         # arguments set here, hidden from the model and added to every call (e.g. the Google account)
         self.fixed_args = {str(k): v for k, v in (raw.get("fixed_args") or {}).items()}
         self.triggers = [re.compile(t, re.I) for t in raw.get("triggers") or []]
@@ -277,6 +279,14 @@ def file_leak(f: Path) -> str | None:
 
 
 PAGE_URL = re.compile(r"Page URL:\s*(\S+)")
+# A page fetched again within FETCH_REUSE_S is answered from the saved copy: on 2026-11-14 Ray fetched the same
+# 30k-character wiki page twice across a handoff, and each copy filled its context.
+FETCH_DIR = Path(os.environ.get("DL_FETCH_CACHE") or Path.home() / ".cache" / "dl-ai" / "fetch")
+FETCH_REUSE_S = float(os.environ.get("DL_FETCH_REUSE_S") or 7200)
+# where image blocks of tool results (screenshots) are saved for the model to see (2026-11-14: Ray had no way to look
+# at the page it built, and its tests passed while every Tetris piece was upside down)
+IMAGE_DIR = Path(os.environ.get("DL_MCP_IMAGE_DIR") or Path.home() / ".cache" / "dl-ai" / "mcp-images")
+SHOT_LINK = re.compile(r"\[Screenshot[^\]]*\]\(([^)\s]+\.(?:png|jpe?g|webp))\)", re.I)
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0")
 
 
@@ -311,6 +321,7 @@ class McpRegistry:
         self._defaults_done = False
         self.said: list[str] = []                            # the user's own words, for the recipient check
         self.page: dict[str, str] = {}                       # server -> the URL its browser is on, as last seen
+        self.fetched: dict[str, tuple[float, str, int]] = {}   # fetch url#start -> (when, saved copy, characters)
 
     # ------------------------------------------------------------------ on and off
     @property
@@ -528,6 +539,59 @@ class McpRegistry:
         self.enable(server, "its tool was called after it was turned off")
         return self.owns(model_name)
 
+    @staticmethod
+    def _save_images(res: dict) -> list[str]:
+        """Image blocks of a tool result (a Playwright screenshot) written to IMAGE_DIR, so the model can look at
+        them; the paths."""
+        import base64
+        out = []
+        for block in res.get("content") or []:
+            if not isinstance(block, dict) or block.get("type") != "image" or not block.get("data"):
+                continue
+            ext = {"image/jpeg": ".jpg", "image/webp": ".webp"}.get(str(block.get("mimeType")), ".png")
+            try:
+                IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+                path = IMAGE_DIR / f"shot-{time.strftime('%Y%m%d-%H%M%S')}-{len(out)}{ext}"
+                path.write_bytes(base64.b64decode(block["data"]))
+            except (OSError, ValueError):
+                continue
+            out.append(str(path))
+        return out
+
+    def _linked_images(self, name: str, text: str) -> list[str]:
+        """A screenshot saved to a file instead of returned (Playwright with `filename`: '[Screenshot ...](./x.png)'),
+        copied to IMAGE_DIR so the model sees it too (2026-11-14 18:18: Ray searched the whole disk for the file)."""
+        links = SHOT_LINK.findall(text or "")
+        if not links:
+            return []
+        import shutil
+        args = [str(a) for a in (self.catalog[name].cfg.get("args") or [])] if name in self.catalog else []
+        base = (args[args.index("--output-dir") + 1] if "--output-dir" in args[:-1]
+                else (self.catalog[name].cfg.get("cwd") if name in self.catalog else None) or os.getcwd())
+        out = []
+        for rel in links:
+            src = (Path(os.path.expanduser(base)) / rel).resolve()
+            if not src.is_file():
+                continue
+            try:
+                IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+                dst = IMAGE_DIR / f"shot-{time.strftime('%Y%m%d-%H%M%S')}-{len(out)}{src.suffix.lower()}"
+                shutil.copyfile(src, dst)
+            except OSError:
+                continue
+            out.append(str(dst))
+        return out
+
+    def _save_fetch(self, key: str, text: str) -> None:
+        import hashlib
+        try:
+            FETCH_DIR.mkdir(parents=True, exist_ok=True)
+            path = FETCH_DIR / (hashlib.sha256(key.encode()).hexdigest()[:16] + ".md")
+            path.write_text(text, encoding="utf-8")
+        except OSError:
+            return
+        self.fetched[key] = (time.time(), str(path), len(text))
+
     def _track_page(self, name: str, tool: str, args, text: str) -> None:
         """Remember which URL the server's browser shows: from a navigate call, then from the "Page URL:" line
         Playwright adds to its results (a click may have left the page)."""
@@ -586,6 +650,13 @@ class McpRegistry:
                     return err
             except ImportError:
                 pass
+        fetch_key = (f"{args.get('url')}#{args.get('start_index') or 0}"
+                     if name == "fetch" and tool == "fetch" and isinstance(args, dict) and args.get("url") else None)
+        seen = self.fetched.get(fetch_key) if fetch_key else None
+        if seen and time.time() - seen[0] < FETCH_REUSE_S and Path(seen[1]).is_file():
+            return (f"Already fetched at {time.strftime('%H:%M', time.localtime(seen[0]))} in this session; the "
+                    f"text ({seen[2]:,} characters) is saved at {seen[1]}. Read the part you need with view_file "
+                    f"(StartLine/EndLine) or grep it there instead of fetching the page again.")
         with self.lock:
             on, srv = self.enabled.get(name), self.servers.get(name)
             if on is None or srv is None:                    # turned off (idle, tool limit) since it was routed
@@ -593,12 +664,17 @@ class McpRegistry:
             on["turn"], on["used"] = self.turn, time.monotonic()
         try:
             args = {**(args if isinstance(args, dict) else {}), **self.catalog[name].fixed_args}
-            res = srv.call(tool, args, float(self.settings["timeout_s"]), cancel)
+            res = srv.call(tool, args, float(self.catalog[name].timeout_s or self.settings["timeout_s"]), cancel)
             text = result_text(res)
+            shots = (self._save_images(res) or self._linked_images(name, text)) if not res.get("isError") else []
+            if shots:                           # dl_cli shows these to the model as images (tool_result_images)
+                text += "".join(f"\n[[image: {p}]]" for p in shots)
             if res.get("isError"):
                 text = "error: " + (text or "the tool reported an error")
             else:
                 self._track_page(name, tool, args, text)
+                if fetch_key and text:
+                    self._save_fetch(fetch_key, text)
         except McpCancelled:
             return "error: stopped"
         except McpError as e:

@@ -905,6 +905,7 @@ Active Workspaces:
 <guidelines>
 - Reference code as `file_path:line_number` — it is clickable in terminal emulators.
 - Start editing once you know the first change. A design worked out in files persists, while long thinking can be cut off and lost.
+- Check a web page you built by looking at it: the browser's screenshot shows it to you and browser_evaluate reads its state. Do not write probe pages or test harnesses for that.
 - Match existing codebase conventions, comment density, architecture patterns, and naming style.
 - Report outcomes faithfully: if a test fails or command errors, state the exact error and diagnose it immediately.
 - Back every claim with evidence from this task: a test or command you ran after your last edit, a tool result, or a cited source. Never call something verified, tested or correct from memory; a worked derivation shown in your answer counts.
@@ -1092,7 +1093,8 @@ def resolve_file_references(prompt: str, workspace: Path) -> str:
 # A tool that hands the model a picture puts [[image: <path in the workspace>]] in its result (the phone's photo
 # tools; view_file on an image).  Only these tools may, and only image files inside the workspace count, so a fetched
 # web page or another tool's text can't make the model read other files
-IMAGE_RESULT_TOOLS = ("phone_camera_snap", "phone_get_last_photo", "phone_get_gallery_image", "view_file")
+IMAGE_RESULT_TOOLS = ("phone_camera_snap", "phone_get_last_photo", "phone_get_gallery_image", "view_file",
+                      "browser_take_screenshot")
 IMAGE_MARKER = re.compile(r"\[\[image:\s*([^\]\n]+?)\s*\]\]")
 
 
@@ -1105,6 +1107,8 @@ def tool_result_images(tool_name: str, result: str, workspace: Path) -> list[str
     env_root = os.environ.get("STRATA_WORKSPACE_DIR")
     if env_root:
         roots.append(Path(env_root).expanduser().resolve())
+    if dl_mcp is not None and tool_name.endswith("__browser_take_screenshot"):
+        roots.append(Path(dl_mcp.IMAGE_DIR).resolve())        # where the registry saved the screenshot
     urls = []
     for raw in IMAGE_MARKER.findall(result or ""):
         for root in roots:
@@ -2659,11 +2663,14 @@ def compact_history(messages: list[dict], tools: list[dict] | None, limit: int, 
 TOOL_RESULT_MAX = int(os.environ.get("DL_TOOL_RESULT_MAX") or 30000)    # chars of one tool result the model gets
 
 
-def cap_tool_result(text: str, limit: int | None = None) -> str:
+def cap_tool_result(text: str, limit: int | None = None, read: bool = False) -> str:
     """The start and the end of a result longer than limit, with a stand-in that says how to get the rest."""
     limit = limit or TOOL_RESULT_MAX
     if len(text) <= limit:
         return text
+    if read:                                # a file read or command output: the start is what was asked for
+        return (f"{text[:limit]}\n[cut at {limit:,} of {len(text):,} characters: read a narrower range "
+                f"(StartLine/EndLine, sed -n) or grep for what you need]")
     head, tail = int(limit * 0.7), int(limit * 0.3)
     return (f"{text[:head]}\n[... {len(text) - head - tail:,} chars removed by D.L. CLI to fit the context: the "
             f"result had {len(text):,}. Ask for less - redirect long output to a file and read it in parts "
@@ -2720,27 +2727,33 @@ def fit_context(messages: list[dict], tools: list[dict] | None, url: str, api_ke
 
 HANDOFF_MIN_REPLY_ROOM = int(os.environ.get("DL_HANDOFF_MIN_REPLY_ROOM") or 4500)  # min KV room in 50k..64k for in-session diary turn
 HANDOFF_MIN_GROWTH = int(os.environ.get("DL_HANDOFF_MIN_GROWTH") or 8000)  # min prompt tokens added between handoffs to prevent thrashing
-HANDOFF_MAX_CHARS = 2600
+HANDOFF_MAX_CHARS = 3200
 HANDOFF_SYSTEM = (
     "You write a condensed session handoff brief for a coding agent that is resetting to a fresh context window. "
-    "Write at most 380 words using ONLY these four Markdown sections:\n"
+    "Write at most 450 words using ONLY these five Markdown sections:\n"
     "## Goal & Live State\n"
     "## Completed & Verified\n"
+    "## Key Facts (verified)\n"
     "## Dead Ends / Ruled Out\n"
     "## Next Immediate Action\n"
     "Include exact file:Lstart-Lend anchors, function names, commands, and ports. Under 'Completed & Verified', list "
     "what is already done on disk so the fresh session does not re-read those files. Under 'Dead Ends / Ruled Out', "
     "list any approaches, edits, or commands that failed or were ruled out so the fresh session never repeats them. "
-    "Do not call any tools and do not include code blocks or prose outside these four sections."
+    "Under 'Key Facts (verified)', copy exact data the work depends on that was already looked up or checked (table "
+    "values, constants, API names, URLs already read), so the fresh session never fetches or derives it again. "
+    "Do not call any tools and do not include code blocks or prose outside these five sections."
 )
 IN_SESSION_HANDOFF_PROMPT = (
     "[D.L. CLI: Context is approaching the handoff threshold. Before D.L. CLI reloads a clean session, write the "
-    "condensed Active Handoff Brief now (at most 380 words, no tool calls, no code blocks) using ONLY these four "
+    "condensed Active Handoff Brief now (at most 450 words, no tool calls, no code blocks) using ONLY these five "
     "Markdown sections:\n"
     "## Goal & Live State\n"
     "(Exact task, workspace paths, active file:Lstart-Lend anchors, running services/ports)\n"
     "## Completed & Verified\n"
     "(One-line bullets of steps already verified on disk; include exact PLAN.md step text for any newly completed steps)\n"
+    "## Key Facts (verified)\n"
+    "(Exact data already looked up or checked that the work depends on: table values, constants, names, URLs already "
+    "read. Copy the values themselves, not a pointer to them)\n"
     "## Dead Ends / Ruled Out\n"
     "(Failed commands, errors, or ruled-out hypotheses from this session and any prior handoff — never repeat these)\n"
     "## Next Immediate Action\n"
@@ -2755,7 +2768,8 @@ HANDOFF_NOTE = (
     "1. Do NOT re-read files listed under **Completed & Verified** unless a test fails.\n"
     "2. Do NOT read entire files or dump full logs; use `view_file` with narrow `StartLine`/`EndLine` ranges around "
     "the `file:Lstart-Lend` anchors above, or `grep_search`.\n"
-    "3. Only open `{archive_rel}` if you specifically need an older detail not in the brief above.]"
+    "3. Only open `{archive_rel}` if you specifically need an older detail not in the brief above.\n"
+    "4. **Key Facts (verified)** are already checked: use them as they are; never fetch or derive them again.]"
 )
 _HANDOFF_RE = re.compile(
     r"^\[D\.L\. CLI: Session handoff #(\d+) — (\d+) earlier messages were archived to `[^`]+`[^\n]*\n\n"
@@ -3214,6 +3228,24 @@ TEXT_CALL_RETRIES = 2                       # per request: a model that keeps do
 TEXT_CALL_NOTE = ("[D.L. CLI] Your last reply contains a tool call written as text (<tool_call>, <function=...>), "
                   "which cannot be run, so nothing was executed. Send it again as a real tool call with all its "
                   "parameters, one call at a time.")
+TEXT_CALL_NAME = re.compile(r"<function=([\w-]+)|<invoke name=\"([\w-]+)\"")
+TEXT_CALL_REVIVED = (" That tool's server ({server}) had been turned off while it was idle, so the tool was missing "
+                     "from your list; it is on again now, so the real call will work.")
+# Edit-first watchdog (2026-11-14: a 25-line fix took 2 h, most of it reading and building test tools in /tmp):
+# coding work in Act mode that goes DL_NUDGE_AT rounds without changing a workspace file gets a note; DL_PATCH_AT
+# rounds gets DeepSeek's patch (the helper on) or a sterner note.  0 turns it off.
+NUDGE_AT = int(os.environ.get("DL_NUDGE_AT") or 12)
+PATCH_AT = int(os.environ.get("DL_PATCH_AT") or 18)
+CODING_REASONS = ("coding task", "code or error", "follow-up on a failed answer")
+NUDGE_NOTE = ("[D.L. CLI] {n} rounds without changing a project file. Stop reading and building test tools: make the "
+              "edit now with replace_file_content (or write_to_file), then test it.")
+NUDGE_NOTE_2 = ("[D.L. CLI] {n} rounds and still no project file changed. Make the change you already know is needed "
+                "in your next call; do not read, fetch or write helper scripts first.")
+# Lean thinking (the user's choice, 2026-11-14): auto effort on coding work thinks on high in the first round and
+# for LEAN_HIGH_ROUNDS rounds after a failure, and on medium in the rounds that only act on what it already knows.
+LEAN_HIGH_ROUNDS = int(os.environ.get("DL_LEAN_HIGH_ROUNDS") or 2)
+READ_RESULT_MAX = int(os.environ.get("DL_READ_RESULT_MAX") or 8000)     # one view_file / run_command result
+READ_TOOLS = ("view_file", "run_command")
 MAX_TURNS = int(os.environ.get("DL_MAX_TURNS") or 40)   # model calls per request before the agent must stop
 CONTINUE_PROMPT = "Continue the task from where you stopped."
 SMALL_TALK_NOTE = "Small talk: no tool is needed here, and none was run. Answer directly, as yourself."
@@ -3827,7 +3859,54 @@ def finish_checks(state: dict, messages: list[dict], final: str, mode: str, ws: 
                 print(f"{C_MUTED}{findings}{C_RESET}")
             return REVIEW_NOTE.format(findings=findings)
         _note(emit, "Review: no problems found.")
+    # the DeepSeek helper (DL_ADVISOR=1): a run that started from an approved plan gets a final review by Pro, and
+    # goes back for fixes until it passes (at most DL_ADVISOR_FINAL_MAX rounds; the user's choice, 2026-11-14)
+    if (dl_advisor is not None and dl_advisor.enabled() and state.get("from_plan") and (changed or via_cps)
+            and os.environ.get("DL_ADVISOR_FINAL", "1") != "0"):
+        return _final_review(state, final, ws, ctx, changed, via_cps, emit)
     return None
+
+
+def _final_review(state: dict, final: str, ws: Path, ctx: dict, changed: list, via_cps: list, emit) -> str | None:
+    """One round of the Pro final review: a note sending the agent back, or None when it passed or must stop."""
+    rounds_max = int(os.environ.get("DL_ADVISOR_FINAL_MAX") or 5)
+    done = state.get("final_rounds", 0)
+    snap = workspace_snapshot(ws)
+    if done and snap == state.get("final_snap"):
+        _note(emit, "Final review: nothing changed since the last review round, so it was not repeated; the "
+                    "findings above are still open.", "warn")
+        return None
+    if done >= rounds_max:
+        _note(emit, f"Final review: stopped after {rounds_max} rounds; the fixes after the last round were not "
+                    "reviewed again.", "warn")
+        return None
+    names = sorted(set(via_cps) | {str(p.relative_to(ws)) if p.is_relative_to(ws) else str(p) for p in changed})
+    files = {}
+    for n in names:
+        p = (ws / n) if not Path(n).is_absolute() else Path(n)
+        try:
+            if p.is_file() and p.stat().st_size <= 200_000:
+                files[n] = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+    try:
+        plan = Path(state["from_plan"]).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        plan = ""
+    adv = state.setdefault("final_advisor", dl_advisor.Advisor(ctx))
+    _note(emit, f"Final review by DeepSeek Pro, round {done + 1} of at most {rounds_max} ({len(files)} file(s))...")
+    verdict, note = adv.final_review(ctx.get("mcp"), plan, final or "", files, done + 1,
+                                     approve=ctx.get("approve") or terminal_approve, emit=emit)
+    if verdict == "skip":
+        return None
+    state["final_rounds"], state["final_snap"] = done + 1, snap
+    if verdict == "pass":
+        _note(emit, f"Final review: passed in round {done + 1}.")
+        return None
+    _note(emit, f"Final review: problems found in round {done + 1}; sent the agent back to fix them.", "warn")
+    if emit:
+        emit({"type": "output", "title": "Final review findings (DeepSeek Pro)", "text": note, "ansi": note})
+    return note
 
 
 def execute_agent_loop(messages: list[dict], url: str, api_key: str,
@@ -3847,10 +3926,32 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
 
     advisor = dl_advisor.Advisor(session_context) if dl_advisor is not None and dl_advisor.enabled() else None
 
-    def _auto_raise(reason: str | None) -> None:
-        nonlocal effort, budget
-        if advisor is not None:
+    sc = session_context or {}
+    kind = sc.get("effort_reason")
+    if kind is None and dl_effort is not None and sc.get("user_text"):
+        try:
+            kind = dl_effort.pick(str(sc["user_text"]), mode=mode)[1]
+        except Exception:  # noqa: BLE001 - the watchdog is a helper; a classifier error must not stop the request
+            kind = None
+    coding = mode == "act" and (kind in CODING_REASONS or bool(sc.get("plan_file")))
+    lean = (effort_auto and coding and effort == "high" and dl_effort is not None
+            and os.environ.get("DL_LEAN_THINKING", "1") != "0")
+    high_left = 1                           # lean: rounds left on high (the first one plans)
+    quiet = 0                               # watchdog: rounds in a row without a changed workspace file
+    nudged = 0
+
+    def _auto_raise(reason: str | None, noted: bool = False) -> None:
+        nonlocal effort, budget, high_left
+        if advisor is not None and not noted:
             advisor.note_raise(reason)
+        if reason and session_context is not None:
+            session_context["raised"] = True          # the helper waits for this rung first
+        if lean and reason:
+            if high_left <= 0:
+                _note(emit, f"Thinking on high for the next {LEAN_HIGH_ROUNDS} rounds, because "
+                            f"{dl_effort.RAISE_WHY.get(reason, reason)}.")
+            high_left = max(high_left, LEAN_HIGH_ROUNDS)
+            return
         if effort_auto and reason and effort != "high":
             effort = "high"
             budget = dl_effort.budget_for("high") if dl_effort is not None else 4096
@@ -3881,7 +3982,8 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                 current_ws, mode=mode, plan_file=(session_context or {}).get("plan_file"))}
 
     refresh_memory(messages)
-    finish = {"changes": RequestChanges(current_ws), "pages": web_pages(current_ws)}   # one request's check state
+    finish = {"changes": RequestChanges(current_ws), "pages": web_pages(current_ws),   # one request's check state
+              "from_plan": (session_context or {}).get("plan_file")}
     # on in the daemon and the CLI (their main() sets DL_CHECKPOINTS=1 unless it is set), not in tests that import this
     cps = Checkpoints(current_ws, emit) if os.environ.get("DL_CHECKPOINTS") == "1" else None
     if cps is not None:
@@ -3926,7 +4028,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
     def poll_queued() -> bool:
         # User input sent while the session was busy: pick it up right after a tool round finishes (or before finish
         # checks) so the next model call sees it without losing the cached prompt prefix.
-        nonlocal effort, effort_auto, budget, active_tools, small_talk, turn, text_call_retries, loop_retries
+        nonlocal effort, effort_auto, budget, active_tools, small_talk, turn, text_call_retries, loop_retries, high_left
         take = (session_context or {}).get("take_queued")
         if not take or (cancel is not None and cancel.is_set()):
             return False
@@ -3940,6 +4042,8 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
         if picked.get("prompts"):
             small_talk = False
             turn = text_call_retries = loop_retries = 0
+            if lean:
+                high_left = max(high_left, 1)
             for k in ("browser", "evidence", "review", "stalls"):
                 finish.pop(k, None)
             return True
@@ -3948,6 +4052,12 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
     while turn < max_turns:
         turn += 1
         total_rounds += 1
+        if lean:                                # high to plan (and after a failure), medium to act
+            effort = "high" if high_left > 0 else "medium"
+            high_left = max(0, high_left - 1)
+            budget = dl_effort.budget_for(effort)
+            if session_context is not None:
+                session_context["effort"], session_context["reasoning_budget_tokens"] = effort, budget
         res = chat_turn_in_context(messages, url, api_key, active_tools, emit=emit, cancel=cancel,
                                    measured=measured, effort=effort, budget=budget, on_compact=refresh_memory,
                                    workspace=current_ws, plan_file=(session_context or {}).get("plan_file"),
@@ -3989,8 +4099,19 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
         if (not res["tool_calls"] and text_call_retries < TEXT_CALL_RETRIES
                 and TEXT_TOOL_CALL.search(res["content"] or "")):
             text_call_retries += 1
-            messages.append({"role": "user", "content": TEXT_CALL_NOTE})
+            # often the tool's server was turned off (idle) and its tools left the list, so the model had no real
+            # call to make (Playwright, 2026-11-14 16:03): turn it back on before asking for the call again
+            revived = ""
+            for named in (a or b for a, b in TEXT_CALL_NAME.findall(res["content"] or "")):
+                if registry is not None and registry.active and not registry.owns(named) and registry.revive(named):
+                    revived = named.split("__", 1)[0]
+                    active_tools = get_active_tools(current_ws, mode=mode, registry=registry)
+                    break
+            messages.append({"role": "user", "content": TEXT_CALL_NOTE + (TEXT_CALL_REVIVED.format(server=revived)
+                                                                          if revived else "")})
             note = "The model wrote a tool call as text, so nothing ran; asked it to send a real tool call."
+            if revived:
+                note += f" Its server ({revived}) was off and is on again."
             if emit:
                 emit({"type": "notice", "level": "warn", "text": note})
             else:
@@ -4067,6 +4188,8 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                 result_str = bad_args or dispatch_dl_tool(fn_name, args, current_ws, mode=mode,
                                                           session_context=session_context)
             result_str = cap_tool_result(result_str)    # 2026-10-20 22:12: a 106k debug print ended a CONTRA run
+            if fn_name in READ_TOOLS and READ_RESULT_MAX > 0 and not bad_args:     # keep reads small (2026-11-14)
+                result_str = cap_tool_result(result_str, READ_RESULT_MAX, read=True)
             if before is not None:                  # did it empty, delete or halve a file?
                 after = scan_workspace(current_ws)
                 hits = shrunk_files(before, after) if after is not None else []
@@ -4100,10 +4223,15 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                 "name": fn_name,
                 "content": result_str
             })
-            if effort_auto and dl_effort is not None and not small_talk:
-                _auto_raise(dl_effort.raise_reason(fn_name, args, result_str, seen))
             if advisor is not None and not small_talk:
                 advisor.note_result(fn_name, args, result_str)
+                if dl_effort is not None and not effort_auto:     # the helper also sees raises when effort is fixed
+                    advisor.note_raise(dl_effort.raise_reason(fn_name, args, result_str, seen), fn_name)
+            if effort_auto and dl_effort is not None and not small_talk:
+                reason = dl_effort.raise_reason(fn_name, args, result_str, seen)
+                if advisor is not None:
+                    advisor.note_raise(reason, fn_name)
+                _auto_raise(reason, noted=True)
 
         # pictures a tool handed back this round (the phone's photo): the model sees them in the next call, as a user
         # message after all of the round's tool results (the order the chat template expects)
@@ -4119,20 +4247,50 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             if emit:
                 emit({"type": "notice", "level": "info", "text": f"Image from the tool shown to the model ({len(round_imgs)})"})
 
+        changed_now = False
         if cps is not None:                         # this round's changes, so the next one can be undone
             if cps.ws != Path(current_ws).resolve():
                 cps = Checkpoints(current_ws, emit)
-            cps.take(f"round {total_rounds}: " + ", ".join(
-                (tc.get("function") or {}).get("name", "?") for tc in res["tool_calls"]))
+            changed_now = cps.take(f"round {total_rounds}: " + ", ".join(
+                (tc.get("function") or {}).get("name", "?") for tc in res["tool_calls"])) is not None
+        else:
+            changed_now = any((tc.get("function") or {}).get("name") in ("write_to_file", "replace_file_content")
+                              for tc in res["tool_calls"])
 
-        if advisor is not None and not small_talk:    # stuck after thinking on high: ask DeepSeek, hand Ray the advice
+        start = finish.get("cp_start")
+        approve_fn = (session_context or {}).get("approve") or terminal_approve
+        consulted = False
+        if coding and not small_talk and NUDGE_AT > 0:          # edit-first watchdog
+            quiet = 0 if changed_now else quiet + 1
+            if changed_now:
+                nudged = 0
+            elif quiet >= NUDGE_AT and nudged == 0:
+                nudged = 1
+                messages.append({"role": "user", "content": NUDGE_NOTE.format(n=quiet)})
+                _note(emit, f"Watchdog: {quiet} rounds without changing a project file; told Ray to make the edit.",
+                      "warn")
+            elif PATCH_AT > 0 and quiet >= PATCH_AT and nudged == 1:
+                nudged = 2
+                note = None
+                if advisor is not None and dl_advisor.enabled():
+                    changed = cps.changed_since(start) if cps is not None and start else []
+                    note = advisor.patch(registry, f"{quiet} rounds without changing a project file",
+                                         f"nochange#{total_rounds}", files=advisor.target_files(changed),
+                                         diff=cps.diff_since(start, 9000) if cps is not None and start else "",
+                                         approve=approve_fn, emit=emit)
+                    consulted = note is not None
+                messages.append({"role": "user", "content": note or NUDGE_NOTE_2.format(n=quiet)})
+                if not note:
+                    _note(emit, f"Watchdog: {quiet} rounds without changing a project file; told Ray again.", "warn")
+
+        if advisor is not None and not small_talk:    # stuck after thinking on high: ask DeepSeek, hand Ray the fix
             advisor.end_round()
-            stuck = advisor.stuck()
+            stuck = None if consulted else advisor.stuck()
             if stuck:
-                start = finish.get("cp_start")
                 diff = cps.diff_since(start, 9000) if cps is not None and start else ""
-                note = advisor.consult(registry, stuck[0], stuck[1], stuck[2], diff=diff,
-                                       approve=(session_context or {}).get("approve") or terminal_approve, emit=emit)
+                files = advisor.target_files(cps.changed_since(start) if cps is not None and start else [])
+                note = advisor.patch(registry, stuck[0], stuck[1], stuck[2], files=files, diff=diff,
+                                     approve=approve_fn, emit=emit)
                 if note:
                     messages.append({"role": "user", "content": note})
 

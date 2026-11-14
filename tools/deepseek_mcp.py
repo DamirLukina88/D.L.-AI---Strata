@@ -94,6 +94,8 @@ def handle_query(prompt: str, model: str = "auto", max_tokens: int = 8192, syste
             if include_thinking and getattr(msg, "reasoning_content", None):
                 out += f"<think>\n{msg.reasoning_content}\n</think>\n\n"
             out += content
+            if resp.choices[0].finish_reason == "length":      # the thinking used up the budget; say so, not a silent stub
+                out += f"\n\n[cut off: the reply reached max_tokens ({max_tokens})]"
             note = f"\n\n[model: {m}" + (f"; after {', '.join(tried)} failed" if tried else "") + "]"
             return out + note
         except Exception as e:
@@ -158,7 +160,9 @@ def main():
                             "web": {"type": "boolean", "default": False,
                                     "description": "Let DeepSeek search the web and read URLs (billed per search/fetch)."},
                             "include_thinking": {"type": "boolean", "default": True,
-                                                 "description": "Prepend DeepSeek's reasoning in <think> tags."}
+                                                 "description": "Prepend DeepSeek's reasoning in <think> tags."},
+                            "max_tokens": {"type": "integer", "default": 8192,
+                                           "description": "Most tokens of the reply, its thinking included (up to 65536)."}
                         },
                         "required": ["prompt"]
                     }
@@ -173,7 +177,8 @@ def main():
             if name == "deepseek_reason":
                 text = handle_query(args.get("prompt", ""), model=args.get("model") or "auto",
                                     system=args.get("system") or "", web=bool(args.get("web")),
-                                    include_thinking=args.get("include_thinking", True) is not False)
+                                    include_thinking=args.get("include_thinking", True) is not False,
+                                    max_tokens=max(256, min(65536, int(args.get("max_tokens") or 8192))))
                 res = {
                     "jsonrpc": "2.0",
                     "id": msg_id,

@@ -775,5 +775,68 @@ class QueuedInput(unittest.TestCase):
             s.mcp.close()
 
 
+class ResumeAfterKill(unittest.TestCase):
+    """A turn cut off by an out-of-memory kill is resumed once, automatically (2026-11-14)."""
+
+    def setUp(self):
+        sys.path.insert(0, str(HERE))
+        import dl_sessiond
+        from unittest import mock
+        self.sd, self.mock = dl_sessiond, mock
+        self.tmp = Path(tempfile.mkdtemp())
+        for p in (mock.patch.object(dl_sessiond, "STATE_DIR", self.tmp / "sessions"),
+                  mock.patch.object(dl_sessiond, "RUN_DIR", self.tmp / "running"),
+                  mock.patch.object(dl_sessiond, "RESUME_DELAY_S", 0)):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def wait_idle(self, s, extra=0.0):
+        time.sleep(extra)
+        for _ in range(300):
+            if not s.busy:
+                return
+            time.sleep(0.01)
+
+    def test_marker_while_running_and_gone_after(self):
+        seen = []
+        s = self.sd.Session("t", self.tmp)
+        s.save = lambda: None
+        with self.mock.patch.object(self.sd.cli, "execute_agent_loop",
+                                    lambda **kw: (seen.append((self.tmp / "running" / "t.json").exists()),
+                                                  kw["workspace"])[1]):
+            s.submit("fix it")
+            self.wait_idle(s)
+        self.assertEqual(seen, [True])
+        self.assertFalse((self.tmp / "running" / "t.json").exists())
+
+    def test_engine_death_resumes_once(self):
+        prompts = []
+
+        def loop(**kw):
+            prompts.append(kw["session_context"]["user_text"])
+            raise RuntimeError("Strata stream error: the engine stopped unexpectedly (exit code -9)")
+        s = self.sd.Session("t", self.tmp)
+        s.save = lambda: None
+        with self.mock.patch.object(self.sd.cli, "execute_agent_loop", loop):
+            s.submit("fix it")
+            self.wait_idle(s, 0.2)
+            self.wait_idle(s, 0.3)
+        self.assertEqual(prompts, ["fix it", self.sd.RESUME_TEXT])     # the resumed turn failing is not resumed again
+
+    def test_daemon_start_resumes_a_cut_turn(self):
+        (self.tmp / "running").mkdir()
+        (self.tmp / "running" / "t.json").write_text(json.dumps({"session": "t", "ts": time.time(), "text": "x",
+                                                                 "resumed": False}))
+        (self.tmp / "running" / "old.json").write_text(json.dumps({"session": "old", "ts": time.time() - 99999}))
+        (self.tmp / "running" / "again.json").write_text(json.dumps({"session": "again", "ts": time.time(),
+                                                                     "resumed": True}))
+        got = []
+        reg = self.sd.Registry(self.tmp)
+        with self.mock.patch.object(self.sd.Session, "resume_later", lambda self_, why: got.append(self_.name)):
+            self.assertEqual(reg.resume_cut_turns(), ["t"])
+        self.assertEqual(got, ["t"])
+        self.assertEqual(list((self.tmp / "running").glob("*.json")), [])
+
+
 if __name__ == "__main__":
     unittest.main()

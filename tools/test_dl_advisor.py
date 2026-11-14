@@ -91,6 +91,13 @@ class WhenItAsks(Env):
             a.note_result("run_command", {}, f"FAIL row {n} expected {n * 2}\n[Command exited with code 1]")
         self.assertEqual(len(a.sigs), 1)
 
+    def test_different_errors_without_a_fail_line_differ(self):
+        a = A.failure_signature("Stderr:\nSyntaxError-free but: cannot find marker A\n[Command exited with code 1]")
+        b = A.failure_signature("Stderr:\nwrote 0 bytes to out.js\n[Command exited with code 1]")
+        self.assertNotEqual(a, b)
+        self.assertEqual(A.failure_signature("Stderr:\ncannot find marker at line 12\n[Command exited with code 1]"), A.failure_signature("Stderr:\ncannot find marker at line 40\n[Command exited with code 2]"))
+        self.assertIsNone(A.failure_signature("all good\n[Command exited with code 0]"))
+
     def test_thinking_on_high_comes_first(self):
         self.assertIsNone(stuck_advisor(effort="low").stuck())
 
@@ -116,9 +123,26 @@ class WhenItAsks(Env):
 
     def test_two_loops_ask(self):
         a = A.Advisor({"effort": "high"})
+        a.note_result("run_command", {}, FAIL)
         a.note_raise("thinking loop")
         a.note_raise("repeated tool call")
         self.assertEqual(a.stuck()[1], "loops")
+
+    def test_browser_repeats_are_not_circles(self):
+        a = A.Advisor({"effort": "high"})
+        a.note_result("run_command", {}, FAIL)
+        for t in ("playwright__browser_navigate", "playwright__browser_press_key", "playwright__browser_snapshot"):
+            a.note_raise("repeated tool call", t)
+        self.assertIsNone(a.stuck())
+        a.note_raise("repeated tool call", "run_command")
+        a.note_raise("thinking loop")
+        self.assertEqual(a.stuck()[1], "loops")
+
+    def test_circles_need_a_recent_failure(self):
+        a = A.Advisor({"effort": "high"})
+        a.note_raise("repeated tool call", "run_command")
+        a.note_raise("thinking loop")
+        self.assertIsNone(a.stuck())
 
     def test_limits(self):
         a, reg = stuck_advisor(yolo=True), FakeRegistry()
@@ -158,6 +182,20 @@ class FlashThenPro(Env):
         why = a.stuck()
         self.assertTrue(why is None or why[2] == A.FLASH)     # at most one Pro consult per request
 
+    def test_pro_brief_carries_flashs_advice(self):
+        a, reg = stuck_advisor(yolo=True), FakeRegistry()
+        a.consult(reg, *a.stuck())
+        self.assertNotIn("Advice already given", reg.calls[0]["prompt"])
+        for _ in range(6):
+            a.note_result("run_command", {}, FAIL)
+            a.end_round()
+        a.consult(reg, *a.stuck())
+        pro = reg.calls[1]["prompt"]
+        self.assertIn("Advice already given (deepseek-flash", pro)
+        self.assertIn("Root cause: the test adds hard-drop points", pro)
+        self.assertLessEqual(len(pro), A.BRIEF_MAX)
+        self.assertNotIn("advice", self.log()[0])            # the advice text stays out of the log
+
     def test_no_pro_when_flash_helped(self):
         a, reg = stuck_advisor(yolo=True), FakeRegistry()
         a.consult(reg, *a.stuck())
@@ -188,6 +226,82 @@ class PlanReview(Env):
         cards = []
         self.assertIsNone(A.Advisor({}).review_plan(FakeRegistry(), "1. x", approve=lambda k, s, r: cards.append(s) or False))
         self.assertTrue(cards)
+
+
+class FinalReview(Env):
+    """A plan run that says it is done: Pro reviews it, sends it back until it passes, at most 5 rounds."""
+
+    def run_plan(self, answers, edit_each_time=True, max_turns=30):
+        ws = Path(self.tmp.name) / "ws"
+        ws.mkdir(exist_ok=True)
+        plan = ws / "PLAN.md"
+        plan.write_text("# Plan\n\n## Progress\n\n- [x] write game.js\n")
+        reg = FakeRegistry()
+        reg.route = lambda *a, **k: []
+        reg.tick = lambda: None
+        replies = iter(answers)
+        reg.call = lambda name, args, mode="act", cancel=None: reg.calls.append(args) or next(replies)
+        n = 0
+
+        def turn(messages, *a, **k):
+            nonlocal n
+            n += 1
+            last = str(messages[-1].get("content", ""))
+            if messages[-1].get("role") == "tool" or n > 1 and not edit_each_time:
+                return reply("Done: game.js written and tested.")
+            if n == 1 or (edit_each_time and last.startswith("[D.L. CLI] A final review")):
+                return reply("", call(n, "write_to_file", {"TargetFile": str(ws / "game.js"),
+                                                           "CodeContent": f"let v = {n};\n", "Overwrite": True}))
+            return reply("Done: game.js written and tested.")
+
+        msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "[Now: x]\nexecute the plan"}]
+        notes = []
+        ctx = {"workspace": ws, "messages": msgs, "mode": "act", "yolo": True, "effort": "high",
+               "effort_auto": False, "user_text": "execute the plan", "mcp": reg, "plan_file": str(plan),
+               "emit": lambda e: notes.append(e.get("text", "")) if e.get("type") == "notice" else None}
+        with patch.object(cli, "chat_turn_in_context", side_effect=turn), \
+             patch.object(cli, "get_active_tools", return_value=[]), \
+             patch.dict(os.environ, {"DL_REVIEW": "0", "DL_CHECKPOINTS": "0", "DL_BROWSER_CHECK": "0",
+                                     "DL_EVIDENCE": "0"}):
+            cli.execute_agent_loop(msgs, "http://127.0.0.1:1", "k", ws, max_turns=max_turns, session_context=ctx)
+        return reg, msgs, notes
+
+    def test_fix_then_pass(self):
+        reg, msgs, notes = self.run_plan(["VERDICT: FIX\nMust fix:\n- game.js: v is wrong\n\n[model: deepseek-v4-pro]",
+                                          "VERDICT: PASS\n\n[model: deepseek-v4-pro]"])
+        self.assertEqual(len(reg.calls), 2)
+        self.assertEqual(reg.calls[0]["model"], "deepseek-v4-pro")
+        self.assertEqual(reg.calls[0]["system"], A.FINAL_SYSTEM)
+        self.assertIn("## File game.js", reg.calls[0]["prompt"])
+        self.assertIn("- [x] write game.js", reg.calls[0]["prompt"])
+        sent_back = [m for m in msgs if str(m.get("content", "")).startswith("[D.L. CLI] A final review")]
+        self.assertEqual(len(sent_back), 1)
+        self.assertIn("round 1 of at most 5", sent_back[0]["content"])
+        self.assertTrue(any("passed in round 2" in t for t in notes))
+
+    def test_stops_when_nothing_changed(self):
+        reg, msgs, notes = self.run_plan(["VERDICT: FIX\nMust fix:\n- a bug\n\n[model: deepseek-v4-pro]"] * 3,
+                                         edit_each_time=False)
+        self.assertEqual(len(reg.calls), 1)
+        self.assertTrue(any("nothing changed since the last review" in t for t in notes))
+
+    def test_at_most_five_rounds(self):
+        reg, msgs, notes = self.run_plan(["VERDICT: FIX\nMust fix:\n- still wrong\n\n[model: deepseek-v4-pro]"] * 9,
+                                         max_turns=40)
+        self.assertEqual(len(reg.calls), 5)
+        self.assertTrue(any("stopped after 5 rounds" in t for t in notes))
+
+    def test_no_review_without_a_plan(self):
+        a = A.Advisor({"yolo": True})
+        with patch.dict(os.environ, {"DL_ADVISOR_FINAL": "0"}):
+            self.assertEqual(a.final_review(FakeRegistry(), "p", "r", {}, 1), ("skip", None))
+
+    def test_big_files_are_cut_to_the_budget(self):
+        reg = FakeRegistry(answer="VERDICT: PASS\n\n[model: deepseek-v4-pro]")
+        verdict, _ = A.Advisor({"yolo": True}).final_review(reg, "plan", "done", {"a.js": "x" * 50000, "b.js": "y" * 50000}, 1)
+        self.assertEqual(verdict, "pass")
+        self.assertLessEqual(len(reg.calls[0]["prompt"]), 60500)
+        self.assertIn("file cut", reg.calls[0]["prompt"])
 
 
 class WhatItSends(Env):
@@ -302,6 +416,212 @@ class InTheLoop(Env):
         log = self.log()
         self.assertEqual(log[0]["result"], "ok")
         self.assertIn("outcome_of", log[-1])
+
+
+PATCH = ("FILE: a.js\n<<<OLD\nlet x = 1;\n===\nlet x = 3;\nNEW>>>\n\n"
+         "FILE: a.js\n<<<OLD\nlet y = 2;\n===\nlet y = 5;\nNEW>>>\n\n"
+         "FILE: /etc/hosts\n<<<OLD\nlocalhost\n===\nx\nNEW>>>\n\n"
+         "CHECK: node a.test.js prints 3\nWhy: x was never set.\n\n[model: deepseek-flash]")
+
+
+class PatchMode(Env):
+    """Stuck in known files: DeepSeek writes exact old -> new blocks; only blocks that match once reach Ray."""
+
+    def ws(self):
+        ws = Path(self.tmp.name) / "ws"
+        ws.mkdir(exist_ok=True)
+        (ws / "a.js").write_text("let x = 1;\nlet y = 2;\nlet y = 2;\n")
+        return ws
+
+    def test_only_unique_blocks_in_the_workspace_are_kept(self):
+        valid, bad, check = A.parse_patch(PATCH, self.ws())
+        self.assertEqual([(Path(b["file"]).name, b["new"]) for b in valid], [("a.js", "let x = 3;")])
+        self.assertEqual(len(bad), 2)
+        self.assertIn("found 2 times", bad[0])
+        self.assertIn("not a file in the workspace", bad[1])
+        self.assertEqual(check, "node a.test.js prints 3")
+
+    def test_patch_note_has_the_blocks_and_the_check(self):
+        ws = self.ws()
+        a, reg = stuck_advisor(yolo=True, workspace=ws), FakeRegistry(answer=PATCH)
+        note = a.patch(reg, *a.stuck(), files=a.target_files(["a.js"]))
+        sent = reg.calls[0]
+        self.assertEqual(sent["system"], A.PATCH_SYSTEM)
+        self.assertIn("## File a.js", sent["prompt"])
+        self.assertIn("let y = 2;", sent["prompt"])
+        self.assertTrue(note.startswith("[D.L. CLI] You were stuck"))
+        self.assertIn("<<<OLD\nlet x = 1;\n===\nlet x = 3;\nNEW>>>", note)
+        self.assertIn("node a.test.js prints 3", note)
+        self.assertIn("Dropped", note)
+        self.assertNotIn("/etc/hosts\n<<<OLD", note)
+        self.assertEqual(a.consults[-1]["patch_blocks"], 1)
+
+    def test_a_patch_that_matches_nothing_becomes_advice(self):
+        ws = self.ws()
+        a = stuck_advisor(yolo=True, workspace=ws)
+        reg = FakeRegistry(answer="FILE: a.js\n<<<OLD\nnot there\n===\nx\nNEW>>>\n\n[model: deepseek-flash]")
+        note = a.patch(reg, *a.stuck(), files={"a.js": "let x = 1;"})
+        self.assertTrue(note.startswith("[D.L. CLI] You were stuck"))
+        self.assertIn("Its advice", note)
+
+    def test_no_files_means_plain_advice(self):
+        a, reg = stuck_advisor(yolo=True), FakeRegistry()
+        note = a.patch(reg, *a.stuck(), files={})
+        self.assertEqual(reg.calls[0]["system"], A.SYSTEM)
+        self.assertIn("Root cause", note)
+
+    def test_target_files_are_the_ones_ray_works_on(self):
+        ws = self.ws()
+        (ws / "b.js").write_text("b")
+        (ws / ".env").write_text("SECRET=1")
+        a = A.Advisor({"workspace": ws})
+        for _ in range(2):
+            a.note_result("view_file", {"AbsolutePath": str(ws / "a.js")}, "1: let x")
+        a.note_result("run_command", {"CommandLine": "node b.js && cat .env /tmp/x.js"}, "ok")
+        self.assertEqual(list(a.target_files()), ["a.js", "b.js"])
+        self.assertEqual(list(a.target_files(["b.js"])), ["b.js", "a.js"])
+
+    def test_pro_gets_room_to_answer(self):
+        a, reg = stuck_advisor(yolo=True), FakeRegistry()
+        a.consult(reg, "why", "k1")
+        a.consult(reg, "why", "k2", A.PRO)
+        self.assertEqual([c["max_tokens"] for c in reg.calls], [16384, 32768])
+
+
+class TextCalls(Env):
+    def test_a_tool_call_written_as_text_is_not_a_loop(self):
+        a = stuck_advisor(yolo=True)
+        a.note_raise("tool call sent as text")
+        a.note_raise("tool call sent as text")
+        self.assertEqual(a.raises, [])
+
+
+class TextCallRevive(Env):
+    def test_a_text_call_to_a_stopped_server_turns_it_back_on(self):
+        ws = Path(self.tmp.name) / "ws"
+        ws.mkdir()
+        reg = FakeRegistry()
+        reg.route = lambda *a, **k: []
+        reg.tick = lambda: None
+        revived = []
+        reg.revive = lambda name: revived.append(name) or True
+        replies = iter([reply("<tool_call>\n<function=playwright__browser_navigate>\n<parameter=url>\nhttp://x\n"
+                              "</parameter>\n</function>\n</tool_call>"), reply("Done.")])
+        msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "open it"}]
+        ctx = {"workspace": ws, "messages": msgs, "mode": "act", "yolo": False, "effort": "low",
+               "effort_auto": False, "user_text": "open it", "mcp": reg}
+        with patch.object(cli, "chat_turn_in_context", side_effect=lambda *a, **k: next(replies)), \
+             patch.object(cli, "get_active_tools", return_value=[]), \
+             patch.dict(os.environ, {"DL_REVIEW": "0", "DL_CHECKPOINTS": "0", "DL_BROWSER_CHECK": "0",
+                                     "DL_EVIDENCE": "0"}):
+            cli.execute_agent_loop(msgs, "http://127.0.0.1:1", "k", ws, max_turns=5, session_context=ctx)
+        self.assertEqual(revived, ["playwright__browser_navigate"])
+        self.assertTrue(any("(playwright) had been turned off" in str(m.get("content", "")) for m in msgs))
+
+
+class Watchdog(Env):
+    """Coding work that goes 12 rounds without changing a project file is told to edit; at 18 DeepSeek writes the
+    patch (or, with the helper off, Ray is told again)."""
+
+    def run_reading(self, rounds=25, helper=True, answer=PATCH):
+        ws = Path(self.tmp.name) / "ws"
+        ws.mkdir(exist_ok=True)
+        (ws / "a.js").write_text("let x = 1;\nlet y = 2;\nlet y = 2;\n")
+        n = 0
+
+        def turn(messages, *a, **k):
+            nonlocal n
+            n += 1
+            if any(str(m.get("content", "")).startswith(("[D.L. CLI] You were stuck", "[D.L. CLI] 18 rounds"))
+                   for m in messages):
+                return reply("Applied it.")
+            return reply("", call(n, "view_file", {"AbsolutePath": str(ws / "a.js"), "StartLine": n}))
+
+        reg = FakeRegistry(answer=answer)
+        reg.route = lambda *a, **k: []
+        reg.tick = lambda: None
+        msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "[Now: x]\nfix a.js"}]
+        notes = []
+        ctx = {"workspace": ws, "messages": msgs, "mode": "act", "yolo": True, "effort": "high", "effort_auto": False,
+               "effort_reason": "coding task", "user_text": "fix a.js", "mcp": reg,
+               "emit": lambda e: notes.append(e.get("text", "")) if e.get("type") == "notice" else None}
+        with patch.object(cli, "chat_turn_in_context", side_effect=turn), \
+             patch.object(cli, "get_active_tools", return_value=[]), \
+             patch.dict(os.environ, {"DL_REVIEW": "0", "DL_CHECKPOINTS": "0", "DL_BROWSER_CHECK": "0",
+                                     "DL_EVIDENCE": "0", "DL_ADVISOR": "1" if helper else "0"}):
+            cli.execute_agent_loop(msgs, "http://127.0.0.1:1", "k", ws, max_turns=rounds, session_context=ctx)
+        return reg, msgs, notes
+
+    def test_nudge_at_12_then_patch_at_18(self):
+        reg, msgs, notes = self.run_reading()
+        texts = [str(m.get("content", "")) for m in msgs if m.get("role") == "user"]
+        nudges = [t for t in texts if t.startswith("[D.L. CLI] 12 rounds without changing")]
+        self.assertEqual(len(nudges), 1)
+        self.assertEqual(len(reg.calls), 1)
+        self.assertEqual(reg.calls[0]["system"], A.PATCH_SYSTEM)
+        self.assertIn("## File a.js", reg.calls[0]["prompt"])
+        self.assertTrue(any("<<<OLD\nlet x = 1;" in t for t in texts))
+        self.assertTrue(any("Watchdog: 12 rounds" in t for t in notes))
+
+    def test_helper_off_tells_ray_again(self):
+        reg, msgs, notes = self.run_reading(helper=False)
+        texts = [str(m.get("content", "")) for m in msgs if m.get("role") == "user"]
+        self.assertEqual(reg.calls, [])
+        self.assertTrue(any(t.startswith("[D.L. CLI] 18 rounds and still no project file") for t in texts))
+
+    def test_off_for_questions(self):
+        ws = Path(self.tmp.name) / "ws2"
+        ws.mkdir()
+        msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "x"}]
+        n = 0
+
+        def turn(messages, *a, **k):
+            nonlocal n
+            n += 1
+            return reply("", call(n, "view_file", {"AbsolutePath": str(ws / "x"), "StartLine": n}))
+        ctx = {"workspace": ws, "messages": msgs, "mode": "act", "yolo": False, "effort": "medium",
+               "effort_auto": True, "effort_reason": "explanation", "user_text": "explain x", "mcp": None}
+        with patch.object(cli, "chat_turn_in_context", side_effect=turn), \
+             patch.object(cli, "get_active_tools", return_value=[]), \
+             patch.dict(os.environ, {"DL_REVIEW": "0", "DL_CHECKPOINTS": "0", "DL_BROWSER_CHECK": "0",
+                                     "DL_EVIDENCE": "0"}):
+            cli.execute_agent_loop(msgs, "http://127.0.0.1:1", "k", ws, max_turns=20, session_context=ctx)
+        self.assertFalse(any("rounds without changing" in str(m.get("content", "")) for m in msgs))
+
+
+class LeanThinking(Env):
+    """Auto effort on coding work: high in the first round and for 2 rounds after a failure, medium otherwise."""
+
+    def test_high_to_plan_medium_to_act(self):
+        ws = Path(self.tmp.name) / "ws"
+        ws.mkdir()
+        efforts, n = [], 0
+
+        def turn(messages, *a, **k):
+            nonlocal n
+            n += 1
+            efforts.append((k.get("effort"), k.get("budget")))
+            if n >= 8:
+                return reply("Done.")
+            return reply("", call(n, "run_command", {"CommandLine": f"node t.js # {n}"}))
+
+        def run(args, ws_):
+            return ("Error: boom\n[Command exited with code 1]" if "# 3" in args.get("CommandLine", "")
+                    else "ok\n[Command exited with code 0]")
+        msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "x"}]
+        ctx = {"workspace": ws, "messages": msgs, "mode": "act", "yolo": True, "effort": "high",
+               "effort_auto": True, "effort_reason": "coding task", "reasoning_budget_tokens": 4096,
+               "user_text": "fix t.js", "mcp": None}
+        with patch.object(cli, "chat_turn_in_context", side_effect=turn), \
+             patch.object(cli, "tool_run_command", side_effect=run), \
+             patch.object(cli, "get_active_tools", return_value=[]), \
+             patch.dict(os.environ, {"DL_REVIEW": "0", "DL_CHECKPOINTS": "0", "DL_BROWSER_CHECK": "0",
+                                     "DL_EVIDENCE": "0", "DL_ADVISOR": "0"}):
+            cli.execute_agent_loop(msgs, "http://127.0.0.1:1", "k", ws, max_turns=12, session_context=ctx)
+        levels = [e for e, _ in efforts]
+        self.assertEqual(levels[:6], ["high", "medium", "medium", "high", "high", "medium"])
+        self.assertEqual(efforts[1][1], 2048)
+        self.assertTrue(ctx.get("raised"))
 
 
 if __name__ == "__main__":

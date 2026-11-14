@@ -77,6 +77,14 @@ _save_lock = threading.Lock()
 # workspace); index.json holds each one's title and dates for the list.  /resume brings one back (the conversation it
 # replaces is kept the same way first); /delete moves the file to .deleted/, so nothing is lost by a wrong click.
 ARCHIVE_DIR = STATE_DIR.parent / "archive"
+# A turn that is running has a marker here; a turn cut off by an out-of-memory kill (of the daemon, or of the engine
+# after its retries) is resumed once, automatically (the user's choice, 2026-11-14).  A normal stop removes it.
+RUN_DIR = STATE_DIR.parent / "running"
+RESUME_TEXT = ("[D.L. CLI] The PC ran out of memory (or the engine stopped) and this task was cut off mid-turn. "
+               "Resume where you stopped. The handoff brief and PLAN.md are current; check the files on disk before "
+               "redoing anything.")
+RESUME_MAX_AGE_S = float(os.environ.get("DL_RESUME_MAX_AGE_S") or 7200)
+RESUME_DELAY_S = float(os.environ.get("DL_RESUME_DELAY_S") or 20)
 ARCHIVE_ID = re.compile(r"^[0-9a-f]{8}$")
 _archive_lock = threading.RLock()
 
@@ -818,6 +826,7 @@ class Session:
             else:
                 resolved_effort = turn_effort
                 resolved_budget = 0
+                reason = None
             current_effort = resolved_effort
             self.messages.append({"role": "user", "dl_turn": self._turn_seq,
                                   "content": cli.build_user_message_content(prompt, current_ws, voice=item["voice"],
@@ -833,12 +842,42 @@ class Session:
             ctx["effort"] = resolved_effort
             ctx["effort_auto"] = effort_auto
             ctx["reasoning_budget_tokens"] = resolved_budget
+            ctx["effort_reason"] = reason
         self.emit_state()
         return {"settings": bool(setting_items), "prompts": len(prompt_items)}
 
+    def _marker(self) -> Path:
+        return RUN_DIR / f"{self.name}.json"
+
+    def _mark_running(self, text: str) -> None:
+        try:
+            RUN_DIR.mkdir(parents=True, exist_ok=True)
+            self._marker().write_text(json.dumps({"session": self.name, "workspace": str(self.workspace),
+                                                  "text": text[:300], "ts": time.time(),
+                                                  "resumed": text == RESUME_TEXT}), encoding="utf-8")
+        except OSError:
+            pass
+
+    def _clear_running(self) -> None:
+        try:
+            self._marker().unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def resume_later(self, why: str) -> None:
+        """Send RESUME_TEXT after RESUME_DELAY_S (the engine reloads on the request itself)."""
+        self.notice(f"♻️ {why}; resuming the task in {int(RESUME_DELAY_S)} s (once).", "warn")
+
+        def go():
+            time.sleep(RESUME_DELAY_S)
+            self.submit(RESUME_TEXT, origin="dl-ai-resume")
+        threading.Thread(target=go, daemon=True).start()
+
     def _run(self, text: str, origin: str, effort: str | None = None, voice: bool = False) -> None:
         queued_turn = False
+        resume = None
         while True:
+            self._mark_running(text)
             self.emit({"type": "user", "text": text, "origin": origin, "voice": voice,
                        **({"queued": True} if queued_turn else {})})
             self._turn_seq = self.seq                 # this prompt's event: its user message carries it (/rewind)
@@ -852,6 +891,8 @@ class Session:
                 self.emit({"type": "error", "text": str(e)})
                 if self.messages and self.messages[-1].get("role") == "user":
                     self.messages.pop()
+                if cli.TRANSIENT_ENGINE_ERR.search(str(e)) and text != RESUME_TEXT and not self.cancel.is_set():
+                    resume = "The engine stopped mid-turn (likely out of RAM) and did not come back in time"
             with self.lock:
                 if not self.queue:
                     self.busy = False
@@ -868,12 +909,15 @@ class Session:
             self.emit({"type": "turn_end"})
             text, origin, effort, voice = nxt["text"], nxt["origin"], nxt["effort"], nxt["voice"]
             queued_turn = True
+        self._clear_running()
         try:
             self.save()
         except OSError as e:
             self.emit({"type": "error", "text": f"could not save the session: {e}"})
         self.emit({"type": "turn_end"})
         self.emit_state()
+        if resume:
+            self.resume_later(resume)
 
     def _system(self) -> None:
         self.messages[0] = {"role": "system", "content": cli.build_dl_system_prompt(self.workspace, self.mode,
@@ -901,6 +945,7 @@ class Session:
         else:
             resolved_effort = turn_effort
             resolved_budget = 0
+            reason = None
         self.messages.append({"role": "user", "dl_turn": getattr(self, "_turn_seq", None),
                               "content": cli.build_user_message_content(prompt, self.workspace, voice=voice,
                                                                         thinking=resolved_effort != "none",
@@ -910,6 +955,7 @@ class Session:
                "effort": resolved_effort,
                "effort_auto": effort_auto,
                "reasoning_budget_tokens": resolved_budget,
+               "effort_reason": reason,
                "emit": self.emit, "cancel": self.cancel, "approve": self.approve, "mcp": self.mcp, "user_text": prompt,
                "voice": voice, "session": self,
                "on_handoff": lambda _msgs, part: self.snapshot_before_handoff(part)}
@@ -1528,6 +1574,26 @@ class Registry:
         self.sessions: dict[str, Session] = {}
         self.lock = threading.Lock()
 
+    def resume_cut_turns(self) -> list[str]:
+        """At start: sessions whose turn was cut off by a kill (a marker left behind) get one resume each."""
+        done = []
+        for f in sorted(RUN_DIR.glob("*.json")) if RUN_DIR.is_dir() else []:
+            try:
+                info = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                f.unlink(missing_ok=True)
+                continue
+            f.unlink(missing_ok=True)
+            if info.get("resumed") or time.time() - float(info.get("ts") or 0) > RESUME_MAX_AGE_S:
+                continue
+            name = str(info.get("session") or f.stem)
+            try:
+                self.get(name).resume_later("The session daemon was stopped mid-turn (likely out of RAM)")
+                done.append(name)
+            except Exception:  # noqa: BLE001 - a session that cannot load is not resumed
+                continue
+        return done
+
     def get(self, name: str | None) -> Session:
         name = name or DEFAULT_SESSION
         if not NAME_OK.match(name):
@@ -1670,6 +1736,9 @@ def main() -> int:
     srv = Server(str(sock), Handler)
     os.umask(old)
     print(f"[dl-sessiond] listening on {sock} (workspace {Handler.registry.default_ws})", flush=True)
+    resumed = Handler.registry.resume_cut_turns()
+    if resumed:
+        print(f"[dl-sessiond] resuming the cut-off turn of: {', '.join(resumed)}", flush=True)
     runner = JobRunner(Handler.registry)
     sched = dl_schedule.Scheduler(runner.run_prompt, runner.run_action, runner.health, runner.warm, runner.post,
                                   runner.notify)
@@ -1681,6 +1750,7 @@ def main() -> int:
     finally:
         sched.stop.set()
         for s in Handler.registry.sessions.values():
+            s._clear_running()               # a deliberate stop (SIGTERM) is not a cut-off turn to resume
             try:
                 s.save()
             except OSError:
