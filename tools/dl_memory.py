@@ -2059,10 +2059,12 @@ def _upkeep_direct_edits(root: Path, state: _HookState, agent: str) -> str | Non
     if before is None:
         state.data["snapshot"] = after
         return None
-    touched = sorted(
+    # Handoff diaries are written by Ray's session daemon, are never committed to jj, and are not this agent's edits:
+    # leave them out, so a link in Ray's diary does not block Claude Code's Stop hook (2026-11-14).
+    touched = sorted(r for r in
         [r for r in after if r not in before or after[r] != before[r]]
         + [r for r in before if r not in after]
-    )
+        if not r.startswith("handoffs/"))
     if not touched:
         return None
     with write_lock(root):
