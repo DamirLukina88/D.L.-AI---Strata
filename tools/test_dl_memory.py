@@ -509,10 +509,8 @@ class Checkpointing(unittest.TestCase):
         self.addCleanup(patcher.stop)
         self.addCleanup(self.tmp.cleanup)
 
-    def git(self, cp, *args):
-        import subprocess
-        return subprocess.run(["git", f"--git-dir={cp.git_dir}", *args], capture_output=True, text=True,
-                              cwd=self.ws).stdout
+    def jj(self, cp, *args):
+        return cp._jj("--ignore-working-copy", *args).stdout
 
     def test_alarm_names_the_file_and_the_restore_works(self):
         import subprocess
@@ -539,8 +537,11 @@ class Checkpointing(unittest.TestCase):
         restore = result.split("taken before this round:\n  ", 1)[1].splitlines()[0]
         subprocess.run(restore, shell=True, check=True, cwd=self.ws)
         self.assertEqual(self.data.read_text(), "const C = 1;\n" * 400)
-        log = self.git(cli.Checkpoints(self.ws), "log", "--format=%s")
+        log = self.jj(cli.Checkpoints(self.ws), "log", "--no-graph", "-r", "::@- ~ root()", "-T",
+                      'description.first_line() ++ "\\n"')
         self.assertEqual(log.split("\n")[:2], ["round 1: run_command", "request start"])
+        self.assertNotIn("git", restore.split()[0:3])                       # a plain copy, no git or jj
+        self.assertFalse((self.ws / ".jj").exists() or (self.ws / ".git").exists())
 
     def test_off_unless_the_entry_point_turns_it_on(self):
         msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "[Now: x]\ntask"}]
@@ -562,7 +563,7 @@ class Checkpointing(unittest.TestCase):
         with patch.object(cli, "CHECKPOINT_MAX_FILE", 6000):
             cp = cli.Checkpoints(self.ws)
             self.assertTrue(cp.take("start"))
-        self.assertEqual(self.git(cp, f"--work-tree={self.ws}", "ls-files").split(), ["src/data.part"])
+        self.assertEqual(self.jj(cp, "file", "list", "-r", "@-").split(), ["src/data.part"])
         self.assertIsNone(cp.take("again"))                                  # nothing changed
         self.assertTrue(cli.Checkpoints(Path.home()).off)
         with patch.object(cli, "CHECKPOINT_MAX_FILES", 1):

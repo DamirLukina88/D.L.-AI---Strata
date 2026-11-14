@@ -491,7 +491,7 @@ def init_repo(root: Path) -> Path:
         _save_projects(root, {"by_path": {}, "projects": {}})
     with write_lock(root):
         if not (root / ".jj").is_dir():
-            res = _run_jj(root, ["git", "init", "."], snapshot=True)
+            res = _run_jj(root, ["git", "init", "--no-colocate", "."], snapshot=True)   # jj only: no .git folder
             if res.returncode != 0:
                 raise RuntimeError(f"jj git init failed: {(res.stderr or res.stdout).strip()}")
             _run_jj(root, ["config", "set", "--repo", "user.name", "Ray Memory"], snapshot=True)

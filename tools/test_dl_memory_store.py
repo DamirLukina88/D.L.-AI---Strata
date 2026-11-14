@@ -301,5 +301,81 @@ class RayUsesTheStore(Store):
         self.assertIn("error(s)", self.cli.memory_slash("/wiki-lint", self.ws))
 
 
+class JjOnly(Store):
+    def test_a_new_store_has_no_git_folder(self):
+        self.assertFalse((self.root / ".git").exists())
+        self.assertTrue((self.root / ".jj").is_dir())
+        out = M.write_page(self.root, page_type="preference", slug="x", title="X", description="x", content="x",
+                           workspace=self.ws)
+        self.assertIn("Saved", out)
+        self.assertIn("add projects", M.jj_history(self.root, limit=3))
+        self.assertFalse((self.root / ".git").exists())
+
+
+class RayKeepsToJjMemory(Store):
+    """Ray reaches the store only through the memory tool, never types jj, and leaves git alone unless asked."""
+
+    def setUp(self):
+        super().setUp()
+        import dl_cli
+        self.cli = dl_cli
+        self.ran = []
+        self.real = dl_cli.tool_run_command
+        dl_cli.tool_run_command = lambda args, ws: self.ran.append(args["CommandLine"]) or "ran"
+
+    def tearDown(self):
+        self.cli.tool_run_command = self.real
+        super().tearDown()
+
+    def run_(self, cmd, user_text="list the files", **extra):
+        return self.cli.dispatch_dl_tool("run_command", {"CommandLine": cmd, **extra}, self.ws,
+                                         session_context={"yolo": True, "user_text": user_text})
+
+    def test_git_refused_unless_the_user_asks(self):
+        for cmd in ("git status", "cd x && git log -n 3", "sudo git push", "/usr/bin/git diff", "bash -c 'git add .'",
+                    "FOO=1 git commit -m x", "echo $(git rev-parse HEAD)", "git-lfs ls-files"):
+            self.assertTrue(self.run_(cmd).startswith("Refused: git"), cmd)
+        self.assertEqual(self.ran, [])
+        self.assertEqual(self.run_("git status", user_text="show me the git status"), "ran")
+
+    def test_words_that_only_contain_git_still_run(self):
+        for cmd in ("cat .gitignore", "grep -r digit src", "ls ~/github", "echo legit"):
+            self.assertEqual(self.run_(cmd), "ran", cmd)
+
+    def test_jj_never_typed_even_when_asked(self):
+        self.assertTrue(self.run_("jj log", user_text="how do you use jj now").startswith("Refused: jj"))
+        self.assertTrue(self.run_("cd /tmp && jj st").startswith("Refused: jj"))
+
+    def test_store_not_reached_with_commands_or_file_tools(self):
+        self.assertTrue(self.run_(f"ls {self.root}").startswith("Refused: the memory store"))
+        self.assertTrue(self.run_("ls", Cwd=str(self.root / "global")).startswith("Refused: the memory store"))
+        ctx = {"yolo": True, "user_text": "save it"}
+        page = self.root / "global" / "preferences" / "x.md"
+        for name, args in (("write_to_file", {"TargetFile": str(page), "CodeContent": "x"}),
+                           ("replace_file_content", {"TargetFile": str(page), "TargetContent": "a",
+                                                     "ReplacementContent": "b"}),
+                           ("view_file", {"AbsolutePath": str(self.root / "private" / ".env")})):
+            self.assertTrue(self.cli.dispatch_dl_tool(name, args, self.ws, session_context=ctx).startswith("Refused"),
+                            name)
+        self.assertFalse(page.exists())
+
+    def test_user_typed_commands_are_not_limited(self):
+        out = self.cli.dispatch_dl_tool("run_command", {"CommandLine": "git status"}, self.ws,
+                                        session_context={"yolo": True})
+        self.assertEqual(out, "ran")
+
+    def test_yolo_global_write_says_no_card_was_shown(self):
+        page = {"action": "write", "page_type": "preference", "slug": "lights-off", "title": "Lights off",
+                "description": "Lights off at 23:00", "content": "Turn the lights off at 23:00.", "scope": "global"}
+        out = self.cli.dispatch_dl_tool("memory", page, self.ws, session_context={"yolo": True, "user_text": "x"})
+        self.assertIn("No approval card was shown", out)
+        self.assertTrue((self.root / "global" / "preferences" / "lights-off.md").exists())
+
+    def test_prompt_names_the_rules(self):
+        block = self.cli.build_dl_system_prompt(self.ws)
+        self.assertIn("never type jj commands", block)
+        self.assertIn("Git is not yours", block)
+
+
 if __name__ == "__main__":
     unittest.main()
