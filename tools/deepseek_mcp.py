@@ -3,7 +3,7 @@
 deepseek_mcp.py - MCP Server providing DeepSeek Cloud Reasoning to local Strata / D.L. AI / Ray.
 
 Exposes:
-- deepseek_reason: DeepSeek-Flash / DeepSeek-V4-Pro with ultra-high thinking reasoning
+- deepseek_reason: the newest DeepSeek Flash model (falling back step by step to older ones), optional web search
 - deepseek_delegate: Parallel background subagent reasoning query
 """
 
@@ -16,34 +16,91 @@ def resolve_api_key():
     """Only the key D.L. AI hands this server (mcp.json env_from_secrets, from ~/.config/dl-ai/secrets.env)."""
     return os.environ.get("DEEPSEEK_API_KEY", "").strip()
 
-def handle_query(prompt: str, model: str = "deepseek-flash", max_tokens: int = 4096) -> str:
+# Model choice (2026-11-14): the newest Flash model the account lists, then older ones, step by step, so an outage or a
+# retired id never ends the call.  The /models list is cached for a day; without it the built-in ladder is used.
+LADDER = ["deepseek-flash", "deepseek-v4-pro", "deepseek-chat"]
+MODEL_CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "dl-ai",
+                           "deepseek-models.json")
+WEB_TOOLS = [{"type": "deepseek_web_search"}, {"type": "deepseek_read_url"}]
+
+
+def _version_key(mid: str):
+    """Newest first: higher version numbers and later date suffixes sort first ('deepseek-v4.1-flash-1017' over
+    'deepseek-v4-flash'); the plain alias 'deepseek-flash' after dated ids of the same family."""
+    import re
+    nums = [int(n) for n in re.findall(r"\d+", mid)]
+    return (nums or [0]) + [0] * (6 - len(nums))
+
+
+def model_ladder(client, wanted: str = "auto") -> list:
+    """The models to try in order.  'auto' (or a Flash name): every Flash model the account lists, newest first, then
+    the alias deepseek-flash, then deepseek-v4-pro and deepseek-chat.  Another name: that one, then the ladder."""
+    import time
+    listed = []
+    try:
+        st = os.stat(MODEL_CACHE)
+        if time.time() - st.st_mtime < 86400:
+            listed = json.load(open(MODEL_CACHE))
+    except (OSError, ValueError):
+        pass
+    if not listed:
+        try:
+            listed = sorted(m.id for m in client.models.list().data)
+            os.makedirs(os.path.dirname(MODEL_CACHE), exist_ok=True)
+            json.dump(listed, open(MODEL_CACHE, "w"))
+        except Exception:
+            listed = []
+    flash = sorted((m for m in listed if "flash" in m.lower()), key=_version_key, reverse=True)
+    out = []
+    if wanted and wanted not in ("auto", "deepseek-flash"):
+        out.append(wanted)
+    for m in flash + LADDER:
+        if m not in out and (not listed or m in listed):     # only models the account offers, once it is known
+            out.append(m)
+    return out
+
+
+def _retry_with_next(err: Exception) -> bool:
+    """Availability problems step down to the next model; a bad key or an empty balance does not (no model helps)."""
+    code = getattr(err, "status_code", None)
+    text = str(err).lower()
+    if code in (401, 402, 403) or "insufficient balance" in text or "authentication" in text:
+        return False
+    return True
+
+
+def handle_query(prompt: str, model: str = "auto", max_tokens: int = 8192, system: str = "",
+                 web: bool = False, include_thinking: bool = True, timeout: float = 300) -> str:
     api_key = resolve_api_key()
     if not api_key:
         return "Error: DEEPSEEK_API_KEY is not set in ~/.config/dl-ai/secrets.env."
-    
+
     base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-    client = OpenAI(api_key=api_key, base_url=base_url)
-
-    models = [model]
-    if model == "deepseek-flash":
-        models.append("deepseek-v4-pro")
-
-    for m in models:
+    client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+    messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
+    extra = {"thinking": {"type": "enabled"}}
+    if web:
+        extra["tools"] = WEB_TOOLS
+    tried = []
+    for m in model_ladder(client, model):
         try:
-            resp = client.chat.completions.create(
-                model=m,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_tokens
-            )
+            resp = client.chat.completions.create(model=m, messages=messages, max_tokens=max_tokens,
+                                                  extra_body=extra)
             msg = resp.choices[0].message
+            content = (msg.content or "").strip()
+            if not content:
+                raise RuntimeError("empty reply")
             out = ""
-            if hasattr(msg, "reasoning_content") and msg.reasoning_content:
+            if include_thinking and getattr(msg, "reasoning_content", None):
                 out += f"<think>\n{msg.reasoning_content}\n</think>\n\n"
-            out += msg.content or ""
-            return out
+            out += content
+            note = f"\n\n[model: {m}" + (f"; after {', '.join(tried)} failed" if tried else "") + "]"
+            return out + note
         except Exception as e:
-            if m == models[-1]:
+            tried.append(f"{m} ({str(e)[:80]})")
+            if not _retry_with_next(e):
                 return f"DeepSeek API Error: {e}"
+    return "DeepSeek API Error: every model failed: " + "; ".join(tried)
 
 def _reply(req, res):
     """Write one JSON-RPC reply: nothing for a notification, an empty result for ping, and isError on a tool
@@ -95,7 +152,13 @@ def main():
                         "type": "object",
                         "properties": {
                             "prompt": {"type": "string", "description": "The reasoning or analysis task for DeepSeek."},
-                            "model": {"type": "string", "enum": ["deepseek-flash", "deepseek-v4-pro"], "default": "deepseek-flash"}
+                            "model": {"type": "string", "default": "auto",
+                                      "description": "auto (default): the newest Flash model, stepping down to older ones if it is unavailable; or a model id"},
+                            "system": {"type": "string", "description": "Optional system prompt."},
+                            "web": {"type": "boolean", "default": False,
+                                    "description": "Let DeepSeek search the web and read URLs (billed per search/fetch)."},
+                            "include_thinking": {"type": "boolean", "default": True,
+                                                 "description": "Prepend DeepSeek's reasoning in <think> tags."}
                         },
                         "required": ["prompt"]
                     }
@@ -108,9 +171,9 @@ def main():
             name = params.get("name")
             args = params.get("arguments", {})
             if name == "deepseek_reason":
-                prompt = args.get("prompt", "")
-                model = args.get("model", "deepseek-flash")
-                text = handle_query(prompt, model=model)
+                text = handle_query(args.get("prompt", ""), model=args.get("model") or "auto",
+                                    system=args.get("system") or "", web=bool(args.get("web")),
+                                    include_thinking=args.get("include_thinking", True) is not False)
                 res = {
                     "jsonrpc": "2.0",
                     "id": msg_id,

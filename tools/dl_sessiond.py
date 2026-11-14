@@ -924,6 +924,15 @@ class Session:
             self.workspace = new_ws
             self.emit_state()
         if (self.mode == "plan" and not self.cancel.is_set() and self.messages
+                and self.messages[-1].get("role") == "assistant" and cli.dl_advisor is not None):
+            # the DeepSeek helper (DL_ADVISOR=1): Pro reviews the finished plan once; Ray revises it before the card
+            plan = str(self.messages[-1].get("content") or "")
+            note = cli.dl_advisor.Advisor(ctx).review_plan(self.mcp, plan, approve=self.approve, emit=self.emit)
+            if note and not self.cancel.is_set():
+                self.messages.append({"role": "user", "content": note})
+                cli.execute_agent_loop(messages=self.messages, url=cli.DEFAULT_URL, api_key=cli.DEFAULT_API_KEY,
+                                       workspace=self.workspace, mode=self.mode, session_context=ctx)
+        if (self.mode == "plan" and not self.cancel.is_set() and self.messages
                 and self.messages[-1].get("role") == "assistant"):
             self.plan_offer = uuid.uuid4().hex[:10]
             self.emit({"type": "approval_request", "id": self.plan_offer, "kind": "plan",

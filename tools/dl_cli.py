@@ -48,6 +48,12 @@ except ImportError:
         dl_memory = None
 
 
+try:
+    import dl_advisor
+except ImportError:
+    dl_advisor = None
+
+
 def memory_store() -> Path | None:
     """The shared memory store's root, or None when it is off."""
     return dl_memory.resolve_memory_root() if dl_memory is not None else None
@@ -3839,8 +3845,12 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
     budget = int((session_context or {}).get("reasoning_budget_tokens") or 0)
     seen: set[tuple[str, str]] = set()
 
+    advisor = dl_advisor.Advisor(session_context) if dl_advisor is not None and dl_advisor.enabled() else None
+
     def _auto_raise(reason: str | None) -> None:
         nonlocal effort, budget
+        if advisor is not None:
+            advisor.note_raise(reason)
         if effort_auto and reason and effort != "high":
             effort = "high"
             budget = dl_effort.budget_for("high") if dl_effort is not None else 4096
@@ -4092,6 +4102,8 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             })
             if effort_auto and dl_effort is not None and not small_talk:
                 _auto_raise(dl_effort.raise_reason(fn_name, args, result_str, seen))
+            if advisor is not None and not small_talk:
+                advisor.note_result(fn_name, args, result_str)
 
         # pictures a tool handed back this round (the phone's photo): the model sees them in the next call, as a user
         # message after all of the round's tool results (the order the chat template expects)
@@ -4113,6 +4125,17 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             cps.take(f"round {total_rounds}: " + ", ".join(
                 (tc.get("function") or {}).get("name", "?") for tc in res["tool_calls"]))
 
+        if advisor is not None and not small_talk:    # stuck after thinking on high: ask DeepSeek, hand Ray the advice
+            advisor.end_round()
+            stuck = advisor.stuck()
+            if stuck:
+                start = finish.get("cp_start")
+                diff = cps.diff_since(start, 9000) if cps is not None and start else ""
+                note = advisor.consult(registry, stuck[0], stuck[1], stuck[2], diff=diff,
+                                       approve=(session_context or {}).get("approve") or terminal_approve, emit=emit)
+                if note:
+                    messages.append({"role": "user", "content": note})
+
         poll_queued()
         if turn >= max_turns and (session_context or {}).get("yolo") and cancel is not None and cancel.is_set():
             break
@@ -4123,6 +4146,8 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
 
     if registry is not None and registry.active:
         registry.tick()
+    if advisor is not None:
+        advisor.finish()
     return current_ws
 
 
