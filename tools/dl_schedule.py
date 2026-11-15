@@ -34,7 +34,6 @@ from pathlib import Path
 STORE = Path.home() / ".local" / "state" / "dl-ai" / "schedule.json"
 CONFIG = Path.home() / ".config" / "dl-ai" / "schedule.json"
 DEFAULTS = {"notify_email": "", "max_late_h": 12, "retry_min": 30, "warmup_s": 180, "tick_s": 15}
-DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 
 class _StoreLock:

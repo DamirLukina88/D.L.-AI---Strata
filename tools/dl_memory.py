@@ -75,7 +75,6 @@ META_FILENAMES = {"index.md", "changelog.md", "README.md"}
 KEBAB_MD = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*\.md$")
 LINK_RE = re.compile(r"!?\[[^\]]*\]\(\s*(?:<([^>]+)>|([^)\s]+))(?:\s+\"[^\"]*\")?\s*\)")
 INLINE_CODE_RE = re.compile(r"`[^`]*`")
-ABS_PATH_CODE_RE = re.compile(r"`(~/[^`\s]*|/[^`\s/]+/[^`\s]*)`")
 
 GITIGNORE_LINES = ["private/", ".memory/", ".trash/", "handoffs/", "*.db", "*.db-wal", "*.db-shm", "*.lock", "*.tmp"]
 GITIGNORE_TEXT = (

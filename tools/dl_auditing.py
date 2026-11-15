@@ -455,11 +455,6 @@ def format_health_card(h: Dict[str, Any]) -> str:
     return "".join(out)
 
 
-def tool_system_health(args: Dict[str, Any], workspace: Path) -> str:
-    """Standalone tool handler for system_health."""
-    h = get_system_health()
-    return format_health_card(h)
-
 
 # ==============================================================================
 # 4. GIT DIFF AUDIT (Semantic Review Tool)
@@ -679,99 +674,6 @@ def tool_smart_test_runner(args: Dict[str, Any], workspace: Path) -> str:
 # ==============================================================================
 # TOOL SCHEMAS FOR D.L. CLI & AGENT ORCHESTRATION
 # ==============================================================================
-
-AUDITING_TOOL_DEFINITIONS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "syntax_guard",
-            "description": "Performs instant AST and grammar syntax inspection (Python, JS/TS, Bash, JSON, YAML). Use before or after file edits to detect broken syntax.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "TargetFile": {
-                        "type": "string",
-                        "description": "Path to file to validate."
-                    },
-                    "CodeContent": {
-                        "type": "string",
-                        "description": "Optional snippet to validate directly without reading from disk."
-                    },
-                    "language": {
-                        "type": "string",
-                        "description": "Optional language override (python, javascript, bash, json, yaml)."
-                    }
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "scan_secrets",
-            "description": "Scans code, files, or workspace for leaked API keys, tokens, private keys, or credentials.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Target file or directory to scan (defaults to workspace)."
-                    }
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "system_health",
-            "description": "Queries real-time hardware telemetry: System RAM, ROCm GPU VRAM, Swap memory, CPU load, and Strata engine status.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "detailed": {
-                        "type": "boolean",
-                        "description": "Set true for comprehensive memory and context breakdowns."
-                    }
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "git_diff_audit",
-            "description": "Audits current git diff for unintended file deletions, oversized blobs, trailing whitespace, and secret leaks.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "staged_only": {
-                        "type": "boolean",
-                        "description": "If true, audits only staged git changes."
-                    }
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "smart_test_runner",
-            "description": "Targeted test runner that detects modified modules and runs relevant unit tests (pytest, unittest, npm, bash, make).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "files": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Optional list of modified files to focus test discovery on."
-                    }
-                }
-            }
-        }
-    }
-]
-
 
 
 # ==============================================================================

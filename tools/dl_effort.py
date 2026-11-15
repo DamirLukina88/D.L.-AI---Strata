@@ -145,9 +145,6 @@ def _resolve_router_mode(router_mode: str | None = None, semantic: bool | None =
     return "hybrid" if legacy in ("1", "true", "yes", "on") else "rules"
 
 
-def _semantic_enabled() -> bool:
-    return _resolve_router_mode() in ("hybrid", "model2vec")
-
 
 def pick(
     prompt: str,

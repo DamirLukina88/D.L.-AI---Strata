@@ -123,8 +123,6 @@ C_BLUE = "\033[38;5;111m"         # Info soft blue
 C_CYAN = "\033[38;5;80m"          # Cyan
 
 
-C_GRAY = C_MUTED
-
 
 def load_env_file(path: Path = Path.home() / ".config" / "dl-ai" / "secrets.env") -> None:
     """Load KEY=VALUE lines from the local secrets file; variables already in the environment win."""

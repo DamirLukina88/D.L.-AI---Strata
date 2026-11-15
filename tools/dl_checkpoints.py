@@ -91,9 +91,6 @@ def shrink_note(hits: list[tuple[str, str]], cps: "Checkpoints | None") -> str:
     return f"[D.L. CLI] Warning: {what}. There is no checkpoint to restore it from{why}: check that it was intended."
 
 
-def _exclude_line(rel: str) -> str:
-    return "/" + re.sub(r"([\\*?\[\]!# ])", r"\\\1", rel.replace(os.sep, "/"))
-
 
 class Checkpoints:
     """A jj history of one workspace, kept outside it in CHECKPOINT_DIR and committed after every round that changed
