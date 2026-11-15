@@ -67,7 +67,7 @@ MEDIA_EXTENSIONS = frozenset(
     ".jpg .jpeg .png .webp .bmp .gif .tiff .tif .avif .ppm .pgm .pbm .pnm .ico .tga .heic .heif "
     ".mp4 .mov .mkv .webm .avi .m4v .wav .mp3 .m4a .ogg .flac .aac .opus .pdf".split())
 MEDIA_REF_RE = re.compile(r"(?:^|(?<=\s))@([\w./-]+)")
-MEDIA_MARK_RE = re.compile(r"\[(?:Image|Video|PDF|Audio|Photo)[^\]]*\]", re.I)
+MEDIA_MARK_RE = re.compile(r"\[(?:Attached image|Image|Video|PDF|Audio|Photo)[^\]]*\]", re.I)
 
 
 def strip_media(prompt: str) -> tuple[str, bool]:

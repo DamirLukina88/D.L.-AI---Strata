@@ -681,6 +681,18 @@ class CallExtras(unittest.TestCase):
         self.assertTrue(path.startswith(str(self.tmp / "img")))
         self.assertEqual(Path(path).read_bytes(), b"\x89PNG\r\n\x1a\nfile")
 
+    def test_saved_console_text_is_read_back(self):
+        out_dir = self.tmp / "pw-out2"
+        out_dir.mkdir()
+        (out_dir / "console-selftest.log").write_text("[ERROR] Uncaught TypeError: x is undefined\n" + "y" * 5000)
+        self.r.catalog["pw"].cfg["args"] = ["--output-dir", str(out_dir)]
+        self.answer = {"content": [{"type": "text", "text": "### Result\n- [Console](./console-selftest.log)\n"
+                                                            "- [Snapshot](../outside.yml)"}]}
+        out = self.r.call("pw__browser_take_screenshot", {})       # any tool of the server: the result counts
+        self.assertIn("Uncaught TypeError: x is undefined", out)
+        self.assertIn("more characters in", out)
+        self.assertNotIn("outside.yml (", out)              # only files inside the output folder are read
+
     def test_a_screenshot_is_saved_and_marked(self):
         import base64
         png = base64.b64encode(b"\x89PNG\r\n\x1a\nfake").decode()

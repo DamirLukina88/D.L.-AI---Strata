@@ -578,7 +578,7 @@ class Watchdog(Env):
     """Coding work that goes 12 rounds without changing a project file is told to edit; at 18 DeepSeek writes the
     patch (or, with the helper off, Ray is told again)."""
 
-    def run_reading(self, rounds=25, helper=True, answer=PATCH):
+    def run_reading(self, rounds=25, helper=True, answer=PATCH, failing=True):
         ws = Path(self.tmp.name) / "ws"
         ws.mkdir(exist_ok=True)
         (ws / "a.js").write_text("let x = 1;\nlet y = 2;\nlet y = 2;\n")
@@ -590,7 +590,8 @@ class Watchdog(Env):
             if any(str(m.get("content", "")).startswith(("[D.L. CLI] You were stuck", "[D.L. CLI] 18 rounds"))
                    for m in messages):
                 return reply("Applied it.")
-            return reply("", call(n, "view_file", {"AbsolutePath": str(ws / "a.js"), "StartLine": n}))
+            name = "missing.js" if failing and n == 15 else "a.js"      # failing: one read fails after the nudge
+            return reply("", call(n, "view_file", {"AbsolutePath": str(ws / name), "StartLine": n}))
 
         reg = FakeRegistry(answer=answer)
         reg.route = lambda *a, **k: []
@@ -617,6 +618,16 @@ class Watchdog(Env):
         self.assertIn("## File a.js", reg.calls[0]["prompt"])
         self.assertTrue(any("<<<OLD\nlet x = 1;" in t for t in texts))
         self.assertTrue(any("Watchdog: 12 rounds" in t for t in notes))
+
+    def test_no_patch_when_nothing_failed(self):
+        """2026-11-15: quiet rounds of reading alone get the second note, not a DeepSeek patch."""
+        reg, msgs, notes = self.run_reading(failing=False)
+        texts = [str(m.get("content", "")) for m in msgs if m.get("role") == "user"]
+        self.assertEqual(reg.calls, [])
+        self.assertTrue(any(t.startswith("[D.L. CLI] 18 rounds and still no project file") for t in texts))
+        with patch.dict(os.environ, {"DL_PATCH_NEEDS_FAILURE": "0"}):
+            reg, _, _ = self.run_reading(failing=False)
+        self.assertEqual(len(reg.calls), 1)
 
     def test_helper_off_tells_ray_again(self):
         reg, msgs, notes = self.run_reading(helper=False)

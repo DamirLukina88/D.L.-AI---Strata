@@ -911,6 +911,7 @@ Active Workspaces:
 - Reference code as `file_path:line_number` — it is clickable in terminal emulators.
 - Start editing once you know the first change. A design worked out in files persists, while long thinking can be cut off and lost.
 - Check a web page you built by looking at it: the browser's screenshot shows it to you and browser_evaluate reads its state. Do not write probe pages or test harnesses for that.
+- A picture attached to the request is already visible to you: answer from what you see. Do not open, convert, crop, serve or re-read the file with commands or tools unless the user asks you to change the file.
 - Match existing codebase conventions, comment density, architecture patterns, and naming style.
 - Report outcomes faithfully: if a test fails or command errors, state the exact error and diagnose it immediately.
 - Back every claim with evidence from this task: a test or command you ran after your last edit, a tool result, or a cited source. Never call something verified, tested or correct from memory; a worked derivation shown in your answer counts.
@@ -949,6 +950,7 @@ IMAGE_EXTENSIONS = {
     ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff", ".tif", ".avif",
     ".ppm", ".pgm", ".pbm", ".pnm", ".ico", ".tga"
 }
+ATTACHED_IMAGE_LABEL = "Attached image, shown to you below"
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".aac", ".opus"}
 PDF_EXTENSIONS = {".pdf"}
@@ -1148,7 +1150,9 @@ def resolve_prompt_and_images(prompt: str, workspace: Path) -> tuple[str, list[s
             rel_path = p.relative_to(workspace) if p.is_relative_to(workspace) else p
 
             if ext in IMAGE_EXTENSIONS:
-                replacement = f"[Image: {rel_path}]"
+                # the model is told the picture is already in front of it (2026-11-15: Ray ran exiftool, magick,
+                # xdg-open and a web server on an attached photo before answering it)
+                replacement = f"[{ATTACHED_IMAGE_LABEL}: {rel_path}]"
                 images.append(f"file://{p.resolve()}")
             elif ext in VIDEO_EXTENSIONS:
                 frames = _sample_video_frames(p, max_frames=4)
@@ -1198,7 +1202,7 @@ def build_user_message_content(prompt: str, workspace: Path, voice: bool = False
     produces an OpenAI-compatible multimodal parts list (text + image_url blocks) for strata-vision;
     otherwise returns a formatted text string.  A spoken prompt gets voice_note(thinking)."""
     resolved_prompt, images = resolve_prompt_and_images(prompt, workspace)
-    clean_user_text = re.sub(r"\[(Image|Video|PDF|Binary file):[^\]]*\]", "", resolved_prompt).strip()
+    clean_user_text = re.sub(r"\[(Attached image[^:\]]*|Image|Video|PDF|Binary file):[^\]]*\]", "", resolved_prompt).strip()
     if images and not clean_user_text:
         resolved_prompt = f"{resolved_prompt.strip()}\nDescribe this media and identify its key elements."
 
@@ -1390,6 +1394,27 @@ def tool_run_command(args: dict, workspace: Path) -> str:
         return "Error: Command timed out after 120s"
     except Exception as e:
         return f"Error running command: {e}"
+
+
+def _note_new_listeners(bg: list, before: dict, t0: float, wait_s: float = 1.5) -> None:
+    """Adds to bg the ports that processes started since t0 began listening on (a server needs a moment to bind)."""
+    import psutil
+    end = time.time() + wait_s
+    while True:
+        new = {k: v for k, v in _listeners().items()
+               if k not in before and v >= t0 - 1 and k[0] not in (os.getpid(), os.getppid())}
+        if new or time.time() >= end:
+            break
+        time.sleep(0.25)
+    known = {(p, port) for p, port, _, _ in bg}
+    for (pid, port), started in new.items():
+        if (pid, port) in known:
+            continue
+        try:
+            name = psutil.Process(pid).name()
+        except psutil.Error:
+            name = "background"
+        bg.append((pid, port, started, name))
 
 
 def tool_exa_web_search(args: dict) -> str:
@@ -2069,6 +2094,98 @@ def asked_text(ctx: dict | None) -> str:
     return f"{ctx.get('user_text') or ''}\n{ctx.get('task_text') or ''}"
 
 
+# A desktop viewer or opener puts a window on the user's screen: only when the words ask for it (2026-11-15: Ray ran
+# xdg-open on an attached photo the model could already see).
+DESKTOP_OPENER = re.compile(_CMD_WORD.replace(
+    "{word}", r"(?:xdg-open|gio\s+open|kde-open\d*|kioclient\d*\s+exec|eog|gwenview|feh)"))
+ASKS_TO_OPEN = re.compile(r"\b(?:open|show|display|otvori|prika[zž]i)\w*\b[^\n]*\b(?:screen|desktop|pc|computer|monitor|"
+                          r"viewer|window|ekran\w*|zaslon\w*|ra[cč]unal\w*)\b|\b(?:xdg-open|gwenview|eog|feh)\b", re.I)
+# The request's own words about the attached picture: changing it, or reading its metadata
+ASKS_TO_EDIT = re.compile(r"\b(?:edit|convert|crop|resiz|rotat|compress|scal|shrink|chang|modif|metadata|exif|"
+                          r"optimi[sz]|annotat|uredi|izre[zž]|smanj|pretvor|promijen|okren)\w*", re.I)
+ATTACHED_PICTURE = re.compile(r"(?:^|(?<=\s))@([\w./-]+\.(?:jpe?g|png|webp|gif|bmp|heic|heif|tiff?|avif))\b", re.I)
+REF_WORD = re.compile(r"(?:^|(?<=\s))@[\w./-]+")
+# a command that leaves something running after it returns: `cmd &`, nohup, setsid, disown (not && or 2>&1)
+DETACHES = re.compile(r"(?<![&>|])&(?![&>\d])|\bnohup\b|\bsetsid\b|\bdisown\b")
+KEEP_RUNNING = re.compile(r"\b(?:serve|server|host|keep (?:it |them )?running|leave (?:it |them )?running|"
+                          r"in the background|background|pokreni|poslu[zž]itelj|neka radi|ostavi)\w*", re.I)
+
+
+def words_of(ctx: dict | None) -> str:
+    """asked_text without the @file references, so a path such as uploads/crop.jpg is not read as a word."""
+    return REF_WORD.sub(" ", asked_text(ctx))
+
+
+def attached_pictures(ctx: dict | None) -> list[str]:
+    """The pictures attached to this turn's request (@path in its own words), as written."""
+    return ATTACHED_PICTURE.findall(str((ctx or {}).get("user_text") or ""))
+
+
+def picture_refusal(cmd: str, ctx: dict) -> str | None:
+    """A refusal for a command that opens a desktop window, or that works on the attached picture, unasked."""
+    words = words_of(ctx)
+    if DESKTOP_OPENER.search(cmd) and not ASKS_TO_OPEN.search(words):
+        return ("Refused: this opens a window on the user's screen, which the user did not ask for. Answer in the chat;"
+                " an attached picture is already shown to you.")
+    if not ASKS_TO_EDIT.search(words):
+        for ref in attached_pictures(ctx):
+            if Path(ref).name in cmd:
+                return ("Refused: the picture is already shown to you. Answer from what you see; do not open, convert,"
+                        " crop, serve or re-read the file unless the user asks you to change it.")
+    return None
+
+
+def _listeners() -> dict[tuple[int, int], float]:
+    """{(pid, port): process start time} of this user's listening TCP sockets."""
+    import psutil
+    out = {}
+    try:
+        conns = psutil.net_connections(kind="tcp")
+    except (psutil.Error, OSError):
+        return out
+    for c in conns:
+        if c.status != psutil.CONN_LISTEN or not c.pid or not c.laddr:
+            continue
+        try:
+            out[(c.pid, c.laddr.port)] = psutil.Process(c.pid).create_time()
+        except psutil.Error:
+            pass
+    return out
+
+
+def stop_left_listeners(ctx: dict | None, emit=None) -> list[str]:
+    """At the end of a request: stop what Ray's detached commands left listening on a port, unless the words asked to
+    keep something running.  Returns the notices."""
+    left = (ctx or {}).get("bg_listeners") or []
+    if not left:
+        return []
+    ctx["bg_listeners"] = []
+    if KEEP_RUNNING.search(words_of(ctx)):
+        return []
+    import psutil
+    notes = []
+    now = _listeners()
+    for pid, port, started, name in left:
+        if now.get((pid, port)) != started:            # already gone, or the pid now belongs to another process
+            continue
+        try:
+            proc = psutil.Process(pid)
+            proc.terminate()
+            try:
+                proc.wait(3)
+            except psutil.TimeoutExpired:
+                proc.kill()
+        except psutil.Error:
+            continue
+        notes.append(f"Stopped the {name} server Ray left running on port {port} (pid {pid}).")
+    for n in notes:
+        if emit:
+            emit({"type": "notice", "level": "warn", "text": n})
+        else:
+            print(f"{C_YELLOW}{n}{C_RESET}")
+    return notes
+
+
 def _inside(p: Path, root: Path) -> bool:
     try:
         p.resolve().relative_to(root.resolve())
@@ -2100,6 +2217,9 @@ def agent_boundary(name: str, args: dict, workspace: Path, session_context: dict
         if GIT_COMMAND.search(cmd) and not asked_git:
             return ("Refused: git is not yours to use unless the user asks for git in this request (git is for Claude "
                     "Code and Antigravity). Keep history with the memory tool, or ask the user whether they want git.")
+        refused = picture_refusal(cmd, ctx)
+        if refused:
+            return refused
     if name in ("write_to_file", "replace_file_content", "view_file") and store is not None:
         path_str = args.get("TargetFile") or args.get("AbsolutePath") or args.get("path") or ""
         p = Path(str(path_str)).expanduser()
@@ -2157,7 +2277,15 @@ def dispatch_dl_tool(name: str, args: dict, workspace: Path, mode: str = "act", 
     elif name == "replace_file_content":
         return tool_replace_file_content(args, workspace)
     elif name == "run_command":
-        return tool_run_command(args, workspace)
+        # an agent turn's detached command: what it leaves listening on a port is stopped at the end of the request
+        bg = (session_context or {}).get("bg_listeners") if "user_text" in (session_context or {}) else None
+        if bg is None or not DETACHES.search(str(args.get("CommandLine") or args.get("command") or "")):
+            return tool_run_command(args, workspace)
+        before, t0 = _listeners(), time.time()
+        try:
+            return tool_run_command(args, workspace)
+        finally:
+            _note_new_listeners(bg, before, t0)
     elif name == "exa_web_search":
         return tool_exa_web_search(args)
     elif name == "resolve_library_id":
@@ -3347,6 +3475,7 @@ TEXT_CALL_REVIVED = (" That tool's server ({server}) had been turned off while i
 # rounds gets DeepSeek's patch (the helper on) or a sterner note.  0 turns it off.
 NUDGE_AT = int(os.environ.get("DL_NUDGE_AT") or 12)
 PATCH_AT = int(os.environ.get("DL_PATCH_AT") or 18)
+PATCH_RECENT = 6                            # the patch needs a failure among this many latest tool results
 CODING_REASONS = ("coding task", "code or error", "follow-up on a failed answer")
 NUDGE_NOTE = ("[D.L. CLI] {n} rounds without changing a project file. Stop reading and building test tools: make the "
               "edit now with replace_file_content (or write_to_file), then test it.")
@@ -4122,6 +4251,8 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
     high_left = 1                           # lean: rounds left on high (the first one plans)
     quiet = 0                               # watchdog: rounds in a row without a changed workspace file
     nudged = 0
+    recent_fail: list[bool] = []            # the last PATCH_RECENT tool results: did each one fail?
+    fail_seen: set[tuple[str, str]] = set()
 
     def _auto_raise(reason: str | None, noted: bool = False) -> None:
         nonlocal effort, budget, high_left
@@ -4144,6 +4275,8 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             _note(emit, dl_effort.describe_raise(reason) if dl_effort is not None else f"Thinking raised to high ({reason}).")
 
     degraded_notice(url, api_key, emit)
+    if session_context is not None and "user_text" in session_context:
+        session_context["bg_listeners"] = []      # what detached commands leave listening; stopped at the end
     registry = (session_context or {}).get("mcp")
     if registry is not None and registry.active:
         registry.route((session_context or {}).get("user_text") or "")
@@ -4413,6 +4546,9 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                 advisor.note_result(fn_name, args, result_str)
                 if dl_effort is not None and not effort_auto:     # the helper also sees raises when effort is fixed
                     advisor.note_raise(dl_effort.raise_reason(fn_name, args, result_str, seen), fn_name)
+            if dl_effort is not None:
+                recent_fail = (recent_fail + [dl_effort.raise_reason(fn_name, args, result_str, fail_seen) is not None]
+                               )[-PATCH_RECENT:]
             if effort_auto and dl_effort is not None and not small_talk:
                 reason = dl_effort.raise_reason(fn_name, args, result_str, seen)
                 if advisor is not None:
@@ -4466,7 +4602,10 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             elif PATCH_AT > 0 and quiet >= PATCH_AT and nudged == 1:
                 nudged = 2
                 note = None
-                if advisor is not None and dl_advisor.enabled():
+                # DeepSeek is asked only when something failed lately; quiet rounds of reading alone get the note
+                # (2026-11-15: the patch fired 18 rounds in with nothing broken).  DL_PATCH_NEEDS_FAILURE=0: always.
+                failing = any(recent_fail) or os.environ.get("DL_PATCH_NEEDS_FAILURE", "1") == "0"
+                if advisor is not None and dl_advisor.enabled() and failing:
                     changed = cps.changed_since(start) if cps is not None and start else []
                     note = advisor.patch(registry, f"{quiet} rounds without changing a project file",
                                          f"nochange#{total_rounds}", files=advisor.target_files(changed),
@@ -4500,6 +4639,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
         registry.tick()
     if advisor is not None:
         advisor.finish()
+    stop_left_listeners(session_context, emit)
     return current_ws
 
 

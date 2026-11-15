@@ -66,7 +66,7 @@ BODY_KEY = re.compile(r"^(body|text|content|message|html_?body|plain_?body)$", r
 
 # A picture attached to the prompt ("@phone-photos/x.jpg", "[Image: ...]"): the words "photo", "picture", "slika",
 # "what do you see" are about it, not a request to use the phone's camera or gallery (audit 2026-11-15).
-HAS_ATTACHMENT = re.compile(r"(?:^|\s)@[\w./-]+\.(?:jpe?g|png|webp|gif|bmp|heic|heif|tiff?|avif)\b|\[(?:Image|Photo)\b",
+HAS_ATTACHMENT = re.compile(r"(?:^|\s)@[\w./-]+\.(?:jpe?g|png|webp|gif|bmp|heic|heif|tiff?|avif)\b|\[(?:Attached image|Image|Photo)\b",
                             re.I)
 PICTURE_WORDS = re.compile(r"(?:photos?|pictures?|images?|slik\w*|fotk\w*|pogledaj|look at (?:this|that|it)|"
                            r"what (?:do|can) you see|what(?:'s| is) (?:this|that|in front)\w*|[šs]ta vidi[šs]|[šs]to vidi[šs])",
@@ -172,7 +172,9 @@ class Entry:
         self.timeout_s = float(raw.get("timeout_s") or 0)
         # arguments set here, hidden from the model and added to every call (e.g. the Google account)
         self.fixed_args = {str(k): v for k, v in (raw.get("fixed_args") or {}).items()}
-        self.triggers = [re.compile(t, re.I) for t in raw.get("triggers") or []]
+        # a short plain word must start a word: "lan" turned networking on for "plan" (2026-11-14); "lans" still counts
+        self.triggers = [re.compile(rf"\b{t}" if re.fullmatch(r"[A-Za-z]{1,3}", str(t)) else t, re.I)
+                         for t in raw.get("triggers") or []]
         # clients whose every prompt turns this server on (the phone's tools for prompts from the Ray Android app);
         # "ray-android" also covers "ray-android-app-<id>" (the app's chat page)
         self.origins = {str(o) for o in raw.get("origins") or []}
@@ -383,6 +385,10 @@ FETCH_REUSE_S = float(os.environ.get("DL_FETCH_REUSE_S") or 7200)
 # at the page it built, and its tests passed while every Tetris piece was upside down)
 IMAGE_DIR = Path(os.environ.get("DL_MCP_IMAGE_DIR") or Path.home() / ".cache" / "dl-ai" / "mcp-images")
 SHOT_LINK = re.compile(r"\[Screenshot[^\]]*\]\(([^)\s]+\.(?:png|jpe?g|webp))\)", re.I)
+# Text a tool saved to a file instead of returning it (Playwright: "- [Console](./console-x.log)", "[Snapshot](./page.yml)").
+# It is read back into the result (2026-11-14: Ray could not find console-selftest.log).
+SAVED_LINK = re.compile(r"\[(?:Console|Snapshot|Network|Result|Logs?)[^\]]*\]\(([^)\s]+\.(?:log|ya?ml|txt|md|json))\)", re.I)
+SAVED_CAP = 4000
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0")
 
 
@@ -719,9 +725,7 @@ class McpRegistry:
         if not links:
             return []
         import shutil
-        args = [str(a) for a in (self.catalog[name].cfg.get("args") or [])] if name in self.catalog else []
-        base = (args[args.index("--output-dir") + 1] if "--output-dir" in args[:-1]
-                else (self.catalog[name].cfg.get("cwd") if name in self.catalog else None) or os.getcwd())
+        base = self._out_dir(name)
         out = []
         for rel in links:
             src = (Path(os.path.expanduser(base)) / rel).resolve()
@@ -735,6 +739,34 @@ class McpRegistry:
                 continue
             out.append(str(dst))
         return out
+
+    def _out_dir(self, name: str) -> str:
+        """Where the server writes the files it names in results: its --output-dir, else its cwd."""
+        args = [str(a) for a in (self.catalog[name].cfg.get("args") or [])] if name in self.catalog else []
+        return (args[args.index("--output-dir") + 1] if "--output-dir" in args[:-1]
+                else (self.catalog[name].cfg.get("cwd") if name in self.catalog else None) or os.getcwd())
+
+    def _saved_text(self, name: str, text: str) -> str:
+        """The text of files the result says it saved (console messages, page snapshots), up to SAVED_CAP characters
+        in all, to append to the result; "" when there are none."""
+        links = SAVED_LINK.findall(text or "")
+        if not links:
+            return ""
+        base = Path(os.path.expanduser(self._out_dir(name))).resolve()
+        out, left = [], SAVED_CAP
+        for rel in dict.fromkeys(links):
+            src = (base / rel).resolve()
+            if left <= 0 or not src.is_file() or base not in src.parents:
+                continue
+            try:
+                body = src.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            shown = body[:left]
+            left -= len(shown)
+            more = f"\n[... {len(body) - len(shown):,} more characters in {src}]" if len(shown) < len(body) else ""
+            out.append(f"\n\n--- {rel} ({src}) ---\n{shown or '(empty)'}{more}")
+        return "".join(out)
 
     def _save_fetch(self, key: str, text: str) -> None:
         import hashlib
@@ -839,6 +871,8 @@ class McpRegistry:
             shots = (self._save_images(res) or self._linked_images(name, text)) if not res.get("isError") else []
             if shots:                           # dl_cli shows these to the model as images (tool_result_images)
                 text += "".join(f"\n[[image: {p}]]" for p in shots)
+            if not res.get("isError"):
+                text += self._saved_text(name, text)
             if res.get("isError"):
                 text = "error: " + (text or "the tool reported an error")
             else:

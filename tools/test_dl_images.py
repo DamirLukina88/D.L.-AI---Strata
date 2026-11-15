@@ -58,7 +58,7 @@ class TestMultimodalMediaHandling(unittest.TestCase):
         self.assertIsInstance(content, list)
         self.assertEqual(len(content), 2)
         self.assertEqual(content[0]["type"], "text")
-        self.assertIn("Look at [Image: photo.jpg]", content[0]["text"])
+        self.assertIn("Look at [Attached image, shown to you below: photo.jpg]", content[0]["text"])
         self.assertEqual(content[1]["type"], "image_url")
         self.assertEqual(content[1]["image_url"]["url"], f"file://{self.jpg_file.resolve()}")
 
@@ -76,7 +76,7 @@ class TestMultimodalMediaHandling(unittest.TestCase):
         self.assertIsInstance(content, list)
         self.assertEqual(len(content), 2)
         self.assertIn("print('hello world')", content[0]["text"])
-        self.assertIn("[Image: diagram.png]", content[0]["text"])
+        self.assertIn("[Attached image, shown to you below: diagram.png]", content[0]["text"])
         self.assertEqual(content[1]["image_url"]["url"], f"file://{self.png_file.resolve()}")
 
     def test_binary_file_guard(self):
