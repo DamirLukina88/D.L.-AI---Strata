@@ -8,6 +8,10 @@ fixes ported one by one ([docs/RAY_CHANGES.md](docs/RAY_CHANGES.md)).
 ## Layout
 
 - `src/`, `include/`: the C++/CUDA/HIP/SYCL engine. `setup.py`, `setup.sh`, `START-HERE.bat`: the installer.
+- `serve/server.py`: the HTTP handler (`make_handler`) and `main`; it re-exports the modules it was split into
+  (`engine`, `service`, `vision`, `engine_args`, `textcore`, `request_stats`, `api_formats`, `http_security`, `config`,
+  `tunables`, `errors`, `ray_phone`), keeping upstream's names and bodies. Names tests patch on `serve.server` are read
+  through it at call time (`_server().NAME`, `serve/late.py`).
 - `serve/`: the Python server (OpenAI- and Anthropic-compatible API, engine supervision, vision encoder, MCP) and the
   web app in `serve/web/` (Code tab, monitor, voice): one program in 11 classic scripts (`app-01-util.js` ... `app.js`,
   loaded in that order by `index.html`; tests read them through `serve/webapp_source.py` and `tools/web_app_source.js`).
