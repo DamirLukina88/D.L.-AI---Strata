@@ -141,6 +141,44 @@ class Store(unittest.TestCase):
     def test_remember_global_prefix_needs_approval(self):
         self.assertEqual(M.remember(self.root, "global: lights off at 23:00", workspace=self.ws), M.GLOBAL_APPROVAL_MSG)
 
+    LONG = ("Audit of the Ray work (commits ef0146415..7cb36c389 plus the uncommitted router work). All changes are "
+            "uncommitted in the working tree. Bugs fixed: 1. The read cap cut a failing command's output. 2. The "
+            "watchdog saw no change with checkpoints off. Not fixed, needs the user: a rollback reverted mcp.json and "
+            "two unit files, and the permission system blocked the restore. Verification: an isolated daemon with a "
+            "stub engine covers lean thinking, the watchdog and both resume paths in about three minutes.")
+
+    def test_a_long_note_is_a_log_page_with_a_whole_word_title(self):
+        """2026-11-15: long session reports saved with memory_remember became one-bullet preference pages with titles
+        cut in the middle of a parenthesis."""
+        self.assertGreater(len(self.LONG), M.LONG_NOTE_CHARS)
+        out = M.remember(self.root, self.LONG, workspace=self.ws)
+        path = next(self.root.glob("projects/*/logs/*.md"))
+        self.assertIn("logs/", out)
+        text = path.read_text()
+        meta, _, _ = M.parse_frontmatter(text.splitlines())
+        self.assertEqual(meta["type"], "log")
+        self.assertEqual(meta["title"], "Audit of the Ray work…")           # not cut inside "(commits"
+        self.assertGreaterEqual(text.count("\n- "), 4)                        # one bullet per sentence
+        errors, warnings, _ = M.lint_repo(self.root)
+        self.assertEqual([w for w in warnings if "cut off" in w or "-character bullet" in w], [])
+
+    def test_a_short_fact_stays_a_preference(self):
+        M.remember(self.root, "Prefers tabs over spaces", workspace=self.ws)
+        self.assertTrue(any(self.root.glob("projects/*/preferences/*.md")))
+
+    def test_lint_flags_dump_pages_and_wrong_folders(self):
+        d = self.root / "projects" / "my-project" / "preferences"
+        d.mkdir(parents=True)
+        (d / "dump.md").write_text(
+            "---\ntitle: \"Claude Code audit of the work (commits ef0146415..7cb36c389 plus the uncomm\"\n"
+            "type: log\ndescription: x\nstatus: active\ntags: [a]\ncreated: 2026-11-15\nupdated: 2026-11-15\n"
+            "last_verified: 2026-11-15\n---\n\n## Summary\n\n- " + "word " * 150 + "\n\n## Sources\n\n1. test\n")
+        _, warnings, _ = M.lint_repo(self.root)
+        joined = "\n".join(warnings)
+        self.assertIn("title looks cut off", joined)
+        self.assertIn("belongs in logs/", joined)
+        self.assertIn("-character bullet", joined)
+
     def test_undo_of_global_change_needs_approval(self):
         self.write(scope="global", approved=True)
         self.assertEqual(M.jj_undo(self.root, "@-"), M.GLOBAL_APPROVAL_MSG)

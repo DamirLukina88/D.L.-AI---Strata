@@ -1276,6 +1276,29 @@ def write_page(
         return f"Saved → {rel}{rev_note}" + ("".join(f"\nQuarantined: {g}" for g in guard))
 
 
+LONG_NOTE_CHARS = 400          # a note longer than this is a report, not a fact: it becomes a log page
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9(`\[])")
+
+
+def _shorten(text: str, limit: int) -> str:
+    """text cut at a word boundary within limit characters, with an ellipsis when something was left out."""
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1]
+    if " " in cut[limit // 2:]:
+        cut = cut[: cut.rfind(" ")]
+    if cut.count("(") > cut.count(")"):          # not inside an open parenthesis
+        cut = cut[: cut.rfind("(")]
+    return cut.rstrip(" ,;:-([{/") + "…"
+
+
+def _note_parts(clean: str) -> tuple[str, str, list[str]]:
+    """(title, description, bullets) of a long note: the first sentence names it, every sentence is a bullet."""
+    sentences = [x.strip() for x in _SENTENCE_END.split(clean) if x.strip()]
+    first = sentences[0] if sentences else clean
+    return _shorten(first, 72), _shorten(first, 140), sentences or [clean]
+
+
 def remember(
     root: Path,
     fact: str,
@@ -1296,16 +1319,22 @@ def remember(
         target_scope = "global"
         clean = clean[7:].strip()
 
-    words = [re.sub(r"[^a-z0-9]", "", w.lower()) for w in clean.split()[:6]]
+    long_note = len(clean) > LONG_NOTE_CHARS
+    if long_note:            # a report: a log page with a whole-word title and one bullet per sentence
+        title, description, bullets = _note_parts(clean)
+    else:
+        title, description, bullets = clean[:72], clean[:140], [clean]
+    words = [re.sub(r"[^a-z0-9]", "", w.lower()) for w in (title if long_note else clean).split()[:6]]
     slug = "-".join(w for w in words if w) or f"note-{int(dt.datetime.now().timestamp())}"
+    kind = "log" if long_note else "preference"
     return write_page(
         root,
-        page_type="preference",
+        page_type=kind,
         slug=slug[:60],
-        title=clean[:72],
-        description=clean[:140],
-        content=f"## Summary\n\n- {clean}",
-        tags=["preference", target_scope if target_scope != "auto" else "memory"],
+        title=title,
+        description=description,
+        content="## Summary\n\n" + "\n".join(f"- {b}" for b in bullets),
+        tags=[kind, target_scope if target_scope != "auto" else "memory"],
         scope=target_scope,
         workspace=workspace,
         mode="upsert",
@@ -1557,6 +1586,15 @@ def lint_repo(root: Path, *, stale_days: int = 90, max_lines: int = 250, auto_fi
             desc = str(meta.get("description") or "")
             if len(desc) > 150:
                 warnings.append(f"{rel}:1 description is {len(desc)} chars (>150)")
+            title_text = str(meta.get("title") or "")
+            # the old remember() cut titles at 72 characters, often inside a parenthesis
+            if title_text.count("(") > title_text.count(")") or (
+                    len(title_text) == 72 and not title_text.endswith((".", ")", "…", '"', "'", "?", "!"))):
+                warnings.append(f"{rel}:1 title looks cut off: {title_text[-30:]!r}")
+            parts = rel.split("/")
+            folder = parts[2] if parts[0] == "projects" and len(parts) > 3 else parts[1] if parts[0] == "global" and len(parts) > 2 else ""
+            if folder and meta.get("type") in FOLDERS and FOLDERS[meta["type"]] != folder:
+                warnings.append(f"{rel}:1 type {meta['type']!r} belongs in {FOLDERS[meta['type']]}/, not {folder}/")
             if meta.get("status", "active") == "active" and not rel.startswith("handoffs/"):
                 titles_by_scope.setdefault((_scope_from_rel(rel), str(meta.get("title") or "").strip().lower()), []).append(rel)
 
@@ -1579,6 +1617,9 @@ def lint_repo(root: Path, *, stale_days: int = 90, max_lines: int = 250, auto_fi
         for n, label in find_secrets(text):
             errors.append(f"{rel}:{n} possible credential ({label}) — store in private/.env with `env set`")
 
+        bullets = [ln for _, ln in _body_lines(lines, body_start) if ln.startswith("- ")]
+        if len(bullets) == 1 and len(bullets[0]) > 600 and not rel.startswith("handoffs/"):
+            warnings.append(f"{rel}:1 the page is one {len(bullets[0])}-character bullet: split it into points")
         if not KEBAB_MD.match(path.name):
             warnings.append(f"{rel}:1 filename is not kebab-case")
         if len(lines) > max_lines and not rel.startswith("handoffs/"):
