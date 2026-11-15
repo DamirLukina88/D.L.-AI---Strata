@@ -338,6 +338,17 @@ class RayKeepsToJjMemory(Store):
         self.assertEqual(self.ran, [])
         self.assertEqual(self.run_("git status", user_text="show me the git status"), "ran")
 
+    def test_global_memory_only_when_the_words_ask(self):
+        """Even in YOLO (no card), a global write needs the words; a project write and a carried-on task do not."""
+        def boundary(args, **ctx):
+            return self.cli.agent_boundary("memory", args, self.ws, {"yolo": True, **ctx})
+        glob = {"action": "remember", "content": "the dog is a beagle", "scope": "global"}
+        self.assertTrue(boundary(glob, user_text="what breed is this? @dog.jpg").startswith("Refused: global memory"))
+        self.assertIsNone(boundary(glob, user_text="remember globally that the dog is a beagle"))
+        self.assertIsNone(boundary(glob, user_text="continue", task_text="save that for every project"))
+        self.assertIsNone(boundary({"action": "remember", "content": "x"}, user_text="what breed is this?"))
+        self.assertIsNone(boundary({"action": "undo"}, user_text="undo that"))
+
     def test_words_that_only_contain_git_still_run(self):
         for cmd in ("cat .gitignore", "grep -r digit src", "ls ~/github", "echo legit"):
             self.assertEqual(self.run_(cmd), "ran", cmd)
@@ -367,7 +378,7 @@ class RayKeepsToJjMemory(Store):
     def test_yolo_global_write_says_no_card_was_shown(self):
         page = {"action": "write", "page_type": "preference", "slug": "lights-off", "title": "Lights off",
                 "description": "Lights off at 23:00", "content": "Turn the lights off at 23:00.", "scope": "global"}
-        out = self.cli.dispatch_dl_tool("memory", page, self.ws, session_context={"yolo": True, "user_text": "x"})
+        out = self.cli.dispatch_dl_tool("memory", page, self.ws, session_context={"yolo": True, "user_text": "add a global rule: lights off at 23:00"})
         self.assertIn("No approval card was shown", out)
         self.assertTrue((self.root / "global" / "preferences" / "lights-off.md").exists())
 

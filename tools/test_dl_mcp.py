@@ -654,6 +654,11 @@ class CallExtras(unittest.TestCase):
         self.r.call("pw__browser_take_screenshot", {})
         self.assertEqual([t for _, _, t in self.got], [330.0, 10.0])
 
+    def test_a_page_on_this_pc_is_always_fetched_again(self):
+        for _ in range(2):                               # the page being built changes between fetches
+            self.assertEqual(self.r.call("fetch__fetch", {"url": "http://127.0.0.1:18765/tetris.html"}), "# Page\nbody")
+        self.assertEqual(len(self.got), 2)
+
     def test_a_page_fetched_again_comes_from_the_saved_copy(self):
         first = self.r.call("fetch__fetch", {"url": "https://a.test/x"})
         again = self.r.call("fetch__fetch", {"url": "https://a.test/x"})
@@ -690,6 +695,58 @@ class CallExtras(unittest.TestCase):
         with mock.patch.object(dl_cli.dl_mcp, "IMAGE_DIR", self.tmp / "img"):
             urls = dl_cli.tool_result_images("pw__browser_take_screenshot", out, self.tmp / "ws")
         self.assertEqual(urls, [f"file://{Path(path).resolve()}"])
+
+
+class PhoneActionsNeedWords(unittest.TestCase):
+    """Camera, media and clipboard-write calls run only when the request's words ask (audit 2026-11-15), and a
+    picture attached to the prompt does not turn picture-word servers on."""
+
+    def setUp(self):
+        cat = json.loads(json.dumps(CATALOG))
+        cat["servers"]["phone"] = server(description="Phone", allow=["echo"], triggers=[r"\bphotos?\b", r"\bcamera\b"],
+                                         ask_words={"echo": ["\\bshout\\b"]})
+        self.r = registry(catalog=cat)
+        self.r.routes.update({"phone__phone_camera_snap": ("phone", "phone_camera_snap"),
+                              "phone__phone_clipboard": ("phone", "phone_clipboard"),
+                              "phone__echo": ("phone", "echo")})
+
+    def tearDown(self):
+        self.r.close()
+
+    def test_camera(self):
+        refuse = lambda text: self.r.words_refusal("phone__phone_camera_snap", {}, text)
+        self.assertIsNone(refuse("take a photo of the desk"))
+        self.assertIsNone(refuse("what do you see?"))
+        self.assertTrue(refuse("what do you see? @phone-photos/dog.jpg").startswith("Refused: phone_camera_snap"))
+        self.assertTrue(refuse("what breed is the dog in this photo?").startswith("Refused"))
+
+    def test_clipboard_only_when_setting(self):
+        self.assertIsNone(self.r.words_refusal("phone__phone_clipboard", {"action": "get"}, "what is this?"))
+        self.assertIsNotNone(self.r.words_refusal("phone__phone_clipboard", {"action": "set", "text": "x"}, "describe it"))
+        self.assertIsNone(self.r.words_refusal("phone__phone_clipboard", {"action": "set"}, "copy the code"))
+
+    def test_config_words_and_unknown_tools(self):
+        self.assertIsNotNone(self.r.words_refusal("phone__echo", {}, "say hi"))
+        self.assertIsNone(self.r.words_refusal("phone__echo", {}, "shout hi"))
+        self.assertIsNone(self.r.words_refusal("fetch__echo", {}, "anything"))
+
+    def test_attached_picture_does_not_route_on_picture_words(self):
+        self.assertNotIn("phone", [n for n, _ in self.r.route("what is in this photo? @phone-photos/a.jpg")])
+        self.assertIn("phone", [n for n, _ in self.r.route("use the camera @phone-photos/a.jpg")])
+
+    def test_an_attached_path_is_not_a_trigger_or_a_go_ahead(self):
+        cat = json.loads(json.dumps(CATALOG))
+        cat["servers"]["phone"] = server(description="Phone", allow=["echo"], triggers=["phone"])
+        r = registry(catalog=cat)
+        try:
+            self.assertNotIn("phone", [n for n, _ in r.route("What is in this picture? @phone-photos/RAY_SNAP_1.jpg")])
+            self.assertIn("phone", [n for n, _ in r.route("is my phone charged?")])
+        finally:
+            r.close()
+        self.r.routes["phone__phone_get_last_photo"] = ("phone", "phone_get_last_photo")
+        self.assertIsNotNone(self.r.words_refusal("phone__phone_get_last_photo", {},
+                                                  "What is in this picture? @phone-photos/camera_1.jpg"))
+        self.assertIsNone(self.r.words_refusal("phone__phone_get_last_photo", {}, "show the last photo you took"))
 
 
 if __name__ == "__main__":

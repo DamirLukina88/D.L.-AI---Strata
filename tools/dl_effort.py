@@ -5,13 +5,23 @@ import json
 import os
 import re
 
-try:
-    from tools import dl_effort_scorer
-except ImportError:
+if __package__ == "tools":
+    from tools import dl_effort_scorer, dl_router
+else:
     try:
         import dl_effort_scorer
     except ImportError:
-        dl_effort_scorer = None
+        try:
+            from tools import dl_effort_scorer
+        except ImportError:
+            dl_effort_scorer = None
+    try:
+        import dl_router
+    except ImportError:
+        try:
+            from tools import dl_router
+        except ImportError:
+            dl_router = None
 
 CODE_HINTS = ("```", "traceback", "error:", "exception", "exit code", "exited with code")
 CODING_VERBS = (
@@ -50,6 +60,29 @@ CODE_FILE_RE = re.compile(
     re.I,
 )
 EXIT_CODE_RE = re.compile(r"\[Command exited with code (-?\d+)\]")
+# A picture, recording or PDF attached to a prompt says nothing about how hard the request is: the thinking level
+# follows the words (audit 2026-11-15: every attached photo was "code or error" -> high).  dl_cli.py's resolver uses
+# the same extensions (IMAGE_/VIDEO_/AUDIO_/PDF_EXTENSIONS there).
+MEDIA_EXTENSIONS = frozenset(
+    ".jpg .jpeg .png .webp .bmp .gif .tiff .tif .avif .ppm .pgm .pbm .pnm .ico .tga .heic .heif "
+    ".mp4 .mov .mkv .webm .avi .m4v .wav .mp3 .m4a .ogg .flac .aac .opus .pdf".split())
+MEDIA_REF_RE = re.compile(r"(?:^|(?<=\s))@([\w./-]+)")
+MEDIA_MARK_RE = re.compile(r"\[(?:Image|Video|PDF|Audio|Photo)[^\]]*\]", re.I)
+
+
+def strip_media(prompt: str) -> tuple[str, bool]:
+    """(the prompt without attached media references, whether there were any).  `@notes.txt` and `@app.py` stay."""
+    had = False
+
+    def drop(m: re.Match) -> str:
+        nonlocal had
+        if os.path.splitext(m.group(1).lower())[1] in MEDIA_EXTENSIONS:
+            had = True
+            return ""
+        return m.group(0)
+    out = MEDIA_REF_RE.sub(drop, prompt or "")
+    out, n = MEDIA_MARK_RE.subn("", out)
+    return re.sub(r"[ \t]{2,}", " ", out).strip(), had or n > 0
 
 BUDGET_TIERS: dict[str, int] = {
     "none": 0,
@@ -69,7 +102,7 @@ def is_small_talk(prompt: str, *, voice: bool = False, last_reply: str = "") -> 
     greetings, small-talk phrases, Ray's names and filler words are taken out, at most one word is left (a friend's
     name, or "Ring" for Ray).  "Hello Ray, check the printer" is small talk to pick() (for the thinking level) but a
     request here, so its tools still run."""
-    if pick(prompt, voice=voice, last_reply=last_reply, semantic=False)[1] != "small talk":
+    if pick(prompt, voice=voice, last_reply=last_reply, semantic=False, router_mode="rules")[1] != "small talk":
         return False
     rest = (prompt or "").lower()
     for phrase in sorted(SMALL_TALK, key=len, reverse=True):
@@ -92,17 +125,59 @@ def _has_any(text: str, phrases: tuple[str, ...]) -> bool:
     return False
 
 
+def _resolve_router_mode(router_mode: str | None = None, semantic: bool | None = None) -> str:
+    if semantic is False:
+        return "rules"
+    if router_mode is not None:
+        if dl_router is not None:
+            return dl_router.router_mode(router_mode, subsystem="effort")
+        m = str(router_mode).strip().lower()
+        return m if m in ("rules", "model2vec", "hybrid") else "rules"
+    if semantic is True:
+        return "hybrid"
+    if dl_router is not None:
+        return dl_router.router_mode(subsystem="effort")
+    for key in ("DL_EFFORT_ROUTER_MODE", "DL_ROUTER_MODE"):
+        v = os.environ.get(key, "").strip().lower()
+        if v:
+            return v if v in ("rules", "model2vec", "hybrid") else "rules"
+    legacy = os.environ.get("DL_SEMANTIC_ROUTER", "").strip().lower()
+    return "hybrid" if legacy in ("1", "true", "yes", "on") else "rules"
+
+
 def _semantic_enabled() -> bool:
-    v = os.environ.get("DL_SEMANTIC_ROUTER", "").strip().lower()
-    return v in ("1", "true", "yes", "on")
+    return _resolve_router_mode() in ("hybrid", "model2vec")
 
 
-def pick(prompt: str, *, voice: bool = False, mode: str = "act", last_reply: str = "", semantic: bool | None = None) -> tuple[str, str]:
-    """Pick (level, reason) for a prompt with rules and optional semantic routing. Matching is case-insensitive on raw prompt."""
+def pick(
+    prompt: str,
+    *,
+    voice: bool = False,
+    mode: str = "act",
+    last_reply: str = "",
+    semantic: bool | None = None,
+    router_mode: str | None = None,
+) -> tuple[str, str]:
+    """Pick (level, reason) for a prompt across rules, model2vec, or hybrid mode."""
     if mode == "plan":
         return "high", "plan mode"
 
-    raw = (prompt or "").strip()
+    raw, had_media = strip_media((prompt or "").strip())
+    if had_media and not raw:
+        return "low", "picture only"
+    effective_mode = _resolve_router_mode(router_mode=router_mode, semantic=semantic)
+
+    if effective_mode == "model2vec" and dl_effort_scorer is not None:
+        m2v_ready = dl_router is not None and dl_router.is_available()
+        if m2v_ready:
+            try:
+                s_lvl, _s_conf = dl_effort_scorer.predict(raw)
+                if s_lvl in ("none", "low", "medium", "high"):
+                    return s_lvl, f"model2vec {s_lvl}"
+            except Exception:
+                pass
+        # If Model2Vec is unavailable, fall back cleanly to rules below.
+
     low = raw.lower()
     words = len(raw.split())
     v_slack = 6 if voice else 0
@@ -137,11 +212,13 @@ def pick(prompt: str, *, voice: bool = False, mode: str = "act", last_reply: str
     if words <= 20 + v_slack and not has_code and is_question:
         return "low", "short question"
 
-    use_semantic = _semantic_enabled() if semantic is None else semantic
-    if use_semantic and dl_effort_scorer is not None:
+    # Without Model2Vec, hybrid is rules: the CRC32 n-gram fallback in dl_effort_scorer was never tuned for the 0.55
+    # gate, and the notice tells the user "using rules" (is_available() queues it once).
+    if (effective_mode == "hybrid" and dl_effort_scorer is not None
+            and dl_router is not None and dl_router.is_available()):
         try:
-            s_lvl, s_conf = dl_effort_scorer.predict(raw)
-            if s_conf >= 0.70 and s_lvl in ("none", "low", "medium"):
+            s_lvl, _s_conf = dl_effort_scorer.predict(raw)
+            if s_lvl in ("none", "low", "medium"):
                 return s_lvl, f"semantic {s_lvl}"
         except Exception:
             pass
@@ -170,6 +247,7 @@ LEVEL_WORDS = {"none": "off", "low": "low", "medium": "medium", "high": "high"}
 PICK_WHY = {
     "plan mode": "Plan Mode is on",
     "code or error": "the prompt has code, an error message or a file in it",
+    "picture only": "the prompt is an attached picture or file with no words to weigh",
     "coding task": "the prompt asks for coding work",
     "follow-up on a failed answer": "it follows up on an answer that did not work",
     "small talk": "it is small talk",
@@ -189,15 +267,23 @@ RAISE_WHY = {
 
 
 def pick_why(reason: str) -> str:
-    return PICK_WHY.get(reason) or (f"the prompt classifier rated it {reason.split()[-1]}" if reason.startswith("semantic")
-                                    else reason)
+    if reason in PICK_WHY:
+        return PICK_WHY[reason]
+    if reason.startswith(("semantic ", "model2vec ")):
+        return f"the prompt classifier rated it {reason.split()[-1]}"
+    return reason
 
 
 def describe_pick(level: str, reason: str, budget: int = 0) -> str:
     """'Thinking: low for this answer, because it is a short question (up to 1,024 thinking tokens).'"""
     why = pick_why(reason)
     cap = f" (up to {budget:,} thinking tokens)" if budget and level != "none" else ""
-    return f"Thinking: {LEVEL_WORDS.get(level, level)} for this answer, because {why}{cap}."
+    msg = f"Thinking: {LEVEL_WORDS.get(level, level)} for this answer, because {why}{cap}."
+    if dl_router is not None:
+        fb = dl_router.consume_fallback_notice()
+        if fb:
+            msg = f"{fb}\n{msg}"
+    return msg
 
 
 def describe_raise(reason: str) -> str:

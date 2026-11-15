@@ -155,6 +155,23 @@ class TestDlEffortPick(unittest.TestCase):
         self.assertEqual(dl_effort.pick("Hi Ray, turn on the living room lights"), ("none", "home command"))
 
 
+class TestDlEffortMedia(unittest.TestCase):
+    """An attached picture or file does not set the thinking level; the words do (audit 2026-11-15)."""
+
+    def test_picture_alone_is_low(self):
+        self.assertEqual(dl_effort.pick("@IMG_20261115_115008.jpg", router_mode="rules"), ("low", "picture only"))
+        self.assertEqual(dl_effort.pick("[Image: phone-photos/a.png]", router_mode="rules"), ("low", "picture only"))
+
+    def test_words_decide(self):
+        self.assertEqual(dl_effort.pick("what breed is this dog? @phone-photos/x.jpg", router_mode="rules"),
+                         ("low", "short question"))
+        self.assertEqual(dl_effort.pick("@shot.png fix the bug shown here", router_mode="rules")[0], "high")
+
+    def test_code_files_still_count(self):
+        self.assertEqual(dl_effort.pick("look at @app.py", router_mode="rules"), ("high", "code or error"))
+        self.assertEqual(dl_effort.strip_media("see @notes.txt and @a.JPG"), ("see @notes.txt and", True))
+
+
 class TestDlEffortSmallTalkGuard(unittest.TestCase):
     """is_small_talk: only greetings and talk about Ray, never a request after a greeting (the guard skips tools)."""
 

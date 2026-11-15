@@ -119,6 +119,29 @@ class Memory(unittest.TestCase):
         (self.ws / "P2.md").write_text("# no checklist\n- [ ] x\n")
         self.assertEqual(cli.plan_progress(self.ws / "P2.md")[1], [])
 
+    def test_plan_progress_under_a_numbered_heading(self):
+        # 2026-11-15: the checklist sat under "## 6. Progress checklist"; it was not found, an empty "## Progress" was
+        # added, the pill showed 0/0 and the done check passed with "all 0 steps"
+        text = ("# Plan\n\n## 5. Verification\n\n- G1 syntax\n\n## 6. Progress checklist\n\n- [x] shell\n- [ ] kicks\n\n"
+                "## Progress\n\n- a note, not a step\n")
+        (self.ws / "PLAN.md").write_text(text)
+        section, open_items, done, _ = cli.plan_progress(self.ws / "PLAN.md")
+        self.assertTrue(section.startswith("## 6. Progress checklist"))
+        self.assertEqual((open_items, done), (["kicks"], ["shell"]))
+        self.assertIsNotNone(cli.PROGRESS_HEAD.search("# Plan\n\n### 2.1 Progress\n- [ ] a\n"))
+        self.assertIsNone(cli.PROGRESS_HEAD.search("## 3. In progress\n"))
+
+    def test_an_empty_progress_section_is_not_a_finished_plan(self):
+        (self.ws / "PLAN.md").write_text("# Plan\n\n## Progress\n\n- a note, not a step\n")
+        notes = []
+        ctx = {"plan_file": str(self.ws / "PLAN.md"), "yolo": True}
+        with patch.dict(os.environ, {"DL_REVIEW": "0", "DL_BROWSER_CHECK": "0", "DL_EVIDENCE": "0", "DL_ADVISOR": "0"}):
+            back = cli.finish_checks({}, [], "Done.", "act", self.ws, ctx, "http://127.0.0.1:1", "k",
+                                     emit=lambda e: notes.append(str(e.get("text", ""))))
+        self.assertFalse([n for n in notes if "Plan complete" in n])
+        self.assertIn("checklist", back or "")
+        self.assertEqual(ctx["plan_file"], str(self.ws / "PLAN.md"))
+
     def test_memory_section(self):
         (self.ws / "AGENTS.md").write_text("Rule: timers count in frames.")
         (self.ws / "CLAUDE.md").write_text("Rule: timers count in frames.")
@@ -730,8 +753,11 @@ class ReviewSeesEverything(unittest.TestCase):
         self.assertTrue(task.startswith("EARLIER MESSAGE (context):\nCreate a folder TEST2"))
         self.assertTrue(task.endswith("LATEST MESSAGE:\nInit the wiki"))
         bodies = []
-        with patch.object(cli, "stream_chat_turn", side_effect=lambda m, *a, **k: bodies.append(m) or reply("NO PROBLEMS")):
+        kwargs = []
+        with patch.object(cli, "stream_chat_turn",
+                          side_effect=lambda m, *a, **k: (bodies.append(m), kwargs.append(k)) and reply("NO PROBLEMS")):
             self.assertEqual(cli.review_changes(msgs, cli.RequestChanges(self.ws), "done", "", "u", "k"), "")
+        self.assertEqual((kwargs[0]["effort"], kwargs[0]["budget"]), ("low", 1024))    # the level and its token cap
         self.assertIn("TOOL ACTIONS:\n- local_wiki", bodies[0][1]["content"])
         self.assertIn("gitignore", bodies[0][0]["content"])
         # 2026-10-31: a disclosed fix of a wrong test is right; a branch for the test's exact inputs is a fake pass

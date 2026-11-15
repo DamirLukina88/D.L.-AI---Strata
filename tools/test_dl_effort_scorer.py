@@ -66,9 +66,12 @@ class TestDlEffortScorer(unittest.TestCase):
         res_no_sem = dl_effort.pick(prompt, semantic=False)
         self.assertEqual(res_no_sem, ("high", "default"))
 
-        # With semantic=True: routes to none via semantic scorer
+        # With semantic=True: routes to none via the Model2Vec scorer; without Model2Vec it is rules
         res_sem = dl_effort.pick(prompt, semantic=True)
-        self.assertEqual(res_sem, ("none", "semantic none"))
+        if dl_effort.dl_router is not None and dl_effort.dl_router.is_available():
+            self.assertEqual(res_sem, ("none", "semantic none"))
+        else:
+            self.assertEqual(res_sem, ("high", "default"))
 
 
 if __name__ == "__main__":

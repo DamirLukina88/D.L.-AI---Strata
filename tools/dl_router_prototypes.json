@@ -1,0 +1,364 @@
+{
+  "version": 1,
+  "effort": {
+    "none": [
+      "hi",
+      "hello Ray",
+      "good morning Ray",
+      "thanks a lot",
+      "thank you very much",
+      "how are you doing today?",
+      "bok Ray",
+      "hvala ti puno",
+      "dobro jutro",
+      "turn off the living room lights",
+      "turn on the kitchen light",
+      "switch off the smart plug",
+      "dim the bedroom lamp to 30 percent",
+      "set the air conditioner to 22 degrees",
+      "upali svjetlo u kuhinji",
+      "ugasi klimu u dnevnoj sobi",
+      "pause the music",
+      "stop music playback",
+      "mute the living room speaker",
+      "pause playback on the bedroom speaker",
+      "skip to the next song",
+      "pauziraj glazbu",
+      "sljedeća pjesma",
+      "turn on the phone flashlight",
+      "what is my phone battery level?"
+    ],
+    "low": [
+      "what is the capital of Croatia?",
+      "when was the Eiffel Tower built?",
+      "what is 15 percent of 240?",
+      "how many kilometers are in 12 miles?",
+      "who painted the Mona Lisa?",
+      "what is the weather in Zagreb today?",
+      "kakvo je vrijeme u Zagrebu danas?",
+      "koliko je stupnjeva vani?",
+      "koji je tečaj eura za dolar danas?",
+      "when is the next public holiday in Croatia?",
+      "what time is it in Tokyo right now?",
+      "is the 3D printer still printing?",
+      "what is the boiling point of ethanol?",
+      "koliko košta eurosuper danas?",
+      "which ZET tram goes to Črnomerec?",
+      "koja je dežurna ljekarna večeras u Zagrebu?",
+      "what song is currently playing?",
+      "koja pjesma sada svira?",
+      "how many bytes are in 8 gigabytes?",
+      "check if the front door camera is online"
+    ],
+    "medium": [
+      "explain how speculative decoding speeds up inference",
+      "summarize the differences between TCP and UDP",
+      "compare SQLite and PostgreSQL for a local desktop app",
+      "translate this paragraph into German",
+      "prevedi ovaj tekst na hrvatski jezik",
+      "objasni mi razliku između S-Log3 i D-Log profila",
+      "what are the EASA rules for flying a 249g drone in Croatia?",
+      "kakva su pravila za letenje dronom od 249 grama u Hrvatskoj?",
+      "explain why hash tables have constant average lookup time",
+      "compare Citadel and Vallejo paints for miniature glazing",
+      "summarize what the EU AI Act requires for local tools",
+      "objasni kako radi TLS rukovanje i certifikati",
+      "what resistor value should I use for an LED on 5V?",
+      "explain the difference between OM3 and OM4 fiber cables",
+      "summarize the main trade-offs between monolithic and microservice designs",
+      "koje su razlike između ZOO i ZOR u ovom slučaju?",
+      "explain how DaVinci Wide Gamut color space transforms work",
+      "compare Amdahl's Law and Gustafson's Law",
+      "prevedi ovu poruku na engleski i zadrži formalni ton",
+      "what is a bloom filter and when should I use one?"
+    ],
+    "high": [
+      "fix the failing unit test in the session daemon",
+      "debug why the websocket reconnects in a loop on timeout",
+      "refactor the agent loop to separate state persistence from streaming",
+      "implement a thread-safe LRU cache with per-entry TTL",
+      "write a Python script that parses systemd logs and aggregates errors",
+      "optimize the HIP kernel to eliminate shared memory bank conflicts",
+      "review the recent changes for race conditions and resource leaks",
+      "design the database migration and rollback path for session archives",
+      "plan the architecture for multi-client approval synchronization",
+      "why does the background worker hang when cancel is set mid-stream?",
+      "popravi grešku u skripti kad se proces prekine usred rada",
+      "pronađi zašto se aplikacija ruši kod učitavanja većih datoteka",
+      "napiši testove koji pokrivaju rubne slučajeve kod parsiranja",
+      "analyze this traceback and find the root cause of the deadlock",
+      "check the last git commits and find where the regression started",
+      "write a complete CAD model script for a vented electronics enclosure",
+      "read my unread emails, summarize the invoices, and draft a reply",
+      "search recent arXiv papers on MoE quantization and compare their methods",
+      "check the latest Proton Mail messages from the supplier and create a spreadsheet on Drive",
+      "audit our dependencies for known CVEs and propose upgrade steps",
+      "design a reliable retry policy with exponential backoff and jitter",
+      "migrate the frontend state store without breaking mobile layouts",
+      "investigate why memory usage climbs steadily over long runs",
+      "izradi detaljan plan za refaktoriranje sustava obavijesti"
+    ]
+  },
+  "mcp": {
+    "_none": [
+      "hi Ray",
+      "good morning, how are you?",
+      "thanks for the help!",
+      "bok Ray, kako si?",
+      "hvala ti puno!",
+      "fix the off-by-one bug in the parser function",
+      "refactor this Python class to use dataclasses",
+      "write unit tests for the retry helper",
+      "explain what a mutex is in operating systems",
+      "compare quicksort and mergesort time complexity",
+      "review the diff in this repository for edge cases",
+      "why does this regex fail on multiline strings?",
+      "optimize this SQL query to avoid a full table scan",
+      "write a bash script to rename files by date",
+      "popravi ovu funkciju u Pythonu da ne baca iznimku",
+      "napiši jedinični test za ovaj modul",
+      "objasni mi kako funkcionira garbage collector",
+      "check the syntax error in my local script",
+      "create a small CLI tool in Python to count lines",
+      "summarize what we changed in the previous turn",
+      "format this JSON cleanly and sort the keys",
+      "what is 25 percent of 360?",
+      "write a short poem about winter rain",
+      "help me plan the structure of a new Python package"
+    ],
+    "exa": [
+      "search the web for recent AMD ROCm 7 release notes",
+      "look up online when the next Formula 1 race starts",
+      "find the latest news about open source LLM inference engines",
+      "pretraži internet za najnovije vijesti o Linux kernelu",
+      "potraži na webu recenzije novog monitora"
+    ],
+    "context7": [
+      "show me the official documentation for FastAPI lifespan events",
+      "look up the React 19 useActionState API reference docs",
+      "check the migration guide from Pydantic v1 to v2 in Context7",
+      "pronađi službenu dokumentaciju za SQLAlchemy async session",
+      "pogledaj dokumentaciju za Playwright locator metode"
+    ],
+    "fetch": [
+      "read this web page https://example.com/article and summarize it",
+      "fetch https://docs.python.org/3/library/asyncio.html and check the API",
+      "open www.example.org/changelog and tell me what changed",
+      "pročitaj ovu stranicu https://example.com/upute i sažmi glavne točke"
+    ],
+    "deepl": [
+      "translate this product description into German",
+      "translate the attached HTML email into Croatian and keep the tables",
+      "prevedi ovaj tekst na njemački jezik",
+      "napravi prijevod ovog dokumenta iz radne mape na engleski"
+    ],
+    "playwright": [
+      "open the website in a headless browser and click the login button",
+      "fill out the web form on the portal and take a snapshot",
+      "otvori stranicu u pregledniku i klikni na gumb za preuzimanje",
+      "prijavi se na web sučelje preko preglednika i ispuni obrazac"
+    ],
+    "proton": [
+      "check my Proton Mail inbox for new messages",
+      "search my emails for the electricity invoice",
+      "send an email to info@example.com with the quarterly summary",
+      "provjeri sandučić na Protonu ima li novih poruka",
+      "pošalji mail s privitkom iz radne mape"
+    ],
+    "gmail": [
+      "search my Gmail for the flight confirmation email",
+      "read the latest thread in Gmail about the project",
+      "draft a reply in Gmail to the client message",
+      "provjeri moj Gmail sandučić za potvrdu narudžbe"
+    ],
+    "drive": [
+      "search my Google Drive for the budget spreadsheet",
+      "upload the report PDF to my Drive folder",
+      "create a Google Sheets table from this CSV data",
+      "podijeli tablicu s Google Drivea i pošalji link",
+      "pronađi datoteku na mom Driveu"
+    ],
+    "docs": [
+      "create a new Google Doc from this markdown outline",
+      "read my Google Doc titled Architecture Notes",
+      "export the Google Docs proposal to PDF",
+      "uredi tekst u mom Google dokumentu i dodaj tablicu"
+    ],
+    "schedule": [
+      "remind me tomorrow at 8:30 to check the backups",
+      "schedule a daily summary every morning at 9am",
+      "list all my scheduled jobs and reminders",
+      "zakaži podsjetnik za sutra u 14 sati",
+      "podsjeti me za 30 minuta da izvadim print"
+    ],
+    "homeassistant": [
+      "turn on the kitchen lights and set brightness to 60 percent",
+      "what is the temperature and humidity in the living room?",
+      "check the Bambu Lab 3D printer status and AMS filament slots",
+      "show a snapshot from the front door camera",
+      "upali svjetlo u spavaćoj sobi i provjeri klimu",
+      "je li 3D printer završio s printanjem i kolika je temperatura u sobi?"
+    ],
+    "deepseek": [
+      "ask DeepSeek for a second opinion on this concurrency proof",
+      "use deep reasoning to verify this mathematical induction proof",
+      "get DeepSeek to review this complex distributed consensus design",
+      "pitaj DeepSeek za drugo mišljenje oko ovog dokaza"
+    ],
+    "europepmc": [
+      "search Europe PMC for recent open-access papers on CRISPR delivery",
+      "look up biomedical journal articles by PMCID about GLP-1 agonists",
+      "find peer-reviewed clinical trial publications on gut microbiome"
+    ],
+    "arxiv": [
+      "search arXiv preprints on KV cache compression in transformers",
+      "find recent machine learning papers on mixture of experts routing",
+      "potraži nove arXiv radove o kvantizaciji jezičnih modela"
+    ],
+    "wikipedia": [
+      "give me a Wikipedia overview of the Battle of Lepanto",
+      "who was Nikola Tesla and what did he invent according to Wikipedia?",
+      "what is the history of Dubrovnik according to encyclopedia articles?"
+    ],
+    "osv": [
+      "audit our Python packages for known CVE vulnerabilities on OSV",
+      "check if urllib3 2.0.0 has any security advisories",
+      "provjeri ima li ovaj npm paket poznatih sigurnosnih ranjivosti"
+    ],
+    "pubchem": [
+      "look up the chemical structure and SMILES formula of caffeine on PubChem",
+      "what is the molecular weight and formula of ibuprofen?",
+      "pronađi kemijsku formulu i molekulsku masu za paracetamol"
+    ],
+    "rfc": [
+      "check RFC 9110 for HTTP caching header semantics",
+      "look up the WebSocket protocol spec in the IETF RFC",
+      "what does the official internet standard say about TLS 1.3?"
+    ],
+    "openalex": [
+      "search OpenAlex for citation counts of papers by Geoffrey Hinton",
+      "find highly cited scholarly papers on graph neural networks",
+      "do a broad academic literature search across journals on OpenAlex"
+    ],
+    "osm": [
+      "geocode the address Trg bana Josipa Jelačića in Zagreb",
+      "what are the latitude and longitude coordinates of Split?",
+      "koje su koordinate za Plitvička jezera na OpenStreetMapu?"
+    ],
+    "clinicaltrials": [
+      "search ClinicalTrials.gov for recruiting phase 3 trials in diabetes",
+      "check the study status of an investigational drug trial",
+      "find clinical trials testing mRNA melanoma vaccines"
+    ],
+    "opentargets": [
+      "check Open Targets for gene-disease associations for BRAF",
+      "what therapeutic drug targets are linked to rheumatoid arthritis?",
+      "find target disease evidence for PCSK9"
+    ],
+    "reactome": [
+      "look up the MAPK signaling cascade in Reactome",
+      "what metabolic pathway converts pyruvate to acetyl-CoA?",
+      "inspect cellular pathways involved in apoptosis"
+    ],
+    "modernweb": [
+      "how does CSS anchor positioning work in modern web standards?",
+      "check modern HTML5 dialog modal and view transition best practices",
+      "what is the recommended way to build responsive tables with container queries?"
+    ],
+    "print3d": [
+      "what Klipper G-code macro handles filament purge on bed temp reach?",
+      "recommended nozzle temp and bed temp for Bambu PETG filament",
+      "postavke temperature mlaznice i podloge za 3D printanje ASA filamenta"
+    ],
+    "cadmaterials": [
+      "explain the STEP AP242 vs IGES B-Rep geometry representation",
+      "look up AFLOW alloy crystal structure properties for Ti-6Al-4V",
+      "how does OpenCascade store B-Rep topology in STEP files?"
+    ],
+    "devstandards": [
+      "explain the Command and ECS game programming patterns",
+      "check MDN web API docs for IntersectionObserver",
+      "how should a fixed-timestep game loop handle spatial partitioning?"
+    ],
+    "laws": [
+      "što kaže hrvatski Zakon o obveznim odnosima o raskidu ugovora?",
+      "provjeri u Narodnim novinama pravilnik o zaštiti na radu",
+      "what are the GDPR and EU AI Act obligations for high-risk systems?",
+      "kakva su pravila za PDV prema Zakon.hr?"
+    ],
+    "weather": [
+      "what is the weather forecast for Zagreb tomorrow?",
+      "will it rain in Rijeka this weekend?",
+      "kakvo je vrijeme u Zagrebu i hoće li padati kiša?",
+      "kakva je prognoza za sutra ujutro?"
+    ],
+    "minipaint": [
+      "find the Vallejo equivalent for Citadel Mephiston Red paint",
+      "what airbrush thinning ratio should I use for acrylic miniature paints?",
+      "explain slapchop and NMM glazing techniques for Warhammer 40k",
+      "koja je Vallejo zamjena za ovu Citadel boju za minijature?"
+    ],
+    "electronics": [
+      "find an LCSC part number for an ESP32-S3 or logic-level MOSFET",
+      "calculate the IPC-2152 PCB trace width for 3A on 1oz copper",
+      "what decoupling capacitors and pinout does this microcontroller need?",
+      "izračunaj širinu PCB voda za 5 ampera i provjeri SMD kod otpornika"
+    ],
+    "networking": [
+      "what is the difference between OM3 and OM4 fiber for 10G SFP+ optics?",
+      "show the RJ45 T568B Ethernet cable pinout and PoE+ power budget",
+      "look up the IEEE MAC address OUI vendor for this network switch",
+      "koja je razlika između SFP+ optike i T568B kabela za VLAN mrežu?"
+    ],
+    "photovideo": [
+      "calculate the 180 degree shutter speed for 24fps video",
+      "how should I set up a DaVinci Resolve CST node from S-Log3 to DaVinci Wide Gamut?",
+      "what LUFS loudness target and mic pattern should I use for YouTube audio?",
+      "kako podesiti ekspoziciju i color grading za D-Log snimku u DaVinci Resolveu?"
+    ],
+    "drones": [
+      "what are the DJI Mini 4 Pro specs and weight class?",
+      "check Croatian CCAA and EASA drone rules and AMC Portal airspace booking",
+      "smijem li letjeti DJI dronom u zoni bez rezervacije na AMC portalu?",
+      "koja su pravila za dronove u Hrvatskoj prema CCAA?"
+    ],
+    "zagreb": [
+      "which ZET tram lines have service alerts in Zagreb right now?",
+      "find a 24/7 on-duty pharmacy in Zagreb tonight",
+      "check Zagreb Čistoća waste collection schedule and live PM10 air quality",
+      "koji ZET tramvaj ide do centra i koja je dežurna ljekarna u Zagrebu?",
+      "kakva je kvaliteta zraka u Zagrebu i kad je odvoz otpada Čistoće?"
+    ],
+    "croatia_live": [
+      "check HAK road conditions on the A1 highway and Bregana border crossing",
+      "what is today's official HNB exchange rate for EUR to USD and CHF?",
+      "what are the current regulated Eurosuper and Eurodiesel fuel prices in Croatia?",
+      "kakvo je stanje na cestama po HAK-u i ima li gužve na Lučkom?",
+      "je li ova nedjelja radna ili neradna za trgovine i koja je cijena goriva?"
+    ],
+    "ray_identity": [
+      "who built you and what hardware is this server running on?",
+      "check your git status and latest commits on the Strata checkout",
+      "tko te napravio i na kojem hardveru radiš?",
+      "koja je zadnja promjena u tvom repozitoriju i koje servise koristiš?"
+    ],
+    "solidcraft": [
+      "design a parametric 3D enclosure in SolidCraft and export a STEP file",
+      "create a 3D bracket with mounting holes and render a preview in SolidCraft",
+      "izradi 3D model nosača u SolidCraftu i spremi STL datoteku"
+    ],
+    "phone": [
+      "check my phone battery level and turn on the flashlight",
+      "read the latest notifications and extract the 2FA verification code",
+      "snap a photo with my Xiaomi phone camera and tell me what you see",
+      "postavi alarm na mobitelu za 7 ujutro i pročitaj obavijesti",
+      "slikaj kamerom mobitela i reci mi što vidiš na ekranu"
+    ],
+    "pc_music": [
+      "play my Liked songs on YouTube Music on the PC",
+      "pause the music playing on the computer speakers and skip to the next track",
+      "what song is currently playing on the PC?",
+      "pusti glazbu na računalu i reci koja pjesma svira"
+    ]
+  }
+}

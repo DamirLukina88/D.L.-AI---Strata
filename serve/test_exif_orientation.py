@@ -43,5 +43,36 @@ class ExifOrientation(unittest.TestCase):
         self.assertEqual(Vision.normalize(data), data)
 
 
+@unittest.skipIf(Image is None, "Pillow is not installed")
+class ShrinkCameraPhotos(unittest.TestCase):
+    """2026-11-15: large camera photos are scaled down before the reader; screenshots and small pictures are not."""
+
+    def picture(self, size, fmt="JPEG", camera=False):
+        im = Image.new("RGB", size, (20, 120, 200))
+        out = io.BytesIO()
+        if fmt == "JPEG":
+            exif = Image.Exif()
+            if camera:
+                exif[0x010F], exif[0x0110] = "Xiaomi", "17 Ultra"
+            im.save(out, format="JPEG", exif=exif)
+        else:
+            im.save(out, format=fmt)
+        return out.getvalue()
+
+    def test_camera_photo_scaled(self):
+        out = Vision.shrink(self.picture((2400, 1800), camera=True), 1568)
+        self.assertEqual(Image.open(io.BytesIO(out)).size, (1568, 1176))
+        out = Vision.shrink(self.picture((4000, 3000), fmt="PNG"), 1568)          # big enough to be a photo anyway
+        self.assertEqual(max(Image.open(io.BytesIO(out)).size), 1568)
+
+    def test_screenshots_and_small_pictures_unchanged(self):
+        for data in (self.picture((2560, 1440), fmt="PNG"), self.picture((2400, 1800)),
+                     self.picture((1200, 900), camera=True)):
+            self.assertEqual(Vision.shrink(data, 1568), data)
+        big = self.picture((2400, 1800), camera=True)
+        self.assertEqual(Vision.shrink(big, 0), big)
+        self.assertEqual(Vision.shrink(b"not a picture", 1568), b"not a picture")
+
+
 if __name__ == "__main__":
     unittest.main()

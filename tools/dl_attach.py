@@ -35,6 +35,14 @@ class Renderer:
     def show(self, ev: dict, replay: bool = False) -> None:
         t = ev.get("type")
         w = sys.stdout.write
+        if t == "progress":                       # one line, rewritten in place, cleared when the answer starts
+            if ev.get("phase") == "reading":
+                pct = f" ({100 * ev['read'] // ev['total']}%)" if ev.get("total") and ev.get("read") is not None else ""
+                w(f"\r\033[K{C_MUTED}Reading the prompt… {ev.get('elapsed_s', 0)} s{pct}{C_RESET}")
+            else:
+                w("\r\033[K")
+            sys.stdout.flush()
+            return
         if t == "thinking":
             if self.stream != "thinking":
                 self._close()

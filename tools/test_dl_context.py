@@ -634,5 +634,50 @@ class StreamErrorAndHandoff(unittest.TestCase):
         self.assertIn("python3 test.py", diary.split("## Dead Ends / Ruled Out")[1])
 
 
+class SlowReadHandler(BaseHTTPRequestHandler):
+    """Keep-alive comments and prompt_progress chunks, then the answer (a long image prompt, sped up)."""
+    seen: list = []
+
+    def log_message(self, *a):
+        pass
+
+    def do_POST(self):
+        SlowReadHandler.seen.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        for i in range(3):
+            pp = {"choices": [{"delta": {}}], "prompt_progress": {"total": 1100, "cache": 100, "processed": 100 + 400 * i,
+                                                                  "time_ms": 1000 * i}}
+            self.wfile.write(f": keep-alive\n\ndata: {json.dumps(pp)}\n\n".encode())
+            self.wfile.flush()
+            time.sleep(0.12)
+        chunk = {"choices": [{"delta": {"content": "a beagle"}, "finish_reason": "stop"}]}
+        self.wfile.write(f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n".encode())
+
+
+class ReadingProgress(unittest.TestCase):
+    def test_progress_events_then_done(self):
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), SlowReadHandler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        events = []
+        try:
+            with patch.object(cli, "READING_SHOW_S", 0.0), patch.object(cli, "READING_SLOW_S", 0.2):
+                res = cli.stream_chat_turn([{"role": "user", "content": "hi"}], f"http://127.0.0.1:{srv.server_port}",
+                                           "k", [], emit=events.append)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+        self.assertTrue(SlowReadHandler.seen[-1]["return_progress"])
+        self.assertEqual(res["content"], "a beagle")
+        prog = [e for e in events if e["type"] == "progress"]
+        self.assertEqual(prog[0], {"type": "progress", "phase": "reading", "elapsed_s": 0})   # the keep-alive first
+        self.assertEqual({k: prog[1][k] for k in ("read", "total")}, {"read": 0, "total": 1000})
+        self.assertEqual(prog[-1]["phase"], "done")
+        self.assertTrue(any(e.get("slow") for e in prog))
+        self.assertEqual(sum(1 for e in events if e["type"] == "notice" and "unusually slow" in e["text"]), 1)
+        self.assertLess(events.index(prog[-1]), next(i for i, e in enumerate(events) if e["type"] == "text"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

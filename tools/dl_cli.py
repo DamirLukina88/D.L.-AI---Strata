@@ -639,7 +639,9 @@ def print_banner(workspace: Path, settings_text: str, mode: str = "act"):
 # ---------------------------------------------------------------------------------------------------- project memory
 PLAN_FILE = "PLAN.md"
 MEMORY_CAPS = {"rules": 8000, "wiki": 3000, "progress": 3000}      # chars of each part in the system prompt
-PROGRESS_HEAD = re.compile(r"^#{1,6}\s*Progress\b.*$", re.I | re.M)
+# "## Progress", also numbered ("## 6. Progress checklist"): a numbered one was not found on 2026-11-15, so the plan
+# got a second, empty section, the pill showed 0/0 and "all 0 steps are ticked" let the run end at any time
+PROGRESS_HEAD = re.compile(r"^#{1,6}\s*(?:\d+(?:\.\d+)*[.)]?\s+)?Progress\b.*$", re.I | re.M)
 OPEN_ITEM = re.compile(r"^\s*[-*]\s*\[ \]\s*(.+?)\s*$", re.M)
 DONE_ITEM = re.compile(r"^\s*[-*]\s*\[[xX]\]\s*(.+?)\s*$", re.M)
 BLOCKED_LINE = re.compile(r"^\s*(?:[-*]\s*)?\**Blocked\**\s*:", re.I | re.M)
@@ -661,14 +663,17 @@ def plan_progress(plan: Path) -> tuple[str, list[str], list[str], bool]:
         text = plan.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return "", [], [], False
-    m = PROGRESS_HEAD.search(text)
-    if not m:
-        return "", [], [], False
-    level = len(m.group(0)) - len(m.group(0).lstrip("#"))
-    rest = text[m.end():]
-    nxt = re.search(r"^#{1,%d}\s" % level, rest, re.M)
-    section = (m.group(0) + rest[:nxt.start()] if nxt else m.group(0) + rest).strip()
-    return section, OPEN_ITEM.findall(section), DONE_ITEM.findall(section), bool(BLOCKED_LINE.search(section))
+    first = None
+    for m in PROGRESS_HEAD.finditer(text):
+        level = len(m.group(0)) - len(m.group(0).lstrip("#"))
+        rest = text[m.end():]
+        nxt = re.search(r"^#{1,%d}\s" % level, rest, re.M)
+        section = (m.group(0) + rest[:nxt.start()] if nxt else m.group(0) + rest).strip()
+        found = (section, OPEN_ITEM.findall(section), DONE_ITEM.findall(section), bool(BLOCKED_LINE.search(section)))
+        if found[1] or found[2]:            # the Progress section that holds the checklist (a plan can have a second,
+            return found                    # empty one: 2026-11-15, "## 6. Progress checklist" plus "## Progress")
+        first = first or found
+    return first or ("", [], [], False)
 
 
 def _wiki_titles(workspace: Path) -> str:
@@ -2052,6 +2057,16 @@ _CMD_WORD = (r"(?:^|[;&|(`{\n]|\$\(|[\"'])\s*(?:(?:sudo|env|command|exec|nohup|n
 GIT_COMMAND = re.compile(_CMD_WORD.replace("{word}", "git"))
 JJ_COMMAND = re.compile(_CMD_WORD.replace("{word}", "jj"))
 ASKS_FOR_GIT = re.compile(r"\bgit\b", re.I)
+# Global memory (every agent, every project) changes only when the words ask for it, in YOLO too (the user's choice,
+# 2026-11-15: Ray wrote a global page about a photo on his own).  Outside YOLO the approval card still follows.
+ASKS_FOR_GLOBAL = re.compile(r"\bglobal(?:ly)?\b|\bevery (?:project|agent)\b|\ball (?:projects|agents)\b|"
+                             r"\beverywhere\b|\bsvugdje\b|\bglobaln\w*|\bza sve projekte\b", re.I)
+
+
+def asked_text(ctx: dict | None) -> str:
+    """The words a words-rule reads: this turn's request plus the task it carries on (dl_sessiond's task_text)."""
+    ctx = ctx or {}
+    return f"{ctx.get('user_text') or ''}\n{ctx.get('task_text') or ''}"
 
 
 def _inside(p: Path, root: Path) -> bool:
@@ -2069,7 +2084,8 @@ def agent_boundary(name: str, args: dict, workspace: Path, session_context: dict
     ctx = session_context or {}
     if "user_text" not in ctx:
         return None
-    asked_git = bool(ASKS_FOR_GIT.search(str(ctx.get("user_text") or "")))
+    # git_ok: this turn carries on a task whose request asked for git (dl_sessiond.Session._git_for)
+    asked_git = bool(ASKS_FOR_GIT.search(str(ctx.get("user_text") or ""))) or ctx.get("git_ok") is True
     store = memory_store()
     use_memory = ("Use the memory tool instead: memory(action=\"search\"|\"read\"|\"write\"|\"remember\"|\"history\"|"
                   "\"diff\"|\"undo\"); it commits to jj for you.")
@@ -2093,6 +2109,10 @@ def agent_boundary(name: str, args: dict, workspace: Path, session_context: dict
                     + (" Credentials: memory(action=\"env_list\")." if name == "view_file" else ""))
     if name == "git_diff_audit" and not asked_git:
         return "Refused: git is not yours to use unless the user asks for git in this request."
+    if (name in ("memory", "local_wiki") and str(args.get("action") or "").strip().lower() in ("write", "new_page", "remember", "log")
+            and memory_global_change(args) and not ASKS_FOR_GLOBAL.search(asked_text(ctx))):
+        return ("Refused: global memory (every agent, every project) changes only when the user asks for a global "
+                "rule in this request. Save it to this project instead (scope=\"project\").")
     return None
 
 
@@ -2117,6 +2137,10 @@ def dispatch_dl_tool(name: str, args: dict, workspace: Path, mode: str = "act", 
             blocked = registry.leak(args)            # a credential in an email/file/URL: refused before any card
             if blocked:
                 return blocked
+            if "user_text" in (session_context or {}):  # an agent turn (not a scheduled job or the user's own call)
+                refused = registry.words_refusal(name, args, asked_text(session_context))
+                if refused:
+                    return refused
             ask = registry.approval(name, args)
             # YOLO is fully autonomous (the user's choice, 2026-10-15): nothing asks, sending email included
             if ask and not (session_context or {}).get("yolo"):
@@ -2212,6 +2236,10 @@ def thinking_loops(text: str) -> str | None:
     return None
 
 
+READING_SHOW_S = float(os.environ.get("DL_READING_SHOW_S") or 20.0)   # a prompt read this long shows "Reading the prompt… N s"
+READING_SLOW_S = float(os.environ.get("DL_READING_SLOW_S") or 120.0)  # ... and this long adds "unusually slow" (once)
+
+
 def stream_chat_turn(messages: list[dict], url: str, api_key: str, tools: list[dict] | None = None,
                      emit=None, cancel=None, effort: str | None = None, budget: int = 0):
     """One streamed model reply.  `emit(event)` replaces terminal printing (the session daemon); `cancel` is a
@@ -2227,6 +2255,7 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str, tools: list[d
                      if any(k.startswith("dl_") for k in m) else m for m in messages],
         "tools": active_tools,
         "stream": True,
+        "return_progress": True,   # prompt_progress chunks while the engine reads the prompt (llama.cpp's flag)
     }
     if effort:                     # a session's own thinking level (/effort); the server's Chat settings otherwise
         payload["reasoning_effort"] = effort
@@ -2253,8 +2282,58 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str, tools: list[d
     loop_guard = _switch("DL_LOOP_GUARD")
     reasoning_len, next_loop_check, loop_sentence = 0, LOOP_CHECK_EVERY, None
 
+    # "Reading the prompt… N s" (audit 2026-11-15: an image prompt read for 339 s with nothing on screen).  The server
+    # sends a keep-alive comment every 10 s and, with return_progress, a prompt_progress chunk per chunk it reads.
+    first_out = False
+    reading = {"last": 0.0, "last_pp": 0.0, "sent": False, "slow": False}
+
+    def note_reading(pp: dict | None = None) -> None:
+        if emit is None or first_out:
+            return
+        now = time.time()
+        elapsed = now - t0
+        if elapsed < READING_SHOW_S:
+            return
+        # a progress chunk at most every 2 s; a bare keep-alive (no progress to tell) only after 10 s of nothing
+        turns_slow = elapsed >= READING_SLOW_S and not reading["slow"]          # always told, once
+        if not turns_slow and ((now - reading["last_pp"] < 2.0) if pp else
+                               (now - reading["last"] < 10.0 and reading["sent"])):
+            return
+        reading["last"], reading["sent"] = now, True
+        if pp:
+            reading["last_pp"] = now
+        ev = {"type": "progress", "phase": "reading", "elapsed_s": int(elapsed)}
+        if pp and int(pp.get("total") or 0) > 0:
+            cache = int(pp.get("cache") or 0)
+            ev.update(read=int(pp.get("processed") or 0) - cache, total=int(pp["total"]) - cache)
+        if turns_slow:
+            reading["slow"] = ev["slow"] = True
+            emit({"type": "notice", "level": "warn",
+                  "text": f"The engine has been reading the prompt for {int(elapsed)} s, which is unusually slow. "
+                          "/restart reloads it."})
+        emit(ev)
+
+    def output_started() -> None:
+        nonlocal first_out
+        if not first_out:
+            first_out = True
+            if emit is not None and reading["sent"]:
+                emit({"type": "progress", "phase": "done", "elapsed_s": int(time.time() - t0)})
+
     socks: list = []
     done = threading.Event()
+    reading_lock = threading.Lock()
+
+    def tick() -> None:
+        # the server sends nothing while it loads the model or encodes a picture (live, 2026-11-15: the first line
+        # came after 63 s): the time still shows, from here
+        while not done.wait(5.0):
+            if first_out:
+                return
+            with reading_lock:
+                note_reading()
+    if emit is not None:
+        threading.Thread(target=tick, daemon=True).start()
     open_url = urllib.request.urlopen                # no Stop to wait for (the terminal REPL): as before
     if cancel is not None:
         open_url = urllib.request.build_opener(_ConnHTTPHandler(socks), _ConnHTTPSHandler(socks)).open
@@ -2267,6 +2346,9 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str, tools: list[d
                     break
                 line = raw_line.decode("utf-8", errors="replace").strip()
                 if not line or line.startswith(":"):
+                    if line:
+                        with reading_lock:
+                            note_reading()
                     continue
                 if line.startswith("data: "):
                     data_str = line[6:].strip()
@@ -2282,8 +2364,13 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str, tools: list[d
                         msg = err.get("message") if isinstance(err, dict) else str(err)
                         raise RuntimeError(f"Strata stream error: {msg}")
 
+                    if isinstance(chunk.get("prompt_progress"), dict):
+                        with reading_lock:
+                            note_reading(chunk["prompt_progress"])
                     choice = (chunk.get("choices") or [{}])[0]
                     delta = choice.get("delta") or {}
+                    if delta.get("reasoning_content") or delta.get("content") or delta.get("tool_calls"):
+                        output_started()
                     if chunk.get("usage"):
                         usage = chunk["usage"]
                     if choice.get("finish_reason"):
@@ -2472,6 +2559,30 @@ def context_window(url: str, api_key: str) -> int:
             return 65536                 # not cached: a starting engine reports 0
         _ctx_cache[url] = n
     return _ctx_cache[url]
+
+
+_degraded_told: set = set()
+
+
+def degraded_notice(url: str, api_key: str, emit) -> None:
+    """Once per engine start: a notice when the engine started short of memory and reads part of the model from disk
+    (/health "degraded", audit 2026-11-15: an image prompt then read for 339 s with nothing on screen)."""
+    if emit is None:
+        return
+    try:
+        req = urllib.request.Request(f"{url.rstrip('/')}/health",
+                                     headers={"Authorization": f"Bearer {api_key}"} if api_key else {})
+        with urllib.request.urlopen(req, timeout=3) as r:
+            d = json.loads(r.read().decode("utf-8")).get("degraded")
+    except Exception:
+        return
+    if not isinstance(d, dict) or d.get("since") in _degraded_told:
+        return
+    _degraded_told.add(d.get("since"))
+    emit({"type": "notice", "level": "warn",
+          "text": (f"The engine started short of memory: {d.get('kept_gib', '?')} of {d.get('wanted_gib', '?')} GiB of "
+                   "the model are in RAM, the rest is read from disk, so replies (pictures most) are slow. It reloads "
+                   "by itself when it is idle and memory is free again, or use /restart.")})
 
 
 def _msg_chars(m: dict) -> int:
@@ -3172,7 +3283,7 @@ def handoff_session(messages: list[dict], tools: list[dict] | None, limit: int, 
 
 TRANSIENT_ENGINE_ERR = re.compile(
     r"the next request restarts it|engine stopped unexpectedly|said nothing for|"
-    r"Connection refused|RemoteDisconnected|Connection reset|EOF occurred|"
+    r"Connection refused|RemoteDisconnected|Remote end closed connection|Connection reset|EOF occurred|"
     r"Strata API HTTP 50[234]",
     re.IGNORECASE,
 )
@@ -3241,6 +3352,48 @@ NUDGE_NOTE = ("[D.L. CLI] {n} rounds without changing a project file. Stop readi
               "edit now with replace_file_content (or write_to_file), then test it.")
 NUDGE_NOTE_2 = ("[D.L. CLI] {n} rounds and still no project file changed. Make the change you already know is needed "
                 "in your next call; do not read, fetch or write helper scripts first.")
+# Test, probe and scratch files do not count as a changed project file (the user's choice, 2026-11-15): the first
+# Tetris run spent 30 minutes repairing tetris.test.js while tetris.html stayed untouched.  The plan does count: a
+# ticked line is progress (leaving it out, the 09:35 live run was nudged and patched while it verified and ticked).
+SCRATCH_FILE = re.compile(r"(^|/)([^/]*\.(test|spec)\.[^/]+|test_[^/]*|[^/]*_test\.[^/]+|"
+                          r"(probe|scratch|tmp|temp)(?![a-z])[^/]*|(tests?|__tests__|scratch|tmp|uploads|phone-photos|phone-files)/.*)$",
+                          re.I)       # uploads/, phone-*: chat attachments and the phone's pictures, not project work
+
+
+def project_change(names, ws: Path | None = None) -> bool:
+    """Whether any of the changed files is a project file: inside the workspace, and not a test, probe or scratch
+    file.  Paths are relative to the workspace, or absolute (from a tool call's arguments)."""
+    root = Path(ws).resolve() if ws is not None else None
+    for n in names:
+        p = Path(str(n))
+        if p.is_absolute() and root is not None:
+            try:
+                p = p.resolve().relative_to(root)
+            except (ValueError, OSError):
+                continue                            # written outside the workspace (/tmp): not a project file
+        if not SCRATCH_FILE.search(str(p).replace(os.sep, "/")):
+            return True
+    return False
+
+
+def _written_files(tool_calls) -> list[str]:
+    """The files this round's write_to_file / replace_file_content calls name."""
+    out = []
+    for tc in tool_calls or []:
+        fn = tc.get("function") or {}
+        if fn.get("name") not in ("write_to_file", "replace_file_content"):
+            continue
+        a = fn.get("arguments")
+        if isinstance(a, str):
+            try:
+                a = json.loads(a)
+            except ValueError:
+                a = {}
+        a = a if isinstance(a, dict) else {}
+        out.append(str(a.get("TargetFile") or a.get("path") or a.get("AbsolutePath") or "?"))
+    return out
+
+
 # Lean thinking (the user's choice, 2026-11-14): auto effort on coding work thinks on high in the first round and
 # for LEAN_HIGH_ROUNDS rounds after a failure, and on medium in the rounds that only act on what it already knows.
 LEAN_HIGH_ROUNDS = int(os.environ.get("DL_LEAN_HIGH_ROUNDS") or 2)
@@ -3760,10 +3913,13 @@ def review_changes(messages: list[dict], changes: RequestChanges, final: str, pl
             + (f"PLAN PROGRESS:\n{plan_section[:3000]}\n\n" if plan_section else "")
             + f"DIFF:\n{diff if diff is not None else changes.diff()}\n\n"
             + f"TOOL ACTIONS:\n{request_actions(messages) or '(none)'}\n\nFINAL ANSWER:\n{final[:3000]}")
+    level = os.environ.get("DL_REVIEW_EFFORT") or REVIEW_EFFORT
+    # the level needs its token budget too: without one the engine let the "low" review think for 10,000+ tokens
+    # (7 minutes and counting, 2026-11-15 10:07)
+    budget = dl_effort.budget_for(level) if dl_effort is not None and level in ("low", "medium", "high") else 0
     try:
         res = stream_chat_turn([{"role": "system", "content": REVIEWER_SYSTEM}, {"role": "user", "content": body}],
-                               url, api_key, tools=[], emit=lambda e: None, cancel=cancel,
-                               effort=os.environ.get("DL_REVIEW_EFFORT") or REVIEW_EFFORT)
+                               url, api_key, tools=[], emit=lambda e: None, cancel=cancel, effort=level, budget=budget)
     except RuntimeError:
         return ""
     text = (res.get("content") or "").strip()
@@ -3791,7 +3947,7 @@ def finish_checks(state: dict, messages: list[dict], final: str, mode: str, ws: 
     section = ""
     if plan is not None and plan.is_file() and _switch("DL_DONE_CHECK"):
         section, open_items, done_items, blocked = plan_progress(plan)
-        if not section:                     # nothing to tick yet: writing the checklist is the open step
+        if not section or not (open_items or done_items):   # nothing to tick yet: writing the checklist is the open step
             open_items = ['add a "## Progress" checklist to the plan, one "- [ ] <step>" line per step, ticking '
                           'the steps that are already done']
         if section and not open_items:
@@ -3867,6 +4023,33 @@ def finish_checks(state: dict, messages: list[dict], final: str, mode: str, ws: 
     return None
 
 
+def final_review_files(ws: Path, changed: list, via_cps: list, plan: str | None = None) -> list[str]:
+    """The files the final review reads, most important first, as paths relative to the workspace.
+    First the project files the agent edited with its file tools, then other project files the checkpoints saw
+    change (shell edits, or the user's own files), then test and scratch files.  Left out: files outside the
+    workspace (scratch copies in /tmp) and the plan, which the review gets on its own.  On 2026-11-15 two stale
+    scripts in /tmp, the plan and a file of the user's filled the brief before the game itself."""
+    root = Path(ws).resolve()
+    plan_rel = None
+    if plan:
+        try:
+            plan_rel = str(Path(plan).resolve().relative_to(root))
+        except (ValueError, OSError):
+            pass
+    edited = []
+    for p in changed:
+        try:
+            rel = str(Path(p).resolve().relative_to(root))
+        except (ValueError, OSError):
+            continue                                # outside the workspace: not part of the result
+        if rel not in edited:
+            edited.append(rel)
+    others = [n for n in sorted(set(via_cps)) if n not in edited and not Path(n).is_absolute()]
+    ordered = ([n for n in edited if not SCRATCH_FILE.search(n)] + [n for n in others if not SCRATCH_FILE.search(n)]
+               + [n for n in edited + others if SCRATCH_FILE.search(n)])
+    return [n for n in ordered if n != plan_rel]
+
+
 def _final_review(state: dict, final: str, ws: Path, ctx: dict, changed: list, via_cps: list, emit) -> str | None:
     """One round of the Pro final review: a note sending the agent back, or None when it passed or must stop."""
     rounds_max = int(os.environ.get("DL_ADVISOR_FINAL_MAX") or 5)
@@ -3880,7 +4063,7 @@ def _final_review(state: dict, final: str, ws: Path, ctx: dict, changed: list, v
         _note(emit, f"Final review: stopped after {rounds_max} rounds; the fixes after the last round were not "
                     "reviewed again.", "warn")
         return None
-    names = sorted(set(via_cps) | {str(p.relative_to(ws)) if p.is_relative_to(ws) else str(p) for p in changed})
+    names = final_review_files(ws, changed, via_cps, state.get("from_plan"))
     files = {}
     for n in names:
         p = (ws / n) if not Path(n).is_absolute() else Path(n)
@@ -3960,6 +4143,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                 session_context["reasoning_budget_tokens"] = budget
             _note(emit, dl_effort.describe_raise(reason) if dl_effort is not None else f"Thinking raised to high ({reason}).")
 
+    degraded_notice(url, api_key, emit)
     registry = (session_context or {}).get("mcp")
     if registry is not None and registry.active:
         registry.route((session_context or {}).get("user_text") or "")
@@ -4189,7 +4373,9 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                                                           session_context=session_context)
             result_str = cap_tool_result(result_str)    # 2026-10-20 22:12: a 106k debug print ended a CONTRA run
             if fn_name in READ_TOOLS and READ_RESULT_MAX > 0 and not bad_args:     # keep reads small (2026-11-14)
-                result_str = cap_tool_result(result_str, READ_RESULT_MAX, read=True)
+                # a file read keeps its start; a command keeps its start and its end, where the failures, the
+                # summary and the "[Command exited with code N]" line are (cut off, a failed run looked like a pass)
+                result_str = cap_tool_result(result_str, READ_RESULT_MAX, read=fn_name == "view_file")
             if before is not None:                  # did it empty, delete or halve a file?
                 after = scan_workspace(current_ws)
                 hits = shrunk_files(before, after) if after is not None else []
@@ -4251,11 +4437,13 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
         if cps is not None:                         # this round's changes, so the next one can be undone
             if cps.ws != Path(current_ws).resolve():
                 cps = Checkpoints(current_ws, emit)
-            changed_now = cps.take(f"round {total_rounds}: " + ", ".join(
-                (tc.get("function") or {}).get("name", "?") for tc in res["tool_calls"])) is not None
-        else:
-            changed_now = any((tc.get("function") or {}).get("name") in ("write_to_file", "replace_file_content")
-                              for tc in res["tool_calls"])
+            prev_head = cps.head
+            if cps.take(f"round {total_rounds}: " + ", ".join(
+                    (tc.get("function") or {}).get("name", "?") for tc in res["tool_calls"])) is not None:
+                names = cps.changed_since(prev_head) if prev_head else []
+                changed_now = project_change(names) if names else True
+        if cps is None or cps.off:                  # no checkpoints (off, no jj, too big a folder): go by the edit tools
+            changed_now = project_change(_written_files(res["tool_calls"]), current_ws)
         on_round = (session_context or {}).get("on_round")
         if callable(on_round):
             try:
@@ -4315,6 +4503,28 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
     return current_ws
 
 
+STALL_LOG = Path(os.environ.get("STRATA_STALL_LOG") or Path.home() / ".local/state/dl-ai/engine-stalls.jsonl")
+
+
+def stall_summary(day: str | None = None) -> str:
+    """Today's fatal verify stalls from the server's log (serve/server.py log_stall): "N today (M with an image)"."""
+    day = day or time.strftime("%Y-%m-%d")
+    n = img = 0
+    try:
+        with open(STALL_LOG, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if str(rec.get("ts", "")).startswith(day):
+                    n += 1
+                    img += bool(rec.get("image"))
+    except OSError:
+        pass
+    return f"{n} today ({img} with an image)"
+
+
 def check_status(url: str, api_key: str) -> str:
     endpoint = f"{url.rstrip('/')}/health"
     req = urllib.request.Request(endpoint, headers={"Authorization": f"Bearer {api_key}"})
@@ -4329,6 +4539,11 @@ def check_status(url: str, api_key: str) -> str:
                 f"  • Settings:   {chat_settings_summary(url, api_key)} (the web app's Chat settings)\n"
                 f"  • Accelerator: ROCm GPU + Resident RAM\n"
             )
+            d = data.get("degraded")
+            if isinstance(d, dict):
+                out += (f"  • Memory:     {C_YELLOW}started short: {d.get('kept_gib')} of {d.get('wanted_gib')} GiB of "
+                        f"experts in RAM, the rest read from disk (slow){C_RESET}\n")
+            out += f"  • GPU stalls: {stall_summary()}\n"
             print(out)
             return out.strip()
     except Exception as e:

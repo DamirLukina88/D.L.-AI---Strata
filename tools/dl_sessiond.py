@@ -252,6 +252,9 @@ class Session:
         self.pending: dict[str, dict] = {}       # approval id -> {"event", "ok", "kind", ...}
         self.plan_offer: str | None = None       # id of an open "Execute this plan?" offer
         self.plan_file: str | None = None        # the approved plan (PLAN.md) the done check holds the agent to
+        self.git_ok = False                      # the task in progress was started by a request that asked for git
+        self.task_text = ""                      # the words of the task in progress (its request + follow-ups): the
+        #                                          words-rules (git, global memory, phone actions) read them
         self._plan_mtime: int | None = None      # the plan's mtime when a state was last sent for it
         self.archive_id: str | None = None       # the saved conversation this one was resumed from (kept under it)
         self.title: str | None = None            # /rename's title; otherwise the first prompt names it
@@ -265,6 +268,10 @@ class Session:
         with self.lock:
             self.seq += 1
             ev = {**ev, "seq": self.seq, "ts": round(time.time(), 3)}
+            if ev["type"] == "progress":                       # "Reading the prompt… 42 s": live only, never replayed
+                for q in list(self.clients):                   # or transcribed, and it leaves an open block open
+                    q.put(ev)
+                return
             open_blk = self._open_block
             merge = bool(open_blk is not None and ev["type"] in ("thinking", "text")
                          and open_blk["type"] == ev["type"])    # never grow a block already transcribed
@@ -365,7 +372,7 @@ class Session:
                 self._transcribe(self._open_block)
                 self._open_block = None
             data = {"name": self.name, "workspace": str(self.workspace), "mode": self.mode, "effort": self.effort,
-                    "yolo": self.yolo, "plan_file": self.plan_file,
+                    "yolo": self.yolo, "plan_file": self.plan_file, "git_ok": self.git_ok, "task_text": self.task_text[-4000:],
                     "archive_id": self.archive_id, "title": self.title, "created": self.created,
                     "messages": self.messages, "events": self.events[-REPLAY_MAX:], "seq": self.seq}
             STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -406,6 +413,8 @@ class Session:
         pf = data.get("plan_file")
         s.plan_file = pf if isinstance(pf, str) and Path(pf).is_file() else None
         s.yolo = data.get("yolo") is True             # YOLO stays on until it is turned off, also after restarts
+        s.git_ok = data.get("git_ok") is True         # so the resume after a kill keeps the task's git go-ahead
+        s.task_text = str(data.get("task_text") or "")
         aid = data.get("archive_id")
         s.archive_id = aid if isinstance(aid, str) and ARCHIVE_ID.match(aid) else None
         s.title = data.get("title") if isinstance(data.get("title"), str) else None
@@ -842,6 +851,8 @@ class Session:
                 dl_mcp.CALL.ctx = {**dl_mcp.call_context(), "workspace": current_ws, "yolo": self.yolo,
                                    "request_time": time.time()}
             ctx["user_text"] = prompt
+            ctx["git_ok"] = self._git_for(prompt, queued=True)
+            ctx["task_text"] = self.task_text
             ctx["voice"] = item["voice"]
             ctx["effort"] = resolved_effort
             ctx["effort_auto"] = effort_auto
@@ -850,10 +861,30 @@ class Session:
         self.emit_state()
         return {"settings": bool(setting_items), "prompts": len(prompt_items)}
 
+    def _git_for(self, prompt: str, queued: bool = False) -> bool:
+        """Whether this turn may use git (the user's choice, 2026-11-15): its words ask for git, or it only carries on
+        the task that did - "continue", the resume after a kill, a message queued while that task runs.  Any other
+        new request needs the word again."""
+        follow = (queued or prompt == cli.CONTINUE_PROMPT or prompt.startswith(RESUME_TEXT)
+                  or prompt == EXECUTE_PLAN or prompt.startswith(EXECUTE_PLAN_FILE.split("{plan}")[0]))
+        self.git_ok = bool(cli.ASKS_FOR_GIT.search(prompt)) or (follow and self.git_ok)
+        # the same carry-over for every words-rule: a follow-up keeps the task's words, a new request starts afresh
+        self.task_text = (f"{self.task_text}\n{prompt}" if follow and self.task_text else prompt)[-4000:]
+        return self.git_ok
+
     def _marker(self) -> Path:
         return RUN_DIR / f"{self.name}.json"
 
+    def _round_done(self) -> None:
+        """After every tool round: save the conversation and refresh the running marker's time, so a turn that has
+        been working for longer than RESUME_MAX_AGE_S is still resumed after a kill (the limit is for stale markers)."""
+        self.save()
+        text = getattr(self, "_running_text", None)
+        if text is not None and self._marker().is_file():
+            self._mark_running(text)
+
     def _mark_running(self, text: str) -> None:
+        self._running_text = text
         try:
             RUN_DIR.mkdir(parents=True, exist_ok=True)
             self._marker().write_text(json.dumps({"session": self.name, "workspace": str(self.workspace),
@@ -966,10 +997,10 @@ class Session:
                "effort": resolved_effort,
                "effort_auto": effort_auto,
                "reasoning_budget_tokens": resolved_budget,
-               "effort_reason": reason,
+               "effort_reason": reason, "git_ok": self._git_for(prompt), "task_text": self.task_text,
                "emit": self.emit, "cancel": self.cancel, "approve": self.approve, "mcp": self.mcp, "user_text": prompt,
                "voice": voice, "session": self,
-               "on_round": self.save,
+               "on_round": self._round_done,
                "on_handoff": lambda _msgs, part: self.snapshot_before_handoff(part)}
         ctx["take_queued"] = lambda ws, eff: self._take_queued(ws, eff, ctx)
         new_ws = cli.execute_agent_loop(messages=self.messages, url=cli.DEFAULT_URL, api_key=cli.DEFAULT_API_KEY,

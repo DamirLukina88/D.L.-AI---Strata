@@ -392,6 +392,11 @@ def _timeout_env(name: str, default: float) -> float | None:
 # still working is never ended by this, only reported once (the recommendation: engine_silence_s, or this variable).
 # STRATA_ENGINE_STALL_S overrides it (0 = off).  Needs psutil (setup installs it); without it nothing is ended.
 ENGINE_STALL_S = _timeout_env("STRATA_ENGINE_STALL_S", 90.0)
+# 2026-11-15: a request stopped mid-prompt (the user pressed Stop, rewound, or the client left) on an engine reading
+# its prompt from disk did not end for minutes, and the prompt sent again waited behind it.  After a STOP the engine
+# gets this long to end the request; then it is ended and the next request starts it again (about a minute).
+# STRATA_ENGINE_CANCEL_S overrides it (0 = wait as before).
+ENGINE_CANCEL_S = _timeout_env("STRATA_ENGINE_CANCEL_S", 15.0)
 STALL_CPU_EPS_S = 0.5       # CPU seconds the engine may use in the whole stall window and still count as frozen
 STALL_IO_EPS_B = 1 << 20    # bytes read or written in that window
 
@@ -789,6 +794,42 @@ def experts_loading_words(args: list, size: str) -> str:
     return f"loading the experts into RAM ({size}) and locking part of them for the GPU."
 
 
+# The engine's memory guard, when the RAM it wanted for the experts is not available at the start (#467): it keeps
+# what fits and reads the rest from the model files - every long prompt is then slow (2026-11-15: an image prompt read
+# for 339 s).  "resident complement W GiB exceeds available RAM ... ; K GiB of the experts the GPU does not hold".
+DEGRADED_START = re.compile(r"whole resident RAM mode does not fit .*?resident complement ([\d.]+) GiB.*?"
+                            r"([\d.]+) GiB of the experts the GPU does not hold")
+DEGRADED_HEADROOM_GIB = 4.0 + 1.0       # the engine's safety headroom, and a margin
+
+
+def degraded_start(log_path: str | None, start: int) -> dict | None:
+    """{"wanted_gib", "kept_gib", "since"} when this start's log lines carry the memory guard's warning, else None."""
+    if not log_path:
+        return None
+    try:
+        with open(log_path, "rb") as f:
+            f.seek(max(start, os.path.getsize(log_path) - (8 << 20)))
+            text = f.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    hits = list(DEGRADED_START.finditer(text))
+    if not hits:
+        return None
+    m = hits[-1]
+    return {"wanted_gib": float(m.group(1)), "kept_gib": float(m.group(2)), "since": round(time.time(), 1)}
+
+
+def mem_available_gib() -> float:
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) / (1 << 20)
+    except OSError:
+        pass
+    return 0.0
+
+
 def narrate_start(log_path: str, offset: int, args: list, done: threading.Event, heartbeat=20.0) -> None:
     """While the engine starts, say in the server window what it is doing, from its log: the start reads tens of GB
     into RAM and locks part of it for the GPU, and on many PCs everything is slow or frozen for a minute or more -
@@ -945,6 +986,28 @@ EOS_IDS = {248044, 248046}   # <|endoftext|>, <|im_end|>: the engine's default -
 # finished, #267): the process may stay alive and even print DONE, but it must not take another request.
 FATAL_PREFIXES = ("ERR verify: timed out at layer ", "ERR verify batch: timed out at layer ",
                   "ERR verify: an earlier window never finished", "ERR verify batch: an earlier window never finished")
+
+
+# Monitoring only (2026-11-15: 2 of 6 image requests that day ended on "verify: timed out at layer N"): one JSON line per
+# fatal verify stall, with whether the request carried an image, so the pattern can be counted (dl_sessiond /status).
+# main() sets it; None (tests that import this module) writes nothing
+STALL_LOG: Path | None = None
+
+
+def log_stall(line: str, engine) -> None:
+    if STALL_LOG is None:
+        return
+    m = re.search(r"at layer (\d+)", line)
+    progress = getattr(engine, "progress", None) or (None, None)
+    rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "error": line[4:].strip()[:200],
+           "layer": int(m.group(1)) if m else None, "prompt_tokens": progress[1],
+           "image": bool(getattr(engine, "cur_image", False)), "degraded": bool(getattr(engine, "degraded", None))}
+    try:
+        STALL_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(STALL_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec) + "\n")
+    except OSError:
+        pass
 
 
 class StrataEngine:
@@ -1110,6 +1173,11 @@ class StrataEngine:
         if self.info.get("engine"):
             self.info["version"] = str(self.info["engine"])
         self.ended = False                              # READY: alive from here (restart() set it True, #344)
+        self.degraded = degraded_start(log, log_start)  # short of RAM at the start: /health says so, idle reload
+        if self.degraded:
+            print(f"[strata] WARNING: the engine started short of memory: {self.degraded['kept_gib']:g} of "
+                  f"{self.degraded['wanted_gib']:g} GiB of experts in RAM, the rest read from disk (slow); it reloads "
+                  "when idle and the memory is free", flush=True)
         # the engine's stdout on a thread, so a request can wait with a timeout (heartbeats, cancel checks)
         self.lines: queue.Queue = queue.Queue()
         # --batch: concurrent requests in the engine's batch slots (see generate_batched).  The engine says how many
@@ -1172,6 +1240,7 @@ class StrataEngine:
         for line in proc.stdout:
             # checked before batch routing: a fatal line is never a slot's own
             if line.startswith(FATAL_PREFIXES):
+                log_stall(line, self)
                 # release_gpu_waits invalidates the verifier, even if the native
                 # process stays alive and prints DONE afterwards.
                 if self.proc is proc:
@@ -1728,6 +1797,7 @@ class StrataEngine:
         with a much shorter prompt (#656: `BYIELD <slot>`; the part read waits in a slot and the read goes on after).
         A consumer that stops early leaves the engine in step: the solo request is STOPped and read to its DONE, an
         admission to its BADM, a slot is BSTOPped and freed at its BDONE."""
+        self.cur_image = bool(embeddings)                # log_stall: did the request carry an image
         if not self.alive():
             raise EngineDied("the engine is unavailable; this request was not sent")
         self.progress, self.progress_ms, self.reused = None, 0, 0
@@ -2122,6 +2192,7 @@ class StrataEngine:
             return
         self.progress, self.progress_ms, self.reused = None, 0, 0
         self.prefill_tok_s_mean = None
+        self.cur_image = bool(embeddings)                # log_stall: did the request carry an image
         # an image request takes the same sampling keys as text (#75: it used to decode greedily whatever was asked)
         head = f"GENI {int(max_new)}{self.sampling_keys(sampling or {})} {embeddings}" if embeddings else \
             f"GEN {int(max_new)}{self.sampling_keys(sampling or {})}"
@@ -2218,15 +2289,20 @@ class StrataEngine:
                 # answers.  An engine that honours STOP gets the current allowance in all (a STOP during a prompt
                 # chunk is seen after it); an older one runs on to max_new, so each line only has to come in time.
                 heard = time.monotonic()
+                cap = ENGINE_CANCEL_S or 0.0
+                cap_at = heard + cap if cap > 0 else None      # a fixed limit from the STOP, whatever lines come
                 while True:
                     left = allow - (time.monotonic() - heard) if allow > 0 else None
+                    if cap_at is not None:
+                        left = min(left, cap_at - time.monotonic()) if left is not None else cap_at - time.monotonic()
                     try:
                         if left is not None and left <= 0:
                             raise queue.Empty
                         line = self.lines.get(timeout=left)
                     except queue.Empty:
+                        took = time.monotonic() - (cap_at - cap if cap_at is not None else heard)
                         raise self._silent("the engine did not finish the request after it was stopped (STOP) "
-                                           f"within {allow:.0f} s") from None
+                                           f"within {took:.0f} s") from None
                     if line is None or line.startswith("ERR"):
                         break
                     if line.startswith("DONE"):
@@ -2557,6 +2633,9 @@ class Vision:
         # first picture and stops after elastic_idle_s without one; while it runs, the engine's expert cache keeps
         # elastic_mib of VRAM free for it (Service._vision_up / _vision_idle_down)
         self.max_tokens = self.token_limit(cfg)
+        # a camera photo larger than this (long side, px) is scaled down before it is read (0 = never); screenshots
+        # and small pictures go through as they are (shrink())
+        self.max_side = int(cfg["max_side"]) if cfg.get("max_side") is not None else 1568
         self.elastic = cfg.get("elastic") is True
         self.elastic_mib = int(cfg["elastic_mib"]) if cfg.get("elastic_mib") is not None else 2048
         self.elastic_idle_s = float(cfg.get("elastic_idle_s") or 120)
@@ -2714,6 +2793,37 @@ class Vision:
         except Exception:  # noqa: BLE001 - any failure leaves the image as it was sent
             return False
 
+    CAMERA_SIDE = 3000                  # a picture this large (long side) is a camera photo, EXIF or not
+
+    @staticmethod
+    def shrink(data: bytes, max_side: int) -> bytes:
+        """A camera photo (a JPEG with the camera's EXIF Make/Model, or any picture whose long side is CAMERA_SIDE or
+        more) larger than max_side is scaled down to it and sent as a JPEG (quality 90): the reader resizes it anyway,
+        and a 12-50 MP photo costs decode time and memory for nothing.  Screenshots and smaller pictures - where the
+        detail is text - go through unchanged, as does everything without Pillow (2026-11-15, per picture)."""
+        if not max_side or max_side <= 0:
+            return data
+        try:
+            import io
+            from PIL import Image
+            with Image.open(io.BytesIO(data)) as im:
+                long_side = max(im.size)
+                if long_side <= max_side:
+                    return data
+                camera = False
+                if im.format == "JPEG":
+                    exif = im.getexif()
+                    camera = bool(exif.get(0x010F) or exif.get(0x0110))      # Make, Model
+                if not camera and long_side < Vision.CAMERA_SIDE:
+                    return data
+                im = im.convert("RGB")
+                im.thumbnail((max_side, max_side), Image.LANCZOS)
+                out = io.BytesIO()
+                im.save(out, format="JPEG", quality=90)
+                return out.getvalue()
+        except Exception:  # noqa: BLE001 - any failure leaves the picture as it was
+            return data
+
     @staticmethod
     def normalize(data: bytes) -> bytes:
         """The formats strata-vision's decoder (stb_image) reads pass through; anything else is converted to PNG.
@@ -2760,7 +2870,8 @@ class Vision:
     def encode(self, source: str | bytes, keep=()) -> tuple[Path, int]:
         """-> (embeddings file, number of image tokens).  `source`: what load() reads, or the image's bytes.
         `keep`: files the caller still needs (never evicted by this call)."""
-        data = self.normalize(source if isinstance(source, bytes) else self.load(source))
+        data = self.shrink(self.normalize(source if isinstance(source, bytes) else self.load(source)),
+                           getattr(self, "max_side", 1568))
         key = hashlib.sha256(data).hexdigest()[:32]
         with self.lock:
             if key in self.cache:
@@ -3470,6 +3581,7 @@ class Service:
         # only start it again when this much VRAM is free, and run this command first (e.g. to unload another
         # server's model); the next request after an unload starts the engine again
         self.idle_unload_s = 0
+        self.degraded_reload = True     # config "degraded_reload": false keeps a short-of-memory engine until /restart
         self.lazy = False
         self.min_free_vram_mib = 0
         self.before_load = None
@@ -4123,6 +4235,54 @@ class Service:
                     print(f"[strata] idle unload: {e}", flush=True)
         threading.Thread(target=loop, daemon=True).start()
 
+    def reload_degraded(self, idle_s: float = 60.0, gap_s: float = 600.0, avail=mem_available_gib) -> str:
+        """Start the engine again when it started short of memory (engine.degraded) and that memory is free now:
+        only between requests, after idle_s without one, at most once per gap_s.  "fine", "waiting" (too soon after
+        the last try), "busy", "no memory" or "reloaded" / "still short"."""
+        d = getattr(self.engine, "degraded", None)
+        if not d or not getattr(self.engine, "alive", lambda: False)():
+            return "fine"
+        now = time.time()
+        if now - getattr(self, "_degraded_try", 0.0) < gap_s:
+            return "waiting"
+        # the running engine gives back what it holds when it stops
+        if avail() + d["kept_gib"] < d["wanted_gib"] + DEGRADED_HEADROOM_GIB:
+            return "no memory"
+        if not self.fifo.acquire(blocking=False):
+            return "busy"
+        try:
+            with self.status_lock:
+                if self.status.get("busy") or self.status.get("queued"):
+                    return "busy"
+            if now - (self.last_request_at or self.started_at) < idle_s:
+                return "busy"
+            self._degraded_try = now
+            print(f"[strata] the engine started short of memory and {avail():.1f} GiB is free now: starting it again",
+                  flush=True)
+            self.engine.restart()
+            again = getattr(self.engine, "degraded", None)
+            print("[strata] " + ("still short of memory after the restart" if again else "engine reloaded with the "
+                                 "whole resident RAM mode"), flush=True)
+            return "still short" if again else "reloaded"
+        except Exception as e:  # noqa: BLE001 - the next request starts it as usual
+            print(f"[strata] reload after a short-of-memory start failed: {e}", flush=True)
+            return f"error: {e}"
+        finally:
+            self.fifo.release()
+
+    def start_degraded_reload(self):
+        if not self.degraded_reload or not hasattr(self.engine, "restart"):
+            return
+
+        def loop():
+            while True:
+                time.sleep(30.0)
+                try:
+                    self.reload_degraded()
+                except Exception as e:  # noqa: BLE001 - the loop keeps running
+                    print(f"[strata] degraded reload: {e}", flush=True)
+        threading.Thread(target=loop, daemon=True).start()
+
     def set_shared(self, defaults) -> dict:
         """The Chat settings every client gets for what it leaves out; {} / None = clients use their own again."""
         self.shared = clean_shared_defaults(defaults)
@@ -4294,6 +4454,11 @@ class Service:
         }
         engine = {"model": self.model, "max_context": self.reported_ctx(), "images": self.vision is not None,
                   **engine_info}
+        # D.L. AI: with lazy_load the engine reports cvec only once it is loaded; the Sampling drawer's projection
+        # switch must also show (and its saved value survive a Save) while the model is unloaded
+        spawn_args = (getattr(self.engine, "spawn", None) or (None, []))[1]
+        if any(a in ("--control-vector", "--control-vector-scaled") for a in spawn_args):
+            engine["cvec_configured"] = True
         tel = self.telemetry.snapshot() if getattr(self, "telemetry", None) else {"now": {}, "history": {}, "static": {}}
         parked = self.conv_log.poll(getattr(self.engine, "log_path", None), getattr(self.engine, "log_start", None))
         return {"engine": engine, "live": live, "requests": hist[::-1][:None if all_requests else 12],
@@ -6415,7 +6580,8 @@ def make_handler(svc: Service):
                 self._json(200, {"status": "ok", "max_context": svc.reported_ctx(), "model": svc.model,
                                  "images": svc.vision is not None, "api_key": bool(svc.api_key),
                                  "image_generation": svc.images is not None,
-                                 "loaded": svc.loaded(), "service": "strata"})
+                                 "loaded": svc.loaded(), "service": "strata",
+                                 "degraded": getattr(svc.engine, "degraded", None) if svc.loaded() else None})
             elif path.startswith("/v1/images/files/"):
                 # response_format url: the name (32 random hex digits) is the access, as an OpenAI image URL is
                 f = svc.images.file(path[len("/v1/images/files/"):]) if svc.images is not None else None
@@ -8778,6 +8944,10 @@ def _main() -> int:
         atexit.register(hub.close)                      # the servers Strata started end with it
     httpd = serve(svc, host=a.host, port=a.port)
     svc.start_idle_unload()
+    global STALL_LOG
+    STALL_LOG = Path(os.environ.get("STRATA_STALL_LOG") or Path.home() / ".local/state/dl-ai/engine-stalls.jsonl")
+    svc.degraded_reload = cfg.get("degraded_reload", True) is not False
+    svc.start_degraded_reload()
     svc.start_vision_idle()
     here = "127.0.0.1" if a.host in ("0.0.0.0", "", "::") else a.host
     print(f"ready: http://{here}:{a.port}/v1  (OpenAI: /v1/chat/completions, Anthropic: /v1/messages, "

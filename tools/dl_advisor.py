@@ -128,7 +128,8 @@ FINAL_SYSTEM = ("You are the final reviewer of work a smaller local coding agent
                 "approved plan, the agent's final report, and the full text of every file it changed. You cannot run "
                 "anything, so reason from the code. Look for: wrong behaviour and bugs (logic, coordinates, off-by-one, "
                 "state that is never reset, input handling), crashes, and requirements of the plan that are not met or "
-                "only claimed. Ignore style and taste.\n"
+                "only claimed. Ignore style and taste. A changed file that the plan does not mention may be the user's "
+                "own work: never ask for a file to be deleted, removed or reverted; at most note it under Optional.\n"
                 "Answer in exactly this form. First line: 'VERDICT: PASS' when there is no bug and no unmet plan "
                 "requirement, or 'VERDICT: FIX' otherwise. Then under 'Must fix:' one bullet per bug or unmet "
                 "requirement, each naming the file, the function or line, what is wrong and how to see it, most "
@@ -182,6 +183,7 @@ class Advisor:
         self.fail_rounds: list[int] = []
         self.sigs: dict[str, int] = {}
         self.raises: list[str] = []
+        self.raise_rounds: list[int] = []       # the round of each raise: going in circles means two close together
         self.consults: list[dict] = []
         self.asked: set[str] = set()
         self.tried: list[str] = []
@@ -199,6 +201,7 @@ class Advisor:
         if reason == "tool call sent as text":      # a format slip D.L. CLI already handles (and revives the server);
             return                                  # it is not going in circles (2026-11-14 16:04 false alarm)
         self.raises.append(reason)
+        self.raise_rounds.append(self.round)
 
     def note_result(self, name: str, args: dict, result: str) -> None:
         """One tool result: what was tried, whether it failed, and whether it was progress."""
@@ -293,7 +296,11 @@ class Advisor:
         if self.round - self.last_progress >= stall and len(recent_fails) >= 3 and "stall" not in self.asked:
             return (f"{self.round - self.last_progress} rounds without progress, {len(recent_fails)} failed results",
                     "stall", FLASH)
-        loops = [r for r in self.raises if r in ("thinking loop", "repeated tool call")]
+        # two repeats close together, not two anywhere in a long request (2026-11-15 09:27: repeats 73 rounds apart
+        # in a run that was editing fine got a 7-block patch nobody needed)
+        window = _int("DL_ADVISOR_LOOP_WINDOW", 12)
+        loops = [r for r, n in zip(self.raises, self.raise_rounds)
+                 if r in ("thinking loop", "repeated tool call") and n >= self.round - window]
         failing_lately = any(r >= self.round - 10 for r in self.fail_rounds)
         if len(loops) >= 2 and failing_lately and "loops" not in self.asked:
             return f"it went in circles ({', '.join(loops[-2:])})", "loops", FLASH
@@ -366,7 +373,9 @@ class Advisor:
         t0 = time.time()
         text = registry.call(TOOL, args, cancel=self.ctx.get("cancel"))
         entry.update(seconds=round(time.time() - t0, 1), sent_chars=len(args["prompt"]), got_chars=len(text or ""))
-        if not text or text.lstrip().lower().startswith(("error", "deepseek api error")):
+        # a failed call starts with the registry's "error: " or the server's own error line; advice that merely
+        # begins with the word "Error..." is advice
+        if not text or text.lstrip().startswith(("error: ", "error:", "Error: DEEPSEEK_API_KEY", "DeepSeek API Error")):
             entry["result"] = (text or "empty")[:200]
             msg = f"DeepSeek helper failed: {(text or 'empty')[:160]}"
             if DEAD_END.search(text or ""):
@@ -391,7 +400,9 @@ class Advisor:
         if emit and system != PATCH_SYSTEM:                    # patch() reports what it hands over itself
             emit({"type": "notice", "level": "info", "text": f"DeepSeek ({model}) answered in {entry['seconds']} s; "
                                                              "its advice was handed to Ray."})
-        return (note or NOTE).format(why=why[:200], model=model, advice=advice[:8000])
+        # a patch is parsed by patch(): it gets the whole answer (cut at 8,000 it lost its later blocks)
+        return (note or NOTE).format(why=why[:200], model=model,
+                                     advice=advice if system == PATCH_SYSTEM else advice[:8000])
 
     def patch(self, registry, why: str, key: str, model: str = FLASH, files: dict[str, str] | None = None,
               diff: str = "", approve=None, emit=None) -> str | None:

@@ -2142,6 +2142,17 @@ function codeScroll(force) {
   }, { passive: true });
 })();
 
+// "Reading the prompt… 42 s (61%)": one line in the feed while the engine reads a long prompt (an image, a big file),
+// rewritten in place and gone when the answer starts (dl_cli.stream_chat_turn's progress events; never replayed)
+function codeReading(ev) {
+  const el = codeFeed().querySelector(".cs-reading");
+  if (!ev || ev.phase !== "reading") { if (el) el.remove(); return; }
+  const pct = ev.total && ev.read != null ? ` (${Math.round((100 * ev.read) / ev.total)}%)` : "";
+  const text = `Reading the prompt… ${ev.elapsed_s || 0} s${pct}${ev.slow ? " · unusually slow" : ""}`;
+  if (el) el.textContent = text;
+  else codeCard("cs-notice cs-notice--info cs-reading", esc(text));
+}
+
 function codeCard(cls, html) {
   const el = document.createElement("div");
   el.className = `code-mobile-card ${cls}`;
@@ -2494,6 +2505,7 @@ function codeEvent(ev, replay) {
       break;
     case "health": codeEnd(); codeCard("code-mobile-card--assistant cs-health", codeHealth(ev.data || {})); break;
     case "notice": codeEnd(); codeCard(`cs-notice cs-notice--${esc(ev.level || "info")}`, esc(ev.text)); break;
+    case "progress": codeReading(ev); break;
     case "error":
       codeEnd();
       codeCard("cs-notice cs-notice--error", esc(ev.text));
@@ -2512,6 +2524,7 @@ function codeEvent(ev, replay) {
       break;
     case "turn_end":
       codeEnd();
+      codeReading(null);
       codeOnTurnEnd();
       break;
     case "state": codeSetState(ev); break;
@@ -2927,9 +2940,9 @@ if ($("code-mobile-input")) {
     }
     if (files.length) {
       e.preventDefault();
-      await uploadFilesToWorkspace(files);
+      const stored = await uploadFilesToWorkspace(files, "uploads/");
       const input = $("code-mobile-input");
-      const refs = files.map(f => `@${f.name}`).join(" ");
+      const refs = stored.map(p => `@${p}`).join(" ");
       input.value = input.value ? `${input.value.trimEnd()} ${refs} ` : `${refs} `;
       input.focus();
       input.dispatchEvent(new Event("input"));
@@ -3725,7 +3738,9 @@ async function saveShared(s) {
 }
 // the engine was started with the experimental-speed-projection control vector (INFO cvec=...)
 function projectionLoaded() {
-  const c = lastMetrics && lastMetrics.engine ? lastMetrics.engine.cvec : 0;
+  const eng = lastMetrics && lastMetrics.engine ? lastMetrics.engine : {};
+  if (eng.cvec_configured) return true;                  // D.L. AI: lazy load, the model is not in memory yet
+  const c = eng.cvec || 0;
   return !!c && c !== "0";
 }
 function outputs() {
@@ -4229,12 +4244,15 @@ async function extractFilesFromDataTransfer(dataTransfer) {
   return files.length ? files : [...(dataTransfer.files || [])];
 }
 
-async function uploadFilesToWorkspace(fileList) {
-  if (!fileList || !fileList.length) return;
+// prefix: a folder for chat attachments ("uploads/"), so pasted and dropped pictures stay out of the project's own
+// files (checkpoints, reviews).  Returns the stored paths, in order, for the @refs.
+async function uploadFilesToWorkspace(fileList, prefix = "") {
+  if (!fileList || !fileList.length) return [];
   let count = 0;
+  const stored = [];
   for (const file of fileList) {
     try {
-      const uploadPath = file.relativePath || file.name;
+      const uploadPath = prefix + (file.relativePath || file.name);
       toast("info", "Uploading…", uploadPath, 1500);
       const r = await fetch(`api/workspace/upload?file=${encodeURIComponent(uploadPath)}`, {
         method: "POST",
@@ -4246,6 +4264,7 @@ async function uploadFilesToWorkspace(fileList) {
         body: file
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      stored.push((await r.json().catch(() => ({}))).path || uploadPath);
       count++;
     } catch (err) {
       toast("error", `Failed to upload ${file.name}`, err.message);
@@ -4255,6 +4274,7 @@ async function uploadFilesToWorkspace(fileList) {
     toast("success", `Uploaded ${count} file${count === 1 ? "" : "s"} to workspace`, "Saved in server workspace");
     loadWorkspaceFiles();
   }
+  return stored;
 }
 
 if ($("workspace-btn")) $("workspace-btn").onclick = () => openWorkspace(true);
@@ -4808,7 +4828,6 @@ async function stopLiveSensorStream() {
 }
 
 if ($("code-sensors-btn")) $("code-sensors-btn").onclick = () => openSensors(true);
-if ($("monitor-open-sensors-btn")) $("monitor-open-sensors-btn").onclick = () => openSensors(true);
 if ($("sensor-close-btn")) $("sensor-close-btn").onclick = () => openSensors(false);
 if ($("sensor-refresh-btn")) $("sensor-refresh-btn").onclick = () => {
   if (typeof window !== "undefined" && window.RayAndroid && typeof window.RayAndroid.refreshAllSensors === "function") {
@@ -4905,10 +4924,10 @@ window.addEventListener("drop", async (e) => {
     e.preventDefault();
     const files = await extractFilesFromDataTransfer(e.dataTransfer);
     if (files.length) {
-      await uploadFilesToWorkspace(files);
+      const stored = await uploadFilesToWorkspace(files, "uploads/");
       const input = $("code-mobile-input");
-      if (input) {
-        const refs = files.map(f => `@${f.name}`).join(" ");
+      if (input && stored.length) {
+        const refs = stored.map(p => `@${p}`).join(" ");
         input.value = input.value ? `${input.value.trimEnd()} ${refs} ` : `${refs} `;
         input.focus();
         input.dispatchEvent(new Event("input"));

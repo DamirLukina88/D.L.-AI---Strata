@@ -36,6 +36,18 @@ try:
     from tools.dl_auditing import find_known_secrets, scan_secrets_in_text  # noqa: E402
 except ImportError:
     from dl_auditing import find_known_secrets, scan_secrets_in_text  # noqa: E402
+if __package__ == "tools":
+    from tools import dl_router, dl_mcp_router  # noqa: E402
+else:
+    try:
+        import dl_router  # noqa: E402
+        import dl_mcp_router  # noqa: E402
+    except ImportError:
+        try:
+            from tools import dl_router, dl_mcp_router  # noqa: E402
+        except ImportError:
+            dl_router = None
+            dl_mcp_router = None
 
 # D.L. CLI's own tools that are not in the catalogue; /mcp lists them so every outside service shows in one place
 BUILT_IN = [("exa", "Web search (Exa web API, not MCP): exa_web_search, /exa <query>"),
@@ -50,6 +62,88 @@ EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 RECIPIENT_KEY = re.compile(r"^(to|cc|bcc|recipients?|send_?to|share_?with|new_owner_email)$", re.I)
 BODY_KEY = re.compile(r"^(body|text|content|message|html_?body|plain_?body)$", re.I)
 
+
+
+# A picture attached to the prompt ("@phone-photos/x.jpg", "[Image: ...]"): the words "photo", "picture", "slika",
+# "what do you see" are about it, not a request to use the phone's camera or gallery (audit 2026-11-15).
+HAS_ATTACHMENT = re.compile(r"(?:^|\s)@[\w./-]+\.(?:jpe?g|png|webp|gif|bmp|heic|heif|tiff?|avif)\b|\[(?:Image|Photo)\b",
+                            re.I)
+PICTURE_WORDS = re.compile(r"(?:photos?|pictures?|images?|slik\w*|fotk\w*|pogledaj|look at (?:this|that|it)|"
+                           r"what (?:do|can) you see|what(?:'s| is) (?:this|that|in front)\w*|[šs]ta vidi[šs]|[šs]to vidi[šs])",
+                           re.I)
+# Phone actions that run only when the user's words ask for them, in YOLO too (the user's choice, 2026-11-15: Ray played
+# music, overwrote the clipboard and took a camera snapshot nobody asked for).  "words" always count; "plain" count only
+# when no picture is attached.  An entry's "ask_words" in mcp.json adds to or replaces these, per tool.
+DEFAULT_ASK_WORDS: dict[str, dict] = {
+    "phone_camera_snap": {
+        "words": [r"\bcamera\b", r"\bkamer\w*", r"\bu?slikaj\w*", r"\bsnap\b", r"\btake (?:a |another )?(?:photo|picture|pic)\b",
+                  r"\bfotkaj\w*", r"\bphoto of\b"],
+        "plain": [r"\bwhat (?:do|can) you see\b", r"\blook at (?:this|that|it)\b", r"\bwhat(?:'s| is) in front\b",
+                  r"\b[šs]ta vidi[šs]\b", r"\b[šs]to vidi[šs]\b", r"\bpogledaj\b"],
+    },
+    # it takes a photo when Ray took none in the last 2 minutes (live 2026-11-15: a snapshot nobody asked for)
+    "phone_get_last_photo": {"words": [r"\bcamera\b", r"\bkamer\w*", r"\bu?slikaj\w*", r"\bsnap\w*",
+                                       r"\b(?:last|that|the) (?:photo|picture|snap\w*) you took\b", r"\bfotkaj\w*",
+                                       r"\btake (?:a |another )?(?:photo|picture|pic)\b"]},
+    "phone_get_gallery_image": {"words": [r"\bgaller(?:y|ies)\b", r"\bgalerij\w*", r"\bscreen ?shots?\b",
+                                          r"\bsnimk\w* zaslona\b", r"\bon (?:my|the) phone\b", r"\bna mobitelu\b"],
+                                "plain": [r"\b(?:last|latest|newest|recent) (?:photo|picture|pic|image)\b",
+                                          r"\bzadnj\w* slik\w*", r"\bposljednj\w* slik\w*"]},
+    "phone_control_media": {"words": [r"\bplay(?:s|ing)?\b", r"\bpause[ds]?\b", r"\bresume\b", r"\bskip\b", r"\bnext\b", r"\bprevious\b",
+                                      r"\bstop\b", r"\bmusic\b", r"\bsong\b", r"\btrack\b", r"\bspotify\b", r"\byoutube\b",
+                                      r"\bpjesm\w*", r"\bpusti\w*", r"\bglazb\w*", r"\bmuzik\w*", r"\bpauziraj\w*",
+                                      r"\bzaustavi\w*", r"\bstani\b", r"\bsljede[cć]\w*", r"\bprethodn\w*"]},
+    "phone_play_music": {"words": [r"\bplay(?:s|ing)?\b", r"\bput on\b", r"\bmusic\b", r"\bsong\b", r"\balbum\b", r"\bartist\b",
+                                   r"\bspotify\b", r"\byoutube\b", r"\bpjesm\w*", r"\bpusti\w*", r"\bglazb\w*", r"\bmuzik\w*"]},
+    # only setting the clipboard (action "set"); reading it is harmless
+    "phone_clipboard": {"words": [r"\bclipboard\b", r"\bcopy\b", r"\bkopiraj\w*", r"\bme[dđ]uspremnik\w*", r"\bpaste\b"],
+                        "args": {"action": ["set"]}},
+}
+
+
+def _compile_words(spec) -> dict:
+    """{"words": [rx], "plain": [rx], "args": {key: [values]}} from a list (words only) or such a dict."""
+    if isinstance(spec, (list, tuple)):
+        spec = {"words": list(spec)}
+    spec = spec or {}
+    return {"words": [re.compile(w, re.I) for w in spec.get("words") or []],
+            "plain": [re.compile(w, re.I) for w in spec.get("plain") or []],
+            "args": {str(k): [str(x) for x in v] for k, v in (spec.get("args") or {}).items()}}
+
+
+DEFAULT_ASK_WORDS_RX = {k: _compile_words(v) for k, v in DEFAULT_ASK_WORDS.items()}
+
+
+def asked_in_words(rule: dict, args: dict | None, text: str) -> bool:
+    """Whether a words-gated call may run: its arguments are outside the rule (e.g. reading the clipboard), or the
+    user's words ask for it.  A picture word does not count while a picture is attached; an attached path is no word."""
+    for key, values in (rule.get("args") or {}).items():
+        if str((args or {}).get(key, "") or "").lower() not in values:
+            return True
+    attached = bool(HAS_ATTACHMENT.search(text or ""))
+    text = ATTACHED_REF.sub(" ", text or "")
+    pools = rule["words"] + ([] if attached else rule["plain"])
+    for rx in pools:
+        for m in rx.finditer(text or ""):
+            if not (attached and PICTURE_WORDS.fullmatch(m.group(0))):
+                return True
+    return False
+
+
+ATTACHED_REF = re.compile(r"(?:^|(?<=\s))@[\w./-]+")
+
+
+def trigger_hit(entry, text: str):
+    """The first trigger of `entry` that matches, skipping picture words while a picture is attached; None if none.
+    An attached file's path is not the user's words ("@phone-photos/x.jpg" turned the phone on, live 2026-11-15)."""
+    attached = bool(HAS_ATTACHMENT.search(text or ""))
+    text = ATTACHED_REF.sub(" ", text or "")
+    for rx in entry.triggers:
+        for m in rx.finditer(text):
+            if attached and PICTURE_WORDS.fullmatch(m.group(0).strip()):
+                continue
+            return m
+    return None
 
 class Entry:
     """One catalogue server: the MCP config for McpServer and D.L. CLI's own fields."""
@@ -84,6 +178,8 @@ class Entry:
         self.origins = {str(o) for o in raw.get("origins") or []}
         # the router skips this entry when one of these matches (e.g. Proton's mail words, but the user named Gmail)
         self.unless = [re.compile(t, re.I) for t in raw.get("unless") or []]
+        # per tool: the words the user's request must contain for the call to run (DEFAULT_ASK_WORDS adds the phone's)
+        self.ask_words = {str(k): _compile_words(v) for k, v in (raw.get("ask_words") or {}).items()}
         self.missing = [k for k in raw.get("env_from_secrets") or [] if not os.environ.get(k)]
         # D.L. CLI's own tools this entry takes over: they leave the always-on list while the catalogue has it
         self.replaces = [str(x) for x in raw.get("replaces") or []]
@@ -414,30 +510,88 @@ class McpRegistry:
                 self.enable(name, "default")
 
     # ------------------------------------------------------------------ turns
-    def route(self, text: str, origin: str = "") -> list[tuple[str, str]]:
-        """Start of a user turn: count it, turn on the default servers, every server a trigger matches and every
-        server that lists the prompt's origin (the client that sent it) in `origins`."""
+    def route(self, text: str, origin: str = "", mode: str | None = None) -> list[tuple[str, str]]:
+        """Start of a user turn: count it, turn on default servers, origin-matched servers, and
+        turn-matched servers according to router mode ('rules', 'model2vec', or 'hybrid')."""
         self.turn += 1
         if text:
             self.said.append(text)
         self.ensure_defaults()
-        hits = []
+        hits: list[tuple[str, str]] = []
+        active_mode = dl_router.router_mode(mode, subsystem="mcp") if dl_router is not None else "rules"
+
+        if active_mode == "rules":
+            for name, entry in self.catalog.items():
+                if name in self.enabled or entry.unavailable(self.surface):
+                    continue
+                if origin and any(origin == o or origin.startswith(o + "-") for o in entry.origins):
+                    if not self.enable(name, f"prompt from {origin}").startswith("error"):
+                        hits.append((name, origin))
+                    continue
+                if any(rx.search(text or "") for rx in entry.unless):
+                    continue
+                m = trigger_hit(entry, text)
+                if m:
+                    word = m.group(0)[:40]
+                    if not self.enable(name, f"matched '{word}'").startswith("error"):
+                        hits.append((name, word))
+            return hits
+
         for name, entry in self.catalog.items():
             if name in self.enabled or entry.unavailable(self.surface):
                 continue
             if origin and any(origin == o or origin.startswith(o + "-") for o in entry.origins):
                 if not self.enable(name, f"prompt from {origin}").startswith("error"):
                     hits.append((name, origin))
+
+        if active_mode == "model2vec" and dl_mcp_router is not None:
+            m_hits, used_model = dl_mcp_router.route(
+                text or "",
+                self.catalog,
+                surface=self.surface,
+                enabled=self.enabled,
+            )
+            if used_model:
+                for name, score in m_hits:
+                    why = f"similar: {score:.2f}"
+                    if not self.enable(name, why).startswith("error"):
+                        hits.append((name, why))
+                return hits
+            if dl_router is not None:
+                fb = dl_router.consume_fallback_notice()
+                if fb:
+                    self.notify(fb, "warn")
+
+        regex_matched = False
+        for name, entry in self.catalog.items():
+            if name in self.enabled or entry.unavailable(self.surface):
                 continue
             if any(rx.search(text or "") for rx in entry.unless):
                 continue
-            for rx in entry.triggers:
-                m = rx.search(text or "")
-                if m:
-                    word = m.group(0)[:40]
-                    if not self.enable(name, f"matched '{word}'").startswith("error"):
-                        hits.append((name, word))
-                    break
+            m = trigger_hit(entry, text)
+            if m:
+                word = m.group(0)[:40]
+                regex_matched = True
+                if not self.enable(name, f"matched '{word}'").startswith("error"):
+                    hits.append((name, word))
+
+        if active_mode == "hybrid" and not regex_matched and dl_mcp_router is not None:
+            m_hits, used_model = dl_mcp_router.route(
+                text or "",
+                self.catalog,
+                surface=self.surface,
+                enabled=self.enabled,
+            )
+            if used_model:
+                for name, score in m_hits:
+                    why = f"similar: {score:.2f}"
+                    if not self.enable(name, why).startswith("error"):
+                        hits.append((name, why))
+            elif dl_router is not None:
+                fb = dl_router.consume_fallback_notice()
+                if fb:
+                    self.notify(fb, "warn")
+
         return hits
 
     def tick(self) -> None:
@@ -601,6 +755,20 @@ class McpRegistry:
             with self.lock:
                 self.page[name] = str(url)
 
+    def words_refusal(self, model_name: str, args: dict | None, text: str) -> str | None:
+        """A refusal when the call is a words-gated action (DEFAULT_ASK_WORDS, an entry's ask_words) and the user's
+        request (`text`: this turn's words plus the task it carries on) does not ask for it; None otherwise.  Applies
+        in YOLO too: it is not a card."""
+        name, tool = self.routes.get(model_name, (None, None))
+        if name is None:
+            return None
+        entry = self.catalog.get(name)
+        rule = (entry.ask_words.get(tool) if entry is not None else None) or DEFAULT_ASK_WORDS_RX.get(tool)
+        if rule is None or asked_in_words(rule, args, text):
+            return None
+        return (f"Refused: {tool} runs only when the user asks for it in this request (their words do not). "
+                "Do not retry it; answer without it, or ask the user whether they want it.")
+
     def leak(self, args) -> str | None:
         """An error text when the model's arguments carry a credential (an API key, the Google sign-in token, a value
         from secrets.env), or name a local file that holds one (an attachment, a Drive upload): nothing that leaves
@@ -650,8 +818,10 @@ class McpRegistry:
                     return err
             except ImportError:
                 pass
+        # a page on this PC is one being built: it changes between fetches, so it is never answered from the copy
         fetch_key = (f"{args.get('url')}#{args.get('start_index') or 0}"
-                     if name == "fetch" and tool == "fetch" and isinstance(args, dict) and args.get("url") else None)
+                     if name == "fetch" and tool == "fetch" and isinstance(args, dict) and args.get("url")
+                     and not is_local_url(str(args.get("url"))) else None)
         seen = self.fetched.get(fetch_key) if fetch_key else None
         if seen and time.time() - seen[0] < FETCH_REUSE_S and Path(seen[1]).is_file():
             return (f"Already fetched at {time.strftime('%H:%M', time.localtime(seen[0]))} in this session; the "

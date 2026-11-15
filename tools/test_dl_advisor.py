@@ -144,6 +144,18 @@ class WhenItAsks(Env):
         a.note_raise("thinking loop")
         self.assertIsNone(a.stuck())
 
+    def test_repeats_far_apart_are_not_circles(self):
+        a = A.Advisor({"effort": "high"})            # 2026-11-15: repeats 73 rounds apart in a run that edited fine
+        a.note_raise("repeated tool call", "run_command")
+        for _ in range(40):
+            a.end_round()
+        a.note_result("run_command", {}, FAIL)
+        a.note_raise("repeated tool call", "run_command")
+        self.assertIsNone(a.stuck())
+        a.end_round()
+        a.note_raise("repeated tool call", "run_command")
+        self.assertEqual(a.stuck()[1], "loops")
+
     def test_limits(self):
         a, reg = stuck_advisor(yolo=True), FakeRegistry()
         why = a.stuck()
@@ -304,6 +316,24 @@ class FinalReview(Env):
         self.assertIn("file cut", reg.calls[0]["prompt"])
 
 
+class FinalReviewFiles(Env):
+    """2026-11-15: two stale scripts in /tmp, the plan and a file of the user's filled the final review's brief
+    before the game itself, and the reviewer asked for the user's file to be removed."""
+
+    def test_project_files_first_no_plan_nothing_outside_the_workspace(self):
+        ws = Path(self.tmp.name) / "ws_final"
+        (ws / "tetris").mkdir(parents=True)
+        for name in ("tetris/index.html", "PLAN.md", "LAPTOP-SETUP.md", "tetris.test.js"):
+            (ws / name).write_text("x")
+        changed = [Path("/tmp/model.js"), Path("/tmp/selftest.js"), ws / "PLAN.md", ws / "tetris" / "index.html"]
+        via_cps = ["LAPTOP-SETUP.md", "PLAN.md", "tetris.test.js", "tetris/index.html"]
+        self.assertEqual(cli.final_review_files(ws, changed, via_cps, str(ws / "PLAN.md")),
+                         ["tetris/index.html", "LAPTOP-SETUP.md", "tetris.test.js"])
+
+    def test_the_reviewer_is_told_not_to_ask_for_files_to_be_removed(self):
+        self.assertIn("never ask for a file to be deleted", A.FINAL_SYSTEM)
+
+
 class WhatItSends(Env):
     def test_brief_and_note(self):
         a, reg = stuck_advisor(yolo=True), FakeRegistry()
@@ -456,6 +486,24 @@ class PatchMode(Env):
         self.assertNotIn("/etc/hosts\n<<<OLD", note)
         self.assertEqual(a.consults[-1]["patch_blocks"], 1)
 
+    def test_a_long_patch_keeps_its_later_blocks(self):
+        ws = self.ws()                                   # cut at 8,000 characters, the second block was lost
+        long_new = "let x = 3; // " + "x" * 9000
+        answer = (f"FILE: a.js\n<<<OLD\nlet x = 1;\n===\n{long_new}\nNEW>>>\n"
+                  "FILE: a.js\n<<<OLD\nlet y = 2;\nlet y = 2;\n===\nlet y = 5;\nNEW>>>\nCHECK: node a.js\n\n"
+                  "[model: deepseek-flash]")
+        a, reg = stuck_advisor(yolo=True, workspace=ws), FakeRegistry(answer=answer)
+        note = a.patch(reg, *a.stuck(), files=a.target_files(["a.js"]))
+        self.assertEqual(a.consults[-1]["patch_blocks"], 2)
+        self.assertIn("let y = 5;", note)
+
+    def test_advice_that_starts_with_the_word_error_is_advice(self):
+        answer = "Errors come from the test, not the code (401 is what it expects): fix line 3.\n\n[model: deepseek-flash]"
+        a, reg = stuck_advisor(yolo=True), FakeRegistry(answer=answer)
+        note = a.consult(reg, *a.stuck())
+        self.assertIn("Errors come from the test", note or "")
+        self.assertIsNone(A.paused())
+
     def test_a_patch_that_matches_nothing_becomes_advice(self):
         ws = self.ws()
         a = stuck_advisor(yolo=True, workspace=ws)
@@ -596,6 +644,75 @@ class Watchdog(Env):
         self.assertFalse(any("rounds without changing" in str(m.get("content", "")) for m in msgs))
 
 
+class WatchdogWithoutCheckpoints(Env):
+    """Checkpoints that turned themselves off (no jj, too big a folder) report no change: the edit tools count then."""
+
+    def test_edits_every_round_are_not_nudged(self):
+        ws = Path(self.tmp.name) / "ws_off"
+        ws.mkdir()
+        (ws / "a.js").write_text("let x = 0;\n")
+        n = 0
+
+        class Off(cli.Checkpoints):
+            def __init__(self, ws_, emit=None):
+                super().__init__(ws_, emit)
+                self.off = "jj is not installed"
+
+        def turn(messages, *a, **k):
+            nonlocal n
+            n += 1
+            if n > 14:
+                return reply("Done.")
+            return reply("", call(n, "write_to_file", {"TargetFile": str(ws / "a.js"), "CodeContent": f"let x = {n};\n",
+                                                       "Overwrite": True}))
+        msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "[Now: x]\nfix a.js"}]
+        ctx = {"workspace": ws, "messages": msgs, "mode": "act", "yolo": True, "effort": "high", "effort_auto": False,
+               "effort_reason": "coding task", "user_text": "fix a.js", "mcp": None}
+        with patch.object(cli, "chat_turn_in_context", side_effect=turn), \
+             patch.object(cli, "Checkpoints", Off), \
+             patch.object(cli, "get_active_tools", return_value=[]), \
+             patch.dict(os.environ, {"DL_REVIEW": "0", "DL_CHECKPOINTS": "1", "DL_BROWSER_CHECK": "0",
+                                     "DL_EVIDENCE": "0", "DL_ADVISOR": "0"}):
+            cli.execute_agent_loop(msgs, "http://127.0.0.1:1", "k", ws, max_turns=20, session_context=ctx)
+        self.assertEqual((ws / "a.js").read_text(), "let x = 14;\n")
+        self.assertFalse([m for m in msgs if "rounds without changing" in str(m.get("content", ""))])
+
+
+class WatchdogIgnoresScratchFiles(Env):
+    """Test, probe and scratch files are not a changed project file (the user's choice, 2026-11-15); the plan is."""
+
+    def test_which_files_count(self):
+        for name in ("tetris.test.js", "test_game.py", "game_test.go", "probe-tetris.html", "scratch.js", "tmp_gen.py",
+                     "tests/unit/a.js", "/tmp/gen.js"):
+            self.assertFalse(cli.project_change([name], Path(self.tmp.name)), name)
+        for name in ("tetris.html", "src/game.js", "template.html", "contest.py", "latest.md", "PLAN.md"):
+            self.assertTrue(cli.project_change([name], Path(self.tmp.name)), name)
+        self.assertTrue(cli.project_change(["a.test.js", "a.js"]))
+
+    def test_only_scratch_files_written_is_still_nudged(self):
+        ws = Path(self.tmp.name) / "ws_scratch"
+        ws.mkdir()
+        (ws / "a.js").write_text("let x = 0;\n")
+        n = 0
+
+        def turn(messages, *a, **k):
+            nonlocal n
+            n += 1
+            if n > 14:
+                return reply("Done.")
+            return reply("", call(n, "write_to_file", {"TargetFile": str(ws / f"probe_{n}.test.js"),
+                                                       "CodeContent": f"// {n}\n", "Overwrite": True}))
+        msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "[Now: x]\nfix a.js"}]
+        ctx = {"workspace": ws, "messages": msgs, "mode": "act", "yolo": True, "effort": "high", "effort_auto": False,
+               "effort_reason": "coding task", "user_text": "fix a.js", "mcp": None}
+        with patch.object(cli, "chat_turn_in_context", side_effect=turn), \
+             patch.object(cli, "get_active_tools", return_value=[]), \
+             patch.dict(os.environ, {"DL_REVIEW": "0", "DL_CHECKPOINTS": "0", "DL_BROWSER_CHECK": "0",
+                                     "DL_EVIDENCE": "0", "DL_ADVISOR": "0"}):
+            cli.execute_agent_loop(msgs, "http://127.0.0.1:1", "k", ws, max_turns=20, session_context=ctx)
+        self.assertEqual(len([m for m in msgs if str(m.get("content", "")).startswith("[D.L. CLI] 12 rounds")]), 1)
+
+
 class LeanThinking(Env):
     """Auto effort on coding work: high in the first round and for 2 rounds after a failure, medium otherwise."""
 
@@ -629,6 +746,35 @@ class LeanThinking(Env):
         self.assertEqual(levels[:6], ["high", "medium", "medium", "high", "high", "medium"])
         self.assertEqual(efforts[1][1], 2048)
         self.assertTrue(ctx.get("raised"))
+
+    def test_a_long_failing_command_keeps_its_exit_code(self):
+        ws = Path(self.tmp.name) / "ws_long"             # cut to its first 8,000 characters, the run looked like a pass
+        ws.mkdir()
+        efforts, n = [], 0
+
+        def turn(messages, *a, **k):
+            nonlocal n
+            n += 1
+            efforts.append(k.get("effort"))
+            return reply("Done.") if n >= 3 else reply("", call(n, "run_command", {"CommandLine": f"node t.js # {n}"}))
+
+        def run(args, ws_):
+            return ("x" * 20000 + "\nFAIL t clears 4 rows\n[Command exited with code 1]"
+                    if "# 1" in args.get("CommandLine", "") else "ok\n[Command exited with code 0]")
+        msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "x"}]
+        ctx = {"workspace": ws, "messages": msgs, "mode": "act", "yolo": True, "effort": "high",
+               "effort_auto": True, "effort_reason": "coding task", "reasoning_budget_tokens": 4096,
+               "user_text": "fix t.js", "mcp": None}
+        with patch.object(cli, "chat_turn_in_context", side_effect=turn), \
+             patch.object(cli, "tool_run_command", side_effect=run), \
+             patch.object(cli, "get_active_tools", return_value=[]), \
+             patch.dict(os.environ, {"DL_REVIEW": "0", "DL_CHECKPOINTS": "0", "DL_BROWSER_CHECK": "0",
+                                     "DL_EVIDENCE": "0", "DL_ADVISOR": "0"}):
+            cli.execute_agent_loop(msgs, "http://127.0.0.1:1", "k", ws, max_turns=5, session_context=ctx)
+        first = next(str(m["content"]) for m in msgs if m.get("role") == "tool")
+        self.assertIn("FAIL t clears 4 rows\n[Command exited with code 1]", first)
+        self.assertLess(len(first), 8600)
+        self.assertEqual(efforts, ["high", "high", "high"])
 
     def test_bare_filename_or_model2vec_reason_still_enables_lean_thinking(self):
         ws = Path(self.tmp.name) / "ws_bare"

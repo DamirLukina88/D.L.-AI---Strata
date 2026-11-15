@@ -809,6 +809,52 @@ class ResumeAfterKill(unittest.TestCase):
         self.assertEqual(seen, [True])
         self.assertFalse((self.tmp / "running" / "t.json").exists())
 
+    def test_a_round_refreshes_the_marker_time(self):
+        import json as _json
+        ages = []
+        marker = self.tmp / "running" / "t.json"
+
+        def loop(**kw):
+            info = _json.loads(marker.read_text())
+            info["ts"] -= 9000                           # as if the turn had been running for 2.5 hours
+            marker.write_text(_json.dumps(info))
+            kw["session_context"]["on_round"]()
+            ages.append(time.time() - _json.loads(marker.read_text())["ts"])
+            return kw["workspace"]
+        s = self.sd.Session("t", self.tmp)
+        s.save = lambda: None
+        with self.mock.patch.object(self.sd.cli, "execute_agent_loop", loop):
+            s.submit("fix it")
+            self.wait_idle(s)
+        self.assertEqual(len(ages), 1)
+        self.assertLess(ages[0], 60)
+        self.assertFalse(marker.exists())
+
+    def test_git_go_ahead_carries_over_follow_ups_only(self):
+        seen = []
+        s = self.sd.Session("t", self.tmp)
+        s.save = lambda: None
+        with self.mock.patch.object(self.sd.cli, "execute_agent_loop",
+                                    lambda **kw: (seen.append(kw["session_context"]["git_ok"]), kw["workspace"])[1]):
+            for text in ("commit the change", "yes, use git for that", "continue",
+                         self.sd.RESUME_TEXT + "\n\nCut-off request: tidy up", "now fix the header"):
+                s.submit(text)
+                self.wait_idle(s)
+        self.assertEqual(seen, [False, True, True, True, False])
+
+    def test_task_words_carry_over_follow_ups_only(self):
+        seen = []
+        s = self.sd.Session("t", self.tmp)
+        s.save = lambda: None
+        with self.mock.patch.object(self.sd.cli, "execute_agent_loop",
+                                    lambda **kw: (seen.append(kw["session_context"]["task_text"]), kw["workspace"])[1]):
+            for text in ("take a photo with the camera", "continue", "now fix the header"):
+                s.submit(text)
+                self.wait_idle(s)
+        self.assertEqual(seen[0], "take a photo with the camera")
+        self.assertIn("camera", seen[1])
+        self.assertEqual(seen[2], "now fix the header")
+
     def test_engine_death_resumes_once(self):
         prompts = []
 
