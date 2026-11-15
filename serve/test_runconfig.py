@@ -18,6 +18,7 @@ from pathlib import Path
 from serve import runconfig
 from serve.frontend import ChatTemplate
 from serve.server import ByteTokenizer, MockEngine, Service, serve
+from serve.webapp_source import app_js_text
 
 ROOT = Path(__file__).resolve().parents[1]
 CFG = {"exe": "engine/strata.exe", "args": ["--pack", "data/packs/q2_0", "--kv", "int8", "--spec-min-p", "0.5"],
@@ -155,7 +156,7 @@ class Http(unittest.TestCase):
 
     def test_the_page_has_the_view(self):
         web = ROOT / "serve" / "web"
-        html, js = (web / "index.html").read_text(encoding="utf-8"), (web / "app.js").read_text(encoding="utf-8")
+        html, js = (web / "index.html").read_text(encoding="utf-8"), app_js_text()
         for el in ("cfg-card", "cfg-form", "cfg-save", "cfg-msg"):
             self.assertIn(f'id="{el}"', html)
         self.assertIn('fetch("config", {method: "POST", headers: headers(true)', js)

@@ -627,8 +627,7 @@ assert.strictEqual(simCodeClose.triggerEl.focused, true, "#code-sampling-btn mus
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
-const appJsPath = path.resolve(__dirname, "../serve/web/app.js");
-const appJsSource = fs.readFileSync(appJsPath, "utf-8");
+const appJsSource = require("./web_app_source").appJsText();     // the web app is several scripts (serve/web/app-*.js)
 const cleanStart = appJsSource.indexOf("function cleanForSpeech");
 const cleanEnd = appJsSource.indexOf("\nfunction chunkText");
 const cleanFnSource = appJsSource.slice(cleanStart, cleanEnd);

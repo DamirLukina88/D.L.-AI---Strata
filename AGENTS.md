@@ -9,7 +9,8 @@ fixes ported one by one ([docs/RAY_CHANGES.md](docs/RAY_CHANGES.md)).
 
 - `src/`, `include/`: the C++/CUDA/HIP/SYCL engine. `setup.py`, `setup.sh`, `START-HERE.bat`: the installer.
 - `serve/`: the Python server (OpenAI- and Anthropic-compatible API, engine supervision, vision encoder, MCP) and the
-  web app in `serve/web/` (Code tab, monitor, voice).
+  web app in `serve/web/` (Code tab, monitor, voice): one program in 11 classic scripts (`app-01-util.js` ... `app.js`,
+  loaded in that order by `index.html`; tests read them through `serve/webapp_source.py` and `tools/web_app_source.js`).
 - `tools/dl_cli.py`: Ray's agent loop and entry point. It re-exports the names of the `tools/dl_*.py` modules it was
   split into (`dl_prompt`, `dl_boundary`, `dl_engine`, `dl_context`, `dl_finish`, `dl_checkpoints`, `dl_media`,
   `dl_tools_impl`, ...). Names that tests patch, and code that must see the patched value, are read through

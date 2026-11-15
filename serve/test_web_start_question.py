@@ -18,7 +18,8 @@ import subprocess
 import unittest
 from pathlib import Path
 
-APP = Path(__file__).resolve().parent / "web" / "app.js"
+from serve.webapp_source import app_js_text
+
 
 
 def between(src: str, start: str, end: str) -> str:
@@ -79,7 +80,7 @@ async function send() { sends.push(input.value); await fetch("v1/chat/completion
 class StartQuestion(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.src = APP.read_text(encoding="utf-8")
+        cls.src = app_js_text()
         cls.start = between(cls.src, "async function start() {", "\nstart();")
         m = re.search(r"function autosize\(\)[^\n]*", cls.src)
         assert m, "autosize() is gone"

@@ -43,7 +43,7 @@ PITCH = 1.5
 # node: play a recorded turn back through the web app's speech code on a fake clock (50 ms steps)
 NODE = r"""
 const fs = require("fs");
-const app = fs.readFileSync(process.argv[1], "utf8");
+const app = require(process.argv[1]).appJsText();      // the web app is several scripts (serve/web/app-*.js)
 const a = app.indexOf("function cleanForSpeech("), b = app.indexOf("function chunkText(");
 const c = app.indexOf("\n}\n", b) + 3;
 eval(app.slice(a, c).replace("function cleanForSpeech(", "globalThis.cleanForSpeech = function(")
@@ -178,7 +178,7 @@ def main() -> int:
           "Answer's first word, while written | Longest silence before the answer | Preamble spoken |")
     print("| :-- | --: | --: | --: | --: | --: | --: | :-- |")
     for rec in recs:
-        r = json.loads(subprocess.run(["node", "-e", NODE, str(ROOT / "serve/web/app.js"), str(ROOT / "serve/web/speakstream.js")],
+        r = json.loads(subprocess.run(["node", "-e", NODE, str(ROOT / "tools/web_app_source.js"), str(ROOT / "serve/web/speakstream.js")],
                                       input=json.dumps({"rec": rec, "fit": fit}), capture_output=True, text=True,
                                       check=True).stdout)
         n = sum(1 for e in rec["events"] if e["type"] == "tool_call")

@@ -8,7 +8,7 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 
-const SRC = fs.readFileSync(path.join(__dirname, "..", "serve", "web", "app.js"), "utf8");
+const SRC = require("./web_app_source").appJsText();     // the web app is several scripts (serve/web/app-*.js)
 
 // a top-level `function name(...) { ... }` from app.js, by matching braces (strings and regexes in these functions
 // keep their braces balanced)

@@ -11,6 +11,7 @@ from unittest import mock
 
 from serve.frontend import ChatTemplate
 from serve.server import ByteTokenizer, EngineDied, MockEngine, Service, serve
+from serve.webapp_source import app_js_text
 
 
 class ReloadableEngine(MockEngine):
@@ -251,7 +252,7 @@ class ConversationCacheCard(unittest.TestCase):
 
     def test_the_card_is_on_the_page(self):
         web = Path(__file__).parent / "web"
-        html, js = (web / "index.html").read_text(encoding="utf-8"), (web / "app.js").read_text(encoding="utf-8")
+        html, js = (web / "index.html").read_text(encoding="utf-8"), app_js_text()
         for el in ("cc-card", "cc-slots-text", "cc-mem-text", "cc-facts", "cc-note"):
             self.assertIn(f'id="{el}"', html)
             self.assertIn(f'"{el}"', js)
