@@ -137,7 +137,7 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str, tools: list[d
             reading["slow"] = ev["slow"] = True
             emit({"type": "notice", "level": "warn",
                   "text": f"The engine has been reading the prompt for {int(elapsed)} s, which is unusually slow. "
-                          "/restart reloads it."})
+                          "The Monitor tab's Restart reloads the model."})
         emit(ev)
 
     def output_started() -> None:

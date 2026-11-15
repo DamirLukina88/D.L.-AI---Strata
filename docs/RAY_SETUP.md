@@ -16,6 +16,8 @@ Installing this fork on your own PC, and how to use it from the browser, the ter
    STRATA_API_KEY=<a long random string, e.g. python3 -c "import secrets; print(secrets.token_hex(24))">
    EXA_API_KEY=<your Exa key>                 # optional: web search
    CONTEXT7_API_KEY=<your Context7 key>       # optional: library docs
+   DEEPSEEK_API_KEY=<your DeepSeek key>       # optional: the DeepSeek helper and the deepseek MCP server
+   DEEPL_API_KEY=<your DeepL key>             # optional: translation
    HASS_URL=http://127.0.0.1:8123             # optional: Home Assistant smart home
    HASS_TOKEN=<your Long-Lived Access Token>  # optional: Home Assistant
    STRATA_CF_ACCESS_TEAM=<your Zero Trust team name>
@@ -30,6 +32,17 @@ Installing this fork on your own PC, and how to use it from the browser, the ter
    systemctl --user daemon-reload
    systemctl --user enable --now dl-ai-sessiond
    ```
+
+   The template runs the daemon with the checkout's Python (`.venv`). Both units should carry `OOMPolicy=continue`
+   and an `OOMScoreAdjust` (the engine's higher than the daemon's, so the kernel ends the engine first). The live
+   daemon also sets `DL_EFFORT_ROUTER_MODE=hybrid` (rules first, then a Model2Vec classifier; `rules` is the
+   plain default without it) and `DL_MCP_ROUTER_MODE=rules`.
+
+3b. **The shared memory store (optional, recommended).** Ray, Claude Code and Antigravity share one jj-versioned
+   Markdown store. Install [jj](https://github.com/jj-vcs/jj), create a folder for it, write
+   `~/.config/dl-ai/memory.json` as `{"root": "<that folder>"}` (optional keys: `jj_bin`, `max_digest_chars`) and run
+   `python3 tools/dl_memory.py init --root <that folder>`. Without a store Ray falls back to the per-project
+   `wiki/` folder. `RAY_MEMORY_DIR=off` turns the store off.
 
 4. **Remote access (optional).** Create a Cloudflare Tunnel to `http://localhost:8080` with QUIC protocol. Add an Access application
    for its hostname, with a Bypass policy for `/v1/*` if API clients connect from outside. Copy the application's
@@ -65,7 +78,11 @@ Installing this fork on your own PC, and how to use it from the browser, the ter
   | `/mcp trust\|ask <server>` | stop or resume a server's approval card for this session (e.g. DeepSeek) |
   | `/speak` | read the latest assistant message aloud |
   | `/exa <query>`, `/context7 <library>` | web search, library docs |
-  | `/diff`, `/secrets`, `/test`, `/wiki` | review the diff, scan for secrets, run tests, search the wiki |
+  | `/diff`, `/secrets`, `/test` | review the diff, scan for secrets, run tests |
+  | `/memory [search\|read\|lint\|digest\|backup\|undo] ...` | the shared memory store (`/wiki` is an alias) |
+  | `/remember [global\|project] <fact>`, `/recall <words>` | save a fact to the store, search it |
+  | `/handoff` | write the handoff brief now and reset the conversation to it |
+  | `/schedule` | list, add or remove scheduled jobs |
   | `/save` | save the chat as Markdown |
   | `/clear`, `/new` | start a new conversation; the current one is saved |
   | `/sessions [words]` | saved conversations, newest first; words search titles and messages |

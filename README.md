@@ -36,7 +36,10 @@ system RAM. Your conversations stay at home.
   battery, flashlight, alarms, media, notifications, the screen and the camera.
 - **Runs the smart home.** He works lights, climate, plugs and sensors, 3D printers and cameras through Home
   Assistant.
-- **Uses tools.** Around 38 tool servers: web search, mail and drive, translation, maps, weather, papers and more.
+- **Uses tools.** Around 40 tool servers, turned on only when a request needs them: web search, mail and drive, translation, maps, weather, papers and more.
+- **Remembers.** Ray, Claude Code and Antigravity share one versioned memory store of decisions and preferences per
+  project, and he keeps rules in code that no prompt can talk him out of (no git, no global memory, no phone camera
+  unless you ask).
 - **Shows his work.** You can watch the model think, follow each tool call, and see the GPU, memory and speed live.
 - **Is reachable from anywhere.** Remote access goes through a Cloudflare Tunnel behind a login.
 - **Has a face.** A red panda drawn in dots sits on the input box. He puts a paw to his chin while thinking, moves
@@ -44,7 +47,8 @@ system RAM. Your conversations stay at home.
 
 **Speed:** about **26–30 tokens per second** when chatting (about **33 tok/s** in coding-agent sessions), and up to
 **383 tokens per second** when reading a long prompt (a 32K prompt is read in 84 s). Both were measured on the
-RX 7600 XT above on 2026-11-13 and 2026-11-14, with the full numbers in [docs/RAY_SPEED.md](docs/RAY_SPEED.md).
+RX 7600 XT above on 2026-11-13 and 2026-11-14 at a GPU setting of 2800 MHz / 198 W; since GPU crashes the card runs
+at 2500 MHz / 150 W and the numbers await a re-run. The full numbers are in [docs/RAY_SPEED.md](docs/RAY_SPEED.md).
 
 ## Quick start
 

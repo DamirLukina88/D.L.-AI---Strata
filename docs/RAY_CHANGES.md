@@ -4,26 +4,45 @@ How this fork follows upstream Strata releases, what was ported, and the communi
 
 [← Back to the README](../README.md)
 
-The inference engine is Strata, configured and optimized for AMD RDNA3 (ROCm/HIP). Upstream
-Strata releases are continuously evaluated and synced with each release. Upstream 0.2.0-beta and 0.2.1 were
-reviewed on 2026-10-20 ([review](../wiki/artifacts/upstream-v0-2-releases-review-2026-10-20.md)). From 0.2.2 and 0.2.3/0.2.3.1,
-crucial engine, vision, and spec fixes were ported alongside enabling 8-bit hyper-connection weights (`STRATA_HC_Q8=1`)
-after an A/B benchmark ([review](../wiki/artifacts/upstream-v0-2-3-review-2026-10-23.md)). On 2026-10-25, **v0.2.5** and
-**v0.2.6** were synchronized: CommonMark soft linebreaks, direct screenshot clipboard paste (`Ctrl+V`), window-level
-drag-and-drop, dynamic model load timeout scaling, safe shard removal guards, `require_messages(messages)` OpenAI-spec
-validation, 1-token health check speed guards, and stable GPU hardware telemetry IDs
-([v0.2.5 walkthrough](../wiki/artifacts/strata-v0-2-5-sync-and-ergonomics-walkthrough.md),
-[v0.2.6 & tools walkthrough](../wiki/artifacts/davinci-cst-ipc2152-wargaming-and-v026-sync-walkthrough.md),
-[system audit](../wiki/artifacts/full-workstation-audit-and-verification-2026-10-25.md)). On 2026-10-27, four
-**v0.2.7** fixes were ported into engine `0.1.44.1+0.2.7-fixes`:
-- a failed read of the per-layer table no longer hangs the next request (#3602);
-- a checkpoint copy that runs out of memory is skipped instead of ending the engine (#3350);
-- no restore is attempted on a card too full to create its copy stream (#2409);
-- an MCP tool name written with `__` collapsed to `_` is read as the declared tool (#3796).
+The inference engine is Strata, configured and optimized for AMD RDNA3 (ROCm/HIP). This fork last merged upstream
+as a whole at v0.1.44.1 (2026-10-15). Later upstream releases are reviewed against this PC (AMD Ryzen 5 3600, 32 GB
+RAM, Radeon RX 7600 XT 16 GB `gfx1102`, CachyOS, ROCm) and only the fixes that apply are ported by hand, so the engine
+reads `0.1.44.1+0.2.12-fixes`. The reviews live in the shared memory store (project `strata`, pages named
+`upstream-v0-2-*-review-*`); they are not part of this repository.
 
-Each was checked with tests and a short smoke test; no benchmark was run
-([review](../wiki/artifacts/upstream-v0-2-7-review-2026-10-27.md)). On 2026-11-01, an official community benchmark was run with `tools/strata_bench.py --long` against the live 64K context server with Two-Tier Wiki Handoff active ([report](../wiki/artifacts/strata-benchmark-2026-11-01.md)):
+## Releases reviewed and ported
+
+- **0.2.0-beta, 0.2.1 (2026-10-20):** reviewed, nothing merged.
+- **0.2.2, 0.2.3 / 0.2.3.1 (2026-10-21 to 10-23):** crucial engine, vision and spec fixes ported, and 8-bit
+  hyper-connection weights (`STRATA_HC_Q8=1`) enabled after an A/B benchmark.
+- **0.2.5, 0.2.6 (2026-10-25):** CommonMark soft linebreaks, direct screenshot clipboard paste (`Ctrl+V`),
+  window-level drag-and-drop, dynamic model load timeout scaling, safe shard removal guards,
+  `require_messages(messages)` OpenAI-spec validation, 1-token health check speed guards, and stable GPU hardware
+  telemetry IDs.
+- **0.2.7 (2026-10-27)**, four fixes, engine `0.1.44.1+0.2.7-fixes`, each checked with tests and a short smoke test
+  (no benchmark):
+  - a failed read of the per-layer table no longer hangs the next request (#3602);
+  - a checkpoint copy that runs out of memory is skipped instead of ending the engine (#3350);
+  - no restore is attempted on a card too full to create its copy stream (#2409);
+  - an MCP tool name written with `__` collapsed to `_` is read as the declared tool (#3796).
+- **0.2.8, 0.2.9 (2026-10-29 to 10-31):** tool-call parser fixes and the parser code-fence fix ported; much of the
+  rest is for Mac, DGX Spark, Intel, Strix Halo or the desktop app, which this install does not use.
+- **0.2.10 (2026-11-03):** parser and server fixes first, then the HIP #4677 and #4350 engine fixes, with an A/B
+  benchmark.
+- **0.2.11 (2026-11-05):** server robustness ports and the Q5_0 dot precision fix in the C++/HIP engine, with a 4-leg
+  paired A/B benchmark on the RX 7600 XT.
+- **0.2.12 (2026-11-07):** the C++/HIP engine guards (MMQ row margin and Flag-B ordering), with a 4-leg A/B benchmark.
+  Pull request #5477 (`GET /v1/models/{id}`) was submitted upstream and an AMD benchmark was posted to issue #4677.
+- **0.2.13 (2026-11-09):** audited; nothing applies to this install and the release was skipped. Four small optional
+  ports are noted.
+
+## Community benchmark, 2026-11-01
+
+An official community benchmark was run with `tools/strata_bench.py --long` against the live 64K context server:
 - **Chat Speed & Latency**: 24.7 tok/s decode, 1.54 s time-to-first-token (10.1% latency improvement over baseline).
 - **Prompt Prefill Throughput**: 308 tok/s at 4K, 337 tok/s at 16K, and 335 tok/s at 32K.
-- **Agent Conversation Caching**: 68.5% cache hit rate with only 4 re-read tokens/session (94.4% reduction from 72 tokens), delivering 27.5 tok/s decode across multi-turn sessions.
+- **Agent Conversation Caching**: 68.5% cache hit rate with only 4 re-read tokens/session (94.4% reduction from 72
+  tokens), delivering 27.5 tok/s decode across multi-turn sessions.
 
+These numbers were measured with the GPU set to 2800 MHz / 198 W / -50 mV. After GPU crashes on 2026-11-14 the card
+runs at 2500 MHz / 150 W / -50 mV, so they need a re-run (see [RAY_SPEED.md](RAY_SPEED.md)).

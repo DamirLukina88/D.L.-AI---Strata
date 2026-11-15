@@ -1,6 +1,6 @@
-# D.L. AI shared CLI session daemon (tools/dl_sessiond.py): one agent session for the terminal
-# (dl_cli.py --attach) and the web app's Code tab.  Install:
-#   cp tools/systemd/dl-ai-sessiond.service ~/.config/systemd/user/   (set the two paths below)
+# Ray's shared session daemon (tools/dl_sessiond.py): one agent session for the terminal
+# (dl_cli.py --attach), the web app's Code tab and the Android app.  Install:
+#   cp tools/systemd/dl-ai-sessiond.service ~/.config/systemd/user/   (set the paths below to your checkout)
 #   systemctl --user daemon-reload && systemctl --user enable --now dl-ai-sessiond
 [Unit]
 Description=Ray shared CLI session daemon
@@ -8,10 +8,17 @@ After=strata-server.service
 
 [Service]
 Type=simple
+# a unit keeps running when the kernel ends one of its processes; a higher score is ended first (the engine's unit
+# should have a higher one than this daemon's)
+OOMPolicy=continue
+OOMScoreAdjust=100
 EnvironmentFile=%h/.config/dl-ai/secrets.env
 Environment=STRATA_URL=http://127.0.0.1:8080
 Environment=STRATA_WORKSPACE_DIR=%h/DL-AI-workspace
-ExecStart=/usr/bin/python3 %h/Strata/tools/dl_sessiond.py
+# thinking level: rules first, then a Model2Vec classifier (rules alone: remove this line); MCP servers: rules
+Environment=DL_EFFORT_ROUTER_MODE=hybrid
+Environment=DL_MCP_ROUTER_MODE=rules
+ExecStart=%h/Strata/.venv/bin/python %h/Strata/tools/dl_sessiond.py
 Restart=on-failure
 RestartSec=3
 

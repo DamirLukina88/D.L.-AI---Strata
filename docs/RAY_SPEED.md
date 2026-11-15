@@ -40,7 +40,11 @@ A repeat of H on `2026-11-14` (`./bench.sh --long --clients 4` against the runni
 conversation cache hit `67.1 %`. Four requests at once gave `22.0 tok/s` in total: the server has one slot, so they run
 one after another. Every difference from the first H run is inside the spread of the runs.
 
-The active configuration combines Arm E, Arm F, Arm G and Column H: `STRATA_ADAPT_OVERLAP=1`,
+**Current GPU setting (since 2026-11-14):** after GPU crashes the card runs at `2500 MHz` max core clock, `150 W`
+and `-50 mV` (`/etc/lact/config.yaml`). Every number on this page was measured at the settings named below (Column H:
+`2800 MHz` / `198 W`), so the table describes that configuration and needs a re-run for the current one.
+
+The configuration these numbers were measured with combines Arm E, Arm F, Arm G and Column H: `STRATA_ADAPT_OVERLAP=1`,
 `STRATA_ADAPT_OVERLAP_RESIDENT=1`, `STRATA_ROUTE_TAIL_SKIP=7`, `STRATA_ROUTE_RESIDENT=0.5`, fusion and RDNA3 switches,
 WMMA prompt GEMMs (`STRATA_HIP_WMMA=1`), the gfx1102 SIMT QSA scorer (`STRATA_SELECT_SIMT=1`), Q8_0 hyper-connection weights
 (`STRATA_HC_Q8=1`), core isolation (`STRATA_AUX_CPUS=auto`), a custom expert profile built

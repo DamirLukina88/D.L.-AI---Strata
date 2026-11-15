@@ -14,6 +14,27 @@ review like our own code.
 
 Supported: the latest release. Fixes go into the next release, not into older ones.
 
+## Reporting a problem in this fork (Ray)
+
+Findings about the parts this fork adds (Ray's agent, the session daemon, the web app's Code tab, the Android app,
+the phone and MCP tools) go to the fork's owner, [DamirLukina88](https://github.com/DamirLukina88), through the fork's
+GitHub private vulnerability reporting, not to upstream. Upstream's engine and server are covered by the policy above.
+
+What the fork adds to the attack surface:
+
+- **The session daemon** listens only on a Unix socket in the user's runtime directory (mode 600). The web app reaches
+  it through the server, which checks the caller first.
+- **Remote access** is a Cloudflare Tunnel; browser requests need a valid Cloudflare Access token (signature, issuer,
+  audience and expiry are checked on every request) or the API key. Keys are never accepted in URLs.
+- **Rules in code, not in the prompt.** The agent cannot use git, change global memory, use the phone's camera, media
+  or clipboard, or open a desktop window unless the request's words ask, in YOLO too (`agent_boundary`,
+  `tools/dl_boundary.py`; `dl_mcp.DEFAULT_ASK_WORDS`). Credentials in an email, file or URL argument are refused
+  before any approval card.
+- **Text from web pages, mail, Drive and memory pages is data**, never instructions to the agent.
+- **No secrets in the repository.** Keys live in `~/.config/dl-ai/secrets.env`, each MCP server gets only the keys it
+  names, and a pre-commit hook blocks a commit that adds a key, a home path or a personal address.
+- **Workspace file access** (upload, download, list) is confined to the workspace directory.
+
 ## What the server exposes
 
 Strata runs a model on your PC and serves it over HTTP (`serve/server.py`). Out of the box it is reachable from
