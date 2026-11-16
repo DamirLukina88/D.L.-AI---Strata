@@ -35,6 +35,12 @@ reads `0.1.44.1+0.2.12-fixes`. The reviews live in the shared memory store (proj
   Pull request #5477 (`GET /v1/models/{id}`) was submitted upstream and an AMD benchmark was posted to issue #4677.
 - **0.2.13 (2026-11-09):** audited; nothing applies to this install and the release was skipped. Four small optional
   ports are noted.
+- **0.2.14 / 0.2.14.1 (2026-11-15):** three server fixes ported: a request that ends early while the engine restarts
+  no longer raises, `GGML_NO_BACKTRACE=1` keeps gdb out of a crashing engine or picture reader, and the server binds
+  without a host-name lookup. Upstream's 0.1.60 engine (its own prompt kernels) was A/B'd against ours on this PC
+  with the Coder IQ1_M: built here it read a 21,087-token prompt in 58.4 s against our 59.1 s and a 245-token prompt
+  in 2.42 s against 2.12 s; upstream's prebuilt package was 3-6% slower on long prompts; output speed was the same
+  within the run-to-run spread. The engine was not switched.
 
 ## Community benchmark, 2026-11-01
 
