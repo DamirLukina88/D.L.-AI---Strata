@@ -44,6 +44,10 @@ reads `0.1.44.1+0.2.12-fixes`. The reviews live in the shared memory store (proj
   comparison with later releases. Also ported: the picture reader's start waits for READY or ERR and logs any other line
   instead of killing the reader on it (`4cce1ee4d`). Upstream's GPU-to-processor reader fallback (`c53e45a35`,
   `78eaaf1b0`) does not apply: this install's picture reader already runs on the processor.
+- **0.2.15 (2026-11-16):** mostly fixes for upstream's desktop app, installer and Terminal; the engine stays 0.1.60.
+  Ported: a declared boolean tool argument written `True` / `False` is the boolean (#5979). Not ported: the stop
+  that refuses new requests (#6055; this server has no drain) and the monitor's MTP line (#5080; this engine does not
+  report its drafter, so nothing would change).
 
 ## Community benchmark, 2026-11-01
 
