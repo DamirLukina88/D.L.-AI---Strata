@@ -40,6 +40,7 @@ import re
 import select
 import signal
 import socket
+import socketserver
 import struct
 import secrets
 import shutil
@@ -76,6 +77,7 @@ from serve.mcp import McpCancelled, hub_from_config  # noqa: E402
 from serve import runconfig  # noqa: E402
 from serve import cf_access  # noqa: E402
 from serve import logit_bias as bias_api  # noqa: E402
+from serve.childenv import quiet_crash_env  # noqa: E402
 from serve.winjob import contain  # noqa: E402
 from serve.structured import StructuredOutputError, prepare_format, validated_json  # noqa: E402
 from serve import responses as responses_api  # noqa: E402
@@ -2551,6 +2553,12 @@ class Server(ThreadingHTTPServer):
     # (STRATA_HTTP_BACKLOG overrides it)
     request_queue_size = max(5, int(os.environ.get("STRATA_HTTP_BACKLOG") or 256))
 
+    def server_bind(self):
+        # http.server's own server_bind also asks socket.getfqdn(host) for a server_name nothing here reads; on a Mac whose reverse lookup
+        # stalls (GitHub's macOS runner: 35 s on the first lookup of every new process) each start waited that long before it listened
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
     def handle_error(self, request, client_address):
         if not isinstance(sys.exc_info()[1], ConnectionError):   # a client that hangs up needs no stack trace
             super().handle_error(request, client_address)
@@ -2577,6 +2585,7 @@ def main() -> int:
     """The server.  Its console output goes through a bounded queue (serve/nonblocking_out.py, #4479 / #2481): a console
     that stops taking output must not hold a request's turn, a cancel or an admission.  STRATA_BLOCKING_CONSOLE=1 turns
     it off (testers)."""
+    quiet_crash_env()                                  # every child inherits it: no gdb on a user's machine (serve/childenv.py)
     if os.environ.get("STRATA_BLOCKING_CONSOLE") == "1":
         return _main()
     from serve.nonblocking_out import decoupled_console

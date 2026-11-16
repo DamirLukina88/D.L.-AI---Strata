@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
+from serve.childenv import quiet_crash_env
 from serve.late import server as _server
 from serve.tunables import ENGINE_SILENCE_S
 
@@ -393,7 +394,7 @@ def ordered_gpus(cfg: dict, scores=None, vrams=None) -> list[int]:
 def child_env(cfg: dict) -> dict:
     """The engine's environment: the CUDA libraries setup installed (pip's nvidia packages, or the toolkit that
     compiled it) first on the library search path."""
-    env = dict(os.environ)
+    env = quiet_crash_env(dict(os.environ))          # no debugger on a user's machine: ggml's abort path forks gdb (serve/childenv.py)
     if hip_visible(cfg) and cfg.get("backend") == "hip":   # AMD: numbered as HIP numbers them (hip_visible)
         env["HIP_VISIBLE_DEVICES"] = ",".join(str(i) for i in hip_visible(cfg))
     elif gpu_list(cfg):                              # issue #51: the GPU(s) to run on, numbered as nvidia-smi does; CUDA's

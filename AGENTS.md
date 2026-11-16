@@ -28,7 +28,7 @@ fixes ported one by one ([docs/RAY_CHANGES.md](docs/RAY_CHANGES.md)).
 
 - `tools/run_tests.sh` runs everything without a GPU, model or server; `--android` adds the app's tests.
 - Fast loop for Ray's code: `cd tools && ../.venv/bin/python -m pytest -q test_dl_*.py` (about a minute).
-- 36 server tests fail on the last commit (half-ported upstream 0.2.x work). Do not count them as your regressions;
+- 23 server tests fail on the last commit (pytest count; half-ported upstream 0.2.x work). Do not count them as your regressions;
   compare the list before and after.
 - A change to what Ray's daemon does is checked on an isolated daemon (temp HOME, stub engine) before the live one
   is restarted, and the live daemon is restarted only when Ray is idle.
