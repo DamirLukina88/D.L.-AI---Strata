@@ -42,7 +42,25 @@ one after another. Every difference from the first H run is inside the spread of
 
 **Current GPU setting (since 2026-11-14):** after GPU crashes the card runs at `2500 MHz` max core clock, `150 W`
 and `-50 mV` (`/etc/lact/config.yaml`). Every number on this page was measured at the settings named below (Column H:
-`2800 MHz` / `198 W`), so the table describes that configuration and needs a re-run for the current one.
+`2800 MHz` / `198 W`), so the table describes that configuration.
+
+**At the current setting** (`2500 MHz` / `150 W` / `-50 mV`, 2026-11-16, `tools/strata_bench.py --long` against the
+running server, engine `0.1.44.1+0.2.12-fixes`, two runs a few hours apart; the second right after a server restart):
+
+| Metric | Run 1 | Run 2 |
+| :--- | ---: | ---: |
+| Chat decode (median, range) | 22.6 tok/s (20.6–35.2) | 25.9 (22.2–35.2) |
+| Chat time to first token | 1.63 s | 1.52 s |
+| 4K prompt ingestion | 318.7 tok/s | 334.4 |
+| 16K prompt ingestion | 343.9 tok/s | 363.8 |
+| 32K prompt ingestion | 339.8 tok/s (first token 94.4 s) | 362.3 (88.5 s) |
+| Agent decode (median, range) | 28.9 tok/s (23.7–35.7) | 33.5 (23.3–37.4) |
+| Agent turn time to first token | 10.96 s | 10.37 s |
+| Conversation cache hit | 67.3 % | 67.3 % |
+
+The two runs differ by 5–16%; nothing the bench measures changed between them, so that is the spread from one server
+start to the next. Against Column H at `2800 MHz` (4K / 16K / 32K: `346.8` / `381.1` / `379.7 tok/s`), prompt
+ingestion at `2500 MHz` is 4–11% slower; decode is inside the run-to-run spread.
 
 The configuration these numbers were measured with combines Arm E, Arm F, Arm G and Column H: `STRATA_ADAPT_OVERLAP=1`,
 `STRATA_ADAPT_OVERLAP_RESIDENT=1`, `STRATA_ROUTE_TAIL_SKIP=7`, `STRATA_ROUTE_RESIDENT=0.5`, fusion and RDNA3 switches,

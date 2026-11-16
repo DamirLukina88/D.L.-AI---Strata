@@ -58,4 +58,21 @@ An official community benchmark was run with `tools/strata_bench.py --long` agai
   tokens), delivering 27.5 tok/s decode across multi-turn sessions.
 
 These numbers were measured with the GPU set to 2800 MHz / 198 W / -50 mV. After GPU crashes on 2026-11-14 the card
-runs at 2500 MHz / 150 W / -50 mV, so they need a re-run (see [RAY_SPEED.md](RAY_SPEED.md)).
+runs at 2500 MHz / 150 W / -50 mV. Re-run at that setting on 2026-11-16 (two runs): chat decode 22.6 and 25.9 tok/s,
+32K prompt 339.8 and 362.3 tok/s, agent decode 28.9 and 33.5 tok/s, cache hit 67.3% (table in
+[RAY_SPEED.md](RAY_SPEED.md)).
+
+## Ray's tool choice, 2026-11-16
+
+`tools/ray_toolchoice_bench.py` sends Ray 27 fixed prompts three times each: 15 that need no MCP server (arithmetic, a
+definition, a conversion) and 12 that need one (weather, a page to open, a translation, the smart home).
+
+- Before any change: every prompt that needs a server reached a right one (36 of 36 runs); of the prompts that need
+  none, one turned on a server in all 3 runs (a trigger of the user's own catalog matched "in 45 minutes" in a speed
+  question).
+- The `mcp` tool now lists each server with a few words (about 5.4k characters down to about 2.1k; `mcp` action
+  `list` has the whole descriptions). After it: 36 of 36 again, and the median time to the first text fell from 4.6 s
+  to 3.1 s on the prompts without a server and from 39.8 s to 34.8 s on those with one.
+- A model that asks for a server that acts outside or starts slowly (the browser, mail, the smart home) for a request
+  with no link to it is told to answer directly or to give a reason. A live check on 2026-11-15 had seen "17 times
+  23" turn on the browser; that did not happen again in 16 tries, so the cause is not known and the rule is a guard.
