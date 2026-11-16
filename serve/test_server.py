@@ -4240,8 +4240,8 @@ class CallingEngine(MockEngine):
     def generate(self, ids, max_new, sampling, cancel, embeddings=None):
         self.prompts.append(list(ids))
         prompt = self.tok.decode(ids)
-        if prompt.endswith("<function="):
-            text = "search>\n" + self.ARGS
+        if prompt.endswith("<tool_call>\n"):
+            text = "<function=search>\n" + self.ARGS
         elif prompt.endswith("<function=search>\n"):
             text = self.ARGS
         elif prompt.endswith("</think>\n\n"):
@@ -4320,8 +4320,8 @@ class ForcedToolChoice(unittest.TestCase):
         answer = ("I will check that.\n" + CALL_START + "\n<function=lookup>\n<parameter=q>\n2+2\n</parameter>\n"
                   "</function>\n" + CALL_END + "\nHere is the report.")
         self.says(answer)
-        # local: "other tools" (an undeclared name beside declared tools) stays a call here, see OutputParser._callable
-        for label, extra in {"nothing declared": {"tools": []}, "tool_choice none": {"tool_choice": "none"}}.items():
+        for label, extra in {"nothing declared": {"tools": []}, "tool_choice none": {"tool_choice": "none"},
+                             "other tools": {}}.items():
             for stream in (False, True):
                 with self.subTest(case=label, stream=stream):
                     code, b = self.openai(stream=stream, **extra)
@@ -4331,6 +4331,134 @@ class ForcedToolChoice(unittest.TestCase):
                         content = b["choices"][0]["message"]["content"] or ""
                         self.assertIn("Here is the report.", content)
                         self.assertIn("<function=lookup>", content)
+
+    def _undeclared_call_answer(self, name="lookup"):
+        from serve.frontend import CALL_END, CALL_START
+        return ("I will check that.\n" + CALL_START + f"\n<function={name}>\n<parameter=q>\n2+2\n</parameter>\n"
+                "</function>\n" + CALL_END)
+
+    def _rejected_of(self, b, stream):
+        """The strata_rejected_tool_calls of a whole reply or of a streamed one (None when the reply has none)."""
+        if not stream:
+            return b.get("strata_rejected_tool_calls")
+        found = [json.loads(line[6:]).get("strata_rejected_tool_calls") for line in b.splitlines() if line.startswith("data: {")]
+        found = [f for f in found if f]
+        self.assertLessEqual(len(found), 1, "sent once, with the last chunk")
+        return found[0] if found else None
+
+    def test_an_undeclared_call_is_named_in_the_response(self):
+        """#3796: the call stays text and finish_reason stays "stop"; the response also lists the names the model wrote
+        (strata_rejected_tool_calls), so a client can tell this from an ordinary answer and answer the model."""
+        self.says(self._undeclared_call_answer("execute_gdscript"))
+        for stream in (False, True):
+            with self.subTest(stream=stream):
+                before = self.svc.totals.get("tool_calls_unread", 0)
+                code, b = self.openai(stream=stream)
+                finish, calls, _ = self.call_of(code, b, stream)
+                self.assertEqual((finish, calls), ("stop", []), b)
+                self.assertEqual(self._rejected_of(b, stream), [{"name": "execute_gdscript", "reason": "undeclared"}])
+                self.assertEqual(self.svc.totals["tool_calls_unread"], before + 1)         # /metrics counts it
+                if not stream:
+                    self.assertIn("<function=execute_gdscript>", b["choices"][0]["message"]["content"])   # the text is untouched
+
+    def test_undeclared_tool_calls_call_hands_the_call_to_the_client(self):
+        """#4622: "undeclared_tool_calls": "call" returns the well-formed call of an undeclared name as a tool call (the client has its
+        own policy for unknown names); the default ("text") is the test above, unchanged."""
+        self.says(self._undeclared_call_answer("execute_gdscript"))
+        self.svc.undeclared_tool_calls = "call"
+        try:
+            for stream in (False, True):
+                with self.subTest(stream=stream):
+                    code, b = self.openai(stream=stream)
+                    finish, calls, _ = self.call_of(code, b, stream)
+                    self.assertEqual((finish, calls), ("tool_calls", [("execute_gdscript", {"q": "2+2"})]), b)
+                    self.assertIsNone(self._rejected_of(b, stream))
+            # prose that names the format is still text
+            self.says("Write <tool_call> and <function=x> to call a tool.")
+            code, b = self.openai(stream=False)
+            finish, calls, _ = self.call_of(code, b, False)
+            self.assertEqual((finish, calls), ("stop", []), b)
+        finally:
+            self.svc.undeclared_tool_calls = "text"
+
+    def test_undeclared_tool_calls_setting(self):
+        from serve.server import undeclared_tool_calls_setting
+        old = os.environ.pop("STRATA_UNDECLARED_TOOL_CALLS", None)
+        try:
+            self.assertEqual(undeclared_tool_calls_setting({}), "text")
+            self.assertEqual(undeclared_tool_calls_setting({"undeclared_tool_calls": "call"}), "call")
+            os.environ["STRATA_UNDECLARED_TOOL_CALLS"] = "call"
+            self.assertEqual(undeclared_tool_calls_setting({}), "call")
+            self.assertEqual(undeclared_tool_calls_setting({"undeclared_tool_calls": "text"}), "text")   # the config wins
+            for bad in ("yes", True, 1):
+                with self.assertRaises(SystemExit):
+                    undeclared_tool_calls_setting({"undeclared_tool_calls": bad})
+        finally:
+            os.environ.pop("STRATA_UNDECLARED_TOOL_CALLS", None)
+            if old is not None:
+                os.environ["STRATA_UNDECLARED_TOOL_CALLS"] = old
+
+    def test_no_marker_when_nothing_was_rejected(self):
+        """An ordinary answer and a declared call carry no extra field: the API is what it was."""
+        from serve.frontend import CALL_END, CALL_START
+        for label, answer in (("text", "The answer is 4."),
+                              ("declared call", CALL_START + "\n<function=search>\n<parameter=q>\n2+2\n</parameter>\n</function>\n" + CALL_END)):
+            self.says(answer)
+            for stream in (False, True):
+                with self.subTest(case=label, stream=stream):
+                    code, b = self.openai(stream=stream)
+                    self.call_of(code, b, stream)
+                    self.assertIsNone(self._rejected_of(b, stream))
+                    if stream:
+                        self.assertNotIn("strata_rejected_tool_calls", b)
+
+    def test_a_collapsed_mcp_name_is_a_call_not_a_rejection(self):
+        """#3796: `mcp_playwright_browser_navigate` for the declared `mcp__playwright__browser_navigate`."""
+        from serve.frontend import CALL_END, CALL_START
+        tools = [{"type": "function", "function": {"name": "mcp__playwright__browser_navigate", "description": "open a page",
+                                                   "parameters": {"type": "object", "properties": {"q": {"type": "string"}}}}}]
+        self.says(CALL_START + "\n<function=mcp_playwright_browser_navigate>\n<parameter=q>\nx\n</parameter>\n</function>\n" + CALL_END)
+        for stream in (False, True):
+            with self.subTest(stream=stream):
+                code, b = self.openai(stream=stream, tools=tools)
+                finish, calls, _ = self.call_of(code, b, stream)
+                self.assertEqual((finish, calls), ("tool_calls", [("mcp__playwright__browser_navigate", {"q": "x"})]))
+                self.assertIsNone(self._rejected_of(b, stream))
+
+    def test_the_anthropic_reply_names_the_rejected_call_too(self):
+        self.says(self._undeclared_call_answer("bash"))
+        body = {"model": "m", "max_tokens": 400, "messages": [{"role": "user", "content": "2+2?"}],
+                "tools": [{"name": "search", "description": "search", "input_schema": {"type": "object", "properties": {}}}]}
+        req = urllib.request.Request(self.base + "/v1/messages", data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            msg = json.loads(r.read().decode())
+        self.assertEqual(msg["stop_reason"], "end_turn")
+        self.assertEqual(msg["strata_rejected_tool_calls"], [{"name": "bash", "reason": "undeclared"}])
+        self.assertFalse([c for c in msg["content"] if c["type"] == "tool_use"])
+
+    def test_any_model_name_on_the_anthropic_route_is_the_loaded_model(self):
+        """#5312: Claude Desktop sends the model name `claude-5-5-sonnet` and cannot change it; the route serves the loaded model whatever
+        the request calls it, and answers with that model's name (the Desktop app's own gateway is a separate check in apps/host)."""
+        self.says("Hello there.")
+        for name in ("claude-5-5-sonnet", "claude-opus-4-1", "gpt-4o", "nonsense"):
+            for stream in (False, True):
+                with self.subTest(model=name, stream=stream):
+                    body = {"model": name, "max_tokens": 50, "stream": stream, "messages": [{"role": "user", "content": "hi"}],
+                            "tools": [{"name": "search", "description": "search", "input_schema": {"type": "object", "properties": {}}}]}
+                    req = urllib.request.Request(self.base + "/v1/messages", data=json.dumps(body).encode(),
+                                                 headers={"Content-Type": "application/json"})
+                    with urllib.request.urlopen(req, timeout=30) as r:
+                        raw = r.read().decode()
+                        self.assertEqual(r.status, 200)
+                    if stream:
+                        events = [json.loads(l[6:]) for l in raw.splitlines() if l.startswith("data: {")]
+                        self.assertEqual("".join(e["delta"]["text"] for e in events if e["type"] == "content_block_delta"), "Hello there.")
+                        self.assertEqual(events[0]["message"]["model"], self.svc.model)
+                    else:
+                        msg = json.loads(raw)
+                        self.assertEqual(msg["model"], self.svc.model)
+                        self.assertEqual(msg["content"][0]["text"], "Hello there.")
 
     def test_a_call_with_a_dropped_function_keyword_is_still_the_call(self):
         """#3441: `<=search>` for `<function=search>`, as a model under a large tool surface writes it."""
@@ -4352,7 +4480,7 @@ class ForcedToolChoice(unittest.TestCase):
                     self.assertEqual((finish, calls), ("tool_calls", [("search", {"q": "2+2"})]))
                     self.assertEqual(reasoning, CallingEngine.THOUGHT)
                     first, second = self.engine.prompts
-                    opening = "<tool_call>\n<function=" + ("search>\n" if choice == self.NAMED else "")
+                    opening = "<tool_call>\n" + ("<function=search>\n" if choice == self.NAMED else "")
                     # where the thinking ended, after the blank line the template puts before a call
                     self.assertEqual(second, first + self.tok.encode(CallingEngine.THOUGHT + "</think>\n\n" + opening))
 
@@ -4361,7 +4489,7 @@ class ForcedToolChoice(unittest.TestCase):
         thought, calling = 'I will search for "2+2"', self.engine.generate
 
         def generate(ids, max_new, sampling, cancel, embeddings=None):
-            if self.tok.decode(ids).endswith(("<function=", "<function=search>\n")):
+            if self.tok.decode(ids).endswith(("<tool_call>\n", "<function=search>\n")):
                 yield from calling(ids, max_new, sampling, cancel)
                 return
             self.engine.prompts.append(list(ids))
@@ -4374,7 +4502,7 @@ class ForcedToolChoice(unittest.TestCase):
                 finish, calls, reasoning = self.call_of(code, b, stream)
                 self.assertEqual((finish, calls, reasoning), ("tool_calls", [("search", {"q": "2+2"})], thought))
                 first, second = self.engine.prompts
-                self.assertEqual(second, first + self.tok.encode(thought + "</think>\n\n<tool_call>\n<function="))
+                self.assertEqual(second, first + self.tok.encode(thought + "</think>\n\n<tool_call>\n"))
 
     def test_without_thinking_the_prompt_ends_with_the_opening(self):
         for choice in ("required", self.NAMED):
@@ -4385,7 +4513,7 @@ class ForcedToolChoice(unittest.TestCase):
                     finish, calls, reasoning = self.call_of(code, b, stream)
                     self.assertEqual((finish, calls, reasoning), ("tool_calls", [("search", {"q": "2+2"})], ""))
                     self.assertEqual(len(self.engine.prompts), 1)
-                    opening = "<tool_call>\n<function=" + ("search>\n" if choice == self.NAMED else "")
+                    opening = "<tool_call>\n" + ("<function=search>\n" if choice == self.NAMED else "")
                     self.assertTrue(self.tok.decode(self.engine.prompts[0]).endswith("</think>\n\n" + opening))
 
     def test_the_budget_wrap_up_opens_the_call(self):
@@ -4395,7 +4523,7 @@ class ForcedToolChoice(unittest.TestCase):
         self.assertEqual((finish, calls), ("tool_calls", [("search", {"q": "2+2"})]))
         self.assertEqual(reasoning, CallingEngine.THOUGHT[:20] + REASONING_WRAP_UP.split("</think>")[0])
         first, second = self.engine.prompts
-        extra = self.tok.encode(REASONING_WRAP_UP + "<tool_call>\n<function=", parse_special=True)
+        extra = self.tok.encode(REASONING_WRAP_UP + "<tool_call>\n", parse_special=True)
         self.assertEqual(second, first + self.tok.encode(CallingEngine.THOUGHT[:20]) + extra)
 
     def test_auto_absent_and_none_leave_the_tools_to_the_model(self):

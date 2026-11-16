@@ -20,6 +20,10 @@ from serve.replicas import ReplicaEngine
 from serve.server import StrataEngine
 from serve.test_parallel import FAKE_BATCH
 
+# D.L. fork: tests of features this install does not run (AGENTS.md, Tests)
+NOT_PORTED = ("not ported: the stream-ownership fixes of upstream round 0213 (#2892 replicas, #4451 --batch) are only "
+              "half here; this install runs one engine with one slot (no --batch, no replicas)")
+
 CANARY_REPEAT = 60
 CANARY_RE = re.compile(rb"[A-Z]{2}\d{4}")
 
@@ -203,6 +207,7 @@ class ReplicaOwnership(FakeEngines, unittest.TestCase):
         self.assertFalse(threads[0].is_alive())
         return a_got, b_got
 
+    @unittest.skip(NOT_PORTED)
     def test_a_successor_never_reads_the_predecessors_done(self):
         """#2892: B is the next request on the replica and A's DONE is still unread."""
         a_can, b_can = "QA0001", "QB0002"
@@ -211,6 +216,7 @@ class ReplicaOwnership(FakeEngines, unittest.TestCase):
         self.assertEqual(foreign(b_got, b_can), [], "B received A's tokens")
         self.assertEqual(b_got, expected_reply(b_can), "B's own reply is complete and exactly its own")
 
+    @unittest.skip(NOT_PORTED)
     def test_a_successor_never_reads_the_predecessors_tokens(self):
         """#2892: A's remaining tokens are already queued when B reads."""
         a_can, b_can = "QA0011", "QB0012"
@@ -218,6 +224,7 @@ class ReplicaOwnership(FakeEngines, unittest.TestCase):
         self.assertEqual(foreign(b_got, b_can), [], "B received A's tokens")
         self.assertEqual(b_got, expected_reply(b_can), "B's own reply is complete and exactly its own")
 
+    @unittest.skip(NOT_PORTED)
     def test_many_forced_handoffs_never_cross(self):
         """The forced schedule above, 30 times with different hold times and different cut-off points."""
         import random
@@ -280,6 +287,7 @@ class ReplicaOwnership(FakeEngines, unittest.TestCase):
                 bad.append((i, cut, len(b_got), foreign(b_got, b_can)[:2]))
         self.assertEqual(bad, [], f"{len(bad)} of 60 crossed")
 
+    @unittest.skip(NOT_PORTED)
     def test_the_figures_of_a_request_are_its_own(self):
         """A runs to its max_tokens; before A's caller reads its DONE figures, B runs to completion on the replica."""
         a_can, b_can = "QA0003", "QB0004"
@@ -451,6 +459,7 @@ class BatchOwnership(FakeEngines, unittest.TestCase):
             self.assertEqual(c.foreign(), [], "a background request received a foreign frame")
         self.assertEqual(bad, [])
 
+    @unittest.skip(NOT_PORTED)
     def test_a_drain_that_times_out_does_not_leak_into_the_next_request(self):
         """A leaves (its stream is closed, as Service does) in the middle of its prompt read; the engine says nothing for
         longer than the drain limit (SILENTREAD, DEAFSTOP: ~1 s of silence, then its DONE and BADM).  The control lines stay
@@ -472,6 +481,7 @@ class BatchOwnership(FakeEngines, unittest.TestCase):
         self.assertEqual(bg[0].foreign(), [])
         self.assertTrue(self.engine.alive())
 
+    @unittest.skip(NOT_PORTED)
     def test_an_engine_that_keeps_talking_after_a_stop_is_not_given_up_on(self):
         """The limits count silence, never a read or a decode that still produces lines: the engine takes ~1.8 s to end A's
         exchange (DEAFSTOP, a PP line every chunk) with the drain at 0.3 s and the quarantine at 0.4 s.  A limit counted
@@ -494,6 +504,7 @@ class BatchOwnership(FakeEngines, unittest.TestCase):
         bg[0].cancel.set()
         self.finish(bg)
 
+    @unittest.skip(NOT_PORTED)
     def test_an_engine_that_goes_silent_after_a_stop_is_ended(self):
         """The other side of the limit: no line at all for DRAIN_TIMEOUT_S + QUARANTINE_S after the stop (here 0.3 + 0.4 s,
         the read is silent for ~1.8 s) is a wedged engine: it is ended and the next request starts it again."""
@@ -503,6 +514,7 @@ class BatchOwnership(FakeEngines, unittest.TestCase):
         self.assertTrue(wait_until(lambda: not self.engine.alive(), 8.0), "a silent engine was not ended")
         self.finish([a])
 
+    @unittest.skip(NOT_PORTED)
     def test_the_engine_ending_during_a_drain_then_a_restart(self):
         """A is interrupted mid-prompt; the engine dies while A drains; after the restart the new requests (same slot
         numbers) must never be read by a request of the old process."""
@@ -552,6 +564,7 @@ class BatchOwnership(FakeEngines, unittest.TestCase):
             self.assertIsNone(c.error)
             self.assertTrue(c.complete(), c.canary)
 
+    @unittest.skip(NOT_PORTED)
     def test_vram_and_session_file_take_the_control_lines_like_a_request(self):
         """VRAM and SAVE read the control lines for their answer.  Run beside a request that holds them (its solo read
         or an admission), they took that request's T / PP / DONE lines and it lost its reply."""

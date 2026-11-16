@@ -55,13 +55,17 @@ class NativeTools(unittest.TestCase):
                         events += parser.finish()
                         self.assertFalse(any(event.kind.startswith("tool") for event in events))
                         self.assertEqual("".join(event.text for event in events if event.kind == "content"), text)
-                    parser = OutputParser(thinking=False, tools=TOOLS, stream_tools=streaming, recover=recover)
+                    # an unpadded name nobody declared: text where tools are declared (the 0.2.2 rule, #3075); the Responses
+                    # route of a request with no tools (Codex compaction, declared_only off) keeps it as a native call
                     text = "<tool_call><function=missing></function></tool_call>"
-                    events = []
-                    for i in range(0, len(text), step):
-                        events += parser.feed(text[i:i + step])
-                    events += parser.finish()
-                    self.assertEqual([event.call.name for event in events if event.kind == "tool_call"], ["missing"])
+                    for tools, declared_only, expected in ((TOOLS, False, []), (TOOLS, True, []), (None, False, ["missing"])):
+                        parser = OutputParser(thinking=False, tools=tools, stream_tools=streaming, recover=recover,
+                                              declared_only=declared_only)
+                        events = []
+                        for i in range(0, len(text), step):
+                            events += parser.feed(text[i:i + step])
+                        events += parser.finish()
+                        self.assertEqual([event.call.name for event in events if event.kind == "tool_call"], expected)
 
 
     def test_padded_unknown_second_call_is_not_announced(self):
@@ -135,8 +139,11 @@ class NativeTools(unittest.TestCase):
         ambiguous = [{"name": "a.b__c"}, {"name": "a__b.c"}]
         parser = OutputParser(thinking=False, tools=ambiguous)
         text = CALL.replace("mcp__files__read", "a__b__c")
-        call = next(e.call for e in parser.feed(text)+parser.finish() if e.kind == "tool_call")
-        self.assertEqual(call.name, "a__b__c")
+        events = parser.feed(text) + parser.finish()
+        # an ambiguous alias is no declared tool: it does not route to the first namespace; it stays text
+        self.assertFalse(any(e.kind == "tool_call" for e in events))
+        self.assertEqual("".join(e.text for e in events if e.kind == "content"), text)
+        self.assertEqual(parser.unread, 1)                           # and it is counted, so the server logs it
 
 
 if __name__ == "__main__":

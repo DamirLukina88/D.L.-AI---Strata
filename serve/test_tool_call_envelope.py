@@ -82,24 +82,32 @@ class DriftedEnvelope(unittest.TestCase):
 
 
 class OnlyDeclaredTools(unittest.TestCase):
-    # Local change (see OutputParser._callable): with tools declared, a well-formed `<function=NAME>` of an undeclared
-    # name stays a call as before (#2284; D.L. CLI corrects typos and answers made-up names).  Upstream's #3075 makes
-    # it text; here that rule only covers a request that declared no tools (test_no_tools_declared).
-    def test_a_call_for_another_tool_stays_a_call_when_tools_are_declared(self):
+    def test_a_call_for_another_tool_stays_text(self):
         raw = body("<function=get_indicators>", "symbol", "600076")
         for width in (0, 1, 3, 9):
             with self.subTest(width=width):
-                evs, p = run("I will check.\n" + raw, width, tools=TOOLS, declared_only=True)
-                self.assertEqual(calls(evs), [("get_indicators", {"symbol": 600076})])
+                evs, p = run("I will check.\n" + raw, width, tools=TOOLS)
+                self.assertEqual(calls(evs), [])
+                self.assertFalse([e for e in evs if e.kind in ("tool_start", "tool_args")])
+                self.assertEqual(text(evs), "I will check.\n" + raw)
+
+    def test_an_unparsed_call_is_counted_and_named_for_the_log(self):
+        """T1 rail: a call that went back as text is no longer silent; the server prints its count and the names the model wrote."""
+        raw = body("<function=get_indicators>", "symbol", "600076")
+        evs, p = run("I will check."+chr(10) + raw, 4, tools=TOOLS)
+        self.assertEqual((p.unread, p.unread_names), (1, ["get_indicators"]))
+        evs, p = run(body("<function=shell>", "cmd", "ls"), 4, tools=TOOLS)         # a declared call is no unread call
+        self.assertEqual((p.unread, p.unread_names), (0, []))
 
     def test_a_declared_call_after_an_undeclared_one_is_still_a_call(self):
         raw = body("<function=get_indicators>") + "\n" + body("<function=shell>", "cmd", "ls")
         evs, p = run(raw, 5, tools=TOOLS)
-        self.assertEqual([c[0] for c in calls(evs)], ["get_indicators", "shell"])
+        self.assertEqual(calls(evs), [("shell", {"cmd": "ls"})])
+        self.assertIn("get_indicators", text(evs))
 
     def test_the_responses_spelling_of_a_namespace_tool_counts(self):
-        # #2284 maps the namespace__member spelling back to the declared name
         evs, p = run(body("<function=ns__web_search>", "q", "x"), 4, tools=TOOLS)
+        # PR #3556: the call carries the declared spelling (ns.web_search), the one the client offered, not the model's flat one
         self.assertEqual(calls(evs), [("ns.web_search", {"q": "x"})])
 
     def test_a_drifted_opener_of_the_namespace_spelling_is_the_call(self):
