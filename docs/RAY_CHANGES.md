@@ -40,7 +40,10 @@ reads `0.1.44.1+0.2.12-fixes`. The reviews live in the shared memory store (proj
   without a host-name lookup. Upstream's 0.1.60 engine (its own prompt kernels) was A/B'd against ours on this PC
   with the Coder IQ1_M: built here it read a 21,087-token prompt in 58.4 s against our 59.1 s and a 245-token prompt
   in 2.42 s against 2.12 s; upstream's prebuilt package was 3-6% slower on long prompts; output speed was the same
-  within the run-to-run spread. The engine was not switched.
+  within the run-to-run spread. The engine was not switched; both upstream builds are kept on the data disk for
+  comparison with later releases. Also ported: the picture reader's start waits for READY or ERR and logs any other line
+  instead of killing the reader on it (`4cce1ee4d`). Upstream's GPU-to-processor reader fallback (`c53e45a35`,
+  `78eaaf1b0`) does not apply: this install's picture reader already runs on the processor.
 
 ## Community benchmark, 2026-11-01
 
