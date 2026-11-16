@@ -139,6 +139,31 @@ class Router(unittest.TestCase):
         self.assertNotIn("deepl", self.r.enabled)
         self.assertLessEqual(len(self.r.routes), 5)
 
+    def test_the_meta_tool_lists_a_few_words_per_server_and_list_the_whole_description(self):
+        short = dl_mcp.short_description
+        self.assertEqual(short("A real headless browser: open pages, read them, click", "playwright"),
+                         "A real headless browser")
+        self.assertEqual(short("arXiv: search preprints in AI, machine learning, physics, math", "arxiv"),
+                         "search preprints in AI, machine learning")
+        self.assertEqual(short("Your Gmail: search, read (also attachments), drafts, labels, send", "gmail"),
+                         "search, read (also attachments), drafts, labels")
+        self.assertEqual(short("Electronics & Hardware: LCSC / JLCPCB parts (ESP32, NE555)", "electronics"),
+                         "Electronics & Hardware")
+        self.assertEqual(short("Translate whole texts, HTML emails (tables kept) and files", "deepl"),
+                         "Translate whole texts")
+        self.assertEqual(short("Read a web page (URL) as Markdown", "fetch"), "Read a web page (URL) as Markdown")
+        self.assertLessEqual(len(short("word " * 40, "x")), dl_mcp.SHORT_MAX)
+        import copy
+        cat = copy.deepcopy(CATALOG)
+        cat["servers"]["deepl"].update(description="Translate whole texts, HTML emails and workspace files",
+                                       short="Translate texts and files")
+        r = registry(catalog=cat)
+        try:
+            self.assertIn("- deepl: Translate texts and files\n", r.meta_tool()["function"]["description"])
+            self.assertIn("HTML emails and workspace files", r.handle_meta({"action": "list"}))
+        finally:
+            r.close()
+
     def test_meta_tool_lists_and_enables(self):
         meta = self.r.meta_tool()["function"]
         self.assertEqual(meta["name"], "mcp")
@@ -148,6 +173,34 @@ class Router(unittest.TestCase):
         self.assertIn("deepl__echo", self.r.routes)
         self.assertIn("deepl: ON", self.r.handle_meta({"action": "list"}))
         self.assertEqual(self.r.handle_meta({"action": "disable", "server": "deepl"}), "deepl is off")
+
+    def test_a_server_that_acts_outside_is_not_turned_on_for_a_request_with_no_link_to_it(self):
+        # the 2026-11-15 live check: "17 times 23" turned the browser on and waited on an approval card
+        self.r.route("17 times 23")
+        said = self.r.handle_meta({"action": "enable", "server": "browser"})
+        self.assertIn("browser was not turned on", said)
+        self.assertIn("reason=", said)
+        self.assertNotIn("browser", self.r.enabled)
+        # a server with no `ask` tool and no idle_s is not held
+        self.assertTrue(self.r.handle_meta({"action": "enable", "server": "deepl"}).startswith("deepl is on"))
+        # with a reason it goes through, and the notice carries the reason
+        self.assertTrue(self.r.handle_meta({"action": "enable", "server": "browser",
+                                            "reason": "the user wants the page's live state"}).startswith("browser is on"))
+        self.assertEqual(self.r.enabled["browser"]["why"], "asked by the model: the user wants the page's live state")
+
+    def test_the_request_names_what_the_server_does(self):
+        self.r.route("please click the second link")       # the router turned it on already: nothing to hold
+        self.assertIn("browser", self.r.enabled)
+        self.assertIn("already on", self.r.handle_meta({"action": "enable", "server": "browser"}))
+        self.r.disable("browser")
+        self.assertTrue(self.r.handle_meta({"action": "enable", "server": "browser"}).startswith("browser is on"))
+
+    def test_the_guard_is_off_with_the_setting_and_without_a_user_message(self):
+        self.assertTrue(self.r.handle_meta({"action": "enable", "server": "browser"}).startswith("browser is on"))
+        self.r.disable("browser")
+        self.r.route("17 times 23")
+        self.r.settings["guard_model_enable"] = False
+        self.assertTrue(self.r.handle_meta({"action": "enable", "server": "browser"}).startswith("browser is on"))
 
     def test_missing_secret_is_refused(self):
         self.assertIn("needs DL_TEST_NO_SUCH_KEY", self.r.enable("needskey"))

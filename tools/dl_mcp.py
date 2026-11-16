@@ -145,12 +145,43 @@ def trigger_hit(entry, text: str):
             return m
     return None
 
+SHORT_MAX = 48
+
+
+def short_description(text: str, name: str = "") -> str:
+    """The few words of a server's description that the `mcp` tool lists with every request, at most SHORT_MAX
+    characters cut at a word.  "Title: what it does": the title, unless the title only repeats the server's name
+    ("arXiv: search preprints ..." under `arxiv`), then what it does.  Without a title: up to the first comma or
+    full stop.  The whole description stays in `mcp(action="list")`.  40 full descriptions were 5.2k characters of
+    every prompt (2026-11-16)."""
+    text = " ".join(str(text).split())
+    head, colon, tail = text.partition(": ")
+    if colon:
+        bare = re.sub(r"\([^)]*\)|\byour\b", " ", head, flags=re.I)
+        words = re.findall(r"[A-Za-z0-9.]+", bare)
+        key = re.sub(r"[^a-z0-9]", "", name.lower())
+        flat = re.sub(r"[^a-z0-9]", "", bare.lower())
+        repeats = bool(key) and len(words) <= 2 and key in flat and len(flat) - len(key) <= 6
+        text = tail if repeats else head
+    else:
+        for sep in (", ", ". "):
+            first = text.split(sep, 1)[0]
+            if first != text and len(first) >= 12:
+                text = first
+                break
+    if len(text) > SHORT_MAX:
+        text = text[:SHORT_MAX + 1].rsplit(" ", 1)[0]
+    return text.rstrip(" .,;:(&/-")
+
+
 class Entry:
     """One catalogue server: the MCP config for McpServer and D.L. CLI's own fields."""
 
     def __init__(self, name: str, raw: dict):
         self.name = name
         self.description = str(raw.get("description") or name)
+        # what the `mcp` tool's own description says about it; "short" in the catalogue wins over the cut
+        self.short = " ".join(str(raw.get("short") or "").split()) or short_description(self.description, name)
         self.default_on = raw.get("default") == "on"
         self.allow = list(raw.get("allow") or [])            # empty: every tool the server lists
         self.readonly = raw.get("readonly") is True
@@ -636,16 +667,37 @@ class McpRegistry:
         lines = []
         for name, entry in self.catalog.items():
             bad = entry.unavailable(self.surface)
-            lines.append(f"- {name}: {entry.description}" + (f" [{bad}]" if bad else ""))
+            lines.append(f"- {name}: {entry.short}" + (f" [{bad}]" if bad else ""))
         return {"type": "function", "function": {
             "name": META_NAME,
             "description": "Turn MCP tool servers on or off, when the user's request needs one (a greeting or a question "
-                           "about yourself does not). Their tools appear from your next step. Servers:\n"
+                           "about yourself does not, and neither does one you can answer yourself: arithmetic, general "
+                           "knowledge, wording). Their tools appear from your next step; action \"list\" says what "
+                           "each server can do. Servers:\n"
                            + "\n".join(lines),
             "parameters": {"type": "object", "properties": {
                 "action": {"type": "string", "enum": ["list", "enable", "disable"]},
-                "server": {"type": "string", "description": "Server name, or several comma-separated (\"drive,proton\")."}},
+                "server": {"type": "string", "description": "Server name, or several comma-separated (\"drive,proton\")."},
+                "reason": {"type": "string", "description": "Why the request needs the server (only when asked for it)."}},
                 "required": ["action"]}}}
+
+    def unasked_for(self, name: str, reason: str = "") -> str:
+        """The answer to a model's `enable` of a server the user's request has no link to, or "" when it may go on.
+        Only servers that act outside or start slowly are held (an `ask` tool or `idle_s`: the browser, mail, the
+        smart home): the 2026-11-15 live check saw "17 times 23" turn on Playwright and wait on an approval card.  A
+        link is one of the server's own triggers in the user's latest message; with none, the model is told to answer
+        directly or to call again with `reason`, which then goes through (and is shown in the notice).  Off with
+        "guard_model_enable": false in the settings."""
+        if self.settings.get("guard_model_enable", True) is False or str(reason or "").strip():
+            return ""
+        entry = self.catalog.get(name)
+        if entry is None or name in self.enabled or not (entry.ask or entry.idle_s):
+            return ""
+        text = self.said[-1] if self.said else ""
+        if not text or trigger_hit(entry, text):
+            return ""
+        return (f"{name} was not turned on: the user's request does not seem to need it. Answer directly if you can; "
+                f"if the request really needs {name}, call mcp again with reason=\"why\".")
 
     def _allowed_in(self, mode: str, name: str, tool: str) -> bool:
         if mode != "plan":
@@ -682,8 +734,11 @@ class McpRegistry:
         if action in ("enable", "disable"):
             if not names:
                 return f"error: say which server: mcp(action=\"{action}\", server=\"name\" or \"a,b\")"
-            fn = self.enable if action == "enable" else self.disable
-            return "\n".join(fn(n, "asked by the model") for n in names)
+            if action == "disable":
+                return "\n".join(self.disable(n, "asked by the model") for n in names)
+            reason = " ".join(str(args.get("reason") or "").split())[:120]
+            why = "asked by the model" + (f": {reason}" if reason else "")
+            return "\n".join(self.unasked_for(n, reason) or self.enable(n, why) for n in names)
         return "\n".join(f"{s['name']}: {'ON' if s['on'] else 'off'} - {s['description']}"
                          + (f" [{s['unavailable']}]" if s["unavailable"] else "") for s in self.status())
 
