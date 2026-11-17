@@ -218,8 +218,8 @@ fun PermissionsDashboard(
 
         PermissionCard(
             title = "Camera",
-            desc = "So Ray can take a photo when you ask him what he sees. Only while Ray is on screen and the phone " +
-                "is unlocked, always with the shutter sound.",
+            desc = "So Ray can take a photo when you ask him what he sees. Only while Ray is on screen (the voice " +
+                "drawer counts, also over the lock screen), always with the shutter sound.",
             icon = Icons.Default.PhotoCamera,
             isGranted = isCameraGranted,
             actionLabel = "Allow camera",
@@ -229,7 +229,7 @@ fun PermissionsDashboard(
         PermissionCard(
             title = "Photos",
             desc = "So Ray can look at your newest photo or screenshot when you ask for it. He reads only the newest " +
-                "one, only when asked and only while the phone is unlocked.",
+                "one and only when asked, also while the phone is locked.",
             icon = Icons.Default.PhotoLibrary,
             isGranted = isPhotosGranted,
             actionLabel = "Allow photos",
@@ -290,7 +290,8 @@ fun PermissionsDashboard(
 
         PermissionCard(
             title = "Notification access",
-            desc = "Lets Ray read 2FA codes and what Spotify or YouTube is playing.",
+            desc = "Lets Ray read 2FA codes and what Spotify or YouTube is playing, also while the phone is locked " +
+                "(whoever holds it can ask the voice drawer).",
             icon = Icons.Default.Notifications,
             isGranted = isNotificationAccess,
             actionLabel = "Open notification access",

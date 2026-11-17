@@ -6,8 +6,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
-// The voice drawer opens over the lock screen: whoever holds the locked phone must not get its 2FA codes,
-// notifications or screen through Ray
+// The lock guard: a tool in PhoneTools.PRIVATE is refused while the phone is locked.  PRIVATE is empty on purpose
+// (every phone tool works over the lock screen, as onboarding says); these tests keep the guard working if a tool is
+// put back in it
 class PhoneToolsLockTest {
 
     private class DummyContext : ContextWrapper(null) {

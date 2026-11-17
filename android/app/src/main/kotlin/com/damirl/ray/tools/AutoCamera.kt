@@ -23,7 +23,8 @@ import java.util.concurrent.TimeUnit
 
 // Ray takes a photo himself with the back camera (CameraX): no camera app, no confirm step.  Android allows it only
 // while Ray is on screen (the app or the voice drawer), and it is never silent: the shutter sound plays and a short
-// "Ray took a photo" notice shows.  PhoneTools refuses it while the phone is locked.  Blocking: call it off the main
+// "Ray took a photo" notice shows.  It works while the phone is locked too (PhoneTools.PRIVATE is empty: every phone
+// tool runs over the lock screen, on purpose).  Blocking: call it off the main
 // thread (the bridge's and the adb receiver's tool threads)
 object AutoCamera {
 
