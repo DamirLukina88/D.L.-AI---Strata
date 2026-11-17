@@ -49,3 +49,39 @@ class RunCommand(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReplaceFileContent(unittest.TestCase):
+    """replace_file_content read with universal newlines and errors="replace": a CRLF file came back LF, a byte that
+    was not UTF-8 became U+FFFD, and an empty TargetContent put the replacement at the top of the file."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.ws = Path(self.tmp.name)
+
+    def edit(self, data: bytes, target, repl):
+        p = self.ws / "f.txt"
+        p.write_bytes(data)
+        out = impl.tool_replace_file_content({"TargetFile": str(p), "TargetContent": target,
+                                              "ReplacementContent": repl}, self.ws)
+        return out, p.read_bytes()
+
+    def test_crlf_stays_crlf(self):
+        out, data = self.edit(b"line1\r\nline2\r\nline3\r\n", "line2\nline3", "LINE2\nLINE3")
+        self.assertIn("Successfully", out)
+        self.assertEqual(data, b"line1\r\nLINE2\r\nLINE3\r\n")
+
+    def test_lf_stays_lf(self):
+        out, data = self.edit(b"a\nb\n", "b", "B")
+        self.assertEqual(data, b"a\nB\n")
+
+    def test_not_utf8_is_refused_untouched(self):
+        out, data = self.edit(b"caf\xe9\nx\n", "x", "y")
+        self.assertIn("not UTF-8", out)
+        self.assertEqual(data, b"caf\xe9\nx\n")
+
+    def test_empty_target_is_refused(self):
+        out, data = self.edit(b"hello\n", "", "X")
+        self.assertIn("empty", out)
+        self.assertEqual(data, b"hello\n")

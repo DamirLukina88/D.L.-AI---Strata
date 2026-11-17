@@ -187,10 +187,21 @@ def tool_replace_file_content(args: dict, workspace: Path) -> str:
         p = (workspace / p).resolve()
     if not p.is_file():
         return f"Error: File not found: {p}"
-    target = args.get("TargetContent", "")
-    replacement = args.get("ReplacementContent", "")
+    target = str(args.get("TargetContent") or "")
+    replacement = str(args.get("ReplacementContent") or "")
+    if not target:                      # "" is in every text: the replacement went to the top of the file
+        return "Error: TargetContent is empty; copy the exact lines to change from view_file"
     try:
-        orig = p.read_text(encoding="utf-8", errors="replace")
+        # the file's own bytes: a universal-newline read and write turned a CRLF file into LF, and errors="replace"
+        # wrote U+FFFD over every byte that was not UTF-8
+        try:
+            orig = p.read_bytes().decode("utf-8")
+        except UnicodeDecodeError:
+            return (f"Error: {p} is not UTF-8 text; replace_file_content would change its other bytes. "
+                    "Edit it with run_command (sed, python) instead.")
+        if "\r\n" in orig and target not in orig:     # the model writes \n; the file's lines end in \r\n
+            target = target.replace("\r\n", "\n").replace("\n", "\r\n")
+            replacement = replacement.replace("\r\n", "\n").replace("\n", "\r\n")
         if target not in orig:
             if STAND_IN.search(target):
                 return (f"Error: TargetContent not found in {p}: it holds a trim stand-in "
@@ -212,7 +223,8 @@ def tool_replace_file_content(args: dict, workspace: Path) -> str:
         if not is_valid:
             return f"SYNTAX ERROR [syntax_guard]: File modification blocked due to invalid syntax:\n{syn_err}\nPlease fix the syntax error and try again."
 
-        p.write_text(new_text, encoding="utf-8")
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            f.write(new_text)
         return f"Successfully updated {p}"
     except Exception as e:
         return f"Error updating file {p}: {e}"
