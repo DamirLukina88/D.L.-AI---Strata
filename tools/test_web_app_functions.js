@@ -106,3 +106,39 @@ console.log(`All ${n} web app function tests passed.`);
             "codeSetState's idle branch clears modelLoading while the model sleeps");
   console.log("  ok wakeModelFromSleep and codeSetState never leave \"Loading model…\" stuck");
 })().catch((e) => { console.error(e); process.exitCode = 1; });
+
+// sensor polling, dialogs and code-block copy (audit 2026-11-18)
+(async () => {
+  const cutAsync = (name) => {
+    const at = SRC.indexOf(`\nasync function ${name}(`);
+    assert.ok(at >= 0, `no async function ${name}`);
+    let i = SRC.indexOf("{", at), depth = 0;
+    for (; i < SRC.length; i++) {
+      if (SRC[i] === "{") depth++;
+      else if (SRC[i] === "}" && --depth === 0) break;
+    }
+    return SRC.slice(at + 1, i + 1);
+  };
+  let release, calls = 0;
+  const sctx = vm.createContext({window: {}, headers() { return {}; }, applySensorData() {},
+    fetch: () => { calls++; return new Promise((res) => { release = () => res({ok: true, json: async () => ({})}); }); }});
+  vm.runInContext("var sensorFetchInFlight = false;\n" + cutAsync("fetchSensorData") + "\nthis.f = fetchSensorData;", sctx);
+  const first = sctx.f();
+  sctx.f();
+  sctx.f();
+  assert.strictEqual(calls, 1, "a sensor poll waits for the one in flight");
+  release();
+  await first;
+  sctx.f();
+  assert.strictEqual(calls, 2, "the next poll runs once the last one ended");
+  release();
+  for (const dlg of ["wsDialog", "sensorsDlg", "sensorInfoModal"]) {
+    const at = SRC.indexOf(`${dlg}.addEventListener("click", (e) => {`);
+    assert.ok(at >= 0, dlg);
+    assert.ok(SRC.slice(at, at + 400).includes(`if (e.target !== ${dlg}) return;`),
+              `${dlg} closes only on a click on its backdrop`);
+  }
+  const cp = SRC.indexOf('const cp = e.target.closest("[data-code-copy]");');
+  assert.ok(SRC.slice(cp, cp + 500).includes('cp.closest(".st-code")'), "a code block's copy button copies the block");
+  console.log("  ok sensor polling, dialog backdrop clicks and code-block copy");
+})().catch((e) => { console.error(e); process.exitCode = 1; });

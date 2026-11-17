@@ -553,6 +553,9 @@ if (wsDialog) {
     }
   });
   wsDialog.addEventListener("click", (e) => {
+    // only a click on the backdrop itself: a synthetic or keyboard click (the dropzone's input.click(), Enter on a
+    // button) has clientX = clientY = 0, outside a centred dialog, and closed it
+    if (e.target !== wsDialog) return;
     const rect = wsDialog.getBoundingClientRect();
     const isInDialog = (rect.top <= e.clientY && e.clientY <= rect.top + rect.height
       && rect.left <= e.clientX && e.clientX <= rect.left + rect.width);

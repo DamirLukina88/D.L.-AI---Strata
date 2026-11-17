@@ -44,7 +44,11 @@ function stopSensorPolling() {
   }
 }
 
+let sensorFetchInFlight = false;   // one request at a time: on a slow link the 140 ms timer stacked them up and took
+                                   // the browser's six connections to this host (prompts and Stop waited behind them)
 async function fetchSensorData() {
+  if (sensorFetchInFlight) return;
+  sensorFetchInFlight = true;
   try {
     // 1. If on Ray Android WebView companion, use direct native bridge for zero-latency 100 Hz reading
     if (typeof window !== "undefined" && window.RayAndroid && typeof window.RayAndroid.getLiveSensors === "function") {
@@ -65,6 +69,8 @@ async function fetchSensorData() {
     }
   } catch (err) {
     // ignore transient fetch errors during high-frequency poll
+  } finally {
+    sensorFetchInFlight = false;
   }
 }
 
@@ -542,6 +548,9 @@ if ($("sensor-search-input")) {
 const sensorsDlg = $("sensors-dialog");
 if (sensorsDlg) {
   sensorsDlg.addEventListener("click", (e) => {
+    // only a click on the backdrop itself: a synthetic or keyboard click (the dropzone's input.click(), Enter on a
+    // button) has clientX = clientY = 0, outside a centred dialog, and closed it
+    if (e.target !== sensorsDlg) return;
     const rect = sensorsDlg.getBoundingClientRect();
     const isInDialog = (rect.top <= e.clientY && e.clientY <= rect.top + rect.height
       && rect.left <= e.clientX && e.clientX <= rect.left + rect.width);
@@ -571,6 +580,9 @@ if ($("sensor-info-ok-btn")) $("sensor-info-ok-btn").onclick = () => openSensorI
 const sensorInfoModal = $("sensor-info-modal");
 if (sensorInfoModal) {
   sensorInfoModal.addEventListener("click", (e) => {
+    // only a click on the backdrop itself: a synthetic or keyboard click (the dropzone's input.click(), Enter on a
+    // button) has clientX = clientY = 0, outside a centred dialog, and closed it
+    if (e.target !== sensorInfoModal) return;
     const rect = sensorInfoModal.getBoundingClientRect();
     const isInDialog = (rect.top <= e.clientY && e.clientY <= rect.top + rect.height
       && rect.left <= e.clientX && e.clientX <= rect.left + rect.width);

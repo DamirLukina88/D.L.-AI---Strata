@@ -768,8 +768,11 @@ if (codeFeed()) {
     if (pa) { codePromptAction(pa); return; }
     const cp = e.target.closest("[data-code-copy]");
     if (cp) {
+      // a code block's own button copies that block, not the whole answer around it
+      const blk = cp.closest(".st-code");
       const card = cp.closest(".code-mobile-card");
-      const textEl = card.querySelector(".cs-text") || card.querySelector(".code-mobile-card-body");
+      const textEl = (blk && blk.querySelector("pre code")) ||
+        (card && (card.querySelector(".cs-text") || card.querySelector(".code-mobile-card-body")));
       if (textEl) copyText(textEl.innerText || textEl.textContent, cp);
       return;
     }
