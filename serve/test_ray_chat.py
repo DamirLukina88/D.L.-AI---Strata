@@ -60,7 +60,7 @@ class FakeSessiond:
                 self.received.append(op)
                 if op.get("op") == "attach":
                     conn.sendall(b'{"type": "hello"}\n')
-                elif op.get("op") == "input":
+                elif op.get("op") == "input" and op.get("text") != "silent":   # "silent": a turn that says nothing
                     for ev in TURN:
                         conn.sendall((json.dumps(ev) + "\n").encode())
 
@@ -144,6 +144,20 @@ class RayChatStream(unittest.TestCase):
                 caught.exception.close()
                 self.assertEqual(caught.exception.code, 403)
         self.assertEqual(len([op for op in self.sessiond.received if op.get("op") == "input"]), before)
+
+    def test_a_silent_session_gets_an_answer_not_a_dropped_request(self):
+        # the socket's limit ended the request with no HTTP answer at all (non-streamed) or without [DONE]
+        with mock.patch.object(server, "RAY_CHAT_SILENCE_S", 0.3):
+            req = urllib.request.Request(self.base + "/v1/ray/chat", headers={"Content-Type": "application/json"},
+                                         data=json.dumps({"messages": [{"role": "user", "content": "silent"}],
+                                                          "stream": False}).encode())
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(req, timeout=30)
+            caught.exception.close()
+            self.assertEqual(caught.exception.code, 504)
+            out = self.chunks({"messages": [{"role": "user", "content": "silent"}], "stream": True})
+        self.assertEqual(out[-1], "[DONE]")
+        self.assertIn("sent nothing", out[0]["error"]["message"])
 
 
 if __name__ == "__main__":

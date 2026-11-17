@@ -304,6 +304,7 @@ IM_END = "<|im_end|>"
 IMAGE_PAD = "<|image_pad|>"
 
 
+RAY_CHAT_SILENCE_S = 900.0                          # /v1/ray/chat: how long Ray's session may say nothing
 WORKSPACE_DIR = Path(os.environ.get("STRATA_WORKSPACE_DIR", str(Path.cwd() / "workspace"))).resolve()
 
 
@@ -1962,13 +1963,16 @@ def make_handler(svc: Service):
 
             try:
                 conn = socket.socket(socket.AF_UNIX)
-                conn.settimeout(180)
+                # a turn can be silent for minutes (an MCP server's start is allowed 180 s, a command 120 s, a model
+                # load): the limit is for a daemon that hangs, and its end is answered (below), not dropped
+                conn.settimeout(RAY_CHAT_SILENCE_S)
                 conn.connect(str(SESSIOND_SOCKET))
                 f = conn.makefile("rb")
             except OSError:
                 self._ray_chat_prepare(req)
                 return self._openai(req)
 
+            streaming = False
             try:
                 conn.sendall((json.dumps({"op": "attach", "session": session_name}) + "\n").encode())
                 hello = json.loads(f.readline() or "{}")
@@ -2059,6 +2063,7 @@ def make_handler(svc: Service):
                     return self._json(200, res)
 
                 self._sse()
+                streaming = True
                 tail, after_tool = "", False                # text after a tool call starts a new paragraph of speech
                 while True:
                     line = f.readline()
@@ -2100,6 +2105,17 @@ def make_handler(svc: Service):
                     self.wfile.flush()
                 self.wfile.write(b"data: [DONE]\n\n")
                 self.wfile.flush()
+            except TimeoutError:                            # the daemon said nothing for RAY_CHAT_SILENCE_S
+                msg = f"Ray's session sent nothing for {RAY_CHAT_SILENCE_S:.0f} s; the turn may still be running"
+                try:
+                    if streaming:
+                        self.wfile.write(b"data: " + json.dumps({"error": {"message": msg}}).encode() + b"\n\n")
+                        self.wfile.write(b"data: [DONE]\n\n")
+                        self.wfile.flush()
+                    else:
+                        self._json(504, {"error": {"message": msg}})
+                except OSError:
+                    pass
             except (BrokenPipeError, ConnectionResetError, OSError):
                 return
             finally:
