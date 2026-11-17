@@ -85,3 +85,9 @@ could go upstream as its own pull request.
 - `serve/test_server.py`: two classes were both named `VisionTempFiles`, so the first one's test (a refused request
   leaves no combined image file) never ran. Renamed to `VisionRequestFiles`; it then failed because the file had moved
   to `/dev/shm` with #874, so the test now looks there as well. Same in upstream v0.2.15.
+- `tools/test_setup_golden.py`: the name lookarounds were `(?<![w.-])`, a literal `w` where `\w` was meant (same in
+  upstream v0.2.9 to v0.2.15). No current baseline value changes with `\w`; a value such as `libstrata_x` would.
+- Not changed here (Windows only, cannot be run on this PC): `tools/hip/build_windows.bat` configures only when
+  `build.ninja` is missing, so on an existing build folder the `tests` argument, a new `STRATA_HIP_ARCHS` or a new
+  ROCm root is ignored and the zip can be packaged for the old architectures. Always running the configure step
+  would fix it.
