@@ -164,8 +164,12 @@ class FakeRoot(unittest.TestCase):
         self.strata.disk_free = lambda p: 1000.0
         self.tools = M.Tools(self.strata)
         self.extra = []
+        # the tests must never see a Strata server that happens to run on the real default port on this PC
+        self._default_port = M.DEFAULT_PORT
+        M.DEFAULT_PORT = free_port()
 
     def tearDown(self):
+        M.DEFAULT_PORT = self._default_port
         for p in self.extra:
             if p.poll() is None:
                 p.kill()
@@ -233,8 +237,9 @@ class Protocol(FakeRoot):
         self.assertIn("tools", init["capabilities"])
         self.assertEqual(init["serverInfo"]["name"], "strata")
         names = [t["name"] for t in r[2]["result"]["tools"]]
-        self.assertEqual(names, ["strata_status", "strata_models", "strata_install", "strata_start", "strata_stop",
-                                 "strata_logs", "strata_benchmark", "strata_connect_info"])
+        self.assertEqual(names, ["strata_status", "strata_models", "strata_remove", "strata_install", "strata_start",
+                                 "strata_stop", "strata_logs", "strata_benchmark", "strata_connect_info",
+                                 "strata_coder_generate", "strata_coder_review"])
         for t in r[2]["result"]["tools"]:
             self.assertEqual(t["inputSchema"]["type"], "object")
             self.assertFalse(t["inputSchema"]["additionalProperties"])
@@ -272,7 +277,7 @@ class Protocol(FakeRoot):
                            timeout=60, env=dict(os.environ))
         lines = [json.loads(x) for x in p.stdout.splitlines()]
         self.assertEqual(sorted(m["id"] for m in lines), [1, 2, 3])
-        self.assertEqual(len(next(m for m in lines if m["id"] == 2)["result"]["tools"]), 8)
+        self.assertEqual(len(next(m for m in lines if m["id"] == 2)["result"]["tools"]), 11)
         self.assertIn("ready", p.stderr)
 
     def test_not_a_strata_folder(self):
