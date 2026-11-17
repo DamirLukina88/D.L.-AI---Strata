@@ -52,6 +52,18 @@ def approval_reason(name: str, args: dict, workspace: Path) -> tuple[str, str] |
         p = p if p.is_absolute() else (workspace / p)
         reason = classify_write(p, workspace)
         return (f"{name} {p}", reason) if reason else None
+    if name == "switch_workspace":
+        # a workspace that holds the home folder (/, /home, ~) makes every later write "inside the workspace":
+        # ~/.bashrc and the rest would no longer be asked about
+        raw = str(args.get("path") or args.get("workspace") or "").strip()
+        if raw:
+            np = Path(raw).expanduser()
+            np = (np if np.is_absolute() else workspace / np).resolve()
+            home = Path.home().resolve()
+            if np == home or np in home.parents:
+                return (f"{name} {np}", "makes the whole home folder the workspace (its writes are then not asked "
+                                        "about)")
+        return None
     if name == "save_chat" and str(args.get("filename") or "").strip():
         p = save_chat_path(args, workspace)                 # any path, written without a card before
         reason = classify_write(p, workspace)

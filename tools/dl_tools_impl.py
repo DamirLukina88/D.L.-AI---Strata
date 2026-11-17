@@ -86,7 +86,7 @@ def tool_view_file(args: dict, workspace: Path) -> str:
 
 
 def tool_switch_workspace(args: dict, workspace: Path, session_context: dict | None = None) -> str:
-    path_str = (args.get("path") or args.get("workspace") or "").strip()
+    path_str = str(args.get("path") or args.get("workspace") or "").strip()
     if not path_str:
         return "Error: path required"
     new_path = Path(path_str).expanduser()

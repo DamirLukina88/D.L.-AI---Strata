@@ -59,3 +59,13 @@ class BoundaryArgs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SwitchWorkspaceGate(unittest.TestCase):
+    def test_home_or_root_asks_a_project_does_not(self):
+        ws = Path(tempfile.gettempdir())
+        for target in ("/", "~", str(Path.home()), str(Path.home().parent)):
+            with self.subTest(target=target):
+                self.assertIsNotNone(dl_boundary.approval_reason("switch_workspace", {"path": target}, ws))
+        self.assertIsNone(dl_boundary.approval_reason("switch_workspace", {"path": str(Path.home() / "proj")}, ws))
+        self.assertIsNone(dl_boundary.approval_reason("switch_workspace", {"path": "/srv/proj-x"}, ws))
