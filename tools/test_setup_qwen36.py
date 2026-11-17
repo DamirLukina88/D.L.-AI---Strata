@@ -100,7 +100,7 @@ class InstallOwnPath(unittest.TestCase):
             self.calls.append(("config", path.name))
 
         patches = [mock.patch.object(setup, "download", lambda url, dst, what=None: self.calls.append(("get", url, dst))),
-                   mock.patch.object(setup, "verify_sha256", lambda s, size, sha: self.calls.append(("sha", s.name))),
+                   mock.patch.object(setup, "verify_sha256", lambda s, size, sha, own=False: self.calls.append(("sha", s.name, own))),
                    mock.patch.object(setup, "free_gb", lambda p: 500.0),
                    mock.patch.object(setup, "pip_install", lambda *a, **k: None),
                    mock.patch.object(setup, "engine_step", engine_step),
@@ -120,6 +120,18 @@ class InstallOwnPath(unittest.TestCase):
         return run(setup.install_own_path, args(models_dir=str(self.root / "models"), **kw), "qwen36", gpu, False, [],
                    13, [], 8080, ram, None)
 
+    def test_the_persons_own_file_in_gguf_dir_is_used(self):
+        # it has no .done mark: it was counted as still to download (free-space check) and then "is missing"
+        own = self.root / "mine"
+        own.mkdir()
+        (own / "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf").write_bytes(b"gguf")
+        with mock.patch.object(setup, "free_gb", lambda p: 1.0):           # far less than the file's 22 GB
+            rc, out = self.install(model="UD-Q4_K_XL", gguf_dir=str(own))
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("is missing", out)
+        self.assertEqual([c for c in self.calls if c[0] == "get"], [])
+        self.assertIn(("sha", "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf", True), self.calls)   # checked, never deleted
+
     def test_installs_the_pinned_file_and_writes_the_config(self):
         rc, out = self.install(model="UD-Q4_K_XL")
         self.assertEqual(rc, 0, out)
@@ -128,7 +140,7 @@ class InstallOwnPath(unittest.TestCase):
         gguf = self.root / "models" / "qwen36-UD-Q4_K_XL" / "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
         self.assertEqual(get[0][1], setup.hf(REPO) + gguf.name)
         self.assertEqual(get[0][2], gguf)
-        self.assertIn(("sha", gguf.name), self.calls)
+        self.assertIn(("sha", gguf.name, False), self.calls)
         self.assertIn(("engine", "none"), self.calls)            # no image encoder for this family yet
         tok = [c for c in self.calls if c[0] == "run"]
         self.assertTrue(tok and "strata_tokenizer.py" in str(tok[0][1]))
