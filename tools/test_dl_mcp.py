@@ -816,3 +816,49 @@ class PhoneActionsNeedWords(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class NoNoticeUnderTheRegistryLock(unittest.TestCase):
+    """enable() sent "starting ..." and _evict's "-name (tool limit)" while holding the registry lock. The session's
+    notify takes Session.lock, and the daemon calls state() -> status() (the registry lock) while holding
+    Session.lock: a server start racing an attach or a queued message stopped that session for good."""
+
+    def test_enable_and_a_client_do_not_wait_on_each_other(self):
+        import threading as _th
+        import time as _t
+        import dl_mcp
+
+        class FakeSrv:
+            def __init__(self, name, cfg, settings):
+                self.name, self.error, self.tools = name, "", [{"name": "t1"}, {"name": "t2"}]
+
+            def start(self):
+                _t.sleep(0.6)
+                return True
+
+            def close(self):
+                pass
+
+        slock = _th.RLock()                                  # stands in for Session.lock
+
+        def notify(text, level="info"):
+            with slock:
+                pass
+        cat = {n: dl_mcp.Entry(n, {"command": "/bin/true"}) for n in ("a", "b")}
+        with mock.patch.object(dl_mcp, "McpServer", FakeSrv):
+            reg = dl_mcp.McpRegistry(surface="code", notify=notify,
+                                     catalog=(cat, {**dl_mcp.SETTINGS, "max_tools": 2}, []))
+            reg.enable("a")
+            turn = _th.Thread(target=lambda: reg.enable("b", "x"), daemon=True)
+
+            def client():
+                _t.sleep(0.2)
+                with slock:
+                    reg.status()
+            other = _th.Thread(target=client, daemon=True)
+            turn.start()
+            other.start()
+            turn.join(5)
+            other.join(5)
+        self.assertFalse(turn.is_alive() or other.is_alive(), "deadlock between the registry and session locks")
+        self.assertEqual(list(reg.enabled), ["b"])

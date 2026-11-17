@@ -472,25 +472,33 @@ class McpRegistry:
         bad = entry.unavailable(self.surface)
         if bad:
             return f"error: {name} is {bad}"
+        # notify() is never called under self.lock: the session's notice takes Session.lock, and the daemon calls
+        # state() -> status() (self.lock) while holding Session.lock, so the two threads waited on each other for good
         with self.lock:
             if name in self.enabled:
+                self.enabled[name]["turn"] = self.turn
+                return f"{name} is already on: " + ", ".join(self.enabled[name]["tools"])
+        if not entry.builtin:
+            self.notify(f"starting MCP server {name}…")
+        with self.lock:
+            if name in self.enabled:                         # another thread turned it on meanwhile
                 self.enabled[name]["turn"] = self.turn
                 return f"{name} is already on: " + ", ".join(self.enabled[name]["tools"])
             srv = self.servers.get(name)
             if srv is None:
                 srv = self.servers[name] = (BuiltinServer(entry.builtin) if entry.builtin
                                             else McpServer(name, entry.cfg, self.settings))
-            if not entry.builtin:
-                self.notify(f"starting MCP server {name}…")
             if not srv.start():
                 return f"error: {name} did not start: {srv.error}"
             tools = [t for t in srv.tools if not entry.allow or t["name"] in entry.allow]
             self.enabled[name] = {"turn": self.turn, "used": time.monotonic(), "why": why,
                                   "tools": [t["name"] for t in tools]}
-            self._evict(keep=name)
+            evicted = self._evict(keep=name)
             self._rebuild()
             if entry.idle_s:
                 self._start_timer()
+        for gone in evicted:
+            self.notify(f"-{gone} (tool limit {self.settings['max_tools']})", "info")
         self.notify(f"+{name}" + (f" ({why})" if why else ""), "info")
         self._changed()
         return f"{name} is on. Its tools are available from your next step: " + ", ".join(
@@ -510,7 +518,10 @@ class McpRegistry:
         self._changed()
         return f"{name} is off"
 
-    def _evict(self, keep: str) -> None:
+    def _evict(self, keep: str) -> list[str]:
+        """Turn off the oldest servers over max_tools (under self.lock); the names, for the caller to announce
+        after the lock."""
+        evicted = []
         while sum(len(v["tools"]) for v in self.enabled.values()) > int(self.settings["max_tools"]):
             others = [(self.catalog[n].default_on, v["turn"], v["used"], n)   # defaults go last
                       for n, v in self.enabled.items() if n != keep]
@@ -522,7 +533,8 @@ class McpRegistry:
             srv = self.servers.pop(name, None)
             if srv is not None:
                 srv.close()
-            self.notify(f"-{name} (tool limit {self.settings['max_tools']})", "info")
+            evicted.append(name)
+        return evicted
 
     def _rebuild(self) -> None:
         routes = {}
