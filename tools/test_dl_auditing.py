@@ -232,3 +232,25 @@ class TestGateReadsTheRealPath(unittest.TestCase):
                     "cp a sub/b", "ls .."):
             with self.subTest(cmd=cmd):
                 self.assertIsNone(classify_command(cmd, self.ws))
+
+
+class TestWiderSecretPatterns(unittest.TestCase):
+    """dl_memory's FALLBACK_SECRETS were used only when dl_auditing failed to import, i.e. never: these formats
+    passed the memory-page guard, the MCP leak check and the pre-commit hook."""
+
+    SAMPLES = {   # built at run time, so this file itself holds none of them
+        "GitLab Token": "glpat-" + "A1b2C3d4E5f6G7h8I9j0K",
+        "Google API Key": "AIza" + "Sy" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q",
+        "JWT": "eyJ" + "hbGciOiJIUzI1NiJ9" + "." + "eyJzdWIiOiIxMjM0NTY3ODkwIn0" + "." + "abcdefghijklmnop",
+        "Stripe Live Key": "sk_" + "live_" + "A1b2C3d4E5f6G7h8I9",
+        "npm Token": "npm_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8",
+        "Connection String with Password": "postgres://" + "admin:hunter2x" + "@db.example.org/app",
+    }
+
+    def test_each_is_caught(self):
+        from tools.dl_auditing import scan_secrets_in_text
+        for label, value in self.SAMPLES.items():
+            with self.subTest(label=label):
+                ok, err = scan_secrets_in_text(f"value = {value}\n", "notes.md")
+                self.assertFalse(ok)
+                self.assertIn(label, err)

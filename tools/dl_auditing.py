@@ -166,6 +166,14 @@ SECRET_PATTERNS = [
     ("Google OAuth Access Token", re.compile(r"\b(ya29\.[A-Za-z0-9_-]{20,})")),
     ("Google OAuth Refresh Token", re.compile(r"(?<![A-Za-z0-9])(1//0[A-Za-z0-9_-]{30,})")),
     ("DeepL API Key", re.compile(r"\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:fx)\b")),
+    # dl_memory's FALLBACK_SECRETS had these, but it used them only when this module failed to import (never): a
+    # Home Assistant token (a JWT), a Google API key or a password in a URL passed the memory guard and this hook
+    ("GitLab Token", re.compile(r"\b(glpat-[A-Za-z0-9_-]{20,})")),
+    ("Google API Key", re.compile(r"\b(AIza[0-9A-Za-z_-]{35})")),
+    ("JWT", re.compile(r"\b(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})")),
+    ("Stripe Live Key", re.compile(r"\b([rs]k_live_[A-Za-z0-9]{16,})")),
+    ("npm Token", re.compile(r"\b(npm_[A-Za-z0-9]{36})")),
+    ("Connection String with Password", re.compile(r"\b([a-z][a-z0-9+.-]*://[^\s/:@]+:[^\s/@]{3,}@[^\s/]+)")),
 ]
 
 # The real values on this PC: every value in secrets.env, secret-looking environment variables and the Google sign-in
