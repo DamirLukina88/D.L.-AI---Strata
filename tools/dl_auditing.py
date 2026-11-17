@@ -683,7 +683,7 @@ def tool_smart_test_runner(args: Dict[str, Any], workspace: Path) -> str:
 # A match asks the user (terminal y/N or the web approval card); /yolo turns the gate off for a session.
 
 _DESTRUCTIVE_PATTERNS = [
-    ("deletes recursively or forcibly", re.compile(r"(?:^|[\s;&|(`])rm\s+(?:-[a-zA-Z]*[rRf][a-zA-Z]*|--recursive|--force)\b")),
+    ("deletes recursively or forcibly", re.compile(r"(?:^|[\s;&|(`/\\])rm\s+(?:-[a-zA-Z]*[rRf][a-zA-Z]*|--recursive|--force)\b")),
     ("deletes found files", re.compile(r"\bfind\b[^|;&]*\s-(?:delete|exec\s+rm)\b|\bxargs\s+(?:-\S+\s+)*rm\b")),
     ("runs as root", re.compile(r"(?:^|[\s;&|(`])(?:sudo|doas|pkexec|su)(?:\s|$)")),
     ("writes raw disks or filesystems", re.compile(r"(?:^|[\s;&|(`])(?:dd|mkfs(?:\.\w+)?|shred|wipefs|fdisk|sfdisk|parted|sgdisk|blkdiscard)(?:\s|$)|>\s*/dev/(?:sd|nvme|hd|vd|mmcblk)")),
@@ -693,14 +693,20 @@ _DESTRUCTIVE_PATTERNS = [
     ("pipes a download into a shell", re.compile(r"\b(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:ba|z|fi)?sh\b")),
     ("removes packages", re.compile(r"\bpacman\s+-R|\bapt(?:-get)?\s+(?:remove|purge)|\bpip\d?\s+uninstall\b|\bnpm\s+(?:uninstall|rm)\s+-g")),
 ]
-_PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?|\b(?:mv|cp|rsync|ln)\s+(?:-\S+\s+)*\S+\s+)(['"]?)(~?/[^\s'";&|)]*)\1""")
-_SAFE_ROOTS = ("/tmp/", "/dev/null", "/dev/stdout", "/dev/stderr")
+_PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?|\b(?:mv|cp|rsync|ln)\s+(?:-\S+\s+)*\S+\s+)(['"]?)(~?/[^\s'";&|)]*|\.\.(?:/[^\s'";&|)]*)?)\1""")
 
 
 def _outside(path_str: str, workspace: Path) -> bool:
-    if path_str.startswith(_SAFE_ROOTS) or path_str in ("/tmp", "/dev/null"):
+    # the resolved path, not the text: "/tmp/../home/u/.bashrc" starts with "/tmp/"; a relative one ("../../x")
+    # is the workspace's, not this process's folder
+    if path_str in ("/dev/null", "/dev/stdout", "/dev/stderr"):    # links to the terminal or a pipe once resolved
         return False
     p = Path(path_str).expanduser()
+    if not p.is_absolute():
+        p = workspace / p
+    r = str(p.resolve())
+    if r == "/tmp" or r.startswith("/tmp/"):
+        return False
     try:
         p.resolve().relative_to(workspace.resolve())
         return False

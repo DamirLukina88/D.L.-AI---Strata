@@ -207,3 +207,28 @@ class TestKnownValues(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGateReadsTheRealPath(unittest.TestCase):
+    """The outside-workspace check compared the text with /tmp/ before resolving it, so /tmp/../home/u/.bashrc
+    asked nothing; /bin/rm and \\rm got past the rm pattern; a relative ../../x target was never looked at."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.ws = Path(self.tmp.name) / "ws"
+        self.ws.mkdir()
+
+    def test_asks(self):
+        from tools.dl_auditing import classify_command, classify_write
+        for cmd in ("echo x > /tmp/../etc/foo", "/bin/rm -rf ~/x", "\\rm -rf ~/x", "cp a ../../../../../../../etc/out"):
+            with self.subTest(cmd=cmd):
+                self.assertIsNotNone(classify_command(cmd, self.ws))
+        self.assertIsNotNone(classify_write(Path("/tmp/../home/someone/.bashrc"), self.ws))
+
+    def test_still_free(self):
+        from tools.dl_auditing import classify_command
+        for cmd in ("echo x > /tmp/a.txt", "echo > /dev/null", "echo e 2> /dev/stderr", "cat a > out.txt",
+                    "cp a sub/b", "ls .."):
+            with self.subTest(cmd=cmd):
+                self.assertIsNone(classify_command(cmd, self.ws))
