@@ -151,7 +151,7 @@ class RequestChanges:
                 except OSError:
                     self.before[p] = None
             self.last_edit = self.step
-        elif name == "run_command" and CHECK_CMD.search(str(args.get("CommandLine") or "")):
+        elif name == "run_command" and CHECK_CMD.search(str(args.get("CommandLine") or args.get("command") or "")):
             self.last_check = self.step
 
     def changed(self) -> list[Path]:

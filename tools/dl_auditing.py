@@ -624,7 +624,7 @@ def run_smart_tests(workspace: Path, target_files: Optional[List[str]] = None) -
         try:
             res = subprocess.run(cmd, cwd=workspace, env=env, capture_output=True, text=True, timeout=60)
             elapsed = time.time() - t0
-            passed = "PASSED" in res.stdout or res.returncode == 0
+            passed = res.returncode == 0            # "PASSED" in -v output meant one test passed, not all
             badge = f"{C_GREEN}✓ PASSED{C_RESET}" if passed else f"{C_RED}✗ FAILED{C_RESET}"
 
             out = [

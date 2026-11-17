@@ -69,3 +69,16 @@ class SwitchWorkspaceGate(unittest.TestCase):
                 self.assertIsNotNone(dl_boundary.approval_reason("switch_workspace", {"path": target}, ws))
         self.assertIsNone(dl_boundary.approval_reason("switch_workspace", {"path": str(Path.home() / "proj")}, ws))
         self.assertIsNone(dl_boundary.approval_reason("switch_workspace", {"path": "/srv/proj-x"}, ws))
+
+
+class SmallChecks(unittest.TestCase):
+    def test_a_check_run_through_the_command_alias_counts(self):
+        import dl_finish
+        rc = dl_finish.RequestChanges(Path(tempfile.gettempdir()))
+        rc.before_tool("run_command", {"command": "pytest -q"})
+        self.assertEqual(rc.last_check, rc.step)
+
+    def test_smart_tests_pass_only_on_exit_code_zero(self):
+        src = (Path(__file__).resolve().parent / "dl_auditing.py").read_text(encoding="utf-8")
+        self.assertIn("passed = res.returncode == 0", src)
+        self.assertNotIn('"PASSED" in res.stdout or', src)
