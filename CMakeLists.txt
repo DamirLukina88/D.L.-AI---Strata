@@ -163,6 +163,11 @@ elseif(STRATA_ENABLE_CUDA)
   if(MSVC AND STRATA_EXPERIMENTAL_SM60 AND NOT DEFINED CMAKE_CUDA_RUNTIME_LIBRARY)
     set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
   endif()
+  # the default before enable_language(CUDA): under CMP0104 it puts the compiler's own default (sm_52 on CUDA 12,
+  # sm_75 on 13) in the cache, so a check after it never applied 120 to a hand-run configure without an arch
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES AND NOT DEFINED ENV{CUDAARCHS})
+    set(CMAKE_CUDA_ARCHITECTURES 120 CACHE STRING "CUDA architectures")
+  endif()
   enable_language(CUDA)
   # `enable_language(CUDA)` gives the .cu compile rules but NOT the imported targets, so `CUDA::cudart` has to
   # be brought in explicitly for the host-side tests that call cudaMalloc themselves.
