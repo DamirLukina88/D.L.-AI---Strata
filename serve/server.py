@@ -1910,6 +1910,10 @@ def make_handler(svc: Service):
             """Bridge /v1/ray/chat to the shared CLI session daemon (dl_sessiond) so Ray has access to
             all MCP tools, full multi-turn conversational context, and workspace.
             Falls back to raw engine completion if sessiond is not running."""
+            # it drives Ray's agent session (tools, the shell) like /api/code/session's input: the same check, not
+            # only /v1's (a page on another port of an allowed host, a chrome-extension:// origin, cors_origins "*")
+            if not self._own_page("Ray's session can be driven"):
+                return
             if not SESSIOND_SOCKET.exists():
                 self._ray_chat_prepare(req)
                 return self._openai(req)

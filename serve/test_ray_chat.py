@@ -130,6 +130,21 @@ class RayChatStream(unittest.TestCase):
             body = json.loads(r.read())
         self.assertEqual(body["choices"][0]["message"]["content"], "Checking now. Hi! Your battery is at 80%.")
 
+    def test_a_foreign_page_cannot_drive_the_session(self):
+        # /api/code/session's input wants Strata's own page; /v1/ray/chat sends the same op to the daemon
+        before = len([op for op in self.sessiond.received if op.get("op") == "input"])
+        for origin in ("http://localhost:3000", "chrome-extension://abc", "https://evil.example"):
+            with self.subTest(origin=origin):
+                req = urllib.request.Request(self.base + "/v1/ray/chat", headers={"Content-Type": "application/json",
+                                                                                  "Origin": origin},
+                                             data=json.dumps({"messages": [{"role": "user", "content": "run ls"}],
+                                                              "stream": False}).encode())
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(req, timeout=30)
+                caught.exception.close()
+                self.assertEqual(caught.exception.code, 403)
+        self.assertEqual(len([op for op in self.sessiond.received if op.get("op") == "input"]), before)
+
 
 if __name__ == "__main__":
     unittest.main()
