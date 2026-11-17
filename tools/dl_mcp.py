@@ -1022,7 +1022,10 @@ class McpRegistry:
                 reason += " · ADDRESS NOT FROM YOU: " + ", ".join(foreign)
             return "\n".join(lines), reason, True
         if tool in entry.ask:
-            if entry.trust_local_pages and is_local_url(self.page.get(name, "")):
+            # the page it is on, and where the call goes: a navigate from a localhost page to a remote url is not local
+            target = (args or {}).get("url")
+            if entry.trust_local_pages and is_local_url(self.page.get(name, "")) and \
+                    (not isinstance(target, str) or not target or is_local_url(target)):
                 return None
             if name in self.trusted:
                 return None

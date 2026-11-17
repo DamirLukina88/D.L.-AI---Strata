@@ -458,6 +458,12 @@ class LocalPages(unittest.TestCase):
         self.page("https://example.com/login")                  # a click left the user's own page
         self.assertIsNotNone(self.r.approval("browser__add", {"a": 1}, []))
 
+    def test_a_call_to_a_remote_url_asks_even_from_a_local_page(self):
+        # the skip looked only at the page it was on, never at the call's own url
+        self.page("http://localhost:8731/tetris.html")
+        self.assertIsNotNone(self.r.approval("browser__add", {"url": "https://anything.example/?q=secret"}, []))
+        self.assertIsNone(self.r.approval("browser__add", {"url": "http://127.0.0.1:8731/other.html"}, []))
+
     def test_a_restarted_browser_forgets_the_page(self):
         self.page("http://127.0.0.1:8000/")
         self.r.disable("browser")
