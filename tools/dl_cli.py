@@ -1199,8 +1199,12 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                     _note(emit, "Small talk: a tool call was answered, not run (DL_SMALLTALK_GUARD=0 turns this off).")
                 result_str = SMALL_TALK_NOTE
             else:
-                result_str = bad_args or dispatch_dl_tool(fn_name, args, current_ws, mode=mode,
-                                                          session_context=session_context)
+                try:
+                    result_str = bad_args or dispatch_dl_tool(fn_name, args, current_ws, mode=mode,
+                                                              session_context=session_context)
+                except Exception as e:              # a tool's bug or an argument of the wrong type: the model hears
+                    # it and goes on; it ended the whole request, the call left in messages with no result
+                    result_str = f"Error: {fn_name} failed: {type(e).__name__}: {e}"
             result_str = cap_tool_result(result_str)    # 2026-10-20 22:12: a 106k debug print ended a CONTRA run
             if fn_name in READ_TOOLS and READ_RESULT_MAX > 0 and not bad_args:     # keep reads small (2026-11-14)
                 # a file read keeps its start; a command keeps its start and its end, where the failures, the

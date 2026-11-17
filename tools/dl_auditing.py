@@ -324,8 +324,11 @@ def tool_scan_secrets(args: Dict[str, Any], workspace: Path) -> str:
         dirs[:] = [d for d in dirs if d not in ignore_dirs]
         for f in files:
             fp = Path(root) / f
-            # Skip large binaries or database dumps
-            if fp.stat().st_size > 1024 * 1024 or fp.suffix in (".png", ".jpg", ".bin", ".gguf", ".safetensors", ".so"):
+            try:                # a dangling link (an editor's .#file lock) raised here and ended the scan
+                # Skip large binaries or database dumps
+                if fp.stat().st_size > 1024 * 1024 or fp.suffix in (".png", ".jpg", ".bin", ".gguf", ".safetensors", ".so"):
+                    continue
+            except OSError:
                 continue
             try:
                 content = fp.read_text(encoding="utf-8", errors="replace")

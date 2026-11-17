@@ -1,0 +1,61 @@
+"""The approval gate and the agent loop with arguments the model gets wrong or aims outside the workspace:
+- save_chat wrote any path (an absolute filename, ~) with no card and into the memory store;
+- run_command's relative Cwd ran in the process's folder, and ~ was approved as home but ran in "<cwd>/~";
+- a list as CommandLine raised a TypeError in approval_reason, which ended the whole request;
+- tool_scan_secrets ended on a dangling link.
+
+    cd tools && ../.venv/bin/python -m pytest -q test_dl_boundary_args.py
+"""
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import dl_auditing  # noqa: E402
+import dl_boundary  # noqa: E402
+import dl_tools_impl  # noqa: E402
+
+
+class BoundaryArgs(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.ws = Path(self.tmp.name).resolve() / "ws"
+        (self.ws / "sub").mkdir(parents=True)
+
+    def test_save_chat_outside_the_workspace_asks(self):
+        home = Path.home() / "x-chat"
+        self.assertIsNotNone(dl_boundary.approval_reason("save_chat", {"filename": str(home)}, self.ws))
+        self.assertIsNotNone(dl_boundary.approval_reason("save_chat", {"filename": "~/x-chat"}, self.ws))
+        self.assertIsNone(dl_boundary.approval_reason("save_chat", {"filename": "notes/chat"}, self.ws))
+        self.assertIsNone(dl_boundary.approval_reason("save_chat", {}, self.ws))
+
+    def test_save_chat_never_writes_into_the_memory_store(self):
+        store = Path(self.tmp.name).resolve() / "store"
+        store.mkdir()
+        with mock.patch.object(dl_boundary, "memory_store", return_value=store):
+            why = dl_boundary.agent_boundary("save_chat", {"filename": str(store / "page")}, self.ws,
+                                             {"user_text": "save the chat"})
+        self.assertIn("memory store", why or "")
+
+    def test_a_list_command_does_not_raise(self):
+        self.assertIsNone(dl_boundary.approval_reason("run_command", {"CommandLine": ["ls", "-la"]}, self.ws))
+
+    def test_cwd_is_the_workspaces(self):
+        self.assertEqual(dl_boundary.command_cwd({"Cwd": "sub"}, self.ws), self.ws / "sub")
+        self.assertEqual(dl_boundary.command_cwd({"Cwd": "~"}, self.ws), Path.home().resolve())
+        out = dl_tools_impl.tool_run_command({"CommandLine": "pwd", "Cwd": "sub"}, self.ws)
+        self.assertIn(str(self.ws / "sub"), out)
+
+    def test_scan_secrets_skips_a_dangling_link(self):
+        os.symlink(self.ws / "gone", self.ws / ".#lock")
+        (self.ws / "a.txt").write_text("hello", encoding="utf-8")
+        out = dl_auditing.tool_scan_secrets({}, self.ws)
+        self.assertIn("ScanSecrets", out)
+
+
+if __name__ == "__main__":
+    unittest.main()

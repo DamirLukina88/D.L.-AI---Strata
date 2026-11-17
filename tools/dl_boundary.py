@@ -42,8 +42,8 @@ def terminal_approve(kind: str, summary: str, reason: str) -> bool:
 def approval_reason(name: str, args: dict, workspace: Path) -> tuple[str, str] | None:
     """(what will run, why it needs approval) for a destructive or out-of-workspace action, else None."""
     if name == "run_command":
-        cmd = args.get("CommandLine") or args.get("command") or ""
-        cwd = Path(args["Cwd"]).expanduser() if args.get("Cwd") else workspace
+        cmd = str(args.get("CommandLine") or args.get("command") or "")    # a list as CommandLine raised here
+        cwd = command_cwd(args, workspace)
         reason = classify_command(cmd, workspace) or (classify_write(cwd, workspace) and f"runs outside the workspace ({cwd})")
         return (cmd, reason) if reason else None
     if name in ("write_to_file", "replace_file_content"):
@@ -52,10 +52,29 @@ def approval_reason(name: str, args: dict, workspace: Path) -> tuple[str, str] |
         p = p if p.is_absolute() else (workspace / p)
         reason = classify_write(p, workspace)
         return (f"{name} {p}", reason) if reason else None
+    if name == "save_chat" and str(args.get("filename") or "").strip():
+        p = save_chat_path(args, workspace)                 # any path, written without a card before
+        reason = classify_write(p, workspace)
+        return (f"{name} {p}", reason) if reason else None
     if name in ("memory", "local_wiki") and memory_store():
         what = memory_global_change(args)
         return (what, "changes global memory, which every agent sees in every project") if what else None
     return None
+
+
+def command_cwd(args: dict, workspace: Path) -> Path:
+    """run_command's Cwd: a relative one is the workspace's (it ran in the process's folder, which a
+    switch_workspace in another daemon session changes), ~ is the home folder in the gate and in the run alike."""
+    if not args.get("Cwd"):
+        return workspace
+    return (workspace / Path(str(args["Cwd"])).expanduser()).resolve()
+
+
+def save_chat_path(args: dict, workspace: Path) -> Path:
+    """Where save_chat writes (the same rule as tool_save_chat)."""
+    p = Path(str(args.get("filename") or "").strip()).expanduser()
+    p = p if p.is_absolute() else (workspace / p).resolve()
+    return p if p.suffix else p.with_suffix(".md")
 
 
 def memory_global_change(args: dict) -> str | None:
@@ -225,7 +244,7 @@ def agent_boundary(name: str, args: dict, workspace: Path, session_context: dict
                   "\"diff\"|\"undo\"); it commits to jj for you.")
     if name == "run_command":
         cmd = str(args.get("CommandLine") or args.get("command") or "")
-        cwd = Path(args["Cwd"]).expanduser() if args.get("Cwd") else workspace
+        cwd = command_cwd(args, workspace)
         if store is not None and (_inside(cwd, store) or str(store) in cmd or str(store.resolve()) in cmd):
             return (f"Refused: the memory store ({store}) is not reached with run_command, not even to look. "
                     + use_memory)
@@ -237,10 +256,12 @@ def agent_boundary(name: str, args: dict, workspace: Path, session_context: dict
         refused = picture_refusal(cmd, ctx)
         if refused:
             return refused
-    if name in ("write_to_file", "replace_file_content", "view_file") and store is not None:
+    if name in ("write_to_file", "replace_file_content", "view_file", "save_chat") and store is not None:
         path_str = args.get("TargetFile") or args.get("AbsolutePath") or args.get("path") or ""
         p = Path(str(path_str)).expanduser()
         p = p if p.is_absolute() else (workspace / p)
+        if name == "save_chat":
+            p = save_chat_path(args, workspace) if str(args.get("filename") or "").strip() else workspace
         if _inside(p, store) and (name != "view_file" or _inside(p, store / "private") or _inside(p, store / ".memory")):
             return (f"Refused: {name} does not touch the memory store's files ({p}). " + use_memory
                     + (" Credentials: memory(action=\"env_list\")." if name == "view_file" else ""))

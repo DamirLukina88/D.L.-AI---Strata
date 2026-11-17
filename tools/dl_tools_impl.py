@@ -226,7 +226,8 @@ def tool_run_command(args: dict, workspace: Path) -> str:
     if not cmd:
         return "Error: CommandLine required"
     cwd_str = args.get("Cwd")
-    cwd = Path(cwd_str).resolve() if cwd_str else workspace
+    # relative to the workspace (as the approval gate reads it), not to this process's folder
+    cwd = (workspace / Path(str(cwd_str)).expanduser()).resolve() if cwd_str else workspace
     # Output goes to files, not pipes: a child left running in the background (`server &` without a redirect)
     # kept a pipe open, so the call waited the whole timeout and returned no output.  Its own session, so a
     # timeout ends the whole group (`a && b`, pipelines), not only the shell; what was printed is kept.
@@ -284,7 +285,10 @@ def tool_exa_web_search(args: dict) -> str:
     query = args.get("query")
     if not query:
         return "Error: query required"
-    num_results = min(int(args.get("num_results", 5) or 5), 10)
+    try:
+        num_results = max(1, min(int(args.get("num_results", 5) or 5), 10))
+    except (TypeError, ValueError):     # "five" or a list from the model
+        num_results = 5
     api_key = DEFAULT_EXA_KEY
     if not api_key:
         return "Error: EXA_API_KEY is not set (add it to ~/.config/dl-ai/secrets.env)"
