@@ -296,6 +296,9 @@ function codeSetState(st) {
         RayFace.thinking();
       }
     } else {
+      // a turn that never needed the model (a slash command: /effort from the sampling drawer, /rename, /clear) went
+      // busy while it slept and left "Loading model…" for good - and wakeModelFromSleep refused while it was set
+      if (modelUnloaded) modelLoading = false;
       setTimeout(() => { if (!TTSController.speaking && RayFace.state.mode === "think") RayFace.end(false); }, 400);
     }
   }

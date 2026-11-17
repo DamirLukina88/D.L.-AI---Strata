@@ -81,3 +81,28 @@ test("workspace tree: a folder tick reaches every file inside, subfolders too", 
 });
 
 console.log(`All ${n} web app function tests passed.`);
+
+// "Loading model…" got stuck: a failed POST /load left modelLoading set, so tapping Ray never woke the model again;
+// a slash command run while it slept set it too and nothing cleared it
+(async () => {
+  const calls = [];
+  const wctx = vm.createContext({toast() {}, setPill() {}, headers() { return {}; },
+                                 fetch: async (url) => { calls.push(url); return {ok: false, status: 401}; }});
+  const at = SRC.indexOf("\nasync function wakeModelFromSleep(");
+  assert.ok(at >= 0, "app.js has no async function wakeModelFromSleep");
+  let i = SRC.indexOf("{", at), depth = 0;
+  for (; i < SRC.length; i++) {
+    if (SRC[i] === "{") depth++;
+    else if (SRC[i] === "}" && --depth === 0) break;
+  }
+  vm.runInContext("var modelUnloaded = true, modelLoading = false;\n" + SRC.slice(at + 1, i + 1) +
+                  "\nthis.wake = wakeModelFromSleep; this.loading = () => modelLoading;", wctx);
+  await wctx.wake();
+  assert.strictEqual(wctx.loading(), false, "a refused /load must not leave modelLoading set");
+  await wctx.wake();
+  assert.strictEqual(calls.length, 2, "a second tap must try /load again");
+  const idle = SRC.slice(SRC.indexOf("\nfunction codeSetState("));
+  assert.ok(/\} else \{[\s\S]{0,400}?if \(modelUnloaded\) modelLoading = false;/.test(idle.slice(0, 6000)),
+            "codeSetState's idle branch clears modelLoading while the model sleeps");
+  console.log("  ok wakeModelFromSleep and codeSetState never leave \"Loading model…\" stuck");
+})().catch((e) => { console.error(e); process.exitCode = 1; });

@@ -79,7 +79,8 @@ async function wakeModelFromSleep() {
   setPill("reading", "Loading model…");
   toast("info", "Waking Ray up…", "Loading the model into memory.", 2500);
   try {
-    await fetch("load", {method: "POST", headers: headers(true), body: "{}"});
+    const r = await fetch("load", {method: "POST", headers: headers(true), body: "{}"});
+    if (!r.ok) modelLoading = false;                  // a 401 or 500 left it set, and no tap could wake him again
   } catch (e) {
     modelLoading = false;
   }
