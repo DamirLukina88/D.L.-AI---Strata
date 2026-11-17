@@ -1720,7 +1720,42 @@ def _env_entries(lines: list[str]) -> dict[str, tuple[int, str]]:
     return entries
 
 
+def _write_private(path: Path, text: str) -> None:
+    """The vault whole or not at all, never readable by others: written 0600 beside it and moved over it (it was
+    created with the umask's 0644 and chmodded after, and a crash mid-write left half a file)."""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + f".tmp{os.getpid()}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 def env_cmd(
+    root: Path,
+    action: str,
+    key: str = "",
+    value: str | None = None,
+    *,
+    note: str | None = None,
+    approved: bool = False,
+) -> tuple[int, str]:
+    if action in ("set", "rm"):
+        # read, change and write under the store's lock: two sets at once kept only one of them
+        if action == "set" and value in (None, "-"):
+            value = sys.stdin.read().rstrip("\n")       # before the lock, not while holding it
+        with write_lock(root):
+            return _env_cmd(root, action, key, value, note=note, approved=approved)
+    return _env_cmd(root, action, key, value, note=note, approved=approved)
+
+
+def _env_cmd(
     root: Path,
     action: str,
     key: str = "",
@@ -1755,7 +1790,7 @@ def env_cmd(
         del lines[idx]
         if old_note and idx and lines[idx - 1].startswith("#"):
             del lines[idx - 1]
-        path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        _write_private(path, "\n".join(lines).rstrip() + "\n")
         return 0, f"Removed {key} from {ENV_REL}."
 
     # set
@@ -1775,12 +1810,7 @@ def env_cmd(
         if not lines:
             lines = ENV_HEADER.rstrip("\n").split("\n")
         lines += ["", f"# {note_line or key}", entry]
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+    _write_private(path, "\n".join(lines) + "\n")
     return 0, f"Saved {key} to {ENV_REL}."
 
 

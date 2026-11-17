@@ -428,3 +428,29 @@ class RayKeepsToJjMemory(Store):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VaultWrites(unittest.TestCase):
+    """env set/rm read, changed and rewrote private/.env with no lock (40 sets at once kept 2 keys), created it with
+    the umask's 0644 before chmodding it, and left private/ at 0755 in a store that init had not made."""
+
+    def test_parallel_sets_all_kept_and_private(self):
+        import stat
+        import threading
+        from tools import dl_memory
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            threads = [threading.Thread(target=dl_memory.env_cmd, args=(root, "set", f"KEY_{i}", f"value-{i}-xxxx"))
+                       for i in range(24)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(30)
+            _, listed = dl_memory.env_cmd(root, "list")
+            self.assertEqual(sorted(line.split()[0] for line in listed.splitlines()), sorted(f"KEY_{i}" for i in range(24)))
+            env = root / dl_memory.ENV_REL
+            self.assertEqual(stat.S_IMODE(env.stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(env.parent.stat().st_mode), 0o700)
+            self.assertEqual(dl_memory.env_cmd(root, "rm", "KEY_3")[0], 0)
+            self.assertNotIn("KEY_3", [line.split()[0] for line in dl_memory.env_cmd(root, "list")[1].splitlines()])
+            self.assertEqual([p.name for p in env.parent.iterdir() if ".tmp" in p.name], [])
