@@ -114,3 +114,25 @@ class WorkspaceDownload(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorkspaceUploadContent(unittest.TestCase):
+    """A JSON upload's content is text or a list of byte values: bytes() of a number zero-filled that many bytes
+    (10**10: 10 GB of RAM taken from the engine), and -1 or a non-string text raised with no answer."""
+    setUp, tearDown, get = WorkspaceDownload.setUp, WorkspaceDownload.tearDown, WorkspaceDownload.get
+
+    def upload(self, body):
+        return self.get("/api/workspace/upload", {"Authorization": f"Bearer {KEY}",
+                                                  "Content-Type": "application/json"}, "POST", json.dumps(body))
+
+    def test_a_number_is_refused_not_allocated(self):
+        for content in (10 ** 10, -1, {"a": 1}):
+            with self.subTest(content=content):
+                self.assertEqual(self.upload({"filename": "n.bin", "content": content})[0], 400)
+        self.assertEqual(self.upload({"filename": "t.txt", "text": 5})[0], 400)
+        self.assertFalse((server.WORKSPACE_DIR / "n.bin").exists())
+
+    def test_text_and_byte_lists_still_work(self):
+        self.assertEqual(self.upload({"filename": "a.txt", "content": "hi"})[0], 200)
+        self.assertEqual(self.upload({"filename": "b.bin", "content": [104, 105]})[0], 200)
+        self.assertEqual((server.WORKSPACE_DIR / "b.bin").read_bytes(), b"hi")

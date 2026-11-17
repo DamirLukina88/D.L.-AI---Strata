@@ -1223,11 +1223,21 @@ def make_handler(svc: Service):
                         except Exception:
                             self._json(400, {"error": {"message": "invalid base64"}})
                             return
-                    elif "text" in req:
-                        data = req["text"].encode("utf-8")
-                    elif "content" in req:
-                        val = req["content"]
-                        data = val.encode("utf-8") if isinstance(val, str) else bytes(val)
+                    elif "text" in req or "content" in req:
+                        # text only, or a list of byte values: bytes(10**10) of a number zero-filled 10 GB, and a
+                        # number below 0 or a non-string text raised with no answer to the client
+                        val = req["text"] if "text" in req else req["content"]
+                        try:
+                            if isinstance(val, str):
+                                data = val.encode("utf-8")
+                            elif isinstance(val, list) and all(isinstance(b, int) for b in val):
+                                data = bytes(val)
+                            else:
+                                raise TypeError
+                        except (TypeError, ValueError):
+                            self._json(400, {"error": {"message": "text or content must be a string (or a list "
+                                                                  "of byte values)"}})
+                            return
                     else:
                         self._json(400, {"error": {"message": "missing file content"}})
                         return
