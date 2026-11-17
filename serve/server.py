@@ -1298,6 +1298,13 @@ def make_handler(svc: Service):
                 # 401, so anyone on the LAN could fake the phone's heartbeat or a tool's result
                 if not self._authorized():
                     return
+                # a web page elsewhere must not set the desktop clipboard or fake the phone: without an api_key (or
+                # behind Cloudflare Access, whose cookie the browser sends along) a cross-site text/plain POST was let
+                # in.  The web app posts from its own origin and the Android app sends no Origin.
+                if self._foreign_origin():
+                    self._json(403, {"error": {"message": "the phone relay only from Strata's own page (or an origin "
+                                                          "in the config's trusted_origins)"}})
+                    return
                 if path == "/api/phone/status":
                     PHONE_BRIDGE.report_heartbeat()
                     self._json(200, {"status": "ok"})
@@ -1332,7 +1339,8 @@ def make_handler(svc: Service):
                                 "text": text_val,
                                 "hash": str(req.get("hash", "")),
                                 "source": str(req.get("source", "phone")),
-                                "updated_ms": int(req.get("updated_ms") or (time.time() * 1000))
+                                "updated_ms": int(req["updated_ms"]) if isinstance(req.get("updated_ms"), (int, float))
+                                              else int(time.time() * 1000)
                             }
                         if req.get("source") != "desktop" and text_val:
                             def _sync_to_klipper(t: str):

