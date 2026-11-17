@@ -6,7 +6,9 @@ from __future__ import annotations
 from pathlib import Path
 import json
 import os
+import signal
 import subprocess
+import tempfile
 import time
 import urllib.request
 try:
@@ -216,23 +218,43 @@ def tool_replace_file_content(args: dict, workspace: Path) -> str:
         return f"Error updating file {p}: {e}"
 
 
+RUN_COMMAND_TIMEOUT_S = 120.0
+
+
 def tool_run_command(args: dict, workspace: Path) -> str:
     cmd = args.get("CommandLine") or args.get("command")
     if not cmd:
         return "Error: CommandLine required"
     cwd_str = args.get("Cwd")
     cwd = Path(cwd_str).resolve() if cwd_str else workspace
+    # Output goes to files, not pipes: a child left running in the background (`server &` without a redirect)
+    # kept a pipe open, so the call waited the whole timeout and returned no output.  Its own session, so a
+    # timeout ends the whole group (`a && b`, pipelines), not only the shell; what was printed is kept.
     try:
-        res = subprocess.run(cmd, shell=True, cwd=cwd, text=True, capture_output=True, timeout=120)
+        with tempfile.TemporaryFile() as fo, tempfile.TemporaryFile() as fe:
+            proc = subprocess.Popen(str(cmd), shell=True, cwd=cwd, stdin=subprocess.DEVNULL, stdout=fo, stderr=fe,
+                                    start_new_session=True)
+            try:
+                code = proc.wait(timeout=RUN_COMMAND_TIMEOUT_S)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL) if hasattr(os, "killpg") else proc.kill()
+                except OSError:
+                    pass
+                proc.wait()
+                code = None
+            fo.seek(0)
+            fe.seek(0)
+            stdout = fo.read().decode("utf-8", errors="replace")
+            stderr = fe.read().decode("utf-8", errors="replace")
         out = []
-        if res.stdout:
-            out.append(res.stdout)
-        if res.stderr:
-            out.append(f"Stderr:\n{res.stderr}")
-        out.append(f"[Command exited with code {res.returncode}]")
+        if stdout:
+            out.append(stdout)
+        if stderr:
+            out.append(f"Stderr:\n{stderr}")
+        out.append(f"[Command exited with code {code}]" if code is not None
+                   else f"Error: Command timed out after {RUN_COMMAND_TIMEOUT_S:.0f}s (ended; its output so far is above)")
         return "\n".join(out).strip()
-    except subprocess.TimeoutExpired:
-        return "Error: Command timed out after 120s"
     except Exception as e:
         return f"Error running command: {e}"
 
