@@ -660,7 +660,8 @@ class Service:
                 pass
         with self.status_lock:
             self.status["busy"] = False
-            self.status["queued"] = 0
+            # not "queued": each request still waiting takes itself off when it gets the turn (a reset left -1, and
+            # unload() answered "busy" from then on)
             self.status["state"] = "idle"
             self.status["detail"] = "Restarted"
             self.status.pop("started", None)
