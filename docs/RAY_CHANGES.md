@@ -100,3 +100,7 @@ could go upstream as its own pull request.
   - `--cvec` read each `direction.<layer>` tensor without checking its offset against the file.
   - a STOP read between the stdin thread queueing a GEN line and the main loop popping it was cleared as stale; the
     reader now clears it as it queues a GEN / GENI line.
+- `src/qwen35/q36_engine.cu` and `src/prefill/gemm.cu` (Qwen3.6 and the opt-in `STRATA_DENSE_MMQ=1`, neither used on
+  this PC; built for HIP, not run): the MMQ row tables lacked upstream #5108's over-read margin (prefill.cpp has it);
+  `--hybrid-rows` below 8 sent a hybrid layer's 2-8 token batch to `k_group` over the slot-sized blob array; an
+  all-NaN logits row picked token id 0x7fffffff, which then indexed the embedding table.

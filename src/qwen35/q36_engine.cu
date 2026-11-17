@@ -491,7 +491,8 @@ __global__ void k_argmax(const float* x, int n, int32_t* out, float* pv, int32_t
         __syncthreads();
     }
     if (threadIdx.x == 0) {
-        if (stage2) *out = bi[0];
+        if (stage2) *out = bi[0] == 0x7fffffff ? 0 : bi[0];   // an all-NaN / -inf row: token 0, not an id past the vocabulary
+                                                                // that then indexes the embedding table
         else { pv[blockIdx.x] = bv[0]; pi[blockIdx.x] = bi[0]; }
     }
 }
@@ -1179,10 +1180,14 @@ struct Engine {
             rcur = dalloc_t<int32_t>((size_t) g.n_expert);
             rbounds = dalloc_t<int32_t>((size_t) g.n_expert + 1);
             rmax = dalloc_t<int32_t>(1);
-            ident = dalloc_t<int32_t>((size_t) ne);
+            // + the MMQ kernel's over-read: it loads a whole J-column tile of the row table past the last expert's
+            // rows, and the stream-k fixup roundup(max_rows, J) more (upstream #5108; prefill.cpp has it, q36 had not)
+            const uint64_t id_rows = MMQ::mmq_ids_table_rows((uint64_t) ne, (uint64_t) T);
+            if (id_rows == 0) throw std::runtime_error("q36: MMQ row table size overflows");
+            ident = dalloc_t<int32_t>((size_t) id_rows);
             rinv = dalloc_t<int32_t>((size_t) ne);
             CK(cudaDeviceSynchronize());   // ident's cudaMemset (legacy stream) before the iota on the non-blocking stream
-            MMQ::iota(ident, ne, st);
+            MMQ::iota(ident, (int64_t) id_rows, st);
             CK(cudaMalloc(&mq_x, MMQ::q8_bytes(ne, g.n_embd)));
             CK(cudaMalloc(&mq_hq, MMQ::q8_bytes(ne, g.n_ff)));
             mq_gu = dalloc((size_t) ne * 2 * FF);
@@ -2028,7 +2033,9 @@ bool place_experts(Model& m, Engine& E, double vram_gib, int threads, int hybrid
     E.main_hybrid = !mtp_only;
     if (E.main_hybrid) E.use_graph = false;   // the host takes part in every layer
     E.mtp_graph = false;                      // the MTP block's layer is hybrid either way
-    E.hybrid_t = std::max(1, std::min(hybrid_t, E.use_mmq ? E.tmax : E.tmax));
+    // at least kGemmT: a hybrid layer's batch of hybrid_t < T <= 8 was neither a hybrid-rows batch nor an MMQ one and
+    // reached k_group over the slot-sized blob array with expert ids up to n_expert (out of bounds)
+    E.hybrid_t = std::max(Engine::kGemmT, std::min(hybrid_t, E.use_mmq ? E.tmax : E.tmax));
     if (!E.use_mmq) E.hybrid_t = E.tmax;   // no streamed prompt path: every batch on slots + the pool
     const size_t staging = E.use_mmq && E.main_hybrid ? 2 * (max_layer + kMmqTail) : 0;
     size_t slot_bytes = budget2 > staging ? budget2 - staging : 0;

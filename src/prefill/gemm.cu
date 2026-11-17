@@ -834,7 +834,10 @@ bool Gemm::native_mmq(const uint16_t* X, int type, const void* W, float* Y, int6
 
     const auto up = [](size_t v) { return (v + 255) & ~(size_t) 255; };
     const size_t ident_off = up(mmq::q8_bytes(kRows, kMaxK));
-    const size_t bounds_off = ident_off + up((size_t) kRows * 4);
+    // the row table with the MMQ kernel's over-read margin (upstream #5108): kRows entries alone ended ~250 bytes
+    // before what a 1024-row launch reads
+    const size_t ident_rows = (size_t) mmq::mmq_ids_table_rows((uint64_t) kRows, (uint64_t) kRows);
+    const size_t bounds_off = ident_off + up(ident_rows * 4);
     if (!mmq_buf_) {
         if (cudaMalloc(&mmq_buf_, bounds_off + 256) != cudaSuccess) {
             cudaGetLastError();
@@ -842,7 +845,7 @@ bool Gemm::native_mmq(const uint16_t* X, int type, const void* W, float* Y, int6
             return false;
         }
         mmq_ctx_ = new mmq::Context();
-        mmq::iota((int32_t*) ((uint8_t*) mmq_buf_ + ident_off), kRows, stream_);
+        mmq::iota((int32_t*) ((uint8_t*) mmq_buf_ + ident_off), (int64_t) ident_rows, stream_);
         std::fprintf(stderr, "prefill gemm: dense MMQ on (STRATA_DENSE_MMQ=1)\n");
     }
     void* xq = mmq_buf_;
