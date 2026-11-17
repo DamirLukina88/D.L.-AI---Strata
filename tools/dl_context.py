@@ -147,8 +147,10 @@ def _units(messages: list[dict], start: int, stop: int) -> list[tuple[int, int]]
     while i < stop:
         j = i + 1
         if messages[i].get("role") == "assistant" and messages[i].get("tool_calls"):
-            while j < stop and messages[j].get("role") == "tool":
+            while j < len(messages) and messages[j].get("role") == "tool":
                 j += 1
+            if j > stop:            # its results run on past stop (the last round, 2+ parallel calls): not removable,
+                break               # or the call went and its results stayed, answering nothing
         out.append((i, j))
         i = j
     return out

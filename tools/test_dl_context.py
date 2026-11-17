@@ -681,3 +681,32 @@ class ReadingProgress(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class LastParallelRoundStaysWhole(unittest.TestCase):
+    """The newest round with 2+ parallel tool calls ran past `stop` (len - 2): _units cut it there, so a trim or a
+    handoff removed the assistant message with the calls and kept their results, answering nothing."""
+
+    def msgs(self):
+        msgs = session(6)
+        msgs.append({"role": "assistant", "content": "", "tool_calls": [
+            {"id": f"p{k}", "type": "function", "function": {"name": "view_file", "arguments": "{}"}} for k in (0, 1)]})
+        msgs += [{"role": "tool", "tool_call_id": f"p{k}", "name": "view_file", "content": "x"} for k in (0, 1)]
+        return msgs
+
+    def assert_paired(self, msgs):
+        calls = {c["id"] for m in msgs if m.get("role") == "assistant" for c in (m.get("tool_calls") or [])}
+        orphans = [m["tool_call_id"] for m in msgs if m.get("role") == "tool" and m["tool_call_id"] not in calls]
+        self.assertEqual(orphans, [])
+        self.assertIn("p0", calls)
+
+    def test_compact_history(self):
+        msgs = self.msgs()
+        cli.compact_history(msgs, None, limit=1000, target=1000, force=True)
+        self.assert_paired(msgs)
+
+    def test_units_never_end_a_tool_round_early(self):
+        msgs = self.msgs()
+        for a, b in cli._units(msgs, 2, len(msgs) - 2):
+            if msgs[a].get("tool_calls"):
+                self.assertTrue(b == len(msgs) or msgs[b].get("role") != "tool", (a, b))
