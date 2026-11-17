@@ -6,9 +6,11 @@ from __future__ import annotations
 from pathlib import Path
 import json
 import os
+import queue
 import signal
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.request
 try:
@@ -335,7 +337,12 @@ def tool_exa_web_search(args: dict) -> str:
         return f"Error searching Exa: {e}"
 
 
+CONTEXT7_TIMEOUT_S = 60.0
+CONTEXT7_CMD = ["/usr/bin/npx", "@upstash/context7-mcp@1.0.31"]
+
+
 def call_context7_mcp_raw(tool_name: str, arguments: dict) -> str:
+    proc = None
     env = {
         **{k: os.environ[k] for k in ("HOME", "USER", "LANG", "TMPDIR", "XDG_CACHE_HOME") if k in os.environ},
         "CONTEXT7_API_KEY": DEFAULT_CONTEXT7_KEY,
@@ -344,10 +351,10 @@ def call_context7_mcp_raw(tool_name: str, arguments: dict) -> str:
     }
     try:
         proc = subprocess.Popen(
-            ["/usr/bin/npx", "@upstash/context7-mcp@1.0.31"],
+            CONTEXT7_CMD,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,      # never read: a chatty server filled the pipe and stopped
             text=True,
             env=env
         )
@@ -376,22 +383,42 @@ def call_context7_mcp_raw(tool_name: str, arguments: dict) -> str:
         proc.stdin.write(json.dumps(call_req) + "\n")
         proc.stdin.flush()
 
-        result_text = ""
-        for line in proc.stdout:
+        # the answer is read on a thread with a deadline: a server that hangs held the whole turn, and the process
+        # was only terminated (never waited for: a zombie), and not at all when something raised
+        lines: queue.Queue = queue.Queue()
+
+        def pump():
+            for x in proc.stdout:
+                lines.put(x)
+            lines.put(None)
+        threading.Thread(target=pump, daemon=True).start()
+        result_text, deadline = "", time.monotonic() + CONTEXT7_TIMEOUT_S
+        while True:
+            try:
+                line = lines.get(timeout=max(0.0, deadline - time.monotonic()))
+            except queue.Empty:
+                return f"Error calling Context7 MCP: no answer in {CONTEXT7_TIMEOUT_S:.0f} s"
+            if line is None:
+                break
             try:
                 res = json.loads(line)
-                if res.get("id") == 2:
-                    content_items = (res.get("result") or {}).get("content") or []
-                    texts = [item.get("text", "") for item in content_items if item.get("type") == "text"]
-                    result_text = "\n".join(texts)
-                    break
-            except Exception:
+            except ValueError:
                 continue
-
-        proc.terminate()
+            if isinstance(res, dict) and res.get("id") == 2:
+                content_items = (res.get("result") or {}).get("content") or []
+                texts = [item.get("text", "") for item in content_items if item.get("type") == "text"]
+                result_text = "\n".join(texts)
+                break
         return result_text.strip() or "No documentation content returned by Context7."
     except Exception as e:
         return f"Error calling Context7 MCP: {e}"
+    finally:
+        if proc is not None:
+            try:
+                proc.kill()
+                proc.wait(timeout=5)
+            except Exception:
+                pass
 
 
 def tool_context7_resolve(args: dict) -> str:

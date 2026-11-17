@@ -85,3 +85,29 @@ class ReplaceFileContent(unittest.TestCase):
         out, data = self.edit(b"hello\n", "", "X")
         self.assertIn("empty", out)
         self.assertEqual(data, b"hello\n")
+
+
+class Context7Call(unittest.TestCase):
+    """call_context7_mcp_raw read the server's stdout with no deadline (a hung server held the turn) and left the
+    process unreaped."""
+
+    def test_a_silent_server_times_out_and_is_ended(self):
+        procs = []
+        real = impl.subprocess.Popen
+
+        def popen(*a, **k):
+            procs.append(real(*a, **k))
+            return procs[-1]
+        with mock.patch.object(impl, "CONTEXT7_CMD", [sys.executable, "-c", "import time; time.sleep(30)"]), \
+                mock.patch.object(impl, "CONTEXT7_TIMEOUT_S", 0.5), mock.patch.object(impl.subprocess, "Popen", popen):
+            t0 = time.monotonic()
+            out = impl.call_context7_mcp_raw("resolve-library-id", {"libraryName": "x"})
+        self.assertLess(time.monotonic() - t0, 5)
+        self.assertIn("no answer", out)
+        self.assertIsNotNone(procs[0].poll())
+
+    def test_an_answer_is_read(self):
+        reply = '{"jsonrpc": "2.0", "id": 2, "result": {"content": [{"type": "text", "text": "docs here"}]}}'
+        script = f"import sys\nfor i, line in enumerate(sys.stdin):\n    if i == 1:\n        print({reply!r}, flush=True)\n"
+        with mock.patch.object(impl, "CONTEXT7_CMD", [sys.executable, "-c", script]):
+            self.assertEqual(impl.call_context7_mcp_raw("get-library-docs", {}), "docs here")
