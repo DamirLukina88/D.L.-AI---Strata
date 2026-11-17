@@ -1605,6 +1605,13 @@ bool load_control_vectors(const Options& o, const strata::core::ModelGeometry& g
                     err = path + ": " + t.name + " must be " + std::to_string((long long) N) + " f32";
                     return false;
                 }
+                // the tensor's place is from the file: a truncated or crafted one read past the mapping (every
+                // other tensor_data() caller checks this first)
+                const uint64_t pl = f.file_size() > f.data_start() ? f.file_size() - f.data_start() : 0;
+                if (t.offset > pl || (uint64_t) N * sizeof(float) > pl - t.offset) {
+                    err = path + ": " + t.name + " is truncated";
+                    return false;
+                }
                 const float* src = reinterpret_cast<const float*>(f.tensor_data(t));
                 for (int64_t j = 0; j < N; ++j) data[(size_t) (l * N + j)] += scale * src[j];
                 have[(size_t) l] = true;
@@ -9660,6 +9667,10 @@ int main(int argc, char** argv) {
                 if (!l.empty() && l.back() == '\r') l.pop_back();
                 if (l == "STOP") { st->stop_req.store(true); continue; }
                 std::lock_guard<std::mutex> lk(st->mu);
+                // a STOP read before this request's line is stale; one read after it is for it.  Cleared here, in
+                // order: the main loop cleared it only after popping the line (and a profile save, a VRAM query), so
+                // a STOP the server sent in between was lost and the request ran to max_new
+                if (l.rfind("GEN ", 0) == 0 || l.rfind("GENI ", 0) == 0) st->stop_req.store(false);
                 st->lines.push_back(l);
                 st->cv.notify_one();
             }
@@ -10575,7 +10586,8 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            stop_req.store(false);   // a STOP that arrived between requests is stale
+            // a STOP that arrived between requests is stale (a GEN / GENI line had it cleared as it was queued)
+            if (line.rfind("GEN ", 0) != 0 && line.rfind("GENI ", 0) != 0) stop_req.store(false);
             err.clear();
             // Disk sessions: SAVE <path> | RESTORE <path>, between requests (the path runs to the end of the line,
             // UTF-8).  The file holds what a parked conversation holds (conversation_file.hpp).  Answers: SAVED /
@@ -10910,6 +10922,14 @@ int main(int argc, char** argv) {
                 continue;
             }
             const int64_t n = (int64_t) ids.size();
+            // before the image positions below: they are written for every id into a table of max_context + 64 cells,
+            // so a longer GENI prompt wrote past it.  max_new is compared without the sum, which overflowed for a
+            // huge max_new (GEN 9223372036854775807 ...) and let it through to reserve() and an abort
+            if (max_new > (int64_t) o.max_context - 8 - n) {
+                std::printf("ERR prompt (%lld tokens) + max_new (%lld) exceeds the context (%lld)\n", (long long) n,
+                            (long long) max_new, (long long) o.max_context);
+                continue;
+            }
             req_imgs.clear();
             if (geni && !o.vision) { std::printf("ERR this engine was started without --vision\n"); continue; }
             if (geni || !mrope_identity) {
@@ -11005,11 +11025,6 @@ int main(int argc, char** argv) {
                 mrope_identity = !geni;
             }
             sp.embd_rows = geni ? row_ptr.data() : nullptr;
-            if (n + max_new + 8 > o.max_context) {
-                std::printf("ERR prompt (%lld tokens) + max_new (%lld) exceeds the context (%lld)\n", (long long) n,
-                            (long long) max_new, (long long) o.max_context);
-                continue;
-            }
             bool bad = false;
             for (int64_t t : ids) bad = bad || t < 0 || t >= n_vocab;
             if (bad) { std::printf("ERR a token id is outside the vocabulary\n"); continue; }

@@ -91,3 +91,12 @@ could go upstream as its own pull request.
   `build.ninja` is missing, so on an existing build folder the `tests` argument, a new `STRATA_HIP_ARCHS` or a new
   ROCm root is ignored and the zip can be packaged for the old architectures. Always running the configure step
   would fix it.
+- `src/program/generate.cpp` (same in upstream v0.2.15), three fixes in the serve loop, found by reading and built
+  for HIP here; they matter only to a client that writes the engine's stdin protocol itself (serve/service.py never
+  sends such requests), or to a damaged control-vector file:
+  - the prompt + max_new check ran after a GENI request's image positions were written, into a table of
+    max_context + 64 cells, so a longer GENI prompt wrote past it; and `n + max_new + 8` overflowed for a huge
+    max_new. The check comes first now, written without the sum.
+  - `--cvec` read each `direction.<layer>` tensor without checking its offset against the file.
+  - a STOP read between the stdin thread queueing a GEN line and the main loop popping it was cleared as stale; the
+    reader now clears it as it queues a GEN / GENI line.
