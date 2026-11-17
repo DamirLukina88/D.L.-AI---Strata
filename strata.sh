@@ -10,16 +10,30 @@
 # RUN_SCRIPT and PORT can be overridden from the environment, e.g. RUN_SCRIPT=./run-iq2_xs.sh ./strata.sh start
 
 cd "$(dirname "$0")" || exit 1
+[ -n "$RUN_SCRIPT" ] && CHOSEN=1               # a script from the environment runs as given, not through the unit
 RUN_SCRIPT="${RUN_SCRIPT:-./run-coder-iq1_m.sh}"
 PORT="${PORT:-8080}"
 OUT="strata-server.out"
 PIDFILE="strata-server.pid"
 START_TIMEOUT="${START_TIMEOUT:-300}"
+# the systemd user unit that runs the server on this PC (Restart=always): stop, start and restart go through it when
+# it is there, or systemd starts the server again 5 s after a kill and a nohup copy races it for the port
+UNIT="${STRATA_UNIT:-strata-server.service}"
+
+unit_known() {
+    command -v systemctl >/dev/null 2>&1 && systemctl --user cat "$UNIT" >/dev/null 2>&1
+}
 
 pid() {
-    if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-        cat "$PIDFILE"
-        return 0
+    # a pid file only counts while it names a Strata server: a stale one (the server died, or systemd started it)
+    # could name any process once the kernel reuses the number, and stop would kill that
+    if [ -f "$PIDFILE" ]; then
+        p=$(cat "$PIDFILE")
+        if kill -0 "$p" 2>/dev/null && tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q "serve/server.py"; then
+            echo "$p"
+            return 0
+        fi
+        rm -f "$PIDFILE"
     fi
     # started some other way: find the server process by its script
     pgrep -f "serve/server.py --engine strata" | head -n 1
@@ -35,6 +49,13 @@ start() {
         echo "Strata is already running (pid $p)."
         return 0
     fi
+    if [ -z "$CHOSEN" ] && unit_known; then
+        echo "Starting Strata ($UNIT, port $PORT) ..."
+        echo "The PC can be slow for 1-3 minutes while the model loads into RAM."
+        systemctl --user start "$UNIT" || return 1
+        wait_ready unit
+        return $?
+    fi
     if [ ! -x "$RUN_SCRIPT" ]; then
         echo "No start script $RUN_SCRIPT - run ./setup.sh first." >&2
         return 1
@@ -43,9 +64,18 @@ start() {
     echo "The PC can be slow for 1-3 minutes while the model loads into RAM."
     nohup "$RUN_SCRIPT" > "$OUT" 2>&1 &
     echo $! > "$PIDFILE"
+    wait_ready pidfile
+}
+
+wait_ready() {                                  # unit: the systemd unit is running it; pidfile: our nohup child
     waited=0
     while [ "$waited" -lt "$START_TIMEOUT" ]; do
-        if ! kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+        if [ "$1" = unit ]; then
+            if ! systemctl --user is-active --quiet "$UNIT"; then
+                echo "Strata stopped while starting. See: journalctl --user -u $UNIT" >&2
+                return 1
+            fi
+        elif ! kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
             echo "Strata stopped while starting. The end of $OUT:" >&2
             tail -n 20 "$OUT" >&2
             rm -f "$PIDFILE"
@@ -63,6 +93,17 @@ start() {
 }
 
 stop() {
+    if unit_known && systemctl --user is-active --quiet "$UNIT"; then
+        echo "Stopping Strata ($UNIT) ..."
+        systemctl --user stop "$UNIT"
+        p=$(pid)                                # a copy started by hand beside it
+        if [ -z "$p" ]; then
+            end_leftovers
+            rm -f "$PIDFILE"
+            echo "Strata stopped."
+            return 0
+        fi
+    fi
     p=$(pid)
     if [ -z "$p" ]; then
         echo "Strata is not running."
@@ -80,6 +121,12 @@ stop() {
         echo "Still running after 30s; forcing it." >&2
         kill -9 "$p"
     fi
+    end_leftovers
+    rm -f "$PIDFILE"
+    echo "Strata stopped."
+}
+
+end_leftovers() {
     # the engine ends with the server; make sure nothing is left holding the GPU
     sleep 1
     left=$(pgrep -f "/engine/strata( |-vision|$)")
@@ -87,8 +134,6 @@ stop() {
         echo "Ending leftover engine processes: $left" >&2
         kill $left 2>/dev/null
     fi
-    rm -f "$PIDFILE"
-    echo "Strata stopped."
 }
 
 status() {
@@ -112,6 +157,7 @@ case "$1" in
             for s in run-*.sh; do
                 if echo "$s" | grep -qi "$2"; then
                     RUN_SCRIPT="./$s"
+                    CHOSEN=1                    # a model chosen by name runs from its own script, not the unit
                     break
                 fi
             done
@@ -130,7 +176,14 @@ case "$1" in
         echo "To start a specific model, run: ./strata.sh start <name>"
         ;;
     stop) stop ;;
-    restart) stop && start ;;
+    restart)
+        if unit_known && systemctl --user is-active --quiet "$UNIT"; then
+            echo "Restarting Strata ($UNIT) ..."
+            systemctl --user restart "$UNIT" && wait_ready unit
+        else
+            stop && start
+        fi
+        ;;
     status) status ;;
     logs) tail -f "$OUT" ;;
     *) echo "Usage: $0 {start [model]|stop|restart|status|select|logs}" >&2; exit 2 ;;
