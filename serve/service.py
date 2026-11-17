@@ -641,8 +641,9 @@ class Service:
         finally:
             self.fifo.release()
 
-    def force_restart(self) -> str:
-        """Forcefully kill and restart or unload the engine immediately (stopping any stuck requests)."""
+    def force_restart(self, reload: bool = True) -> str:
+        """Forcefully kill and restart or unload the engine immediately (stopping any stuck requests).
+        reload=False: only unload, even when the config is not lazy (switch_model replaces the engine next)."""
         print("[strata] forceful restart requested...", flush=True)
         if hasattr(self.engine, "proc") and self.engine.proc is not None:
             try:
@@ -668,7 +669,7 @@ class Service:
             self.status.pop("first_token", None)
         self.live_reqs.clear()
 
-        if getattr(self, "lazy", False) or getattr(self.engine, "unloaded", False):
+        if not reload or getattr(self, "lazy", False) or getattr(self.engine, "unloaded", False):
             self.engine.unloaded = True
             self.engine.ended = True
             if hasattr(self.engine, "info") and isinstance(self.engine.info, dict):
@@ -758,7 +759,9 @@ class Service:
             print(f"[strata] switching model from {self.model} to {target_id}...", flush=True)
             if self.loaded() or (hasattr(self.engine, "alive") and self.engine.alive()):
                 print(f"[strata] unloading previous model {self.model}...", flush=True)
-                self.force_restart()
+                # not a restart: with a config that is not lazy it loaded the old model again, and the new engine
+                # below replaced it without closing it (two engines on the card, the old process orphaned)
+                self.force_restart(reload=False)
                 # Give Linux kernel and ROCm driver a moment to unpin/reclaim memory
                 time.sleep(2.0)
 

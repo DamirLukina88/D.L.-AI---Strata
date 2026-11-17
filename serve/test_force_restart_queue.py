@@ -37,6 +37,18 @@ class ForceRestartKeepsTheQueue(unittest.TestCase):
             waiter.join(5)
         self.assertEqual(svc.status["queued"], 0)
 
+    def test_a_model_switch_does_not_load_the_old_model_again(self):
+        # switch_model replaces the engine after force_restart; with a config that is not lazy it restarted the old
+        # one first, and the replacement left that process running (two models on the card)
+        tok = ByteTokenizer()
+        engine = MockEngine(tok, "ok", max_context=4096)
+        engine.restart = mock.Mock()
+        svc = Service(engine, tok, ChatTemplate(ROOT / "serve/chat_template.jinja"))
+        svc.lazy = False
+        self.assertEqual(svc.force_restart(reload=False), "unloaded")
+        engine.restart.assert_not_called()
+        self.assertIn("force_restart(reload=False)", (ROOT / "serve/service.py").read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

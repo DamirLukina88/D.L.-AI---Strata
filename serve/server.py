@@ -2972,14 +2972,16 @@ def _main() -> int:
             time.sleep(1)                               # Windows never delivers Ctrl+C to an untimed Event.wait()
     except KeyboardInterrupt:
         print("\n[strata] stopping (Ctrl+C again to end the engine at once) ...", flush=True)
-        closers = [httpd.shutdown, getattr(engine, "close", None), vision.shutdown if vision else None,
+        # svc's, not the first ones: after a /switch_model they are other objects, and the first are already closed
+        cur_vision = getattr(svc, "vision", None)
+        closers = [httpd.shutdown, getattr(svc.engine, "close", None), cur_vision.shutdown if cur_vision else None,
                    hub.close if hub is not None else None]
         for close in filter(None, closers):
             try:
                 close()
             except KeyboardInterrupt:                   # a second Ctrl+C: don't wait for the engine to free its memory
-                if getattr(engine, "proc", None):
-                    engine.proc.kill()
+                if getattr(svc.engine, "proc", None):
+                    svc.engine.proc.kill()
         try:
             from serve import cache_drop
             cache_drop.drop_after_exit(engine)           # opt-in (STRATA_DROP_CACHE_ON_EXIT=1), default unchanged
