@@ -504,7 +504,13 @@ def make_handler(svc: Service):
                                  f"or add the page's host to \"allowed_hosts\" (or its origin to \"cors_origins\") "
                                  f"in the config"}})
                 return True
-            if not self.headers.get("Content-Type", "").startswith("application/json"):
+            ctype = self.headers.get("Content-Type", "")
+            # the web app's own speech-to-text upload is a FormData (multipart): from Strata's own page (or a trusted
+            # origin) it is the user's, not a cross-site POST, and behind Cloudflare Access no key is sent
+            if self.path.split("?", 1)[0] == "/v1/audio/transcriptions" and \
+                    ctype.startswith("multipart/form-data") and not self._foreign_origin():
+                return False
+            if not ctype.startswith("application/json"):
                 self._json(415, {"error": {"message": "send application/json"}})
                 return True
             return False
