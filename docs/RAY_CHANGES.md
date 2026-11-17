@@ -76,3 +76,12 @@ definition, a conversion) and 12 that need one (weather, a page to open, a trans
 - A model that asks for a server that acts outside or starts slowly (the browser, mail, the smart home) for a request
   with no link to it is told to answer directly or to give a reason. A live check on 2026-11-15 had seen "17 times
   23" turn on the browser; that did not happen again in 16 tries, so the cause is not known and the rule is a guard.
+
+## Upstream pull request candidates
+
+Fixes made here to code that came from upstream, kept small so a later port still finds upstream's version. Each one
+could go upstream as its own pull request.
+
+- `serve/test_server.py`: two classes were both named `VisionTempFiles`, so the first one's test (a refused request
+  leaves no combined image file) never ran. Renamed to `VisionRequestFiles`; it then failed because the file had moved
+  to `/dev/shm` with #874, so the test now looks there as well. Same in upstream v0.2.15.

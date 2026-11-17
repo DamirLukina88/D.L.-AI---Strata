@@ -317,7 +317,7 @@ class FitMaxTokens(unittest.TestCase):
         self.assertIn("no room to answer", b["error"]["message"])
 
 
-class VisionTempFiles(unittest.TestCase):
+class VisionRequestFiles(unittest.TestCase):
     """A request's combined image file (req-*.sve, ~10 MB a picture) goes with the request: one refused after prepare()
     wrote it (the engine starting, no room) or whose answer never started left it in the vision directory for good."""
 
@@ -326,7 +326,10 @@ class VisionTempFiles(unittest.TestCase):
 
     @staticmethod
     def leftovers(d):
-        return sorted(p.name for p in Path(d).glob("req-*.sve"))
+        # #874: on Linux the file goes to /dev/shm when that has room, so look in both places
+        shm = sorted(p.name for p in Path("/dev/shm").glob(f"strata-vision-{os.getpid()}-req-*.sve")) \
+            if Path("/dev/shm").is_dir() else []
+        return sorted(p.name for p in Path(d).glob("req-*.sve")) + shm
 
     def test_a_refused_request_writes_none(self):
         from serve.server import EngineStarting
