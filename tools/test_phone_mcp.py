@@ -188,6 +188,18 @@ class TestPhoneMcpServer(unittest.TestCase):
                                                               "workspace_path": str(Path.home() / ".bashrc")})
             self.assertIn("only files in the workspace", out)
 
+    def test_a_glob_in_a_phone_path_still_expands(self):
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            for n in ("a.jpg", "b.jpg", "c.txt"):
+                Path(d, n).write_text("x")
+            out = subprocess.run(["sh", "-c", "ls " + M.sh_glob_quote(f"{d}/*.jpg")], capture_output=True, text=True)
+            self.assertEqual(sorted(Path(x).name for x in out.stdout.split()), ["a.jpg", "b.jpg"])
+            bad = M.sh_glob_quote(f"{d}/x' ; touch {d}/pwned ; '")
+            subprocess.run(["sh", "-c", "ls " + bad], capture_output=True)
+            self.assertFalse(Path(d, "pwned").exists())       # quoted: no command ran
+
     def test_multilingual_otp_extraction(self):
         """Verify regex extraction for Croatian and English 2FA / OTP codes."""
         cases = [

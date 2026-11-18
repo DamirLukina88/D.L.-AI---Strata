@@ -471,6 +471,13 @@ def first_song(data: Any) -> Optional[Dict[str, str]]:
 ADB_OFF_FLAG = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "dl-ai" / "phone-adb-off"
 
 
+def sh_glob_quote(path: str) -> str:
+    """A path for the phone's sh with * ? [ ] left to the shell (so /sdcard/DCIM/*.jpg lists the photos) and every
+    other character quoted: round 1 quoted whole arguments, which stopped globs from expanding."""
+    parts = re.split(r"([*?\[\]])", path)
+    return "".join(p if p in ("*", "?", "[", "]") else (shlex.quote(p) if p else "") for p in parts) or "''"
+
+
 class PhoneMcpServer:
     """Phone MCP Server implementation handling tools/list, tools/call, and device communication."""
 
@@ -888,13 +895,13 @@ class PhoneMcpServer:
             action = str(args.get("action", "list")).lower()
             path = str(args.get("path", "/sdcard/Download")).strip()
             if action == "list":
-                out = self._run_adb_cmd(["shell", "ls", "-lh", path], timeout=5.0)
+                out = self._run_adb_cmd(["shell", f"ls -lh {sh_glob_quote(path)}"], timeout=5.0)   # a glob still works
                 if out:
                     return f"Directory listing for {path}:\n{out}"
                 return f"Directory {path} is empty or not accessible."
             elif action == "read_text":
                 max_lines = int(args.get("max_lines", 100))
-                out = self._run_adb_cmd(["shell", "head", f"-n{max_lines}", path], timeout=5.0)
+                out = self._run_adb_cmd(["shell", f"head -n{int(max_lines)} {sh_glob_quote(path)}"], timeout=5.0)
                 if out is not None:
                     return out
                 return f"Could not read text file at {path}."

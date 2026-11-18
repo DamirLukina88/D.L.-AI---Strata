@@ -1724,6 +1724,10 @@ def _write_private(path: Path, text: str) -> None:
     """The vault whole or not at all, never readable by others: written 0600 beside it and moved over it (it was
     created with the umask's 0644 and chmodded after, and a crash mid-write left half a file)."""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        os.chmod(path.parent, 0o700)       # mkdir's mode applies only when it creates the folder
+    except OSError:
+        pass
     tmp = path.with_name(path.name + f".tmp{os.getpid()}")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
