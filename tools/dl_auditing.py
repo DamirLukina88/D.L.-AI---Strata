@@ -712,7 +712,10 @@ _DESTRUCTIVE_PATTERNS = [
     ("pipes a download into a shell", re.compile(r"\b(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:ba|z|fi)?sh\b")),
     ("removes packages", re.compile(r"\bpacman\s+-R|\bapt(?:-get)?\s+(?:remove|purge)|\bpip\d?\s+uninstall\b|\bnpm\s+(?:uninstall|rm)\s+-g")),
 ]
-_PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?|\b(?:mv|cp|rsync|ln|install)\s+(?:-\S+\s+)*(?!-)\S+\s+"""
+_PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?|\b(?:mv|cp|rsync|ln)\s+(?:-\S+\s+)*(?!-)\S+\s+"""
+                       # install as the command itself (not pip/npm/go install, whose extra paths are only read),
+                       # its -m 644 / -o root / -g / -S values skipped
+                       r"""|(?:^|[;&|(`]\s*)(?:sudo\s+)?install\s+(?:-[mogS]\s+\S+\s+|-\S+\s+)*(?!-)\S+\s+"""
                        # the gap stops at the next command word: [^;&|\n]*? from every cp/mv/ln/install ran to the end of
                        # the line (quadratic: 7 s on a 50 KB line of the approval gate); -vt / -Dt and the spaced long
                        # option count too
