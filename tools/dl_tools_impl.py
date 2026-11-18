@@ -290,9 +290,11 @@ def tool_run_command(args: dict, workspace: Path, interactive: bool = False) -> 
                 code = proc.wait(timeout=RUN_COMMAND_TIMEOUT_S)
             except subprocess.TimeoutExpired:
                 try:
-                    os.killpg(proc.pid, signal.SIGKILL) if hasattr(os, "killpg") else proc.kill()
+                    # the group only when it has its own: in the REPL's group (interactive) there is no group
+                    # proc.pid, killpg found nothing and the wait below never ended
+                    os.killpg(proc.pid, signal.SIGKILL) if hasattr(os, "killpg") and not interactive else proc.kill()
                 except OSError:
-                    pass
+                    proc.kill()
                 proc.wait()
                 code = None
             stdout, stderr = _read_back(fo), _read_back(fe)

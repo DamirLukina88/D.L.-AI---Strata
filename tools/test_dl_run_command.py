@@ -58,6 +58,13 @@ class RunCommand(unittest.TestCase):
         self.assertIsNone(kw["stdin"])
         self.assertFalse(kw["start_new_session"])
 
+    def test_the_users_own_command_still_times_out(self):
+        with mock.patch.object(impl, "RUN_COMMAND_TIMEOUT_S", 0.5):
+            t0 = time.monotonic()
+            out = impl.tool_run_command({"CommandLine": "sleep 30"}, self.ws, interactive=True)
+        self.assertLess(time.monotonic() - t0, 5)
+        self.assertIn("timed out", out)
+
     def test_exit_code_and_stderr(self):
         out = self.run_cmd("echo out; echo err >&2; exit 3")
         self.assertIn("out", out)
