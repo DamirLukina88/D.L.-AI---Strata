@@ -716,6 +716,10 @@ _DESTRUCTIVE_PATTERNS = [
     # the gap stops at the next curl / wget (from every one it ran to the end: 1.8 s on 150 KB of "curl ")
     ("pipes a download into a shell", re.compile(r"\b(?:curl|wget)\b(?:(?!\b(?:curl|wget)\b)[^|])*\|\s*(?:sudo\s+)?"
                                                  r"(?:ba|z|fi)?sh\b")),
+    # the target check reads at most 16 options (unbounded it was quadratic); padding a copy with more must not
+    # carry it past the check, so such a command is asked about
+    ("copies with more options than are checked", re.compile(
+        r"\b(?:mv|cp|rsync|ln|install)\s+(?:-[^\s;&|]+\s+(?:[^\s;&|-][^\s;&|]*\s+)?){16}")),   # a flag, maybe its value
     ("removes packages", re.compile(r"\bpacman\s+-R|\bapt(?:-get)?\s+(?:remove|purge)|\bpip\d?\s+uninstall\b|\bnpm\s+(?:uninstall|rm)\s+-g")),
 ]
 _PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?|\b(?:mv|cp|rsync|ln)\s+(?:-\S+\s+){0,16}(?!-)\S+\s+"""

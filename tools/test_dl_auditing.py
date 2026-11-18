@@ -225,7 +225,8 @@ class TestGateReadsTheRealPath(unittest.TestCase):
                     "install -m 644 x /etc/y", "install -m 0755 -o root x /usr/local/bin/x",
                     "echo hi\ninstall x /etc/y", "  install x /etc/y", "{ install x /etc/y; }",
                     "if true; then install x /etc/y; fi", "/usr/bin/install x /etc/y", "env install x /etc/y",
-                    "install --mode 644 x /etc/y"):
+                    "install --mode 644 x /etc/y",
+                    "cp " + "-a " * 17 + "x /etc/y", "install " + "-m 6 " * 20 + "x /etc/y"):   # padded past the cap
             with self.subTest(cmd=cmd):
                 self.assertIsNotNone(classify_command(cmd, self.ws))
         self.assertIsNotNone(classify_write(Path("/tmp/../home/someone/.bashrc"), self.ws))
@@ -238,7 +239,7 @@ class TestGateReadsTheRealPath(unittest.TestCase):
                      "install " + "-m " * 40, "install " + "-o -g " * 40, "install " + "--mode " * 40,   # round 7
                      "\n" * 16000, ";" * 16000, "do/" * 5000, "sudo -E;" * 2000,                   # round 8
                      "cp -a;" * 8000, "-{install " * 5000, "`install\n- " * 5000, "find " * 10000,   # round 9
-                     "curl " * 10000, "wget " * 10000):
+                     "curl " * 10000, "wget " * 10000, "cp " + "-a " * 50000, "install -m 6 " * 12000):
             t0 = _time.monotonic()
             classify_command(line, self.ws)
             self.assertLess(_time.monotonic() - t0, 0.5)
