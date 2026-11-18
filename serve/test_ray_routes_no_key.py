@@ -33,9 +33,15 @@ def lan_address():
 class RayRoutesNeedAKeyFromElsewhere(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        import tempfile
+        from unittest import mock
+        import serve.server as server
+        cls.tmp = tempfile.TemporaryDirectory()                  # not the real ./workspace
+        cls.ws_patch = mock.patch.object(server, "WORKSPACE_DIR", Path(cls.tmp.name))
+        cls.ws_patch.start()
         tok = ByteTokenizer()
         cls.svc = Service(MockEngine(tok, "ok", max_context=4096), tok, ChatTemplate(ROOT / "serve/chat_template.jinja"))
-        cls.httpd = serve(cls.svc, host="0.0.0.0", port=0)
+        cls.httpd = serve(cls.svc, host=lan_address(), port=0)  # the LAN address alone, not every interface
         cls.port = cls.httpd.server_address[1]
         cls.svc.allowed_hosts = ["*"]
         cls.svc.host_names = cls.svc.host_names | {lan_address()}
@@ -44,6 +50,8 @@ class RayRoutesNeedAKeyFromElsewhere(unittest.TestCase):
     def tearDownClass(cls):
         cls.httpd.shutdown()
         cls.httpd.server_close()
+        cls.ws_patch.stop()
+        cls.tmp.cleanup()
 
     def get(self, host, path):
         try:
@@ -60,9 +68,28 @@ class RayRoutesNeedAKeyFromElsewhere(unittest.TestCase):
                 self.assertEqual(self.get(lan, path), 401)
         self.assertEqual(self.get(lan, "/v1/models"), 200)
 
-    def test_from_this_pc_they_work_as_before(self):
-        self.assertNotEqual(self.get("127.0.0.1", "/api/phone/status"), 401)
-        self.assertNotEqual(self.get("127.0.0.1", "/api/workspace/files"), 401)
+    def test_a_tunnelled_request_without_a_login_is_refused(self):
+        import serve.server as server
+        tok = ByteTokenizer()
+        svc = Service(MockEngine(tok, "ok", max_context=4096), tok, ChatTemplate(ROOT / "serve/chat_template.jinja"))
+        httpd = serve(svc, port=0)
+        try:
+            base = f"http://127.0.0.1:{httpd.server_address[1]}"
+            for path, want in (("/api/workspace/files", 401), ("/v1/models", 200)):
+                req = urllib.request.Request(base + path, headers={"CF-Connecting-IP": "203.0.113.9"})
+                try:
+                    with urllib.request.urlopen(req, timeout=10) as r:
+                        code = r.status
+                except urllib.error.HTTPError as e:
+                    code = e.code
+                    e.close()
+                self.assertEqual(code, want, path)
+            with urllib.request.urlopen(base + "/api/workspace/files", timeout=10) as r:   # this PC itself
+                self.assertEqual(r.status, 200)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+        self.assertTrue(server.RAY_ROUTES)
 
 
 if __name__ == "__main__":

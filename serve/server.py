@@ -704,8 +704,10 @@ def make_handler(svc: Service):
             return key_matches(given, svc.api_key)
 
         def _authorized(self) -> bool:
-            if not svc.api_key and self.path.startswith(RAY_ROUTES) and not self._from_loopback() \
-                    and self._access_claims() is None:
+            # a tunnel (cloudflared) comes from loopback too: a request it forwarded (CF-Connecting-IP) without an
+            # Access login is from elsewhere all the same
+            elsewhere = not self._from_loopback() or bool(self.headers.get("CF-Connecting-IP"))
+            if not svc.api_key and self.path.startswith(RAY_ROUTES) and elsewhere and self._access_claims() is None:
                 # no key: anyone may use the model (as upstream, with the startup warning), but Ray's own routes run
                 # a shell, read and write the workspace and reach the phone, so they are this computer's alone
                 self._json(401, {"error": {"type": "authentication_error", "message":
