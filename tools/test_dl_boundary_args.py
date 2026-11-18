@@ -68,7 +68,15 @@ class SwitchWorkspaceGate(unittest.TestCase):
             with self.subTest(target=target):
                 self.assertIsNotNone(dl_boundary.approval_reason("switch_workspace", {"path": target}, ws))
         self.assertIsNone(dl_boundary.approval_reason("switch_workspace", {"path": str(Path.home() / "proj")}, ws))
-        self.assertIsNone(dl_boundary.approval_reason("switch_workspace", {"path": "/srv/proj-x"}, ws))
+        for target in ("~/.ssh", "~/.config", "/etc", "/usr/local/bin"):      # round 2: one level down asked nothing
+            with self.subTest(target=target):
+                self.assertIsNotNone(dl_boundary.approval_reason("switch_workspace", {"path": target}, ws))
+
+    def test_the_export_chat_alias_is_gated_too(self):
+        self.assertIsNotNone(dl_boundary.approval_reason("export_chat", {"filename": "~/.config/fish/x.fish"},
+                                                         Path(tempfile.gettempdir())))
+        self.assertIsNone(dl_boundary.approval_reason("switch_workspace", {"path": "/srv/proj-x"},
+                                                      Path(tempfile.gettempdir())))
 
 
 class SmallChecks(unittest.TestCase):

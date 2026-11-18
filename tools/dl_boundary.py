@@ -63,8 +63,15 @@ def approval_reason(name: str, args: dict, workspace: Path) -> tuple[str, str] |
             if np == home or np in home.parents:
                 return (f"{name} {np}", "makes the whole home folder the workspace (its writes are then not asked "
                                         "about)")
+            # one level down: ~/.ssh, ~/.config (systemd units, secrets.env) or a system folder as the workspace
+            # also made authorized_keys or a user service an unasked write
+            hidden = np.parent == home and np.name.startswith(".")
+            system = any(np == Path(r) or Path(r) in np.parents for r in SYSTEM_ROOTS)
+            if hidden or system:
+                return (f"{name} {np}", "makes a settings or system folder the workspace (its writes are then not "
+                                        "asked about)")
         return None
-    if name == "save_chat" and str(args.get("filename") or "").strip():
+    if name in ("save_chat", "export_chat") and str(args.get("filename") or "").strip():
         p = save_chat_path(args, workspace)                 # any path, written without a card before
         reason = classify_write(p, workspace)
         return (f"{name} {p}", reason) if reason else None
@@ -72,6 +79,9 @@ def approval_reason(name: str, args: dict, workspace: Path) -> tuple[str, str] |
         what = memory_global_change(args)
         return (what, "changes global memory, which every agent sees in every project") if what else None
     return None
+
+
+SYSTEM_ROOTS = ("/etc", "/usr", "/var", "/boot", "/bin", "/sbin", "/lib", "/lib64", "/opt", "/root")
 
 
 def command_cwd(args: dict, workspace: Path) -> Path:
@@ -268,11 +278,11 @@ def agent_boundary(name: str, args: dict, workspace: Path, session_context: dict
         refused = picture_refusal(cmd, ctx)
         if refused:
             return refused
-    if name in ("write_to_file", "replace_file_content", "view_file", "save_chat") and store is not None:
+    if name in ("write_to_file", "replace_file_content", "view_file", "save_chat", "export_chat") and store is not None:
         path_str = args.get("TargetFile") or args.get("AbsolutePath") or args.get("path") or ""
         p = Path(str(path_str)).expanduser()
         p = p if p.is_absolute() else (workspace / p)
-        if name == "save_chat":
+        if name in ("save_chat", "export_chat"):
             p = save_chat_path(args, workspace) if str(args.get("filename") or "").strip() else workspace
         if _inside(p, store) and (name != "view_file" or _inside(p, store / "private") or _inside(p, store / ".memory")):
             return (f"Refused: {name} does not touch the memory store's files ({p}). " + use_memory
