@@ -285,7 +285,10 @@ class RayNativeBridge(
                 wv.post {
                     // only to the page that asked: a slow tool (the camera, a sensor monitor) can outlive a reload,
                     // and a page loaded since then may not be the Strata server's
-                    if (pageUrl == askedFrom && StrataOrigins.isTrusted(pageUrl)) {
+                    // the same origin, not the same URL: the web app's tab switch (history.replaceState to #monitor)
+                    // changes pageUrl, and the answer was lost
+                    val same = StrataOrigins.originFor(pageUrl ?: "") == StrataOrigins.originFor(askedFrom ?: "")
+                    if (same && StrataOrigins.isTrusted(pageUrl)) {
                         wv.evaluateJavascript("window.__rayToolDone && window.__rayToolDone(" +
                             "${JSONObject.quote(callId)}, ${JSONObject.quote(res)});", null)
                     }

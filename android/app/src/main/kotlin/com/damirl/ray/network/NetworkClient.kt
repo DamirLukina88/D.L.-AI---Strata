@@ -238,7 +238,10 @@ class NetworkClient(
 
                 override fun onResponse(call: Call, response: Response) {
                     response.use {
-                        val ok = it.isSuccessful && proofMatches(apiKey, nonce, it.body?.string())
+                        // a body read that fails (a timeout mid-body) threw here, OkHttp swallowed it without
+                        // onFailure, and the coroutine - and the relay thread waiting in runBlocking - never resumed
+                        val body = try { it.body?.string() } catch (e: IOException) { null }
+                        val ok = it.isSuccessful && proofMatches(apiKey, nonce, body)
                         if (ok) provenOn = probedOn
                         cont.resume(Probe(ok, SystemClock.elapsedRealtime() - started,
                             if (ok) "HTTP ${it.code}, proof ok" else "HTTP ${it.code}, not this server", wrongServer = !ok))

@@ -663,7 +663,8 @@ function runPhoneToolAsync(p) {
   return new Promise((resolve) => {
     // the app may never answer (the page reloaded under it, the WebView went): the poller must not wait forever.
     // A sensor monitor runs for its duration_sec, so the limit is that plus two minutes
-    const dur = Number((p.args || {}).duration_sec) || 0;
+    // at most the app's own cap (3600 s): past 2^31 ms a browser fires the timer at once
+    const dur = Math.min(3600, Math.max(0, Number((p.args || {}).duration_sec) || 0));
     const timer = setTimeout(() => {
       if (phoneToolWaiters.get(p.id) === settle) {
         phoneToolWaiters.delete(p.id);
