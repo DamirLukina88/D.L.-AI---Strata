@@ -200,8 +200,12 @@ case "$1" in
     status) status ;;
     logs)
         # the unit's output goes to the journal; strata-server.out is only the nohup start's
-        if unit_known && systemctl --user is-active --quiet "$UNIT"; then journalctl --user -u "$UNIT" -f
-        else tail -f "$OUT"; fi                 # a model started by name (./strata.sh start q2_0) runs from nohup
+        # the journal (a crash of the unit is there too), unless a copy started by name runs from nohup
+        if unit_known && ! { [ -f "$PIDFILE" ] && [ -n "$(pid)" ] && ! systemctl --user is-active --quiet "$UNIT"; }; then
+            journalctl --user -u "$UNIT" -f
+        else
+            tail -f "$OUT"
+        fi
         ;;
     *) echo "Usage: $0 {start [model]|stop|restart|status|select|logs}" >&2; exit 2 ;;
 esac

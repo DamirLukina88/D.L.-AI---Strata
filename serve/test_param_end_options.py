@@ -93,10 +93,6 @@ class Streaming(unittest.TestCase):
         self.assertEqual(len(got), 1)                       # past it: the call goes out while the model is still talking
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class LocalFileWriteStreamed(unittest.TestCase):
     """This fork's case for #4701: D.L. CLI's write_file with a file that documents the call format, streamed one character
     at a time as the engine sends it: the whole file is written, nothing leaks into the answer."""
@@ -119,3 +115,7 @@ class LocalFileWriteStreamed(unittest.TestCase):
         self.assertEqual([c.name for c in calls], ["write_file"])
         self.assertEqual(calls[0].arguments["content"].strip(), self.FILE.strip())
         self.assertEqual("".join(e.text for e in evs if e.kind == "content").strip(), "")
+
+
+if __name__ == "__main__":
+    unittest.main()

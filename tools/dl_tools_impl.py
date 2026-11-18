@@ -255,6 +255,20 @@ RUN_LOG_DIR = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") /
 RUN_OUTPUT_READ_MAX = 4 << 20          # bytes read back per stream (the result is capped far below that anyway)
 
 
+RUN_LOG_KEEP_S = 7 * 86400
+
+
+def _prune_run_logs() -> None:
+    """Logs of commands left running, after a week: nothing else ever removes them."""
+    cutoff = time.time() - RUN_LOG_KEEP_S
+    for f in RUN_LOG_DIR.glob("cmd-*"):
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink()
+        except OSError:
+            pass
+
+
 def _read_back(f) -> str:
     f.seek(0)
     data = f.read(RUN_OUTPUT_READ_MAX + 1)
@@ -278,9 +292,14 @@ def tool_run_command(args: dict, workspace: Path, interactive: bool = False) -> 
     try:
         if _LEAVES_RUNNING.search(str(cmd)):
             RUN_LOG_DIR.mkdir(parents=True, exist_ok=True)
-            stem = RUN_LOG_DIR / time.strftime("cmd-%Y%m%d-%H%M%S")
-            fo, fe = open(f"{stem}-{os.getpid()}.out", "w+b"), open(f"{stem}-{os.getpid()}.err", "w+b")
-            log_note = f"\n[What it left running writes on to {fo.name} and {fe.name}]"
+            _prune_run_logs()
+            # a name of its own (two in one second from the daemon's sessions emptied each other's log)
+            prefix = time.strftime("cmd-%Y%m%d-%H%M%S-")
+            fd, out_path = tempfile.mkstemp(dir=RUN_LOG_DIR, prefix=prefix, suffix=".out")
+            fo = os.fdopen(fd, "w+b")
+            fe = open(out_path[:-4] + ".err", "w+b")
+            log_paths = (out_path, fe.name)
+            log_note = f"\n[What it left running writes on to {log_paths[0]} and {log_paths[1]}]"
         else:
             fo, fe = tempfile.TemporaryFile(), tempfile.TemporaryFile()
         with fo, fe:

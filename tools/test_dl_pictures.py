@@ -79,6 +79,11 @@ class LeftServers(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         ctx = {"yolo": True, "user_text": words, "bg_listeners": []}
+        import dl_tools_impl
+        from unittest import mock
+        logs = mock.patch.object(dl_tools_impl, "RUN_LOG_DIR", Path(tmp.name) / "run-logs")   # not the real ~/.cache
+        logs.start()
+        self.addCleanup(logs.stop)
         cmd = f"nohup {sys.executable} -m http.server {port} --bind 127.0.0.1 >/dev/null 2>&1 &"
         out = cli.dispatch_dl_tool("run_command", {"CommandLine": cmd}, Path(tmp.name), session_context=ctx)
         self.assertIn("exited with code 0", out)

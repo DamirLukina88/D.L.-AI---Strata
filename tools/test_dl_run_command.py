@@ -20,6 +20,9 @@ class RunCommand(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.ws = Path(self.tmp.name)
+        logs = mock.patch.object(impl, "RUN_LOG_DIR", self.ws / "run-logs")   # never the real ~/.cache
+        logs.start()
+        self.addCleanup(logs.stop)
 
     def run_cmd(self, cmd, timeout=5.0):
         with mock.patch.object(impl, "RUN_COMMAND_TIMEOUT_S", timeout):

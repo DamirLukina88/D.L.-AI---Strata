@@ -974,9 +974,11 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
     degraded_notice(url, api_key, emit)
     if session_context is not None and "user_text" in session_context:
         if session_context.get("bg_listeners"):
-            # a turn an engine error ended never reached its stop_left_listeners: stop what it left before forgetting
-            stop_left_listeners(session_context, emit)
+            # a turn an engine error ended never reached its stop_left_listeners: stop what it left before forgetting,
+            # judged by that turn's words ("start it and keep it running"), not this one's
+            stop_left_listeners({**session_context, "user_text": session_context.get("bg_listeners_text") or ""}, emit)
         session_context["bg_listeners"] = []      # what detached commands leave listening; stopped at the end
+        session_context["bg_listeners_text"] = session_context.get("user_text") or ""
     registry = (session_context or {}).get("mcp")
     if registry is not None and registry.active:
         registry.route((session_context or {}).get("user_text") or "")
