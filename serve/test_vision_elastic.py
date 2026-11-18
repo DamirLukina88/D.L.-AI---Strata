@@ -131,5 +131,17 @@ class Elastic(unittest.TestCase):
         self.assertFalse(self.vision.up)
 
 
+def tearDownModule():
+    # tests that call prepare() with an image and never run() it leave the combined file (#874: in /dev/shm on Linux,
+    # memory that stays taken until a reboot); the server always runs or drops it
+    import glob as _glob
+    import os as _os
+    for f in _glob.glob(f"/dev/shm/strata-vision-{_os.getpid()}-req-*.sve"):
+        try:
+            _os.unlink(f)
+        except OSError:
+            pass
+
+
 if __name__ == "__main__":
     unittest.main()

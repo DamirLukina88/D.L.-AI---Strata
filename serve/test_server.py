@@ -325,11 +325,16 @@ class VisionRequestFiles(unittest.TestCase):
                                          {"type": "image", "source": "x.png"}]}]
 
     @staticmethod
-    def leftovers(d):
+    def _shm():
+        return {p.name for p in Path("/dev/shm").glob(f"strata-vision-{os.getpid()}-req-*.sve")} \
+            if Path("/dev/shm").is_dir() else set()
+
+    def setUp(self):
+        self.shm_before = self._shm()      # other tests in this process may have left theirs
+
+    def leftovers(self, d):
         # #874: on Linux the file goes to /dev/shm when that has room, so look in both places
-        shm = sorted(p.name for p in Path("/dev/shm").glob(f"strata-vision-{os.getpid()}-req-*.sve")) \
-            if Path("/dev/shm").is_dir() else []
-        return sorted(p.name for p in Path(d).glob("req-*.sve")) + shm
+        return sorted(p.name for p in Path(d).glob("req-*.sve")) + sorted(self._shm() - self.shm_before)
 
     def test_a_refused_request_writes_none(self):
         from serve.server import EngineStarting
@@ -6046,6 +6051,18 @@ class UntimedReads(unittest.TestCase):
         v = server.Vision.__new__(server.Vision)
         v.proc = SimpleNamespace(stdout=SimpleNamespace(readline=lambda: "OK 7 1 1 1\n"))
         self.assertEqual(v._readline(5.0, "x"), "OK 7 1 1 1\n")
+
+
+def tearDownModule():
+    # tests that call prepare() with an image and never run() it leave the combined file (#874: in /dev/shm on Linux,
+    # memory that stays taken until a reboot); the server always runs or drops it
+    import glob as _glob
+    import os as _os
+    for f in _glob.glob(f"/dev/shm/strata-vision-{_os.getpid()}-req-*.sve"):
+        try:
+            _os.unlink(f)
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":
