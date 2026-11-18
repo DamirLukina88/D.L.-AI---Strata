@@ -661,7 +661,17 @@ let phoneBridgePollerRunning = false;
 const phoneToolWaiters = new Map();
 function runPhoneToolAsync(p) {
   return new Promise((resolve) => {
-    phoneToolWaiters.set(p.id, resolve);
+    // the app may never answer (the page reloaded under it, the WebView went): the poller must not wait forever.
+    // A sensor monitor runs for its duration_sec, so the limit is that plus two minutes
+    const dur = Number((p.args || {}).duration_sec) || 0;
+    const timer = setTimeout(() => {
+      if (phoneToolWaiters.get(p.id) === settle) {
+        phoneToolWaiters.delete(p.id);
+        resolve("Error: the app gave no answer for this tool");
+      }
+    }, (Math.max(0, dur) + 120) * 1000);
+    const settle = (res) => { clearTimeout(timer); resolve(res); };
+    phoneToolWaiters.set(p.id, settle);
     window.__rayToolDone = (id, res) => {
       const done = phoneToolWaiters.get(id);
       phoneToolWaiters.delete(id);
@@ -671,7 +681,7 @@ function runPhoneToolAsync(p) {
       window.RayAndroid.executeToolAsync(p.tool, JSON.stringify(p.args || {}), p.id);
     } catch (e) {
       phoneToolWaiters.delete(p.id);
-      resolve("Error executing tool: " + (e && e.message ? e.message : String(e)));
+      settle("Error executing tool: " + (e && e.message ? e.message : String(e)));
     }
   });
 }

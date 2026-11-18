@@ -72,17 +72,21 @@ function setPill(state, text) {
 }
 
 let modelUnloaded = false, modelLoading = false, firstPollDone = false;
+let modelWakeInFlight = false;   // a POST /load of ours is running: a turn ending meanwhile must not clear modelLoading
 
 async function wakeModelFromSleep() {
   if (!modelUnloaded || modelLoading) return;
   modelLoading = true;
   setPill("reading", "Loading model…");
   toast("info", "Waking Ray up…", "Loading the model into memory.", 2500);
+  modelWakeInFlight = true;
   try {
     const r = await fetch("load", {method: "POST", headers: headers(true), body: "{}"});
     if (!r.ok) modelLoading = false;                  // a 401 or 500 left it set, and no tap could wake him again
   } catch (e) {
     modelLoading = false;
+  } finally {
+    modelWakeInFlight = false;
   }
 }
 

@@ -95,14 +95,14 @@ console.log(`All ${n} web app function tests passed.`);
     if (SRC[i] === "{") depth++;
     else if (SRC[i] === "}" && --depth === 0) break;
   }
-  vm.runInContext("var modelUnloaded = true, modelLoading = false;\n" + SRC.slice(at + 1, i + 1) +
+  vm.runInContext("var modelUnloaded = true, modelLoading = false, modelWakeInFlight = false;\n" + SRC.slice(at + 1, i + 1) +
                   "\nthis.wake = wakeModelFromSleep; this.loading = () => modelLoading;", wctx);
   await wctx.wake();
   assert.strictEqual(wctx.loading(), false, "a refused /load must not leave modelLoading set");
   await wctx.wake();
   assert.strictEqual(calls.length, 2, "a second tap must try /load again");
   const idle = SRC.slice(SRC.indexOf("\nfunction codeSetState("));
-  assert.ok(/\} else \{[\s\S]{0,400}?if \(modelUnloaded\) modelLoading = false;/.test(idle.slice(0, 6000)),
+  assert.ok(/\} else \{[\s\S]{0,400}?if \(modelUnloaded && !modelWakeInFlight\) modelLoading = false;/.test(idle.slice(0, 6000)),
             "codeSetState's idle branch clears modelLoading while the model sleeps");
   console.log("  ok wakeModelFromSleep and codeSetState never leave \"Loading model…\" stuck");
 })().catch((e) => { console.error(e); process.exitCode = 1; });
@@ -147,7 +147,7 @@ console.log(`All ${n} web app function tests passed.`);
 // a sensor monitor of up to an hour); executeToolAsync answers later through window.__rayToolDone
 (async () => {
   const win = {};
-  const tctx = vm.createContext({window: win, setTimeout, Map, Promise, JSON, String});
+  const tctx = vm.createContext({window: win, setTimeout, clearTimeout, Map, Promise, JSON, String, Number, Math});
   win.RayAndroid = {executeToolAsync(tool, args, id) {
     setTimeout(() => win.__rayToolDone(id, JSON.stringify({tool, callId: id, result: `ran ${tool}`})), 10);
   }};
