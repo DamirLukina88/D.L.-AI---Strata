@@ -519,6 +519,11 @@ class PhoneMcpServer:
     def _run_adb_cmd(self, args: List[str], timeout: float = 5.0) -> Optional[str]:
         if not self.adb_enabled or not self._is_adb_connected():
             return None
+        if len(args) > 2 and args[0] == "shell":
+            # adb shell joins its arguments into one command line for the phone's sh: each one quoted, or a value the
+            # model wrote (an alarm label "x; pm uninstall ...", a path, a package) ran as commands on the phone.  A
+            # single string after "shell" is a pipeline this file builds itself, with its values quoted there
+            args = ["shell"] + [shlex.quote(str(a)) for a in args[1:]]
         try:
             res = subprocess.run(["adb"] + args, capture_output=True, text=True, timeout=timeout)
             if res.returncode == 0:
@@ -643,7 +648,7 @@ class PhoneMcpServer:
             "--es", "tool", name,
             # adb shell joins its arguments into one command line on the phone: quoted, or a space in the
             # arguments (a song name) split them and the app got broken JSON
-            "--es", "args", shlex.quote(json.dumps(args))
+            "--es", "args", json.dumps(args)                  # quoted by _run_adb_cmd
         ]
         if name != "phone_get_gallery_image":              # the gallery is read over adb alone (one copy)
             self._run_adb_cmd(broadcast_cmd, timeout=1.5)
@@ -718,6 +723,8 @@ class PhoneMcpServer:
                 "calculator": "com.miui.calculator",
             }
             pkg = package_map.get(target, target)
+            if not re.fullmatch(r"[A-Za-z0-9_.]+", pkg or ""):
+                return f"Error: {pkg!r} is not an app's package name (letters, digits, dots and underscores)."
             out = self._run_adb_cmd(["shell", "monkey", "-p", pkg, "-c", "android.intent.category.LAUNCHER", "1"])
             if out and "No activities found" not in out:
                 return f"Launched app '{target}' ({pkg})."
@@ -893,7 +900,8 @@ class PhoneMcpServer:
                 return f"Could not read text file at {path}."
             elif action == "search":
                 pattern = str(args.get("pattern", "")).strip()
-                out = self._run_adb_cmd(["shell", f"find '{path}' -iname '*{pattern}*' 2>/dev/null | head -50"], timeout=10.0)
+                out = self._run_adb_cmd(["shell", f"find {shlex.quote(path)} -iname {shlex.quote('*' + pattern + '*')} "
+                                                  "2>/dev/null | head -50"], timeout=10.0)
                 if out:
                     return f"Search results for '{pattern}' in {path}:\n{out}"
                 return f"No matching files found for '{pattern}'."
@@ -909,7 +917,10 @@ class PhoneMcpServer:
             elif action == "push":
                 src = str(args.get("workspace_path", "")).strip()
                 workspace = Path(os.environ.get("STRATA_WORKSPACE_DIR") or Path.home() / "DL-AI-workspace")
-                local_file = (workspace / src) if not os.path.isabs(src) else Path(src)
+                local_file = ((workspace / src) if not os.path.isabs(src) else Path(src)).resolve()
+                ws = workspace.resolve()
+                if local_file != ws and ws not in local_file.parents:   # an absolute path sent any PC file (keys)
+                    return f"Error: only files in the workspace ({ws}) can be pushed to the phone."
                 if not local_file.exists():
                     return f"Error: source file '{local_file}' does not exist on PC workspace."
                 target = path if path.endswith("/") else f"{path}/{local_file.name}"
@@ -946,8 +957,8 @@ class PhoneMcpServer:
                 )
             elif action == "delete":
                 event_id = str(args.get("event_id", "")).strip()
-                if not event_id:
-                    return "Error: event_id is required to delete an event."
+                if not event_id.isdigit():          # it goes into --where: "_id!=0" would have deleted every event
+                    return "Error: event_id (a number) is required to delete an event."
                 out = self._run_adb_cmd([
                     "shell", "content", "delete", "--uri", "content://com.android.calendar/events",
                     "--where", f"_id={event_id}"

@@ -157,6 +157,37 @@ class TestPhoneMcpServer(unittest.TestCase):
                 self.assertTrue(server._is_adb_connected())
                 run.assert_called()
 
+    def test_adb_shell_arguments_are_quoted(self):
+        """adb shell joins its arguments into one sh command line on the phone: a model's alarm label, path or
+        package ran as commands there, an event id of "_id!=0" deleted every event, and push sent any PC file."""
+        import shlex
+        import tempfile
+        from unittest import mock
+        server = M.PhoneMcpServer(base_url="http://127.0.0.1:9999", adb_enabled=True)
+        sent = []
+
+        def run(cmd, **k):
+            sent.append(cmd)
+            return mock.Mock(returncode=0, stdout="device\n" if cmd[1:] == ["get-state"] else "ok")
+        with mock.patch.object(server, "_is_adb_connected", return_value=True), \
+                mock.patch.object(M.subprocess, "run", side_effect=run):
+            server._execute_via_adb("phone_set_alarm", {"hour": 7, "minute": 0, "label": "x; pm uninstall com.foo"})
+            line = " ".join(next(c for c in sent if "SET_ALARM" in " ".join(c))[2:])
+            self.assertIn("x; pm uninstall com.foo", shlex.split(line))           # one word on the phone's sh
+            sent.clear()
+            server._execute_via_adb("phone_files", {"action": "search", "path": "/sdcard/a' ; rm -rf / ; '",
+                                                    "pattern": "x"})
+            find = [c for c in sent if "find" in " ".join(c)][0][2]
+            self.assertEqual(shlex.split(find)[1], "/sdcard/a' ; rm -rf / ; '")
+            self.assertIn("is not an app's package name",
+                          server._execute_via_adb("phone_launch_app", {"package_or_name": "a;reboot"}))
+            self.assertIn("a number", server._execute_via_adb("phone_calendar", {"action": "delete",
+                                                                                  "event_id": "_id!=0 OR 1"}))
+            with tempfile.TemporaryDirectory() as d, mock.patch.dict(M.os.environ, {"STRATA_WORKSPACE_DIR": d}):
+                out = server._execute_via_adb("phone_files", {"action": "push", "path": "/sdcard/Download/",
+                                                              "workspace_path": str(Path.home() / ".bashrc")})
+            self.assertIn("only files in the workspace", out)
+
     def test_multilingual_otp_extraction(self):
         """Verify regex extraction for Croatian and English 2FA / OTP codes."""
         cases = [
