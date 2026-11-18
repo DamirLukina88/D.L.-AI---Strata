@@ -240,7 +240,10 @@ class TestGateReadsTheRealPath(unittest.TestCase):
                     # round 12: a heredoc body's quotes, >1.log, line continuations, -lc, timeout 5s
                     "cat > n.txt <<EOF\nit's done\nEOF\ncp a /etc/b\necho 'ok'", "cp a /etc/b >1.log",
                     "rsync -av src/ /etc/x \\\n --delete", "cp -t \\\n /etc a", "cp a /etc/b \\\n 2>/dev/null",
-                    "bash -lc 'cp a /etc/b'", "timeout 5s install a /etc/b"):
+                    "bash -lc 'cp a /etc/b'", "timeout 5s install a /etc/b",
+                    # round 13: nothing after a heredoc or a here-string is hidden; a body is read line by line
+                    "grep -q x <<< \"$v\"\ncp a /etc/b", "SIZE=$((1<<20))\ncp a /etc/b", "bash <<EOF\ncp a /etc/b\nEOF",
+                    "cat <<EOF\r\nhi\r\nEOF\r\ncp a /etc/b", "echo x >|/etc/x", "echo x >& /etc/x"):
             with self.subTest(cmd=cmd):
                 self.assertIsNotNone(classify_command(cmd, self.ws))
         self.assertIsNotNone(classify_write(Path("/tmp/../home/someone/.bashrc"), self.ws))
@@ -279,7 +282,7 @@ class TestGateReadsTheRealPath(unittest.TestCase):
                     "go install ./cmd/a ~/go/src/b", "npm-install a /opt/x",     # they only read those paths
                     "pip install " + "--no-deps " * 17, "rsync -av --exclude x src/ dst/", "rm -v x",
                     "git push origin main", "cp a b; ls -t /etc", "cp a b # to /etc/c", "cp a#b c",
-                    "cp a b 2>/tmp/err.log", "cat > out.txt <<EOF\nhello cp a /etc/b\nEOF"):   # heredoc text
+                    "cp a b 2>/tmp/err.log"):
             with self.subTest(cmd=cmd):
                 self.assertIsNone(classify_command(cmd, self.ws))
 

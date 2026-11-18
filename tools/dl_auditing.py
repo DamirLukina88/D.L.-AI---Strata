@@ -720,7 +720,7 @@ _DESTRUCTIVE_PATTERNS = [
 ]
 # a redirect or tee target; a copy's target comes from _copy_targets (a tokenizer: the regex form of it was
 # quadratic in five places and missed `cp x -v /etc/y`, `cp a b /etc/`, `cp -S .bak x /etc/y`)
-_PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?)(['"]?)(~?/[^\s'";&|)]*|\.\.(?:/[^\s'";&|)]*)?"""
+_PATH_ARG = re.compile(r"""(?:>>?[|&]?\s*|\btee\s+(?:-a\s+)?)(['"]?)(~?/[^\s'";&|)]*|\.\.(?:/[^\s'";&|)]*)?"""
                        r"""|~(?=[\s'";&|)]|$)|\$\{?HOME\}?(?![A-Za-z0-9_])(?:/[^\s'";&|)]*)?)\1""")
 _COPY_COMMANDS = {"cp", "mv", "rsync", "ln", "install"}
 _ANYWHERE = {"cp", "mv", "rsync", "ln"}         # a command wherever it stands (xargs cp, find -exec cp, echo cp...)
@@ -743,16 +743,18 @@ _VALUE_LONG = {"--suffix", "--mode", "--owner", "--group", "--rsh", "--exclude",
 _SH_TOKEN = re.compile(r"""(?P<nl>\n)|(?P<ws>(?:[ \t\r\f\v]|\\\n)+)|(?P<comment>\#[^\n]*)
     |(?P<redir>\d*(?:&>>?|[<>]&(?P<fd>\d+-?|-)?|>>|>\||<<<|<<-?|[<>]))
     |(?P<op>;;|&&|\|\||[;&|()`])
-    |(?P<word>(?:[^\s'"\\;&|()<>`$\#]+|'[^']*'|"(?:[^"\\]|\\.)*"|\\.|\$\([^()]*\)|\$\{[^{}]*\}|\$|['"\\]|\#)+)
+    |(?P<word>(?:[^\s'"\\;&|()<>`$\#]+|'[^']*'|"(?:[^"\\]|\\.)*"|\\.|\$\(\([^()]*\)\)|\$\([^()]*\)|\$\{[^{}]*\}|\$|['"\\]|\#)+)
     |(?P<other>.)""", re.X | re.S)
 # (a backslash-newline is a line continuation, not a word; an fd only after >& / <&, so >1.log is a file;
 # ${...} without braces inside, or an unclosed ${ rescanned to the end from every ${: 97 s on 1 MB)
 _DEQUOTE = re.compile(r"""'([^']*)'|"((?:[^"\\]|\\.)*)"|\\(.)""", re.S)
 
 
-def _sh_segments(cmd: str) -> list[list[str]]:
+def _sh_segments(cmd: str, heredocs: bool = True) -> list[list[str]]:
     """The command line as simple commands (lists of words, quotes removed), split at newlines and ; & | ( ) `;
-    comments, redirects (with their target word) and heredoc bodies dropped."""
+    comments and redirects (with their target word) dropped.  A heredoc body is read line by line, each line on its
+    own: its quotes are text and must not pair with a later line's (that hid a cp after `it's done`), but a body can
+    run as commands (bash <<EOF, `cp ...` in it), and a wrongly seen heredoc must not hide what follows."""
     segments, seg, skip_next = [], [], False
     heredoc, pending = None, None        # pending: the << delimiter word expected next; heredoc: (delimiter, strip tabs)
     pos, n = 0, len(cmd)
@@ -765,20 +767,20 @@ def _sh_segments(cmd: str) -> list[list[str]]:
                 segments.append(seg)
             seg, skip_next = [], False
             if kind == "nl" and heredoc is not None:
-                # the body up to the delimiter's own line is text, not commands (its quotes paired across lines)
                 delim, tabs = heredoc
                 heredoc = None
                 while pos < n:
                     eol = cmd.find("\n", pos)
                     line = cmd[pos:eol if eol >= 0 else n]
                     pos = (eol + 1) if eol >= 0 else n
-                    if (line.lstrip("\t") if tabs else line) == delim:
+                    if (line.lstrip("\t") if tabs else line).rstrip("\r") == delim:
                         break
+                    segments.extend(_sh_segments(line, heredocs=False))
         elif kind == "comment":
             continue                     # only at a word's start: a # inside a word is part of it
         elif kind == "redir":
             r = m.group("redir")
-            if r.endswith(("<<", "<<-")):
+            if heredocs and re.search(r"(?<!<)<<-?$", r):     # not <<< (a here-string)
                 pending = "<<-" if r.endswith("-") else "<<"
             skip_next = not m.group("fd")    # > file: the next word is the redirect's own target
         elif kind == "word":
