@@ -740,35 +740,57 @@ _VALUE_LONG = {"--suffix", "--mode", "--owner", "--group", "--rsh", "--exclude",
                "--copy-dest", "--link-dest", "--port", "--bwlimit", "--timeout"}
 # one linear pass: each alternative starts on its own characters (shlex built words a character at a time and was
 # quadratic on one long word: 12 s for a 1 MB python -c script)
-_SH_TOKEN = re.compile(r"""(?P<nl>\n)|(?P<ws>[ \t\r\f\v]+)|(?P<comment>\#[^\n]*)
-    |(?P<redir>\d*(?:&>>?|>>?&?|<<<|<<-?|<&?|>\|)(?P<fd>\d+-?|-)?)
+_SH_TOKEN = re.compile(r"""(?P<nl>\n)|(?P<ws>(?:[ \t\r\f\v]|\\\n)+)|(?P<comment>\#[^\n]*)
+    |(?P<redir>\d*(?:&>>?|[<>]&(?P<fd>\d+-?|-)?|>>|>\||<<<|<<-?|[<>]))
     |(?P<op>;;|&&|\|\||[;&|()`])
-    |(?P<word>(?:[^\s'"\\;&|()<>`$\#]+|'[^']*'|"(?:[^"\\]|\\.)*"|\\.|\$\([^()]*\)|\$\{[^}]*\}|\$|['"\\]|\#)+)
+    |(?P<word>(?:[^\s'"\\;&|()<>`$\#]+|'[^']*'|"(?:[^"\\]|\\.)*"|\\.|\$\([^()]*\)|\$\{[^{}]*\}|\$|['"\\]|\#)+)
     |(?P<other>.)""", re.X | re.S)
+# (a backslash-newline is a line continuation, not a word; an fd only after >& / <&, so >1.log is a file;
+# ${...} without braces inside, or an unclosed ${ rescanned to the end from every ${: 97 s on 1 MB)
 _DEQUOTE = re.compile(r"""'([^']*)'|"((?:[^"\\]|\\.)*)"|\\(.)""", re.S)
 
 
 def _sh_segments(cmd: str) -> list[list[str]]:
     """The command line as simple commands (lists of words, quotes removed), split at newlines and ; & | ( ) `;
-    comments and redirects (with their target word) dropped."""
+    comments, redirects (with their target word) and heredoc bodies dropped."""
     segments, seg, skip_next = [], [], False
-    for m in _SH_TOKEN.finditer(cmd):
+    heredoc, pending = None, None        # pending: the << delimiter word expected next; heredoc: (delimiter, strip tabs)
+    pos, n = 0, len(cmd)
+    while pos < n:
+        m = _SH_TOKEN.match(cmd, pos)
+        pos = m.end()
         kind = m.lastgroup
         if kind in ("nl", "op"):
             if seg:
                 segments.append(seg)
             seg, skip_next = [], False
+            if kind == "nl" and heredoc is not None:
+                # the body up to the delimiter's own line is text, not commands (its quotes paired across lines)
+                delim, tabs = heredoc
+                heredoc = None
+                while pos < n:
+                    eol = cmd.find("\n", pos)
+                    line = cmd[pos:eol if eol >= 0 else n]
+                    pos = (eol + 1) if eol >= 0 else n
+                    if (line.lstrip("\t") if tabs else line) == delim:
+                        break
         elif kind == "comment":
-            continue                         # only at a word's start: a # inside a word is part of it
+            continue                     # only at a word's start: a # inside a word is part of it
         elif kind == "redir":
+            r = m.group("redir")
+            if r.endswith(("<<", "<<-")):
+                pending = "<<-" if r.endswith("-") else "<<"
             skip_next = not m.group("fd")    # > file: the next word is the redirect's own target
         elif kind == "word":
+            word = _DEQUOTE.sub(lambda q: q.group(1) if q.group(1) is not None else
+                                (re.sub(r"\\(.)", r"\1", q.group(2)) if q.group(2) is not None else q.group(3)),
+                                m.group("word"))
+            if pending is not None:
+                heredoc, pending = (word, pending == "<<-"), None
             if skip_next:
                 skip_next = False
                 continue
-            seg.append(_DEQUOTE.sub(lambda q: q.group(1) if q.group(1) is not None else
-                                    (re.sub(r"\\(.)", r"\1", q.group(2)) if q.group(2) is not None else q.group(3)),
-                                    m.group("word")))
+            seg.append(word)
     if seg:
         segments.append(seg)
     return segments
@@ -826,18 +848,20 @@ def _copy_targets(cmd: str, depth: int = 0) -> list[str]:
             w = seg[i]
             if w in _WRAPPERS:
                 wrapper, i = w, i + 1
-            elif re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", w) or (w.isdigit() and wrapper):
+            elif re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", w) or (wrapper and re.match(r"^\d+(?:\.\d+)?[smhd]?$", w)):
                 i += 1
             elif w.startswith("-") and wrapper:
                 i += 2 if w in _WRAPPER_VALUE_FLAGS.get(wrapper, ()) and i + 1 < len(seg) else 1
             else:
                 break
         base = seg[i].rsplit("/", 1)[-1] if i < len(seg) else ""
-        if base in _SHELLS and depth == 0 and "-c" in seg[i + 1:]:
-            k = seg.index("-c", i + 1)
-            if k + 1 < len(seg):
-                out += _copy_targets(seg[k + 1], depth + 1)   # bash -c "cp a /etc/b"
-            continue
+        if base in _SHELLS and depth == 0:
+            # bash -c "cp a /etc/b", also as a cluster: -lc, -ec, -xc
+            k = next((k for k in range(i + 1, len(seg)) if seg[k].startswith("-") and not seg[k].startswith("--")
+                      and "c" in seg[k][1:]), None)
+            if k is not None and k + 1 < len(seg):
+                out += _copy_targets(seg[k + 1], depth + 1)
+                continue
         starts = [i] if base in _COPY_COMMANDS else []
         starts += [k for k in range(i + 1, len(seg)) if seg[k].rsplit("/", 1)[-1] in _ANYWHERE]
         for n, k in enumerate(starts):
@@ -885,10 +909,14 @@ def classify_command(cmd: str, workspace: Path) -> Optional[str]:
             reasons.append(f"writes outside the workspace ({path_str})")
             break
     else:
-        for path_str in _copy_targets(cmd):
-            if path_str and _outside(path_str, workspace):
-                reasons.append(f"writes outside the workspace ({path_str})")
-                break
+        targets = list(dict.fromkeys(_copy_targets(cmd)))    # each once: a resolve() per copy was 10 s on 1 MB
+        if len(targets) > 256:
+            reasons.append(f"copies to {len(targets)} places (too many to check one by one)")
+        else:
+            for path_str in targets:
+                if path_str and _outside(path_str, workspace):
+                    reasons.append(f"writes outside the workspace ({path_str})")
+                    break
     return "; ".join(reasons) or None
 
 
