@@ -308,6 +308,16 @@ def tool_run_command(args: dict, workspace: Path, interactive: bool = False) -> 
             try:
                 code = proc.wait(timeout=RUN_COMMAND_TIMEOUT_S)
             except subprocess.TimeoutExpired:
+                if interactive:             # in the REPL's own group: its children by name, then the shell
+                    try:
+                        import psutil
+                        for c in psutil.Process(proc.pid).children(recursive=True):
+                            try:
+                                c.kill()
+                            except psutil.Error:
+                                pass
+                    except Exception:
+                        pass
                 try:
                     # the group only when it has its own: in the REPL's group (interactive) there is no group
                     # proc.pid, killpg found nothing and the wait below never ended

@@ -219,10 +219,20 @@ class TestGateReadsTheRealPath(unittest.TestCase):
         from tools.dl_auditing import classify_command, classify_write
         for cmd in ("echo x > /tmp/../etc/foo", "/bin/rm -rf ~/x", "\\rm -rf ~/x", "cp a ../../../../../../../etc/out",
                     "cp -t ~/.config/systemd/user a.service", "ln -sf -t /usr/local/bin tool",
-                    "cp --target-directory=/etc x"):
+                    "cp --target-directory=/etc x", "cp -vt /etc x", "install -Dt /etc x", "ln -sft /usr/bin x",
+                    "mv --target-directory /etc x"):
             with self.subTest(cmd=cmd):
                 self.assertIsNotNone(classify_command(cmd, self.ws))
         self.assertIsNotNone(classify_write(Path("/tmp/../home/someone/.bashrc"), self.ws))
+
+    def test_a_long_command_line_is_checked_fast(self):
+        # round 4: the -t branch scanned to the end of the line from every cp/mv/ln/install word (7 s on 50 KB)
+        import time as _time
+        from tools.dl_auditing import classify_command
+        for line in ("echo '" + "install it, cp it, " * 2700 + "'", "cp " * 17000):
+            t0 = _time.monotonic()
+            classify_command(line, self.ws)
+            self.assertLess(_time.monotonic() - t0, 0.5)
 
     def test_still_free(self):
         from tools.dl_auditing import classify_command

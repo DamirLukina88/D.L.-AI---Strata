@@ -178,7 +178,7 @@ SECRET_PATTERNS = [
     # flagging them blocked editing such files
     ("Connection String with Password", re.compile(
         r"\b([a-z][a-z0-9+.-]*://[^\s/:@{}$%<>]+:(?!(?:password|passw0rd|changeme|secret|example|admin)\d*@)"
-        r"(?![^@\s]*%[sd(])(?=[^\s/@]*\d)(?:[^\s/@{}$%<>]|%[0-9A-Fa-f]{2}){8,}@[^\s/]+)")),   # %24 (an encoded $) yes, %s no
+        r"(?![^@\s]*%(?:s|\(|d(?![0-9A-Fa-f])))(?=[^\s/@]*\d)(?:[^\s/@{}$%<>]|%[0-9A-Fa-f]{2}){8,}@[^\s/]+)")),   # %24 (an encoded $) yes, %s no
 ]
 
 # The real values on this PC: every value in secrets.env, secret-looking environment variables and the Google sign-in
@@ -713,7 +713,11 @@ _DESTRUCTIVE_PATTERNS = [
     ("removes packages", re.compile(r"\bpacman\s+-R|\bapt(?:-get)?\s+(?:remove|purge)|\bpip\d?\s+uninstall\b|\bnpm\s+(?:uninstall|rm)\s+-g")),
 ]
 _PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?|\b(?:mv|cp|rsync|ln)\s+(?:-\S+\s+)*(?!-)\S+\s+"""
-                       r"""|\b(?:mv|cp|ln|install)\b[^;&|\n]*?\s(?:-t\s*|--target-directory=))(['"]?)(~?/[^\s'";&|)]*|\.\.(?:/[^\s'";&|)]*)?)\1""")
+                       # the gap stops at the next command word: [^;&|\n]*? from every cp/mv/ln/install ran to the end of
+                       # the line (quadratic: 7 s on a 50 KB line of the approval gate); -vt / -Dt and the spaced long
+                       # option count too
+                       r"""|\b(?:mv|cp|ln|install)\b(?:(?!\b(?:mv|cp|ln|install)\b)[^;&|\n])*?\s"""
+                       r"""(?:-[A-Za-z]*t\s*|--target-directory[=\s]\s*))(['"]?)(~?/[^\s'";&|)]*|\.\.(?:/[^\s'";&|)]*)?)\1""")
 
 
 def _outside(path_str: str, workspace: Path) -> bool:

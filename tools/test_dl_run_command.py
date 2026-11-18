@@ -68,6 +68,16 @@ class RunCommand(unittest.TestCase):
         self.assertLess(time.monotonic() - t0, 5)
         self.assertIn("timed out", out)
 
+    def test_the_users_own_commands_children_end_too(self):
+        import psutil
+        with mock.patch.object(impl, "RUN_COMMAND_TIMEOUT_S", 0.5):
+            impl.tool_run_command({"CommandLine": "sleep 47.31; echo hi"}, self.ws, interactive=True)
+        time.sleep(0.3)
+        left = [p for p in psutil.process_iter(["cmdline"]) if p.info["cmdline"] == ["sleep", "47.31"]]
+        for p in left:
+            p.kill()
+        self.assertEqual(left, [])
+
     def test_exit_code_and_stderr(self):
         out = self.run_cmd("echo out; echo err >&2; exit 3")
         self.assertIn("out", out)
