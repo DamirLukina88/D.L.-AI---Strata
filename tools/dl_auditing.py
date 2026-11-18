@@ -712,12 +712,13 @@ _DESTRUCTIVE_PATTERNS = [
     ("pipes a download into a shell", re.compile(r"\b(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:ba|z|fi)?sh\b")),
     ("removes packages", re.compile(r"\bpacman\s+-R|\bapt(?:-get)?\s+(?:remove|purge)|\bpip\d?\s+uninstall\b|\bnpm\s+(?:uninstall|rm)\s+-g")),
 ]
-_PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?|\b(?:mv|cp|rsync|ln)\s+(?:-\S+\s+)*(?!-)\S+\s+"""
+_PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?|\b(?:mv|cp|rsync|ln|install)\s+(?:-\S+\s+)*(?!-)\S+\s+"""
                        # the gap stops at the next command word: [^;&|\n]*? from every cp/mv/ln/install ran to the end of
                        # the line (quadratic: 7 s on a 50 KB line of the approval gate); -vt / -Dt and the spaced long
                        # option count too
                        r"""|\b(?:mv|cp|ln|install)\b(?:(?!\b(?:mv|cp|ln|install)\b)[^;&|\n])*?\s"""
-                       r"""(?:-[A-Za-z]*t\s*|--target-directory[=\s]\s*))(['"]?)(~?/[^\s'";&|)]*|\.\.(?:/[^\s'";&|)]*)?)\1""")
+                       r"""(?:-[A-Za-z]*t\s*|--target-directory[=\s]\s*))(['"]?)(~?/[^\s'";&|)]*|\.\.(?:/[^\s'";&|)]*)?|~(?=[\s'";&|)]|$)|\$\{?HOME\}?(?![A-Za-z0-9_])(?:/[^\s'";&|)]*)?)\1""")
+# (~ alone and $HOME / ${HOME}: `cp a ~`, `mv -t ~ a`, `cp -t "$HOME" x` wrote into the home folder unasked)
 
 
 def _outside(path_str: str, workspace: Path) -> bool:
@@ -725,7 +726,7 @@ def _outside(path_str: str, workspace: Path) -> bool:
     # is the workspace's, not this process's folder
     if path_str in ("/dev/null", "/dev/stdout", "/dev/stderr"):    # links to the terminal or a pipe once resolved
         return False
-    p = Path(path_str).expanduser()
+    p = Path(re.sub(r"^\$\{?HOME\}?", lambda m: str(Path.home()), path_str)).expanduser()
     if not p.is_absolute():
         p = workspace / p
     r = str(p.resolve())
@@ -744,7 +745,7 @@ def classify_command(cmd: str, workspace: Path) -> Optional[str]:
     for _, path_str in _PATH_ARG.findall(cmd):
         # "> /x" also matches text inside quoted code, such as the regex in sed -n '/^<script>/,/^<\/script>/p':
         # only a path whose top folder exists can be a redirect target (no new folder appears in / without root)
-        if not path_str.startswith("~") and not Path("/" + path_str.strip("/").split("/")[0]).exists():
+        if not path_str.startswith(("~", "$")) and not Path("/" + path_str.strip("/").split("/")[0]).exists():
             continue
         if _outside(path_str, workspace):
             reasons.append(f"writes outside the workspace ({path_str})")

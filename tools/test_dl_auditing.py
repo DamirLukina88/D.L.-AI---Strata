@@ -220,7 +220,8 @@ class TestGateReadsTheRealPath(unittest.TestCase):
         for cmd in ("echo x > /tmp/../etc/foo", "/bin/rm -rf ~/x", "\\rm -rf ~/x", "cp a ../../../../../../../etc/out",
                     "cp -t ~/.config/systemd/user a.service", "ln -sf -t /usr/local/bin tool",
                     "cp --target-directory=/etc x", "cp -vt /etc x", "install -Dt /etc x", "ln -sft /usr/bin x",
-                    "mv --target-directory /etc x"):
+                    "mv --target-directory /etc x",
+                    "cp a ~", "mv -t ~ a", 'cp -t "$HOME" x', "cp a ${HOME}/.bashrc", "install x /etc/y"):
             with self.subTest(cmd=cmd):
                 self.assertIsNotNone(classify_command(cmd, self.ws))
         self.assertIsNotNone(classify_write(Path("/tmp/../home/someone/.bashrc"), self.ws))
@@ -237,7 +238,8 @@ class TestGateReadsTheRealPath(unittest.TestCase):
     def test_still_free(self):
         from tools.dl_auditing import classify_command
         for cmd in ("echo x > /tmp/a.txt", "echo > /dev/null", "echo e 2> /dev/stderr", "cat a > out.txt",
-                    "cp a sub/b", "ls ..", "cp -r ../lib .", "rsync -a ../src/ ./src/"):   # into the workspace
+                    "cp a sub/b", "ls ..", "cp -r ../lib .", "rsync -a ../src/ ./src/",   # into the workspace
+                    "pip install requests numpy", "echo ~", "cp ~/a .", "cp a $HOMEDIR_X/x"):
             with self.subTest(cmd=cmd):
                 self.assertIsNone(classify_command(cmd, self.ws))
 
