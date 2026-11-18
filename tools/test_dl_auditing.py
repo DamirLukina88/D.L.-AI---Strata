@@ -222,7 +222,10 @@ class TestGateReadsTheRealPath(unittest.TestCase):
                     "cp --target-directory=/etc x", "cp -vt /etc x", "install -Dt /etc x", "ln -sft /usr/bin x",
                     "mv --target-directory /etc x",
                     "cp a ~", "mv -t ~ a", 'cp -t "$HOME" x', "cp a ${HOME}/.bashrc", "install x /etc/y",
-                    "install -m 644 x /etc/y", "install -m 0755 -o root x /usr/local/bin/x"):
+                    "install -m 644 x /etc/y", "install -m 0755 -o root x /usr/local/bin/x",
+                    "echo hi\ninstall x /etc/y", "  install x /etc/y", "{ install x /etc/y; }",
+                    "if true; then install x /etc/y; fi", "/usr/bin/install x /etc/y", "env install x /etc/y",
+                    "install --mode 644 x /etc/y"):
             with self.subTest(cmd=cmd):
                 self.assertIsNotNone(classify_command(cmd, self.ws))
         self.assertIsNotNone(classify_write(Path("/tmp/../home/someone/.bashrc"), self.ws))
@@ -231,7 +234,8 @@ class TestGateReadsTheRealPath(unittest.TestCase):
         # round 4: the -t branch scanned to the end of the line from every cp/mv/ln/install word (7 s on 50 KB)
         import time as _time
         from tools.dl_auditing import classify_command
-        for line in ("echo '" + "install it, cp it, " * 2700 + "'", "cp " * 17000):
+        for line in ("echo '" + "install it, cp it, " * 2700 + "'", "cp " * 17000,
+                     "install " + "-m " * 40, "install " + "-o -g " * 40, "install " + "--mode " * 40):   # round 7
             t0 = _time.monotonic()
             classify_command(line, self.ws)
             self.assertLess(_time.monotonic() - t0, 0.5)

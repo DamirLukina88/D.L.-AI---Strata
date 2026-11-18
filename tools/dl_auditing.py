@@ -715,7 +715,13 @@ _DESTRUCTIVE_PATTERNS = [
 _PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?|\b(?:mv|cp|rsync|ln)\s+(?:-\S+\s+)*(?!-)\S+\s+"""
                        # install as the command itself (not pip/npm/go install, whose extra paths are only read),
                        # its -m 644 / -o root / -g / -S values skipped
-                       r"""|(?:^|[;&|(`]\s*)(?:sudo\s+)?install\s+(?:-[mogS]\s+\S+\s+|-\S+\s+)*(?!-)\S+\s+"""
+                       # (in command position also after a newline, { ! then do else, env/command/time/nice/exec, as
+                       # /usr/bin/install; the two option forms are disjoint, or `install -m -m -m ...` backtracked
+                       # exponentially: 2 s at 110 bytes)
+                       r"""|(?:^|[;&|(`{!\n]|\b(?:then|do|else|env|command|time|nice|exec)\b)\s*"""
+                       r"""(?:sudo\s+(?:-\S+\s+)*)?(?:\S*/)?install\s+"""
+                       r"""(?:-[mogS]\s+[^\s-]\S*\s+|--(?:mode|owner|group|suffix)\s+[^\s-]\S*\s+"""
+                       r"""|-(?![mogS]\s)(?!-(?:mode|owner|group|suffix)\s)\S+\s+)*(?!-)\S+\s+"""
                        # the gap stops at the next command word: [^;&|\n]*? from every cp/mv/ln/install ran to the end of
                        # the line (quadratic: 7 s on a 50 KB line of the approval gate); -vt / -Dt and the spaced long
                        # option count too

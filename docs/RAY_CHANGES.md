@@ -48,6 +48,10 @@ reads `0.1.44.1+0.2.12-fixes`. The reviews live in the shared memory store (proj
   Ported: a declared boolean tool argument written `True` / `False` is the boolean (#5979). Not ported: the stop
   that refuses new requests (#6055; this server has no drain) and the monitor's MTP line (#5080; this engine does not
   report its drafter, so nothing would change).
+- **Audit, 2026-11-18:** the HIP ctest here failed `hip_q2_zero` (128 of 1024 Q2_0 half values +0 instead of -0 on
+  this RX 7600 XT, gfx1102, ROCm 7.2.4): the signed-zero guard in `dq_q2_0` covered only gfx1012 on HIP < 7, gfx1151
+  and gfx1200 / gfx1201. Upstream's `719b733e0` (#1540, in v0.1.45 and later), which keeps it on every HIP target, is
+  ported.
 
 ## Community benchmark, 2026-11-01
 
@@ -104,6 +108,3 @@ could go upstream as its own pull request.
   this PC; built for HIP, not run): the MMQ row tables lacked upstream #5108's over-read margin (prefill.cpp has it);
   `--hybrid-rows` below 8 sent a hybrid layer's 2-8 token batch to `k_group` over the slot-sized blob array; an
   all-NaN logits row picked token id 0x7fffffff, which then indexed the embedding table.
-- Ported from upstream (`719b733e0`, #1540), found by the HIP ctest here: the Q2_0 signed-zero guard in
-  `dq_q2_0` covered only gfx1012 / gfx1151 / gfx1200 / gfx1201, and ROCm 7.2.4 on this RX 7600 XT (gfx1102) folds a
-  negative scale times +0 to +0 too (`hip_q2_zero`: 128 of 1024 values wrong). It is on for every HIP target now.
