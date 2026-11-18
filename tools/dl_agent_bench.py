@@ -625,16 +625,17 @@ def drive(live: Live, text: str, ws: Path, timeout: float, nudge: bool = False,
         think, think_t0 = [], None
 
     while True:
+        # checked on every pass, not only when no event came: a streaming model sends one every chunk
+        if not interrupted and time.time() - t0 > timeout:
+            live.send(op="interrupt")
+            interrupted = True
+            rec["timed_out"] = True
+        if interrupted and time.time() - t0 > timeout + 120:
+            rec["errors"].append("did not stop after interrupt")
+            break
         try:
             ev = live.q.get(timeout=1)
         except queue.Empty:
-            if not interrupted and time.time() - t0 > timeout:
-                live.send(op="interrupt")
-                interrupted = True
-                rec["timed_out"] = True
-            if interrupted and time.time() - t0 > timeout + 120:
-                rec["errors"].append("did not stop after interrupt")
-                break
             continue
         t = ev.get("type")
         if t == "thinking":

@@ -82,15 +82,17 @@ def one_turn(live, text: str, timeout: float) -> dict:
     live.send(op="input", text=text, origin="bench")
     interrupted = False
     while True:
+        # the limit is checked on every pass: while the model thinks or writes, an event comes every chunk and
+        # q.get never timed out, so --timeout never interrupted a long turn (the 495 s "17 times 23")
+        if not interrupted and time.time() - t0 > timeout:
+            live.send(op="interrupt")
+            interrupted, rec["timed_out"] = True, True
+        if interrupted and time.time() - t0 > timeout + 120:
+            rec["errors"].append("did not stop after interrupt")
+            break
         try:
             ev = live.q.get(timeout=1)
         except queue.Empty:
-            if not interrupted and time.time() - t0 > timeout:
-                live.send(op="interrupt")
-                interrupted, rec["timed_out"] = True, True
-            if interrupted and time.time() - t0 > timeout + 120:
-                rec["errors"].append("did not stop after interrupt")
-                break
             continue
         t = ev.get("type")
         if t in ("turn_end", "_closed"):
