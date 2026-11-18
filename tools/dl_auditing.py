@@ -170,15 +170,16 @@ SECRET_PATTERNS = [
     # Home Assistant token (a JWT), a Google API key or a password in a URL passed the memory guard and this hook
     ("GitLab Token", re.compile(r"\b(glpat-[A-Za-z0-9_-]{20,})")),
     ("Google API Key", re.compile(r"\b(AIza[0-9A-Za-z_-]{35})")),
-    ("JWT", re.compile(r"\b(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})")),
+    # starts only where a token starts: from every "eyJ" inside a longer run (sk-eyJsk-eyJ...) it scanned to the end
+    ("JWT", re.compile(r"(?<![A-Za-z0-9_-])(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})")),
     ("Stripe Live Key", re.compile(r"\b([rs]k_live_[A-Za-z0-9]{16,})")),
     ("npm Token", re.compile(r"\b(npm_[A-Za-z0-9]{36})")),
     # a real-looking password only: 8+ characters with a digit, no template ({user}, ${VAR}, %s, <pw>) and no stock
     # default (guest:guest, root:example, user:pass) - those are in every docker-compose.yml and settings.py, and
     # flagging them blocked editing such files
     ("Connection String with Password", re.compile(
-        r"\b([a-z][a-z0-9+.-]*://[^\s/:@{}$%<>]+:(?!(?:password|passw0rd|changeme|secret|example|admin)\d*@)"
-        r"(?![^@\s]*%(?:s|\(|d(?![0-9A-Fa-f])))(?=[^\s/@]*\d)(?:[^\s/@{}$%<>]|%[0-9A-Fa-f]{2}){8,}@[^\s/]+)")),   # %24 (an encoded $) yes, %s no
+        r"\b([a-z][a-z0-9+.-]{0,31}://[^\s/:@{}$%<>]{1,256}:(?!(?:password|passw0rd|changeme|secret|example|admin)\d*@)"
+        r"(?![^@\s/]*%(?:s|\(|d(?![0-9A-Fa-f])))(?=[^\s/@]*\d)(?:[^\s/@{}$%<>]|%[0-9A-Fa-f]{2}){8,}@[^\s/]+)")),   # %24 (an encoded $) yes, %s no
 ]
 
 # The real values on this PC: every value in secrets.env, secret-looking environment variables and the Google sign-in
@@ -703,27 +704,34 @@ def tool_smart_test_runner(args: Dict[str, Any], workspace: Path) -> str:
 
 _DESTRUCTIVE_PATTERNS = [
     ("deletes recursively or forcibly", re.compile(r"(?:^|[\s;&|(`/\\])rm\s+(?:-[a-zA-Z]*[rRf][a-zA-Z]*|--recursive|--force)\b")),
-    ("deletes found files", re.compile(r"\bfind\b[^|;&]*\s-(?:delete|exec\s+rm)\b|\bxargs\s+(?:-\S+\s+)*rm\b")),
+    # the gap stops at the next find and xargs' flags are capped: [^|;&]* from every "find" ran to the end of the line
+    # (quadratic: 30 s on 150 KB of "find ")
+    ("deletes found files", re.compile(r"\bfind\b(?:(?!\bfind\b)[^|;&])*\s-(?:delete|exec\s+rm)\b"
+                                       r"|\bxargs\s+(?:-\S+\s+){0,16}rm\b")),
     ("runs as root", re.compile(r"(?:^|[\s;&|(`])(?:sudo|doas|pkexec|su)(?:\s|$)")),
     ("writes raw disks or filesystems", re.compile(r"(?:^|[\s;&|(`])(?:dd|mkfs(?:\.\w+)?|shred|wipefs|fdisk|sfdisk|parted|sgdisk|blkdiscard)(?:\s|$)|>\s*/dev/(?:sd|nvme|hd|vd|mmcblk)")),
     ("changes ownership or permissions recursively", re.compile(r"\b(?:chmod|chown|chgrp)\s+(?:-\S*\s+)*-[a-zA-Z]*R")),
     ("rewrites or discards git history/work", re.compile(r"\bgit\s+(?:push\b[^;&|]*\s(?:--force(?:-with-lease)?|-f)\b|reset\s+--hard|clean\s+-[a-zA-Z]*f|branch\s+-D|checkout\s+--\s|restore\s|filter-(?:repo|branch)|stash\s+(?:drop|clear)|rebase\b)")),
     ("stops services or processes", re.compile(r"\bsystemctl\s+(?:--user\s+)?(?:stop|disable|mask|kill|restart|isolate)\b|\b(?:reboot|shutdown|poweroff|halt)\b|\bkill\s+-(?:9|KILL)\b|\b(?:pkill|killall)\b")),
-    ("pipes a download into a shell", re.compile(r"\b(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:ba|z|fi)?sh\b")),
+    # the gap stops at the next curl / wget (from every one it ran to the end: 1.8 s on 150 KB of "curl ")
+    ("pipes a download into a shell", re.compile(r"\b(?:curl|wget)\b(?:(?!\b(?:curl|wget)\b)[^|])*\|\s*(?:sudo\s+)?"
+                                                 r"(?:ba|z|fi)?sh\b")),
     ("removes packages", re.compile(r"\bpacman\s+-R|\bapt(?:-get)?\s+(?:remove|purge)|\bpip\d?\s+uninstall\b|\bnpm\s+(?:uninstall|rm)\s+-g")),
 ]
-_PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?|\b(?:mv|cp|rsync|ln)\s+(?:-\S+\s+)*(?!-)\S+\s+"""
+_PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?|\b(?:mv|cp|rsync|ln)\s+(?:-\S+\s+){0,16}(?!-)\S+\s+"""
                        # install as the command itself (not pip/npm/go install, whose extra paths are only read),
                        # its -m 644 / -o root / -g / -S values skipped
                        # (in command position also after a newline, { ! then do else, env/command/time/nice/exec, as
                        # /usr/bin/install; the two option forms are disjoint, or `install -m -m -m ...` backtracked
                        # exponentially: 2 s at 110 bytes)
+                       # (the option loops are capped at 16: unbounded, `-\S+\s+` ran across ; and newlines from every
+                       # start, 29 s on 150 KB of `cp -a;`)
                        # (after the separator no newline in the gap, a fixed bin path, sudo flags that stop at ; & |:
                        # \s* over newlines, \S*/ and -\S+ made it quadratic - 7.5 s on 16 KB of newlines)
                        r"""|(?:^|[;&|(`{!\n]|\b(?:then|do|else|env|command|time|nice|exec)\b)[^\S\n]*"""
                        r"""(?:sudo\s+(?:-[^\s;&|]+\s+)*)?(?:/(?:usr/(?:local/)?)?s?bin/)?install\s+"""
                        r"""(?:-[mogS]\s+[^\s-]\S*\s+|--(?:mode|owner|group|suffix)\s+[^\s-]\S*\s+"""
-                       r"""|-(?![mogS]\s)(?!-(?:mode|owner|group|suffix)\s)\S+\s+)*(?!-)\S+\s+"""
+                       r"""|-(?![mogS]\s)(?!-(?:mode|owner|group|suffix)\s)\S+\s+){0,16}(?!-)\S+\s+"""
                        # the gap stops at the next command word: [^;&|\n]*? from every cp/mv/ln/install ran to the end of
                        # the line (quadratic: 7 s on a 50 KB line of the approval gate); -vt / -Dt and the spaced long
                        # option count too

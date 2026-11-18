@@ -236,9 +236,20 @@ class TestGateReadsTheRealPath(unittest.TestCase):
         from tools.dl_auditing import classify_command
         for line in ("echo '" + "install it, cp it, " * 2700 + "'", "cp " * 17000,
                      "install " + "-m " * 40, "install " + "-o -g " * 40, "install " + "--mode " * 40,   # round 7
-                     "\n" * 16000, ";" * 16000, "do/" * 5000, "sudo -E;" * 2000):                  # round 8
+                     "\n" * 16000, ";" * 16000, "do/" * 5000, "sudo -E;" * 2000,                   # round 8
+                     "cp -a;" * 8000, "-{install " * 5000, "`install\n- " * 5000, "find " * 10000,   # round 9
+                     "curl " * 10000, "wget " * 10000):
             t0 = _time.monotonic()
             classify_command(line, self.ws)
+            self.assertLess(_time.monotonic() - t0, 0.5)
+
+    def test_the_secret_scan_is_fast_on_long_runs(self):
+        # round 9: the URL-password and JWT patterns rescanned a long run from every start
+        import time as _time
+        from tools.dl_auditing import scan_secrets_in_text
+        for text in ("x://" * 15000, "-a" * 30000, "sk-eyJ" * 10000):
+            t0 = _time.monotonic()
+            scan_secrets_in_text(text, "x.txt")
             self.assertLess(_time.monotonic() - t0, 0.5)
 
     def test_still_free(self):
