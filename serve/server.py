@@ -31,6 +31,7 @@ import hashlib
 import hmac
 import codecs
 import ctypes
+import ipaddress
 import json
 import math
 import mimetypes
@@ -304,6 +305,24 @@ IM_END = "<|im_end|>"
 IMAGE_PAD = "<|image_pad|>"
 
 
+RAY_LAN_PROOF_PATH = "/v1/ray/proof"                # the Android app's check that the LAN address is this server
+
+
+def ray_lan_proof(api_key: str, nonce: str, peer_addr: str, headers) -> tuple[int, dict]:
+    """(status, body) for GET /v1/ray/proof (Handler._ray_lan_proof): the HMAC of the nonce, for a client on the LAN."""
+    if not api_key:
+        return 404, {"error": {"message": "this server has no API key to prove"}}
+    try:
+        peer = ipaddress.ip_address(peer_addr)
+        peer = getattr(peer, "ipv4_mapped", None) or peer
+    except ValueError:
+        peer = None
+    proxied = any(headers.get(h) for h in ("CF-Connecting-IP", "CF-Ray", "X-Forwarded-For"))
+    if peer is None or peer.is_loopback or not peer.is_private or proxied:
+        return 403, {"error": {"message": "the LAN proof is only answered on the LAN"}}
+    if not re.fullmatch(r"[0-9a-f]{32,128}", nonce or ""):
+        return 400, {"error": {"message": "nonce: 32-128 lowercase hex digits"}}
+    return 200, {"proof": hmac.new(api_key.encode(), b"strata-lan-proof:" + nonce.encode(), hashlib.sha256).hexdigest()}
 RAY_CHAT_SILENCE_S = 900.0                          # /v1/ray/chat: how long Ray's session may say nothing
 WORKSPACE_DIR = Path(os.environ.get("STRATA_WORKSPACE_DIR", str(Path.cwd() / "workspace"))).resolve()
 
@@ -751,6 +770,9 @@ def make_handler(svc: Service):
                     auth = self.headers.get("Authorization", "")
                     given = auth[7:].strip() if auth.lower().startswith("bearer ") else self.headers.get("x-api-key", "")
                     self._json(200, {"auth": "key" if given and key_matches(given, svc.api_key) else "required"})
+                return
+            if raw_path == RAY_LAN_PROOF_PATH:
+                self._ray_lan_proof()
                 return
             path = raw_path.rstrip("/")
             if path in ("/favicon.ico", "/favicon.svg"):
@@ -1922,6 +1944,15 @@ def make_handler(svc: Service):
                 self._json(500, {"error": {"message": f"failed to load session history: {e}"}})
             finally:
                 conn.close()
+
+        def _ray_lan_proof(self):
+            """The Ray Android app's LAN check: it asks with a random nonce and no key, and uses the LAN address only
+            when the answer is HMAC-SHA256(api_key, "strata-lan-proof:" + nonce), which only this server can give - a
+            host at the same IP on another Wi-Fi got the key in clear from the app's probe and then its trust.  Only
+            for a client on the LAN itself: through the tunnel (cloudflared connects from 127.0.0.1) anyone could ask
+            for an answer to relay."""
+            nonce = (parse_qs(urlsplit(self.path).query).get("nonce") or [""])[0]
+            self._json(*ray_lan_proof(svc.api_key, nonce, self.client_address[0], self.headers))
 
         def _ray_chat(self, req: dict):
             """Bridge /v1/ray/chat to the shared CLI session daemon (dl_sessiond) so Ray has access to

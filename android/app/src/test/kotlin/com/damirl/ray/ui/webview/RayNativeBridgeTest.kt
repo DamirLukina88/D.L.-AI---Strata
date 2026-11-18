@@ -19,6 +19,28 @@ class RayNativeBridgeTest {
 
     private fun createDummyContext(): Context = DummyContext()
 
+    // the LAN page is trusted only while the route is the proven LAN (StrataOrigins.lanProven); these tests are about
+    // what the bridge does for a trusted page, so they stand on a proven LAN
+    private val provenBefore = com.damirl.ray.network.StrataOrigins.lanProven
+
+    @org.junit.Before
+    fun onAProvenLan() {
+        com.damirl.ray.network.StrataOrigins.lanProven = { true }
+    }
+
+    @org.junit.After
+    fun restore() {
+        com.damirl.ray.network.StrataOrigins.lanProven = provenBefore
+    }
+
+    @Test
+    fun testUnprovenLanPage_getsNoKey() {
+        com.damirl.ray.network.StrataOrigins.lanProven = { false }
+        val bridge = RayNativeBridge(context = createDummyContext())
+        bridge.pageUrl = com.damirl.ray.BuildConfig.STRATA_LAN_URL
+        assertEquals("", bridge.getApiKey())
+    }
+
 
     @Test
     fun testBridgeAudioCall_invokesSpeechCleanerAndAudioSpeaker() {

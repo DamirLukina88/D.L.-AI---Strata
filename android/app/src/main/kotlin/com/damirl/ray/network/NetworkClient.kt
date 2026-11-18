@@ -22,8 +22,13 @@ import java.net.ConnectException
 import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import kotlin.coroutines.resume
+import org.json.JSONObject
 
 class NetworkClient(
     val lanUrl: String = BuildConfig.STRATA_LAN_URL,
@@ -67,6 +72,31 @@ class NetworkClient(
             return false
         }
 
+        /**
+         * The answer only the real server can give to [nonce]: HMAC-SHA256(API key, "strata-lan-proof:" + nonce), as
+         * serve/server.py's ray_lan_proof computes it.  The LAN address is used, and its page trusted, only when its
+         * /v1/ray/proof answers this: on another Wi-Fi a host at the same IP got the key in clear from the probe.
+         */
+        fun lanProof(apiKey: String, nonce: String): String {
+            if (apiKey.isEmpty()) return ""                 // nothing to prove with (an HMAC key can't be empty)
+            val mac = Mac.getInstance("HmacSHA256")
+            mac.init(SecretKeySpec(apiKey.toByteArray(Charsets.UTF_8), "HmacSHA256"))
+            return mac.doFinal("strata-lan-proof:$nonce".toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        }
+
+        /** True when [body] (the /v1/ray/proof JSON) carries the right proof for [nonce]; compared in constant time. */
+        fun proofMatches(apiKey: String, nonce: String, body: String?): Boolean {
+            if (apiKey.isBlank() || body.isNullOrBlank()) return false
+            val got = runCatching { JSONObject(body).optString("proof", "") }.getOrDefault("")
+            return got.isNotEmpty() && MessageDigest.isEqual(got.toByteArray(), lanProof(apiKey, nonce).toByteArray())
+        }
+
+        fun newNonce(): String {
+            val b = ByteArray(16)
+            SecureRandom().nextBytes(b)
+            return b.joinToString("") { "%02x".format(it) }
+        }
+
         fun label(route: NetworkRoute): String = when (route) {
             is NetworkRoute.Lan -> "lan"
             is NetworkRoute.Remote -> "tunnel"
@@ -104,7 +134,7 @@ class NetworkClient(
     suspend fun probeAndSelectRoute(): NetworkRoute = withContext(Dispatchers.IO) {
         val started = SystemClock.elapsedRealtime()
         coroutineScope {
-            val lan = async { probe(lanUrl, lanProbeClient) }
+            val lan = async { probeLan() }
             val remote = async { probe(remoteUrl, remoteProbeClient) }
             val lanResult = lan.await()
             val remoteResult = if (lanResult.ok) {
@@ -129,6 +159,31 @@ class NetworkClient(
     suspend fun ensureRoute(): NetworkRoute {
         val route = _currentRoute.value
         return if (isFresh(route, probedAt, SystemClock.elapsedRealtime())) route else probeAndSelectRoute()
+    }
+
+    /** The LAN, without the key: it must answer this nonce's proof (see [lanProof]). */
+    private suspend fun probeLan(): Probe {
+        if (lanUrl.isBlank()) return Probe(false, 0, "no address")
+        if (apiKey.isBlank()) return Probe(false, 0, "no key to check it with")
+        val nonce = newNonce()
+        val started = SystemClock.elapsedRealtime()
+        val call = lanProbeClient.newCall(Request.Builder().url("${lanUrl.trimEnd('/')}/v1/ray/proof?nonce=$nonce").get().build())
+        return suspendCancellableCoroutine { cont ->
+            cont.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    cont.resume(Probe(false, SystemClock.elapsedRealtime() - started, e.javaClass.simpleName))
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    response.use {
+                        val ok = it.isSuccessful && proofMatches(apiKey, nonce, it.body?.string())
+                        cont.resume(Probe(ok, SystemClock.elapsedRealtime() - started,
+                            if (ok) "HTTP ${it.code}, proof ok" else "HTTP ${it.code}, not this server"))
+                    }
+                }
+            })
+        }
     }
 
     private suspend fun probe(base: String, client: OkHttpClient): Probe {
@@ -158,7 +213,9 @@ class NetworkClient(
         return when (val r = _currentRoute.value) {
             is NetworkRoute.Lan -> r.url
             is NetworkRoute.Remote -> r.url
-            NetworkRoute.Offline -> lanUrl.ifBlank { remoteUrl }      // the same as the page (MainScreen)
+            // the tunnel (https), not the LAN address: unproven, it may be another network's host, and every request
+            // carries the key.  The same as the page (MainScreen)
+            NetworkRoute.Offline -> remoteUrl.ifBlank { lanUrl }
         }
     }
 
