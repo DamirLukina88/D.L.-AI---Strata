@@ -15,7 +15,6 @@ import glob
 import json
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -724,81 +723,139 @@ _DESTRUCTIVE_PATTERNS = [
 _PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?)(['"]?)(~?/[^\s'";&|)]*|\.\.(?:/[^\s'";&|)]*)?"""
                        r"""|~(?=[\s'";&|)]|$)|\$\{?HOME\}?(?![A-Za-z0-9_])(?:/[^\s'";&|)]*)?)\1""")
 _COPY_COMMANDS = {"cp", "mv", "rsync", "ln", "install"}
-_WRAPPERS = {"sudo", "doas", "env", "command", "time", "nice", "nohup", "exec", "then", "do", "else", "!", "{"}
-# options whose value is the next word (so the value is not taken for an operand)
-_VALUE_OPTS = {"cp": {"-S", "--suffix"}, "mv": {"-S", "--suffix"}, "ln": {"-S", "--suffix"},
-               "install": {"-m", "-o", "-g", "-S", "--mode", "--owner", "--group", "--suffix"},
-               "rsync": {"-e", "--rsh", "--exclude", "--include", "--filter", "-f", "--exclude-from",
-                         "--include-from", "--files-from", "--rsync-path", "--chmod", "--chown", "--log-file",
-                         "--password-file", "--temp-dir", "-T", "--partial-dir", "--backup-dir", "--compare-dest",
-                         "--copy-dest", "--link-dest", "--suffix", "--port", "--bwlimit", "--timeout"}}
+_ANYWHERE = {"cp", "mv", "rsync", "ln"}         # a command wherever it stands (xargs cp, find -exec cp, echo cp...)
+_WRAPPERS = {"sudo", "doas", "env", "command", "builtin", "time", "nice", "nohup", "exec", "then", "do", "else", "elif",
+             "if", "while", "until", "!", "{", "timeout", "stdbuf", "ionice", "chrt", "xargs", "unbuffer"}
+# each wrapper's flags that take the next word as their value (time -p, env -i take none)
+_WRAPPER_VALUE_FLAGS = {"sudo": {"-u", "-g", "-h", "-p", "-C", "-U", "-r", "-t", "-D"}, "doas": {"-u", "-C"},
+                        "nice": {"-n"}, "timeout": {"-s", "-k"}, "stdbuf": {"-i", "-o", "-e"},
+                        "ionice": {"-c", "-n", "-p", "-P", "-u"}, "chrt": {"-p"}, "env": {"-u", "-C", "-S"},
+                        "time": {"-o", "-f"}, "xargs": {"-I", "-n", "-P", "-L", "-d", "-s", "-E", "-a", "-i"}}
+_SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
+# value letters in a short-option cluster: the rest of the cluster (or the next word) is that option's value
+_VALUE_LETTERS = {"cp": "S", "mv": "S", "ln": "S", "install": "mogS", "rsync": "efT"}
+_VALUE_LONG = {"--suffix", "--mode", "--owner", "--group", "--rsh", "--exclude", "--include", "--filter",
+               "--exclude-from", "--include-from", "--files-from", "--rsync-path", "--chmod", "--chown",
+               "--log-file", "--password-file", "--temp-dir", "--partial-dir", "--backup-dir", "--compare-dest",
+               "--copy-dest", "--link-dest", "--port", "--bwlimit", "--timeout"}
+# one linear pass: each alternative starts on its own characters (shlex built words a character at a time and was
+# quadratic on one long word: 12 s for a 1 MB python -c script)
+_SH_TOKEN = re.compile(r"""(?P<nl>\n)|(?P<ws>[ \t\r\f\v]+)|(?P<comment>\#[^\n]*)
+    |(?P<redir>\d*(?:&>>?|>>?&?|<<<|<<-?|<&?|>\|)(?P<fd>\d+-?|-)?)
+    |(?P<op>;;|&&|\|\||[;&|()`])
+    |(?P<word>(?:[^\s'"\\;&|()<>`$\#]+|'[^']*'|"(?:[^"\\]|\\.)*"|\\.|\$\([^()]*\)|\$\{[^}]*\}|\$|['"\\]|\#)+)
+    |(?P<other>.)""", re.X | re.S)
+_DEQUOTE = re.compile(r"""'([^']*)'|"((?:[^"\\]|\\.)*)"|\\(.)""", re.S)
 
 
-def _copy_targets(cmd: str) -> list[str]:
-    """Where each cp / mv / rsync / ln / install in a command line writes: its -t / --target-directory folder, or
-    else its last operand.  Linear: one pass over shell words split at ; & | ( ) and newlines."""
-    if not any(c in cmd for c in _COPY_COMMANDS):
-        return []
-    # one pass; a newline ends a command, as ; does (shlex takes it for a space)
-    text = cmd.replace("\n", " ; ")
-    lex = shlex.shlex(text, posix=True, punctuation_chars=";&|()")
-    lex.whitespace_split = True
-    lex.commenters = ""
-    words: list[str] = []
-    try:
-        for w in lex:
-            words.append(w)
-    except ValueError:                       # an unclosed quote: plain words
-        words = text.split()
-    words.append(";")
-    segments, seg = [], []
-    for w in words:
-        if w and set(w) <= set(";&|()"):
+def _sh_segments(cmd: str) -> list[list[str]]:
+    """The command line as simple commands (lists of words, quotes removed), split at newlines and ; & | ( ) `;
+    comments and redirects (with their target word) dropped."""
+    segments, seg, skip_next = [], [], False
+    for m in _SH_TOKEN.finditer(cmd):
+        kind = m.lastgroup
+        if kind in ("nl", "op"):
             if seg:
                 segments.append(seg)
-            seg = []
-        else:
-            seg.append(w)
-    out = []
-    for seg in segments:
-        i = 0
-        while i < len(seg) and (seg[i] in _WRAPPERS or re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", seg[i])
-                                or (i and seg[i - 1] in ("sudo", "doas") and seg[i].startswith("-"))):
-            i += 1
-        if i >= len(seg) or seg[i].rsplit("/", 1)[-1] not in _COPY_COMMANDS:
-            continue
-        name = seg[i].rsplit("/", 1)[-1]
-        operands, target, j, end_opts = [], None, i + 1, False
-        while j < len(seg):
-            w = seg[j]
-            if end_opts or not w.startswith("-") or w == "-":
-                operands.append(w)
-            elif w == "--":
-                end_opts = True
-            elif w.startswith("--target-directory"):
+            seg, skip_next = [], False
+        elif kind == "comment":
+            continue                         # only at a word's start: a # inside a word is part of it
+        elif kind == "redir":
+            skip_next = not m.group("fd")    # > file: the next word is the redirect's own target
+        elif kind == "word":
+            if skip_next:
+                skip_next = False
+                continue
+            seg.append(_DEQUOTE.sub(lambda q: q.group(1) if q.group(1) is not None else
+                                    (re.sub(r"\\(.)", r"\1", q.group(2)) if q.group(2) is not None else q.group(3)),
+                                    m.group("word")))
+    if seg:
+        segments.append(seg)
+    return segments
+
+
+def _copy_args_target(name: str, args: list[str]) -> Optional[str]:
+    """Where one cp / mv / rsync / ln / install writes, from its arguments: the -t / --target-directory folder, or
+    else the last operand (with two or more operands)."""
+    operands, target, j, end_opts = [], None, 0, False
+    values = _VALUE_LETTERS.get(name, "")
+    while j < len(args):
+        w = args[j]
+        if end_opts or not w.startswith("-") or w == "-":
+            operands.append(w)
+        elif w == "--":
+            end_opts = True
+        elif w.startswith("--"):
+            key = w.split("=", 1)[0]
+            if key == "--target-directory":
                 if "=" in w:
                     target = w.split("=", 1)[1]
-                elif j + 1 < len(seg):
-                    target, j = seg[j + 1], j + 1
-            elif not w.startswith("--") and "t" in w[1:] and name != "rsync":   # -t DIR, -vt DIR, -tDIR
-                rest = w[w.index("t", 1) + 1:]
-                if rest:
-                    target = rest
-                elif j + 1 < len(seg):
-                    target, j = seg[j + 1], j + 1
-            elif w.split("=", 1)[0] in _VALUE_OPTS.get(name, ()) and "=" not in w:
+                elif j + 1 < len(args):
+                    target, j = args[j + 1], j + 1
+            elif key in _VALUE_LONG and "=" not in w:
                 j += 1                       # its value
-            j += 1
-        if target is not None:
-            out.append(target)
-        elif len(operands) >= 2:
-            out.append(operands[-1])
-    return out
+        else:                                # a cluster of short options: -vt DIR, -tDIR, -S.bak, -oroot, -m 644
+            for k, letter in enumerate(w[1:], start=1):
+                if letter == "t" and name != "rsync":
+                    rest = w[k + 1:]
+                    if rest:
+                        target = rest
+                    elif j + 1 < len(args):
+                        target, j = args[j + 1], j + 1
+                    break
+                if letter in values:         # the rest is its value, or the next word is
+                    if k + 1 >= len(w):
+                        j += 1
+                    break
+        j += 1
+    while operands and operands[-1] in (";", "+"):   # find -exec ... \; / +
+        operands.pop()
+    if target is not None:
+        return target
+    return operands[-1] if len(operands) >= 2 else None
 
-# (~ alone and $HOME / ${HOME}: `cp a ~`, `mv -t ~ a`, `cp -t "$HOME" x` wrote into the home folder unasked)
+
+def _copy_targets(cmd: str, depth: int = 0) -> list[str]:
+    """Where each cp / mv / rsync / ln / install in a command line writes.  Linear in the line's length."""
+    if not any(c in cmd for c in _COPY_COMMANDS):
+        return []
+    out = []
+    for seg in _sh_segments(cmd):
+        i, wrapper = 0, ""                   # the command word: past wrappers, their flags and values, VAR=...
+        while i < len(seg):
+            w = seg[i]
+            if w in _WRAPPERS:
+                wrapper, i = w, i + 1
+            elif re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", w) or (w.isdigit() and wrapper):
+                i += 1
+            elif w.startswith("-") and wrapper:
+                i += 2 if w in _WRAPPER_VALUE_FLAGS.get(wrapper, ()) and i + 1 < len(seg) else 1
+            else:
+                break
+        base = seg[i].rsplit("/", 1)[-1] if i < len(seg) else ""
+        if base in _SHELLS and depth == 0 and "-c" in seg[i + 1:]:
+            k = seg.index("-c", i + 1)
+            if k + 1 < len(seg):
+                out += _copy_targets(seg[k + 1], depth + 1)   # bash -c "cp a /etc/b"
+            continue
+        starts = [i] if base in _COPY_COMMANDS else []
+        starts += [k for k in range(i + 1, len(seg)) if seg[k].rsplit("/", 1)[-1] in _ANYWHERE]
+        for n, k in enumerate(starts):
+            stop = starts[n + 1] if n + 1 < len(starts) else len(seg)
+            t = _copy_args_target(seg[k].rsplit("/", 1)[-1], seg[k + 1:stop])
+            if t:
+                out.append(t)
+    return out
 
 
 def _outside(path_str: str, workspace: Path) -> bool:
+    try:
+        return _outside_unchecked(path_str, workspace)
+    except (RuntimeError, ValueError, OSError):  # ~nosuchuser, a NUL byte: not a path we can place, so outside
+        return True
+
+
+def _outside_unchecked(path_str: str, workspace: Path) -> bool:
     # the resolved path, not the text: "/tmp/../home/u/.bashrc" starts with "/tmp/"; a relative one ("../../x")
     # is the workspace's, not this process's folder
     if path_str in ("/dev/null", "/dev/stdout", "/dev/stderr"):    # links to the terminal or a pipe once resolved
