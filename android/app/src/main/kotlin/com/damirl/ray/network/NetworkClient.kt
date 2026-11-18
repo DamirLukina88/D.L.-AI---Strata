@@ -146,7 +146,30 @@ class NetworkClient(
                 override fun onLost(network: Network) = forgetLanUnlessOn(null)
             })
         }.isSuccess
-        if (ok) connectivity = cm
+        if (ok) {
+            connectivity = cm
+            // a LAN proven before the watch started (no network recorded): it was proven on the network now active
+            if (provenOn == null && _currentRoute.value is NetworkRoute.Lan) provenOn = cm.activeNetwork
+        }
+    }
+
+    /**
+     * The relay's check, once a minute while on the LAN: the LAN alone is proven again (not a whole new route choice),
+     * and the route changes only on a definite wrong answer.  A slow or lost probe keeps it: the network callback
+     * covers a change of network, and a single 1.5 s timeout moved the open page to the tunnel and reloaded it.
+     */
+    suspend fun reproveLan() {
+        if (_currentRoute.value !is NetworkRoute.Lan || isFresh(_currentRoute.value, probedAt, SystemClock.elapsedRealtime())) return
+        val r = probeLan()
+        when {
+            r.ok -> probedAt = SystemClock.elapsedRealtime()
+            r.wrongServer -> {
+                Log.d(TAG, "LAN re-check: ${r.note}; choosing the route again")
+                probedAt = 0L
+                _currentRoute.value = NetworkRoute.Offline
+            }
+            else -> Log.d(TAG, "LAN re-check: ${r.note}; kept for now")
+        }
     }
 
     private fun forgetLanUnlessOn(network: Network?) {
@@ -161,7 +184,8 @@ class NetworkClient(
     val currentRoute: StateFlow<NetworkRoute> = _currentRoute.asStateFlow()
     @Volatile private var probedAt = 0L                     // elapsedRealtime when a probe last found a route
 
-    private data class Probe(val ok: Boolean, val ms: Long, val note: String)
+    /** wrongServer: something answered at the address but not with this server's proof (another network's host). */
+    private data class Probe(val ok: Boolean, val ms: Long, val note: String, val wrongServer: Boolean = false)
 
     /**
      * Probes the LAN and the tunnel at the same time (on mobile data the LAN's 1.5 s timeout no longer comes before
@@ -217,7 +241,7 @@ class NetworkClient(
                         val ok = it.isSuccessful && proofMatches(apiKey, nonce, it.body?.string())
                         if (ok) provenOn = probedOn
                         cont.resume(Probe(ok, SystemClock.elapsedRealtime() - started,
-                            if (ok) "HTTP ${it.code}, proof ok" else "HTTP ${it.code}, not this server"))
+                            if (ok) "HTTP ${it.code}, proof ok" else "HTTP ${it.code}, not this server", wrongServer = !ok))
                     }
                 }
             })
