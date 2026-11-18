@@ -160,9 +160,6 @@ class PageRefusesFrames(PhoneRelayNeedsTheKey):
             self.assertEqual(r.headers.get("X-Frame-Options"), "SAMEORIGIN")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class PhoneRelayRefusesAForeignPage(unittest.TestCase):
     """Without an api_key (the default on 127.0.0.1), a page on any site could send a "simple" cross-site text/plain
@@ -181,7 +178,9 @@ class PhoneRelayRefusesAForeignPage(unittest.TestCase):
         cls.httpd.server_close()
 
     def setUp(self):
+        self.saved_bridge = server.PHONE_BRIDGE
         server.PHONE_BRIDGE = server.PhoneBridge()
+        self.addCleanup(setattr, server, "PHONE_BRIDGE", self.saved_bridge)
 
     def post(self, path, body, origin=None, ctype="text/plain;charset=UTF-8"):
         headers = {"Content-Type": ctype}
@@ -214,4 +213,66 @@ class PhoneRelayRefusesAForeignPage(unittest.TestCase):
             self.assertEqual(self.post("/api/phone/status", {}, origin=f"http://{self.host}"), 200)
             self.assertEqual(self.post(server.PHONE_CLIPBOARD_PATH, {"text": "hi", "updated_ms": "soon"},
                                        ctype="application/json"), 200)        # the Android app: no Origin
+            self.assertEqual(self.post(server.PHONE_CLIPBOARD_PATH, {"text": "hi", "updated_ms": float("nan")},
+                                       ctype="application/json"), 200)        # NaN: int() raised, no answer
+            time.sleep(0.3)             # the Klipper sync thread runs inside the patch, never on the real clipboard
         self.assertEqual(server.PHONE_BRIDGE.clipboard["text"], "hi")
+
+
+class RayRoutesFromAnotherSite(unittest.TestCase):
+    """With cors_origins ["*"] (both live configs) any site could read /v1/ray/* GETs - the phone's clipboard, its
+    pending calls, the LAN proof - and a no-cors GET of /api/phone/tool/pending popped a call."""
+
+    @classmethod
+    def setUpClass(cls):
+        tok = ByteTokenizer()
+        cls.svc = Service(MockEngine(tok, "ok", max_context=4096), tok, ChatTemplate(ROOT / "serve/chat_template.jinja"))
+        cls.svc.cors_origins = ["*"]
+        cls.httpd = serve(cls.svc, port=0)
+        cls.base = f"http://127.0.0.1:{cls.httpd.server_address[1]}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+
+    def setUp(self):
+        self.saved = server.PHONE_BRIDGE
+        server.PHONE_BRIDGE = server.PhoneBridge()
+
+    def tearDown(self):
+        server.PHONE_BRIDGE = self.saved
+
+    def get(self, path, **headers):
+        req = urllib.request.Request(self.base + path, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, dict(r.headers)
+        except urllib.error.HTTPError as e:
+            with e:
+                return e.code, dict(e.headers)
+
+    def test_another_site_gets_nothing(self):
+        from unittest import mock
+        with mock.patch.object(server.subprocess, "run") as run:
+            for path in (server.PHONE_CLIPBOARD_PATH, server.PHONE_PENDING_PATH, "/api/phone/tool/pending"):
+                for hdr in ({"Origin": "https://evil.example"}, {"Sec-Fetch-Site": "cross-site"}):
+                    with self.subTest(path=path, hdr=hdr):
+                        self.assertEqual(self.get(path, **hdr)[0], 403)
+            run.assert_not_called()                          # the desktop clipboard was not even queried
+        self.assertFalse(server.PHONE_BRIDGE.get_status()["connected"])
+
+    def test_no_cors_header_on_ray_routes_the_api_keeps_it(self):
+        _, h = self.get("/v1/ray/history?session=x", **{"Sec-Fetch-Site": "same-origin"})
+        self.assertNotIn("Access-Control-Allow-Origin", h)
+        _, h = self.get("/v1/models", Origin="https://app.example")
+        self.assertEqual(h.get("Access-Control-Allow-Origin"), "*")
+
+    def test_the_proof_is_never_given_to_a_browser(self):
+        for hdr in ({"Origin": "http://192.168.1.2:8080"}, {"Sec-Fetch-Mode": "cors"}):
+            with self.subTest(hdr=hdr):
+                self.assertEqual(server.ray_lan_proof("k", "0" * 32, "192.168.1.20", hdr)[0], 403)
+
+
+if __name__ == "__main__":
+    unittest.main()

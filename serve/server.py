@@ -307,6 +307,7 @@ IMAGE_PAD = "<|image_pad|>"
 
 RAY_ROUTES = ("/api/code/session", "/v1/ray/", "/api/workspace", "/api/phone/")   # need a key from off this PC
 RAY_LAN_PROOF_PATH = "/v1/ray/proof"                # the Android app's check that the LAN address is this server
+RAY_GET_GUARDED = ("/v1/ray/", "/api/phone/", "/api/code/session")   # GETs a page on another site never gets
 
 
 def ray_lan_proof(api_key, nonce: str, peer_addr: str, headers, host_names=None) -> tuple[int, dict]:
@@ -325,7 +326,10 @@ def ray_lan_proof(api_key, nonce: str, peer_addr: str, headers, host_names=None)
     except ValueError:
         peer = None
     proxied = any(headers.get(h) for h in ("CF-Connecting-IP", "CF-Ray", "X-Forwarded-For"))
-    if peer is None or peer.is_loopback or not peer.is_private or proxied:
+    # any browser at all: the app's client sends no Origin or Sec-Fetch-*; a page in a LAN browser could read a proof
+    # (CORS) and relay it to a host posing as this server on another network
+    browser = any(headers.get(h) for h in ("Origin", "Sec-Fetch-Site", "Sec-Fetch-Mode"))
+    if peer is None or peer.is_loopback or not peer.is_private or proxied or browser:
         return 403, {"error": {"message": "the LAN proof is only answered on the LAN"}}
     if not re.fullmatch(r"[0-9a-f]{32,128}", nonce or ""):
         return 400, {"error": {"message": "nonce: 32-128 lowercase hex digits"}}
@@ -587,6 +591,10 @@ def make_handler(svc: Service):
             otherwise, so a browser keeps every other page away from the API, /settings, /unload and the MCP tools."""
             if not svc.cors_origins or not self.path.split("?")[0].startswith("/v1/"):
                 return
+            if self.path.startswith("/v1/ray/"):
+                # Ray's own routes are for the web app (same origin) and the Android app (no browser): with
+                # cors_origins ["*"] any site could read the phone's clipboard, its pending calls or the LAN proof
+                return
             origin = (self.headers.get("Origin") or "").rstrip("/")
             if "*" in svc.cors_origins:
                 allow = "*"
@@ -709,6 +717,15 @@ def make_handler(svc: Service):
             self._json(401, {"error": {"type": "authentication_error", "message": "missing or wrong API key"}})
             return False
 
+        def _cross_site(self) -> bool:
+            """A browser sent this from another site: a foreign Origin, or Sec-Fetch-Site cross-site / same-site (a
+            GET carries no Origin, but browsers always send Sec-Fetch-Site; the app's own client sends neither)."""
+            origin = (self.headers.get("Origin") or "").rstrip("/")
+            if origin and origin in svc.trusted_origins:
+                return False
+            return self._foreign_origin() or (self.headers.get("Sec-Fetch-Site") or "").lower() in ("cross-site",
+                                                                                                   "same-site")
+
         def _from_loopback(self) -> bool:
             try:
                 ip = ipaddress.ip_address(self.client_address[0])
@@ -793,6 +810,11 @@ def make_handler(svc: Service):
                     auth = self.headers.get("Authorization", "")
                     given = auth[7:].strip() if auth.lower().startswith("bearer ") else self.headers.get("x-api-key", "")
                     self._json(200, {"auth": "key" if given and key_matches(given, svc.api_key) else "required"})
+                return
+            if raw_path.startswith(RAY_GET_GUARDED) and self._cross_site():
+                # a page elsewhere: a no-cors <img> GET of /api/phone/tool/pending still popped a phone call and
+                # queried the desktop clipboard, though the page could not read the answer
+                self._json(403, {"error": {"message": "Ray's routes only from Strata's own page or the app"}})
                 return
             if raw_path == RAY_LAN_PROOF_PATH:
                 self._ray_lan_proof()
@@ -1402,7 +1424,7 @@ def make_handler(svc: Service):
                                 "hash": str(req.get("hash", "")),
                                 "source": str(req.get("source", "phone")),
                                 "updated_ms": int(req["updated_ms"]) if isinstance(req.get("updated_ms"), (int, float))
-                                              else int(time.time() * 1000)
+                                              and math.isfinite(req["updated_ms"]) else int(time.time() * 1000)
                             }
                         if req.get("source") != "desktop" and text_val:
                             def _sync_to_klipper(t: str):
@@ -3064,7 +3086,7 @@ def _main() -> int:
                     svc.engine.proc.kill()
         try:
             from serve import cache_drop
-            cache_drop.drop_after_exit(engine)           # opt-in (STRATA_DROP_CACHE_ON_EXIT=1), default unchanged
+            cache_drop.drop_after_exit(svc.engine)       # the current one (after a /switch_model, not the first); opt-in (STRATA_DROP_CACHE_ON_EXIT=1), default unchanged
         except Exception as e:  # noqa: BLE001 - never block the exit
             print(f"[strata] could not release the model files' cache: {e}", flush=True)
         print("[strata] stopped", flush=True)
