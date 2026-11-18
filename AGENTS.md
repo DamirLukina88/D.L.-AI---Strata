@@ -28,10 +28,12 @@ fixes ported one by one ([docs/RAY_CHANGES.md](docs/RAY_CHANGES.md)).
 
 - `tools/run_tests.sh` runs everything without a GPU, model or server; `--android` adds the app's tests.
 - Fast loop for Ray's code: `cd tools && ../.venv/bin/python -m pytest -q test_dl_*.py` (about a minute).
-- The server tests (`.venv/bin/python -m pytest -q serve/`, about 8 minutes) pass. 11 are skipped on purpose: 10 for
-  upstream's stream-ownership fixes for `--batch` and replicas, which are only half ported and not used on one card
-  (`NOT_PORTED` in `serve/test_stream_ownership.py` and `serve/test_parallel.py`), and one Windows-only keep-awake
-  test that races its worker thread. A failure is yours.
+- The server tests (`.venv/bin/python -m pytest -q serve/`, about 8 minutes) pass, with about 22 skipped. 11 on
+  purpose: 10 for upstream's stream-ownership fixes for `--batch` and replicas, which are only half ported and not used
+  on one card (`NOT_PORTED` in `serve/test_stream_ownership.py` and `serve/test_parallel.py`), and one Windows-only
+  keep-awake test that races its worker thread. The other 11 need what this PC lacks: Windows (`test_winjob.py`), a
+  pack tokenizer in `packs/` (`test_detok.py`) or `jsonschema` (`test_structured.py`, `test_responses.py`). A failure
+  is yours.
 - When an old test fails after an upstream port, compare it with upstream's version of the same test first
   (`git show <tag>:serve/test_x.py`): the code is often current and only the test is behind.
 - `tools/ray_toolchoice_bench.py` checks that Ray turns on an MCP server only when the request needs one; run it

@@ -41,8 +41,8 @@ conversation cache hit `67.1 %`. Four requests at once gave `22.0 tok/s` in tota
 one after another. Every difference from the first H run is inside the spread of the runs.
 
 **Current GPU setting (since 2026-11-14):** after GPU crashes the card runs at `2500 MHz` max core clock, `150 W`
-and `-50 mV` (`/etc/lact/config.yaml`). Every number on this page was measured at the settings named below (Column H:
-`2800 MHz` / `198 W`), so the table describes that configuration.
+and `-50 mV` (`/etc/lact/config.yaml`). The table above was measured at Column H's settings (`2800 MHz` / `198 W`)
+and the earlier columns before them; the runs at the current setting are below.
 
 **At the current setting** (`2500 MHz` / `150 W` / `-50 mV`, 2026-11-16, `tools/strata_bench.py --long` against the
 running server, engine `0.1.44.1+0.2.12-fixes`, two runs a few hours apart; the second right after a server restart):

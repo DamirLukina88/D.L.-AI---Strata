@@ -133,7 +133,7 @@ The coding agent is Ray, in the web app's Code tab and in the terminal (the sepa
   "thinking" sound and Piper "hmm" sounds were tried and dropped as unnatural. About > *Speak while Ray writes*
   turns it off (details: memory page `desktop-piper-voice-switching-and-stt-auto-speak`).
 - **Fast spoken answers:** with default automatic thinking (`/effort auto`), greetings, wake words, and household commands answer right away with thinking off, while deep questions and coding turns get appropriate reasoning automatically.
-- **Checked with a benchmark:** `tools/ray_persona_bench.py` asks him 22 fixed questions (who is talking, being
+- **Checked with a benchmark:** `tools/ray_persona_bench.py` asks him 29 fixed questions (22 at the 2026-10-23 run) (who is talking, being
   addressed, who made him, persona, spoken answers, and the machine, folder, time and smart home through his tools)
   and scores the answers (results and method: memory page `ray-persona-bench-2026-10-23`).
 
