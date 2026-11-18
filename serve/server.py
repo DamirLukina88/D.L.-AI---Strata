@@ -310,6 +310,17 @@ RAY_LAN_PROOF_PATH = "/v1/ray/proof"                # the Android app's check th
 RAY_GET_GUARDED = ("/v1/ray/", "/api/phone/", "/api/code/session")   # GETs a page on another site never gets
 
 
+def finite_ms(v) -> int:
+    """A client's millisecond timestamp, or now: NaN / Infinity (json takes them) and a 400-digit integer (float()
+    overflows) raised in the handler, which then sent no answer."""
+    try:
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(float(v)) and 0 <= v < 1 << 53:
+            return int(v)
+    except (OverflowError, ValueError):
+        pass
+    return int(time.time() * 1000)
+
+
 def ray_lan_proof(api_key, nonce: str, peer_addr: str, headers, host_names=None) -> tuple[int, dict]:
     """(status, body) for GET /v1/ray/proof (Handler._ray_lan_proof): the HMAC of the nonce, for a client on the LAN.
     Several keys ("k1,k2" or a list): one proof each, in "proofs" (the app checks its own among them)."""
@@ -706,7 +717,9 @@ def make_handler(svc: Service):
         def _authorized(self) -> bool:
             # a tunnel (cloudflared) comes from loopback too: a request it forwarded (CF-Connecting-IP) without an
             # Access login is from elsewhere all the same
-            elsewhere = not self._from_loopback() or bool(self.headers.get("CF-Connecting-IP"))
+            # (and a local reverse proxy: nginx, Caddy, ngrok add one of these)
+            elsewhere = not self._from_loopback() or any(self.headers.get(h) for h in (
+                "CF-Connecting-IP", "X-Forwarded-For", "Forwarded", "X-Real-IP"))
             if not svc.api_key and self.path.startswith(RAY_ROUTES) and elsewhere and self._access_claims() is None:
                 # no key: anyone may use the model (as upstream, with the startup warning), but Ray's own routes run
                 # a shell, read and write the workspace and reach the phone, so they are this computer's alone
@@ -1425,8 +1438,7 @@ def make_handler(svc: Service):
                                 "text": text_val,
                                 "hash": str(req.get("hash", "")),
                                 "source": str(req.get("source", "phone")),
-                                "updated_ms": int(req["updated_ms"]) if isinstance(req.get("updated_ms"), (int, float))
-                                              and math.isfinite(req["updated_ms"]) else int(time.time() * 1000)
+                                "updated_ms": finite_ms(req.get("updated_ms"))
                             }
                         if req.get("source") != "desktop" and text_val:
                             def _sync_to_klipper(t: str):

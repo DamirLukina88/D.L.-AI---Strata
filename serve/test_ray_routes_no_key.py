@@ -75,15 +75,17 @@ class RayRoutesNeedAKeyFromElsewhere(unittest.TestCase):
         httpd = serve(svc, port=0)
         try:
             base = f"http://127.0.0.1:{httpd.server_address[1]}"
-            for path, want in (("/api/workspace/files", 401), ("/v1/models", 200)):
-                req = urllib.request.Request(base + path, headers={"CF-Connecting-IP": "203.0.113.9"})
+            for path, want, hdr in (("/api/workspace/files", 401, "CF-Connecting-IP"), ("/v1/models", 200, "CF-Connecting-IP"),
+                                    ("/api/workspace/files", 401, "X-Forwarded-For"),     # nginx, Caddy, ngrok
+                                    ("/api/workspace/files", 401, "X-Real-IP")):
+                req = urllib.request.Request(base + path, headers={hdr: "203.0.113.9"})
                 try:
                     with urllib.request.urlopen(req, timeout=10) as r:
                         code = r.status
                 except urllib.error.HTTPError as e:
                     code = e.code
                     e.close()
-                self.assertEqual(code, want, path)
+                self.assertEqual(code, want, (path, hdr))
             with urllib.request.urlopen(base + "/api/workspace/files", timeout=10) as r:   # this PC itself
                 self.assertEqual(r.status, 200)
         finally:
@@ -91,6 +93,15 @@ class RayRoutesNeedAKeyFromElsewhere(unittest.TestCase):
             httpd.server_close()
         self.assertTrue(server.RAY_ROUTES)
 
+
+
+class FiniteMs(unittest.TestCase):
+    def test_bad_timestamps_become_now(self):
+        import serve.server as server
+        for v in (float("nan"), float("inf"), 10 ** 400, -5, True, "soon", None):
+            with self.subTest(v=v):
+                self.assertGreater(server.finite_ms(v), 1_600_000_000_000)
+        self.assertEqual(server.finite_ms(1_700_000_000_000), 1_700_000_000_000)
 
 if __name__ == "__main__":
     unittest.main()
