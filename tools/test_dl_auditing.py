@@ -226,7 +226,11 @@ class TestGateReadsTheRealPath(unittest.TestCase):
                     "echo hi\ninstall x /etc/y", "  install x /etc/y", "{ install x /etc/y; }",
                     "if true; then install x /etc/y; fi", "/usr/bin/install x /etc/y", "env install x /etc/y",
                     "install --mode 644 x /etc/y",
-                    "cp " + "-a " * 17 + "x /etc/y", "install " + "-m 6 " * 20 + "x /etc/y"):   # padded past the cap
+                    "cp " + "-a " * 17 + "x /etc/y", "install " + "-m 6 " * 20 + "x /etc/y",   # padded past the cap
+                    # round 10: options after the operands, several sources, a quoted flag, an option's value
+                    "cp x -v /etc/y", "cp a b /etc/", 'cp "-a" x /etc/y', "cp -S .bak x /etc/y",
+                    "cp -S\\; -a -a -a x /etc/y", "rsync -av src/ /etc/x", "FOO=1 cp a /etc/b",
+                    "rm -fr x", "git push origin main -f"):
             with self.subTest(cmd=cmd):
                 self.assertIsNotNone(classify_command(cmd, self.ws))
         self.assertIsNotNone(classify_write(Path("/tmp/../home/someone/.bashrc"), self.ws))
@@ -239,7 +243,8 @@ class TestGateReadsTheRealPath(unittest.TestCase):
                      "install " + "-m " * 40, "install " + "-o -g " * 40, "install " + "--mode " * 40,   # round 7
                      "\n" * 16000, ";" * 16000, "do/" * 5000, "sudo -E;" * 2000,                   # round 8
                      "cp -a;" * 8000, "-{install " * 5000, "`install\n- " * 5000, "find " * 10000,   # round 9
-                     "curl " * 10000, "wget " * 10000, "cp " + "-a " * 50000, "install -m 6 " * 12000):
+                     "curl " * 10000, "wget " * 10000, "cp " + "-a " * 50000, "install -m 6 " * 12000,
+                     "rm -" + "f" * 150000 + "1", "git push " * 15000, "cp\n" * 50000):     # round 10
             t0 = _time.monotonic()
             classify_command(line, self.ws)
             self.assertLess(_time.monotonic() - t0, 0.5)
@@ -259,7 +264,9 @@ class TestGateReadsTheRealPath(unittest.TestCase):
                     "cp a sub/b", "ls ..", "cp -r ../lib .", "rsync -a ../src/ ./src/",   # into the workspace
                     "pip install requests numpy", "echo ~", "cp ~/a .", "cp a $HOMEDIR_X/x",
                     "pip install foo ~/wheels/bar.whl", "npm install express ../shared", "uv pip install x /opt/w.whl",
-                    "go install ./cmd/a ~/go/src/b", "npm-install a /opt/x"):     # they only read those paths
+                    "go install ./cmd/a ~/go/src/b", "npm-install a /opt/x",     # they only read those paths
+                    "pip install " + "--no-deps " * 17, "rsync -av --exclude x src/ dst/", "rm -v x",
+                    "git push origin main", "cp a b; ls -t /etc"):
             with self.subTest(cmd=cmd):
                 self.assertIsNone(classify_command(cmd, self.ws))
 

@@ -15,6 +15,7 @@ import glob
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -703,7 +704,7 @@ def tool_smart_test_runner(args: Dict[str, Any], workspace: Path) -> str:
 # A match asks the user (terminal y/N or the web approval card); /yolo turns the gate off for a session.
 
 _DESTRUCTIVE_PATTERNS = [
-    ("deletes recursively or forcibly", re.compile(r"(?:^|[\s;&|(`/\\])rm\s+(?:-[a-zA-Z]*[rRf][a-zA-Z]*|--recursive|--force)\b")),
+    ("deletes recursively or forcibly", re.compile(r"(?:^|[\s;&|(`/\\])rm\s+(?:-(?=[a-zA-Z]*[rRf])[a-zA-Z]+|--recursive|--force)\b")),
     # the gap stops at the next find and xargs' flags are capped: [^|;&]* from every "find" ran to the end of the line
     # (quadratic: 30 s on 150 KB of "find ")
     ("deletes found files", re.compile(r"\bfind\b(?:(?!\bfind\b)[^|;&])*\s-(?:delete|exec\s+rm)\b"
@@ -711,36 +712,89 @@ _DESTRUCTIVE_PATTERNS = [
     ("runs as root", re.compile(r"(?:^|[\s;&|(`])(?:sudo|doas|pkexec|su)(?:\s|$)")),
     ("writes raw disks or filesystems", re.compile(r"(?:^|[\s;&|(`])(?:dd|mkfs(?:\.\w+)?|shred|wipefs|fdisk|sfdisk|parted|sgdisk|blkdiscard)(?:\s|$)|>\s*/dev/(?:sd|nvme|hd|vd|mmcblk)")),
     ("changes ownership or permissions recursively", re.compile(r"\b(?:chmod|chown|chgrp)\s+(?:-\S*\s+)*-[a-zA-Z]*R")),
-    ("rewrites or discards git history/work", re.compile(r"\bgit\s+(?:push\b[^;&|]*\s(?:--force(?:-with-lease)?|-f)\b|reset\s+--hard|clean\s+-[a-zA-Z]*f|branch\s+-D|checkout\s+--\s|restore\s|filter-(?:repo|branch)|stash\s+(?:drop|clear)|rebase\b)")),
+    ("rewrites or discards git history/work", re.compile(r"\bgit\s+(?:push\b(?:(?!\bgit\b)[^;&|\n])*\s(?:--force(?:-with-lease)?|-f)\b|reset\s+--hard|clean\s+-[a-zA-Z]*f|branch\s+-D|checkout\s+--\s|restore\s|filter-(?:repo|branch)|stash\s+(?:drop|clear)|rebase\b)")),
     ("stops services or processes", re.compile(r"\bsystemctl\s+(?:--user\s+)?(?:stop|disable|mask|kill|restart|isolate)\b|\b(?:reboot|shutdown|poweroff|halt)\b|\bkill\s+-(?:9|KILL)\b|\b(?:pkill|killall)\b")),
     # the gap stops at the next curl / wget (from every one it ran to the end: 1.8 s on 150 KB of "curl ")
     ("pipes a download into a shell", re.compile(r"\b(?:curl|wget)\b(?:(?!\b(?:curl|wget)\b)[^|])*\|\s*(?:sudo\s+)?"
                                                  r"(?:ba|z|fi)?sh\b")),
-    # the target check reads at most 16 options (unbounded it was quadratic); padding a copy with more must not
-    # carry it past the check, so such a command is asked about
-    ("copies with more options than are checked", re.compile(
-        r"\b(?:mv|cp|rsync|ln|install)\s+(?:-[^\s;&|]+\s+(?:[^\s;&|-][^\s;&|]*\s+)?){16}")),   # a flag, maybe its value
     ("removes packages", re.compile(r"\bpacman\s+-R|\bapt(?:-get)?\s+(?:remove|purge)|\bpip\d?\s+uninstall\b|\bnpm\s+(?:uninstall|rm)\s+-g")),
 ]
-_PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?|\b(?:mv|cp|rsync|ln)\s+(?:-\S+\s+){0,16}(?!-)\S+\s+"""
-                       # install as the command itself (not pip/npm/go install, whose extra paths are only read),
-                       # its -m 644 / -o root / -g / -S values skipped
-                       # (in command position also after a newline, { ! then do else, env/command/time/nice/exec, as
-                       # /usr/bin/install; the two option forms are disjoint, or `install -m -m -m ...` backtracked
-                       # exponentially: 2 s at 110 bytes)
-                       # (the option loops are capped at 16: unbounded, `-\S+\s+` ran across ; and newlines from every
-                       # start, 29 s on 150 KB of `cp -a;`)
-                       # (after the separator no newline in the gap, a fixed bin path, sudo flags that stop at ; & |:
-                       # \s* over newlines, \S*/ and -\S+ made it quadratic - 7.5 s on 16 KB of newlines)
-                       r"""|(?:^|[;&|(`{!\n]|\b(?:then|do|else|env|command|time|nice|exec)\b)[^\S\n]*"""
-                       r"""(?:sudo\s+(?:-[^\s;&|]+\s+)*)?(?:/(?:usr/(?:local/)?)?s?bin/)?install\s+"""
-                       r"""(?:-[mogS]\s+[^\s-]\S*\s+|--(?:mode|owner|group|suffix)\s+[^\s-]\S*\s+"""
-                       r"""|-(?![mogS]\s)(?!-(?:mode|owner|group|suffix)\s)\S+\s+){0,16}(?!-)\S+\s+"""
-                       # the gap stops at the next command word: [^;&|\n]*? from every cp/mv/ln/install ran to the end of
-                       # the line (quadratic: 7 s on a 50 KB line of the approval gate); -vt / -Dt and the spaced long
-                       # option count too
-                       r"""|\b(?:mv|cp|ln|install)\b(?:(?!\b(?:mv|cp|ln|install)\b)[^;&|\n])*?\s"""
-                       r"""(?:-[A-Za-z]*t\s*|--target-directory[=\s]\s*))(['"]?)(~?/[^\s'";&|)]*|\.\.(?:/[^\s'";&|)]*)?|~(?=[\s'";&|)]|$)|\$\{?HOME\}?(?![A-Za-z0-9_])(?:/[^\s'";&|)]*)?)\1""")
+# a redirect or tee target; a copy's target comes from _copy_targets (a tokenizer: the regex form of it was
+# quadratic in five places and missed `cp x -v /etc/y`, `cp a b /etc/`, `cp -S .bak x /etc/y`)
+_PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?)(['"]?)(~?/[^\s'";&|)]*|\.\.(?:/[^\s'";&|)]*)?"""
+                       r"""|~(?=[\s'";&|)]|$)|\$\{?HOME\}?(?![A-Za-z0-9_])(?:/[^\s'";&|)]*)?)\1""")
+_COPY_COMMANDS = {"cp", "mv", "rsync", "ln", "install"}
+_WRAPPERS = {"sudo", "doas", "env", "command", "time", "nice", "nohup", "exec", "then", "do", "else", "!", "{"}
+# options whose value is the next word (so the value is not taken for an operand)
+_VALUE_OPTS = {"cp": {"-S", "--suffix"}, "mv": {"-S", "--suffix"}, "ln": {"-S", "--suffix"},
+               "install": {"-m", "-o", "-g", "-S", "--mode", "--owner", "--group", "--suffix"},
+               "rsync": {"-e", "--rsh", "--exclude", "--include", "--filter", "-f", "--exclude-from",
+                         "--include-from", "--files-from", "--rsync-path", "--chmod", "--chown", "--log-file",
+                         "--password-file", "--temp-dir", "-T", "--partial-dir", "--backup-dir", "--compare-dest",
+                         "--copy-dest", "--link-dest", "--suffix", "--port", "--bwlimit", "--timeout"}}
+
+
+def _copy_targets(cmd: str) -> list[str]:
+    """Where each cp / mv / rsync / ln / install in a command line writes: its -t / --target-directory folder, or
+    else its last operand.  Linear: one pass over shell words split at ; & | ( ) and newlines."""
+    if not any(c in cmd for c in _COPY_COMMANDS):
+        return []
+    # one pass; a newline ends a command, as ; does (shlex takes it for a space)
+    text = cmd.replace("\n", " ; ")
+    lex = shlex.shlex(text, posix=True, punctuation_chars=";&|()")
+    lex.whitespace_split = True
+    lex.commenters = ""
+    words: list[str] = []
+    try:
+        for w in lex:
+            words.append(w)
+    except ValueError:                       # an unclosed quote: plain words
+        words = text.split()
+    words.append(";")
+    segments, seg = [], []
+    for w in words:
+        if w and set(w) <= set(";&|()"):
+            if seg:
+                segments.append(seg)
+            seg = []
+        else:
+            seg.append(w)
+    out = []
+    for seg in segments:
+        i = 0
+        while i < len(seg) and (seg[i] in _WRAPPERS or re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", seg[i])
+                                or (i and seg[i - 1] in ("sudo", "doas") and seg[i].startswith("-"))):
+            i += 1
+        if i >= len(seg) or seg[i].rsplit("/", 1)[-1] not in _COPY_COMMANDS:
+            continue
+        name = seg[i].rsplit("/", 1)[-1]
+        operands, target, j, end_opts = [], None, i + 1, False
+        while j < len(seg):
+            w = seg[j]
+            if end_opts or not w.startswith("-") or w == "-":
+                operands.append(w)
+            elif w == "--":
+                end_opts = True
+            elif w.startswith("--target-directory"):
+                if "=" in w:
+                    target = w.split("=", 1)[1]
+                elif j + 1 < len(seg):
+                    target, j = seg[j + 1], j + 1
+            elif not w.startswith("--") and "t" in w[1:] and name != "rsync":   # -t DIR, -vt DIR, -tDIR
+                rest = w[w.index("t", 1) + 1:]
+                if rest:
+                    target = rest
+                elif j + 1 < len(seg):
+                    target, j = seg[j + 1], j + 1
+            elif w.split("=", 1)[0] in _VALUE_OPTS.get(name, ()) and "=" not in w:
+                j += 1                       # its value
+            j += 1
+        if target is not None:
+            out.append(target)
+        elif len(operands) >= 2:
+            out.append(operands[-1])
+    return out
+
 # (~ alone and $HOME / ${HOME}: `cp a ~`, `mv -t ~ a`, `cp -t "$HOME" x` wrote into the home folder unasked)
 
 
@@ -749,7 +803,7 @@ def _outside(path_str: str, workspace: Path) -> bool:
     # is the workspace's, not this process's folder
     if path_str in ("/dev/null", "/dev/stdout", "/dev/stderr"):    # links to the terminal or a pipe once resolved
         return False
-    p = Path(re.sub(r"^\$\{?HOME\}?", lambda m: str(Path.home()), path_str)).expanduser()
+    p = Path(re.sub(r"^\$\{?HOME\}?(?![A-Za-z0-9_])", lambda m: str(Path.home()), path_str)).expanduser()
     if not p.is_absolute():
         p = workspace / p
     r = str(p.resolve())
@@ -773,6 +827,11 @@ def classify_command(cmd: str, workspace: Path) -> Optional[str]:
         if _outside(path_str, workspace):
             reasons.append(f"writes outside the workspace ({path_str})")
             break
+    else:
+        for path_str in _copy_targets(cmd):
+            if path_str and _outside(path_str, workspace):
+                reasons.append(f"writes outside the workspace ({path_str})")
+                break
     return "; ".join(reasons) or None
 
 
