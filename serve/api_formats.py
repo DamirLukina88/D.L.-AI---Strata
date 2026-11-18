@@ -54,7 +54,18 @@ def openai_chunks(svc: Service, req: dict, ids, thinking, tools, max_new, cancel
         return {"id": cid, "object": "chat.completion.chunk", "created": created, "model": model,
                 "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
 
-    yield chunk({"role": "assistant", "content": ""})
+    # #2391: the role-only chunk goes out right before the first data chunk, not before the prompt is read: a client
+    # that times the first data chunk (llama-benchy's TTFR / est_ppt) would otherwise see a prefill of ~0 ms.  vLLM
+    # and llama.cpp send it with the engine's first output too.  The keep-alive comments are not data and go first.
+    opened = False
+
+    def first():
+        nonlocal opened
+        if opened:
+            return ()
+        opened = True
+        return (chunk({"role": "assistant", "content": ""}),)
+
     calls = 0
     streamed = {}                                  # tool call id -> index, for calls sent piece by piece
     finished = set()                               # ... and the ones whose final tool_call came (#211)
@@ -66,27 +77,35 @@ def openai_chunks(svc: Service, req: dict, ids, thinking, tools, max_new, cancel
             # a PP line: the prompt is being read and there is nothing to say yet.  It used to be only the SSE comment;
             # now it carries the progress when the client asked, and stays the comment when there is nothing to report.
             pp = prompt_progress(svc) if want_progress else None
+            if pp is not None:
+                yield from first()
             yield None if pp is None else {**chunk({}), "prompt_progress": pp}
         elif kind == "mcp":
+            yield from first()
             c = chunk({})
             c["strata_mcp"] = x
             yield c
         elif kind == "event":
             ev: Event = x
             if ev.kind == "reasoning" and ev.text:
+                yield from first()
                 yield chunk({"reasoning_content": ev.text})
             elif ev.kind == "content" and ev.text:
+                yield from first()
                 yield chunk({"content": ev.text})
             elif ev.kind == "tool_start":
                 streamed[ev.call.id] = calls
                 calls += 1
+                yield from first()
                 yield chunk({"tool_calls": [{"index": streamed[ev.call.id], "id": ev.call.id, "type": "function",
                                              "function": {"name": ev.call.name, "arguments": ""}}]})
             elif ev.kind == "tool_args":
+                yield from first()
                 yield chunk({"tool_calls": [{"index": streamed[ev.call.id], "function": {"arguments": ev.text}}]})
             elif ev.kind == "tool_call" and ev.call.id in streamed:
                 finished.add(ev.call.id)
             elif ev.kind == "tool_call":
+                yield from first()
                 yield chunk({"tool_calls": [{"index": calls, "id": ev.call.id, "type": "function",
                                              "function": {"name": ev.call.name,
                                                           "arguments": json.dumps(ev.call.arguments, ensure_ascii=False)}}]})
@@ -94,6 +113,7 @@ def openai_chunks(svc: Service, req: dict, ids, thinking, tools, max_new, cancel
         else:
             answered_done = True
             # a streamed call without its final tool_call is one the output ended inside: not "tool_calls" (#211)
+            yield from first()                     # an empty answer still opens with the role
             whole = calls and streamed.keys() <= finished
             finish = "tool_calls" if whole and x["finish"] == "stop" else {"cancel": "stop"}.get(x["finish"], x["finish"])
             last = chunk({}, finish)
@@ -106,6 +126,8 @@ def openai_chunks(svc: Service, req: dict, ids, thinking, tools, max_new, cancel
                 last["timings"] = x["timings"]          # llama.cpp's field: the speed its clients show
             if x.get("rejected_tool_calls"):
                 last["strata_rejected_tool_calls"] = x["rejected_tool_calls"]     # #3796: only when a call was refused as undeclared
+            if x.get("unread_tool_markup"):
+                last["strata_unread_tool_markup"] = x["unread_tool_markup"]
             yield last
     if not answered_done and not cancel.is_set():
         # A generator that raised an unhandled exception inside svc.run (or an engine error that slipped through without a
@@ -163,21 +185,35 @@ def openai_collect(chunks) -> dict:
         out["timings"] = last["timings"]
     if last.get("strata_rejected_tool_calls"):
         out["strata_rejected_tool_calls"] = last["strata_rejected_tool_calls"]
+    if last.get("strata_unread_tool_markup"):
+        out["strata_unread_tool_markup"] = last["strata_unread_tool_markup"]
     return out
 
 
 def structured_chunks(chunks, validator):
-    """Buffer structured streams so a client never receives unvalidated content."""
+    """Buffer structured streams so a client never receives unvalidated content.  A turn that calls a tool is not the
+    final answer: from its first call on, what was held goes out as it is and the rest streams unchecked, as
+    /v1/responses does."""
     buffered = []
     heartbeat = time.monotonic()
     try:
         for chunk in chunks:
+            if buffered is None:
+                yield chunk
+                continue
             progress = chunk is not None and "prompt_progress" in chunk
+            if chunk is not None and not progress and (chunk.get("choices") or [{}])[0].get("delta", {}).get("tool_calls"):
+                yield from buffered
+                yield chunk
+                buffered = None
+                continue
             if chunk is not None and not progress:
                 buffered.append(chunk)      # a progress chunk carries no content: there is nothing in it to validate
             if chunk is None or progress or time.monotonic() - heartbeat >= 1:
                 heartbeat = time.monotonic()
                 yield chunk if progress else None
+        if buffered is None:
+            return
         result = _server().openai_collect(buffered)
         choice = result["choices"][0]
         content = validated_json(choice["message"]["content"], validator, choice["finish_reason"])
@@ -259,6 +295,8 @@ def anthropic_events(svc: Service, req: dict, ids, thinking, tools, max_new, can
                                      "cache_read_input_tokens": reused, "output_tokens": x["completion_tokens"]}}
             if x.get("rejected_tool_calls"):
                 delta_event["strata_rejected_tool_calls"] = x["rejected_tool_calls"]     # #3796
+            if x.get("unread_tool_markup"):
+                delta_event["strata_unread_tool_markup"] = x["unread_tool_markup"]
             yield "message_delta", delta_event
             yield "message_stop", {"type": "message_stop"}
 
@@ -293,5 +331,7 @@ def anthropic_collect(events) -> dict:
             msg["usage"].update(e["usage"])
             if e.get("strata_rejected_tool_calls"):
                 msg["strata_rejected_tool_calls"] = e["strata_rejected_tool_calls"]
+            if e.get("strata_unread_tool_markup"):
+                msg["strata_unread_tool_markup"] = e["strata_unread_tool_markup"]
     msg["content"] = blocks
     return msg

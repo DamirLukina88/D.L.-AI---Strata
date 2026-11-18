@@ -27,7 +27,7 @@ import json
 import time
 import uuid
 
-from serve.frontend import Event, _parts_of, effort_kwargs
+from serve.frontend import Event, _parts_of, cut_arguments, declared_parameters, effort_kwargs
 
 ENCRYPTED_PREFIX = "strata.r1:"                   # our own reasoning replay strings; others' are ignored
 HOSTED_TOOLS = ("web_search", "web_search_preview", "file_search", "computer_use_preview", "computer_use",
@@ -102,9 +102,11 @@ def _reasoning_text(item, param) -> str:
     return ""
 
 
-def _arguments(raw, param) -> dict:
+def _arguments(raw, param, declared=None) -> dict:
     """A function_call's arguments (a JSON string) -> the mapping the template renders.  Arguments that are not a JSON
-    object (a call the output ended inside) are kept as text rather than refusing the whole conversation."""
+    object are kept as text rather than refusing the whole conversation; a call the output ended inside (text that
+    starts like an object) gives the members it still holds, as frontend.tool_arguments says (`declared` = the tool's
+    parameter names, None when unknown)."""
     if isinstance(raw, dict):
         return raw
     if raw is None or (isinstance(raw, str) and not raw.strip()):
@@ -114,6 +116,10 @@ def _arguments(raw, param) -> dict:
     try:
         value = json.loads(raw)
     except ValueError:
+        if declared is None or "arguments" not in declared:
+            cut = cut_arguments(raw)
+            if cut is not None:
+                return cut
         return {"arguments": raw}
     return value if isinstance(value, dict) else {"arguments": value}
 
@@ -181,7 +187,7 @@ def input_messages(req: dict) -> list[dict]:
             if item.get("namespace"):
                 name = f"{item['namespace']}.{name}"
             if kind == "function_call":
-                args = _arguments(item.get("arguments"), param + ".arguments")
+                args = _arguments(item.get("arguments"), param + ".arguments", declared_parameters(req.get("tools"), name))
             else:
                 args = {"input": item.get("input") if isinstance(item.get("input"), str) else ""}
             target = open_turn if open_turn is not None and not thinking else turn()
@@ -443,8 +449,12 @@ def check_request(req: dict) -> None:
         raise ResponsesError("stored prompt templates are not supported: send instructions and input",
                              "prompt", "unsupported_parameter")
     n = req.get("max_output_tokens")
-    if n is not None and (isinstance(n, bool) or not isinstance(n, int) or n < 1):
-        raise ResponsesError("max_output_tokens must be a positive whole number", "max_output_tokens")
+    # -1 and 0 mean no cap, as max_tokens does on the chat path (docs/DETAILS.md); anything lower is a mistake
+    # (a whole number sent as a float, 4096.0, is one: some clients write their JSON numbers that way, #4037)
+    if n is not None and (isinstance(n, bool) or not isinstance(n, (int, float)) or n < -1 or
+                          (isinstance(n, float) and not n.is_integer())):
+        raise ResponsesError("max_output_tokens must be a whole number, 1 or more, or -1 or 0 for no cap",
+                             "max_output_tokens")
     reasoning = req.get("reasoning")
     if reasoning is not None and not isinstance(reasoning, dict):
         raise ResponsesError("reasoning must be an object", "reasoning")
@@ -659,6 +669,11 @@ class Assembler:
             "input_tokens": prompt, "input_tokens_details": {"cached_tokens": min(done.get("reused") or 0, prompt)},
             "output_tokens": n, "output_tokens_details": {"reasoning_tokens": done.get("reasoning_tokens", 0)},
             "total_tokens": prompt + n}
+        # #3796 / (a): the markers /v1/chat/completions carries, at the top level of the response object
+        if done.get("rejected_tool_calls"):
+            self.response["strata_rejected_tool_calls"] = done["rejected_tool_calls"]
+        if done.get("unread_tool_markup"):
+            self.response["strata_unread_tool_markup"] = done["unread_tool_markup"]
         if length:
             self.response["status"] = "incomplete"
             self.response["incomplete_details"] = {"reason": "max_output_tokens"}

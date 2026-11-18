@@ -48,6 +48,36 @@ reads `0.1.44.1+0.2.12-fixes`. The reviews live in the shared memory store (proj
   Ported: a declared boolean tool argument written `True` / `False` is the boolean (#5979). Not ported: the stop
   that refuses new requests (#6055; this server has no drain) and the monitor's MTP line (#5080; this engine does not
   report its drafter, so nothing would change).
+- **0.2.16 (2026-11-17), parser part, ported 2026-11-18:** upstream moved its tree into `app/`, `engine/` and
+  `terminal/`, so nothing cherry-picks. `serve/frontend.py`'s output parser (from `# --- output parser` to the end) is
+  upstream's v0.2.16 copy, with this fork's one change kept (a tool given in the OpenAI `{"function": {...}}` shape is
+  read by its name). That brings the tool-call recovery series (#6032 R1-R6), Claude's `<invoke>` dialect (#5969), types
+  through `anyOf` / `oneOf` (#2371), a non-string parameter written twice counts once (#5493), linear streamed arguments
+  and string values over 4 KB (#4686). In `serve/service.py`: a rejected undeclared call names the closest declared
+  tool (#5904), a reply that ends in tool-call markup that is no call is written again once (`e05e6e0cc`,
+  `"tool_markup_retry"`), and a reply cut inside a call carries `strata_unread_tool_markup` (`483778931`). Upstream's
+  tests came with it (`serve/test_parser_*.py`, `test_tool_call_invoke.py`, `test_tool_markup_retry.py`,
+  `test_tool_call_cutoff.py`); `test_tool_call_unclosed.py` is upstream's newer copy (prose after a call without its
+  `</tool_call>` no longer confirms the call).
+- **0.2.16, server part, ported 2026-11-18:** every socket operation of a request handler is bounded at 120 s
+  (`STRATA_PEER_STALL_S`, 0 = unbounded), so a client that connects and sends nothing, or stops reading, no longer holds
+  a handler or the engine's turn (#4759; the fork's own long waits, `/v1/ray/chat` and the event proxy, wait on the
+  session daemon's socket, not the client's, and the proxy pings every 15 s). A stream's role chunk goes out with its
+  first data, not before the prompt is read (#4758). `response_format` is allowed with tools on chat completions; from
+  the first call on, the stream goes out unchecked (#4756). `max_tokens` / `max_completion_tokens` must be a whole number
+  (`true`, `2.5` and other strings are a 400; `4096.0` and `"1024"` are taken), and `max_output_tokens` on
+  `/v1/responses` takes `4096.0` and, as upstream's earlier #4036, -1 and 0 for no cap (#4037). `/v1/responses` honours
+  `tool_choice` `"required"` and a named function (#4835). `POST /load` answers an engine that dies, sticks or is still
+  starting with a 503 instead of closing the connection (`5205fc8bb`). Upstream's tests came with each
+  (`test_connection_deadline.py`, `test_first_chunk.py`, `test_token_limit.py`, `test_load_answers.py`, and additions to
+  `test_structured.py` and `test_responses.py`).
+- **0.2.16, last two, ported 2026-11-18:** a tool call that max tokens cut short is replayed from a client's history
+  with the parameters it already has, not as one parameter called `arguments` that teaches the model to write such
+  calls (`0c99fcf85`; chat, Messages and Responses histories; `serve/test_cut_arguments.py`). `MALLOC_ARENA_MAX=2` on
+  Linux for the server's own process (`mallopt`, as it is started by hand) and for the engine it starts, unless the
+  variable is already set (`aeecf0f5d`, `serve/childenv.py`, `serve/test_childenv_arenas.py`). Upstream measured the
+  server only (2-hour soak: RSS 312 MiB and +4.5 %/h by default, 252 MiB and +0.69 %/h with it; engine RSS the same
+  band). Neither the server's memory nor the engine's speed with it was measured on this PC.
 - **Audit, 2026-11-18:** the HIP ctest here failed `hip_q2_zero` (128 of 1024 Q2_0 half values +0 instead of -0 on
   this RX 7600 XT, gfx1102, ROCm 7.2.4): the signed-zero guard in `dq_q2_0` covered only gfx1012 on HIP < 7, gfx1151
   and gfx1200 / gfx1201. Upstream's `719b733e0` (#1540, in v0.1.45 and later), which keeps it on every HIP target, is

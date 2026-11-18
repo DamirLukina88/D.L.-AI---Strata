@@ -7,6 +7,7 @@ from pathlib import Path
 import codecs
 import json
 import os
+import re
 
 
 
@@ -80,6 +81,22 @@ class Detokenizer:
 
 
 OPENAI_MAX_STOP = 4                                  # OpenAI's limit on `stop`
+
+
+def token_limit(value, name: str):
+    """#4037: a reply's token limit (max_tokens, max_completion_tokens) is a whole number: 1 or more, or -1 / 0 for no cap
+    (docs/DETAILS.md).  None (absent or null) stays None.  A whole number written as a float (4096.0) or as a string of
+    digits with an optional sign ("1024": clients rely on it, as int() always took it) is converted.  A boolean, a fraction
+    (2.5, "2.5"), any other string or any other type is refused: int() used to turn true into 1 and 2.5 into 2.
+    ValueError = a 400."""
+    if value is None:
+        return None
+    if isinstance(value, str) and re.fullmatch(r"[+-]?[0-9]+", value):
+        value = int(value)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or (isinstance(value, float) and not value.is_integer()) \
+            or value < -1:
+        raise ValueError(f"{name} must be a whole number, 1 or more, or -1 or 0 for no cap")
+    return int(value)
 
 
 def stop_strings(req: dict) -> list[str]:

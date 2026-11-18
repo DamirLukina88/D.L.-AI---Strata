@@ -78,7 +78,7 @@ from serve.mcp import McpCancelled, hub_from_config  # noqa: E402
 from serve import runconfig  # noqa: E402
 from serve import cf_access  # noqa: E402
 from serve import logit_bias as bias_api  # noqa: E402
-from serve.childenv import quiet_crash_env  # noqa: E402
+from serve.childenv import arena_env, limit_own_arenas, quiet_crash_env  # noqa: E402,F401
 from serve.winjob import contain  # noqa: E402
 from serve.structured import StructuredOutputError, prepare_format, validated_json  # noqa: E402
 from serve import responses as responses_api  # noqa: E402
@@ -120,6 +120,7 @@ from serve.tunables import (  # noqa: E402,F401
     MAX_START_WAIT,
     PP_CHUNK_MAX,
     PP_FLOOR_TOK_S,
+    PEER_STALL_S,
     PP_SLACK,
     QUEUE_BEAT_S,
     RATE_MIN_SPAN_S,
@@ -240,6 +241,7 @@ from serve.textcore import (  # noqa: E402,F401
     slot_filename_problem,
     slot_save_dir,
     stop_strings,
+    token_limit,
 )
 from serve.request_stats import (  # noqa: E402,F401
     add_carry,
@@ -252,9 +254,15 @@ from serve.request_stats import (  # noqa: E402,F401
 )
 from serve.service import (  # noqa: E402,F401
     Service,
+    TOOL_RETRY_MIN_ROOM,
+    ToolMarkupHold,
     _debug_req,
     _dump_claude_prompt,
+    closest_declared,
+    dead_markup_tail,
+    markup_names,
     run_with_mcp,
+    tool_retry_note,
 )
 from serve.api_formats import (  # noqa: E402,F401
     PP_DONE_TAIL,
@@ -392,6 +400,7 @@ class BadBody(Exception):
 
 def make_handler(svc: Service):
     class Handler(BaseHTTPRequestHandler):
+        timeout = PEER_STALL_S
         protocol_version = "HTTP/1.0"                       # SSE ends by closing the connection
 
         record = None                                       # #332: this request's monitor record, if kept
@@ -1239,10 +1248,14 @@ def make_handler(svc: Service):
                 try:
                     svc.load()
                     self._json(200, {"status": "loaded"})
-                except GpuBusy as e:
+                except (GpuBusy, EngineStarting) as e:
                     ra = getattr(e, "retry_after", None)
                     self._json(503, {"error": {"type": "server_error", "message": str(e)}},
                                headers={"Retry-After": int(ra)} if ra else None)
+                except EngineDied as e:                      # PR #4307: an engine that died while it started is
+                    self._json(503, {"error": {"type": "server_error", "message": died_note(e)}})   # answered, as /v1/load does
+                except EngineStuck as e:                     # (it used to close the connection with no answer)
+                    self._json(503, {"error": {"type": "server_error", "message": str(e)}})
                 return
             if path == "/restart":
                 try:
@@ -1927,9 +1940,12 @@ def make_handler(svc: Service):
             self.send_header("X-Accel-Buffering", "no")   # nginx and similar proxies pass each event at once
             self._cors()
             self.end_headers()
-            if STREAM_WRITE_TIMEOUT_S > 0:
+            # (#4271) a stuck write ends as OSError: disconnected.  The connection's own PEER_STALL_S deadline stays the
+            # bound when it is the shorter one: one stall rule for every socket operation.
+            limits = [x for x in (STREAM_WRITE_TIMEOUT_S, self.timeout) if x]     # self.timeout: PEER_STALL_S when the class was made
+            if limits:
                 try:
-                    self.connection.settimeout(STREAM_WRITE_TIMEOUT_S)     # (#4271) a stuck write ends as OSError: disconnected
+                    self.connection.settimeout(min(limits))
                 except OSError:
                     pass
 
@@ -2253,11 +2269,13 @@ def make_handler(svc: Service):
             if tool_choice_of(req.get("tool_choice"))[0] == "none":   # as the Responses route: no tools are offered
                 tools = None
             force = forced_call(req.get("tool_choice"), tools)      # a bad value is a 400 before anything is sent
-            messages, validator = prepare_format(req.get("response_format"), messages)
-            if validator is not None and (tools or req.get("strata_mcp")):
-                raise ValueError("structured response_format with tools/MCP is not supported")
+            messages, validator = prepare_format(req.get("response_format"), messages, with_tools=bool(tools))
+            if validator is not None and req.get("strata_mcp"):
+                raise ValueError("structured response_format with MCP is not supported")
             svc.load()
-            max_req = max_new = int(req.get("max_completion_tokens") or req.get("max_tokens") or 0)   # 0/-1: the rest
+            limit_new = token_limit(req.get("max_completion_tokens"), "max_completion_tokens")
+            limit_old = token_limit(req.get("max_tokens"), "max_tokens")      # (both checked, whichever is used)
+            max_req = max_new = limit_new or limit_old or 0                   # 0/-1: the rest
             bias_api.validate_request(req, svc.engine, len(getattr(svc.tok, "tokens", ())) or None)
             use_mcp = req.get("strata_mcp") is True and svc.mcp is not None      # the web app's opt-in (serve/mcp.py)
             own = {t.get("name") for t in tools or [] if isinstance(t, dict)}   # #592: a second line of defence
@@ -2479,7 +2497,7 @@ def make_handler(svc: Service):
             cancel = threading.Event()
             self._watch_client(cancel)                       # #430 #431 (#1999: before prepare, which can take long)
             try:
-                ids, thinking, tools, max_new, asm, validator, req = self._responses_prepare(req, cancel)
+                ids, thinking, tools, max_new, asm, validator, req, force = self._responses_prepare(req, cancel)
             except ClientGone:
                 self._note(outcome="disconnected")
                 return
@@ -2496,7 +2514,7 @@ def make_handler(svc: Service):
             def events():
                 yield from asm.start()
                 done = None
-                for kind, x in svc.run(ids, thinking, tools, max_new, req, cancel):
+                for kind, x in svc.run(ids, thinking, tools, max_new, req, cancel, force):
                     if kind == "ping":
                         yield None
                     elif kind == "event":
@@ -2565,6 +2583,7 @@ def make_handler(svc: Service):
             responses_api.check_request(req)
             messages = responses_api.input_messages(req)
             tools, names, skipped = responses_api.request_tools(req)
+            force = forced_call(req.get("tool_choice"), tools)   # "required" / {"type": "function", "name": N}
             kw = responses_api.template_kwargs(req, {"reasoning_effort": svc.effort_default()})
             try:
                 self._no_local_images(messages)              # as on the chat route: no file read for a foreign page
@@ -2599,14 +2618,14 @@ def make_handler(svc: Service):
             shown = responses_api.prompt_tools(req, tools) if svc.codex_compaction_cache else tools
             try:
                 try:
-                    ids, thinking, max_new = svc.prepare(messages, shown, kw, req.get("max_output_tokens") or 0, req=req,
-                                                          cancel=cancel)
+                    ids, thinking, max_new = svc.prepare(messages, shown, kw, int(req.get("max_output_tokens") or 0), force=force,
+                                                          req=req, cancel=cancel)
                 except ValueError:
                     if shown is tools:
                         raise
                     shown = tools                            # too long with the kept tools: the request as sent
-                    ids, thinking, max_new = svc.prepare(messages, shown, kw, req.get("max_output_tokens") or 0, req=req,
-                                                          cancel=cancel)
+                    ids, thinking, max_new = svc.prepare(messages, shown, kw, int(req.get("max_output_tokens") or 0), force=force,
+                                                          req=req, cancel=cancel)
             except ResponsesError:
                 raise
             except ValueError as e:                          # too long for the context, an image without vision
@@ -2619,7 +2638,7 @@ def make_handler(svc: Service):
             asm = responses_api.Assembler(req, svc.model_for(req), len(ids), names,
                                           "reasoning.encrypted_content" in include, validator is not None)
             # the request is also the sampling dict, as on the chat path (temperature, top_p, top_k, seed, ...)
-            return ids, thinking, tools, max_new, asm, validator, req
+            return ids, thinking, tools, max_new, asm, validator, req, force
 
         def _count_tokens(self, req):
             """Anthropic's token count, which Claude Code asks for its context figures: the prompt this server would
@@ -2640,7 +2659,7 @@ def make_handler(svc: Service):
             if tool_choice_of(req.get("tool_choice"))[0] == "none":   # Anthropic's {"type": "none"}: no tools offered
                 tools = None
             force = forced_call(req.get("tool_choice"), tools)        # "any" / {"type": "tool", "name": N}
-            max_new = int(req.get("max_tokens") or 0)                  # 0/-1: the rest of the context
+            max_new = token_limit(req.get("max_tokens"), "max_tokens") or 0   # 0/-1: the rest of the context
             svc.reasoning_budget(req)                         # a bad value is a 400 before anything is sent
             stop_strings(req)                                 # ... and so is a bad stop / stop_sequences
             check_request_sampling(req)                       # ... and a sampling field of the wrong type
@@ -2720,6 +2739,7 @@ def main() -> int:
     that stops taking output must not hold a request's turn, a cancel or an admission.  STRATA_BLOCKING_CONSOLE=1 turns
     it off (testers)."""
     quiet_crash_env()                                  # every child inherits it: no gdb on a user's machine (serve/childenv.py)
+    limit_own_arenas()                                 # a server started by hand: glibc arenas capped as the managed one is (childenv.arena_env)
     if os.environ.get("STRATA_BLOCKING_CONSOLE") == "1":
         return _main()
     from serve.nonblocking_out import decoupled_console
@@ -2994,6 +3014,10 @@ def _main() -> int:
         raise SystemExit(f"[strata] config \"tool_call_recovery\" must be true or false, not {recovery!r}")
     svc.tool_call_recovery = recovery
     svc.undeclared_tool_calls = undeclared_tool_calls_setting(cfg)
+    retry = cfg.get("tool_markup_retry", True)         # (a): false (or STRATA_TOOL_MARKUP_RETRY=0) sends the markup as text
+    if not isinstance(retry, bool):
+        raise SystemExit(f"[strata] config \"tool_markup_retry\" must be true or false, not {retry!r}")
+    svc.tool_markup_retry = svc.tool_markup_retry and retry
     etu = cfg.get("env_to_user", False)                # opt-in: see frontend._env_to_user
     if not isinstance(etu, bool):
         raise SystemExit(f"[strata] config \"env_to_user\" must be true or false, not {etu!r}")

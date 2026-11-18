@@ -223,6 +223,10 @@ MAX_START_WAIT = 1800.0     # seconds a start may wait for the model (#3949 #345
 ENGINE_READY_S = _timeout_env("STRATA_ENGINE_READY_S", 900.0)
 
 
+# A stalled peer must release the request turn; 0 preserves unbounded socket waits.
+PEER_STALL_S = _timeout_env("STRATA_PEER_STALL_S", 120.0)
+
+
 def calculate_start_wait(cfg: dict | None = None, model_path: str | None = None) -> float:
     """How long the start waits for the model to be ready (#3949 #3459): 10 minutes baseline,
     more for a big model (about 8 more seconds per GB above 40 GB, at most 30 minutes / 1800s).

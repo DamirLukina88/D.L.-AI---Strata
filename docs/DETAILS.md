@@ -880,6 +880,20 @@ print(r.choices[0].message.content)
   second call's parameters merge into the first). Anything else in those forms stays the text it is. Measured on
   1,462 agent turns (Qwen3.8 under Claude Code, from signalnine/q27's drift corpus): 98.3% read as intended with it,
   92.9% without. Off by default, so what a client gets back is unchanged unless you turn it on.
+  Upstream 0.2.16's recovery forms are ported too (#6032 R1-R6, #5969): a damaged parameter opener or closer, an
+  `<arguments>` JSON body, a parameter written as the element `<NAME>value</NAME>`, `<function=NAME` without its `>`, and
+  Claude's `<invoke name="T"><parameter name="K">` dialect inside `<tool_call>`.
+- **A reply that ends in tool-call markup that is no call is written again once** (`"tool_markup_retry"`, on; ported
+  from upstream 0.2.16). For a request with tools, the answer's text from a `<tool_call>` (or a bare `<function=`) at a
+  line start is held back until the reply goes on past it. When the model stops inside it (a tool the request did not
+  declare, a call cut before its end, a block that reads as no call), the server writes the reply's end again once in
+  the same request: the model reads a short note with the declared tools and the closest one to the name it wrote, and
+  its new reply takes the markup's place. Nothing runs under a guessed name. `/metrics` counts the retries
+  (`strata:tool_markup_retries_total`); a reply that still ends in such markup, or that max tokens cut inside a call,
+  carries `strata_unread_tool_markup` (`reason`: `cut_off` or `unreadable`, `chars`). `"tool_markup_retry": false` or
+  `STRATA_TOOL_MARKUP_RETRY=0` sends the markup as text, as before. Upstream's measurement (its Qwen set, a system prompt
+  that shows an undeclared `exec` tool, 12 requests per arm): off, 12 of 12 replies ended in `exec` markup; on, 6 called
+  the declared tool, 5 answered in text, 1 still ended in markup. Not measured on this PC.
 - **opencode's environment block in the user turn (opt-in).** opencode writes an `<env>` block (working directory,
   today's date) near the start of its system message, ahead of ~40K characters of instructions and tool definitions that
   are the same in every session. The prefix cache only reuses a prompt's start, so every new folder and every new day
