@@ -235,7 +235,8 @@ class TestGateReadsTheRealPath(unittest.TestCase):
         import time as _time
         from tools.dl_auditing import classify_command
         for line in ("echo '" + "install it, cp it, " * 2700 + "'", "cp " * 17000,
-                     "install " + "-m " * 40, "install " + "-o -g " * 40, "install " + "--mode " * 40):   # round 7
+                     "install " + "-m " * 40, "install " + "-o -g " * 40, "install " + "--mode " * 40,   # round 7
+                     "\n" * 16000, ";" * 16000, "do/" * 5000, "sudo -E;" * 2000):                  # round 8
             t0 = _time.monotonic()
             classify_command(line, self.ws)
             self.assertLess(_time.monotonic() - t0, 0.5)

@@ -718,8 +718,10 @@ _PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?|\b(?:mv|cp|rsync|ln)\s+(
                        # (in command position also after a newline, { ! then do else, env/command/time/nice/exec, as
                        # /usr/bin/install; the two option forms are disjoint, or `install -m -m -m ...` backtracked
                        # exponentially: 2 s at 110 bytes)
-                       r"""|(?:^|[;&|(`{!\n]|\b(?:then|do|else|env|command|time|nice|exec)\b)\s*"""
-                       r"""(?:sudo\s+(?:-\S+\s+)*)?(?:\S*/)?install\s+"""
+                       # (after the separator no newline in the gap, a fixed bin path, sudo flags that stop at ; & |:
+                       # \s* over newlines, \S*/ and -\S+ made it quadratic - 7.5 s on 16 KB of newlines)
+                       r"""|(?:^|[;&|(`{!\n]|\b(?:then|do|else|env|command|time|nice|exec)\b)[^\S\n]*"""
+                       r"""(?:sudo\s+(?:-[^\s;&|]+\s+)*)?(?:/(?:usr/(?:local/)?)?s?bin/)?install\s+"""
                        r"""(?:-[mogS]\s+[^\s-]\S*\s+|--(?:mode|owner|group|suffix)\s+[^\s-]\S*\s+"""
                        r"""|-(?![mogS]\s)(?!-(?:mode|owner|group|suffix)\s)\S+\s+)*(?!-)\S+\s+"""
                        # the gap stops at the next command word: [^;&|\n]*? from every cp/mv/ln/install ran to the end of
