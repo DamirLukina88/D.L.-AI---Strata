@@ -40,6 +40,24 @@ class RunCommand(unittest.TestCase):
         time.sleep(2.5)
         self.assertFalse(mark.exists(), "the rest of `a && b` ran on after the timeout")
 
+    def test_a_detached_command_logs_to_a_named_file_on_disk(self):
+        # round 2: its child kept writing into an unlinked file in /tmp (tmpfs: RAM nobody could see or read)
+        with tempfile.TemporaryDirectory() as logs, mock.patch.object(impl, "RUN_LOG_DIR", Path(logs)):
+            out = self.run_cmd("(sleep 0.3; echo later) & echo now", timeout=10)
+            self.assertIn("now", out)
+            self.assertIn("writes on to", out)
+            time.sleep(0.8)
+            outs = list(Path(logs).glob("cmd-*.out"))
+            self.assertEqual(len(outs), 1)
+            self.assertIn("later", outs[0].read_text())
+
+    def test_the_users_own_command_keeps_the_terminal(self):
+        with mock.patch.object(impl.subprocess, "Popen", wraps=impl.subprocess.Popen) as popen:
+            impl.tool_run_command({"CommandLine": "true"}, self.ws, interactive=True)
+        kw = popen.call_args.kwargs
+        self.assertIsNone(kw["stdin"])
+        self.assertFalse(kw["start_new_session"])
+
     def test_exit_code_and_stderr(self):
         out = self.run_cmd("echo out; echo err >&2; exit 3")
         self.assertIn("out", out)

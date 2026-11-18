@@ -7,6 +7,7 @@ from pathlib import Path
 import json
 import os
 import queue
+import re
 import signal
 import subprocess
 import tempfile
@@ -244,7 +245,24 @@ def tool_replace_file_content(args: dict, workspace: Path) -> str:
 RUN_COMMAND_TIMEOUT_S = 120.0
 
 
-def tool_run_command(args: dict, workspace: Path) -> str:
+# a command that leaves something running (dl_boundary.DETACHES, kept here without the import): that child keeps
+# the output file and writes on after the call, so it gets a named log on disk (an unlinked file in /tmp, a tmpfs
+# here, filled RAM that nothing could see or read)
+_LEAVES_RUNNING = re.compile(r"(?<![&>|])&(?![&>\d])|\bnohup\b|\bsetsid\b|\bdisown\b")
+RUN_LOG_DIR = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "dl-ai" / "run-logs"
+RUN_OUTPUT_READ_MAX = 4 << 20          # bytes read back per stream (the result is capped far below that anyway)
+
+
+def _read_back(f) -> str:
+    f.seek(0)
+    data = f.read(RUN_OUTPUT_READ_MAX + 1)
+    more = len(data) > RUN_OUTPUT_READ_MAX
+    return data[:RUN_OUTPUT_READ_MAX].decode("utf-8", errors="replace") + ("\n[... output cut at 4 MB ...]" if more else "")
+
+
+def tool_run_command(args: dict, workspace: Path, interactive: bool = False) -> str:
+    """interactive: the user's own `!cmd` in the terminal REPL - it keeps the terminal (sudo's password prompt, ssh)
+    instead of running in a session of its own with no stdin."""
     cmd = args.get("CommandLine") or args.get("command")
     if not cmd:
         return "Error: CommandLine required"
@@ -254,10 +272,18 @@ def tool_run_command(args: dict, workspace: Path) -> str:
     # Output goes to files, not pipes: a child left running in the background (`server &` without a redirect)
     # kept a pipe open, so the call waited the whole timeout and returned no output.  Its own session, so a
     # timeout ends the whole group (`a && b`, pipelines), not only the shell; what was printed is kept.
+    log_note = ""
     try:
-        with tempfile.TemporaryFile() as fo, tempfile.TemporaryFile() as fe:
-            proc = subprocess.Popen(str(cmd), shell=True, cwd=cwd, stdin=subprocess.DEVNULL, stdout=fo, stderr=fe,
-                                    start_new_session=True)
+        if _LEAVES_RUNNING.search(str(cmd)):
+            RUN_LOG_DIR.mkdir(parents=True, exist_ok=True)
+            stem = RUN_LOG_DIR / time.strftime("cmd-%Y%m%d-%H%M%S")
+            fo, fe = open(f"{stem}-{os.getpid()}.out", "w+b"), open(f"{stem}-{os.getpid()}.err", "w+b")
+            log_note = f"\n[What it left running writes on to {fo.name} and {fe.name}]"
+        else:
+            fo, fe = tempfile.TemporaryFile(), tempfile.TemporaryFile()
+        with fo, fe:
+            proc = subprocess.Popen(str(cmd), shell=True, cwd=cwd, stdin=None if interactive else subprocess.DEVNULL,
+                                    stdout=fo, stderr=fe, start_new_session=not interactive)
             try:
                 code = proc.wait(timeout=RUN_COMMAND_TIMEOUT_S)
             except subprocess.TimeoutExpired:
@@ -267,10 +293,7 @@ def tool_run_command(args: dict, workspace: Path) -> str:
                     pass
                 proc.wait()
                 code = None
-            fo.seek(0)
-            fe.seek(0)
-            stdout = fo.read().decode("utf-8", errors="replace")
-            stderr = fe.read().decode("utf-8", errors="replace")
+            stdout, stderr = _read_back(fo), _read_back(fe)
         out = []
         if stdout:
             out.append(stdout)
@@ -278,7 +301,7 @@ def tool_run_command(args: dict, workspace: Path) -> str:
             out.append(f"Stderr:\n{stderr}")
         out.append(f"[Command exited with code {code}]" if code is not None
                    else f"Error: Command timed out after {RUN_COMMAND_TIMEOUT_S:.0f}s (ended; its output so far is above)")
-        return "\n".join(out).strip()
+        return "\n".join(out).strip() + log_note
     except Exception as e:
         return f"Error running command: {e}"
 

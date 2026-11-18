@@ -660,7 +660,7 @@ def interactive_loop(workspace: Path, url: str, api_key: str, initial_mode: str 
             elif prompt.startswith("!"):
                 cmd = prompt[1:].strip()
                 if cmd:
-                    out = _cli().tool_run_command({"CommandLine": cmd}, workspace)
+                    out = _cli().tool_run_command({"CommandLine": cmd}, workspace, interactive=True)   # keeps the tty
                     print(f"\n{out}\n")
                 continue
 
