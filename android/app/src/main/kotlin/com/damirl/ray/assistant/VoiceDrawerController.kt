@@ -49,7 +49,7 @@ class VoiceDrawerController(private val context: Context, private val scope: Cor
         private const val NO_SPEECH_RETRIES = 1
     }
 
-    private val networkClient = NetworkClient.shared
+    private val networkClient = NetworkClient.shared.also { it.watchNetwork(context) }   // a new Wi-Fi drops a LAN route
     private val chatRepository = RayChatRepository(networkClient)
     // runs Ray's phone tools during a turn; nothing else does with the phone locked and away from home
     private val phoneRelay by lazy {

@@ -1,5 +1,8 @@
 package com.damirl.ray.network
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.SystemClock
 import android.util.Log
 import com.damirl.ray.BuildConfig
@@ -87,8 +90,14 @@ class NetworkClient(
         /** True when [body] (the /v1/ray/proof JSON) carries the right proof for [nonce]; compared in constant time. */
         fun proofMatches(apiKey: String, nonce: String, body: String?): Boolean {
             if (apiKey.isBlank() || body.isNullOrBlank()) return false
-            val got = runCatching { JSONObject(body).optString("proof", "") }.getOrDefault("")
-            return got.isNotEmpty() && MessageDigest.isEqual(got.toByteArray(), lanProof(apiKey, nonce).toByteArray())
+            val want = lanProof(apiKey, nonce).toByteArray()
+            val got = runCatching {
+                val o = JSONObject(body)
+                val list = o.optJSONArray("proofs")            // a server with several keys: one proof each
+                (if (list != null) (0 until list.length()).map { list.optString(it, "") } else emptyList()) +
+                    o.optString("proof", "")
+            }.getOrDefault(emptyList())
+            return got.any { it.isNotEmpty() && MessageDigest.isEqual(it.toByteArray(), want) }
         }
 
         fun newNonce(): String {
@@ -120,6 +129,33 @@ class NetworkClient(
         .connectTimeout(4, TimeUnit.SECONDS)
         .readTimeout(4, TimeUnit.SECONDS)
         .build()
+
+    // the network the LAN was proven on: a proof holds only there.  Another network (a café's Wi-Fi with a host at the
+    // same IP) needs its own, or the relay kept polling that host with the key, and the page there was trusted
+    @Volatile private var connectivity: ConnectivityManager? = null
+    @Volatile private var provenOn: Network? = null
+
+    /** Watch the phone's default network (once; any context): a LAN route proven on another network is dropped. */
+    @Synchronized
+    fun watchNetwork(context: Context) {
+        if (connectivity != null) return
+        val cm = context.applicationContext.getSystemService(ConnectivityManager::class.java) ?: return
+        val ok = runCatching {
+            cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) = forgetLanUnlessOn(network)
+                override fun onLost(network: Network) = forgetLanUnlessOn(null)
+            })
+        }.isSuccess
+        if (ok) connectivity = cm
+    }
+
+    private fun forgetLanUnlessOn(network: Network?) {
+        if (_currentRoute.value is NetworkRoute.Lan && (network == null || network != provenOn)) {
+            Log.d(TAG, "Network changed: the LAN route is proven again before it is used")
+            probedAt = 0L
+            _currentRoute.value = NetworkRoute.Offline
+        }
+    }
 
     private val _currentRoute = MutableStateFlow<NetworkRoute>(NetworkRoute.Offline)
     val currentRoute: StateFlow<NetworkRoute> = _currentRoute.asStateFlow()
@@ -167,6 +203,7 @@ class NetworkClient(
         if (apiKey.isBlank()) return Probe(false, 0, "no key to check it with")
         val nonce = newNonce()
         val started = SystemClock.elapsedRealtime()
+        val probedOn = connectivity?.activeNetwork
         val call = lanProbeClient.newCall(Request.Builder().url("${lanUrl.trimEnd('/')}/v1/ray/proof?nonce=$nonce").get().build())
         return suspendCancellableCoroutine { cont ->
             cont.invokeOnCancellation { call.cancel() }
@@ -178,6 +215,7 @@ class NetworkClient(
                 override fun onResponse(call: Call, response: Response) {
                     response.use {
                         val ok = it.isSuccessful && proofMatches(apiKey, nonce, it.body?.string())
+                        if (ok) provenOn = probedOn
                         cont.resume(Probe(ok, SystemClock.elapsedRealtime() - started,
                             if (ok) "HTTP ${it.code}, proof ok" else "HTTP ${it.code}, not this server"))
                     }

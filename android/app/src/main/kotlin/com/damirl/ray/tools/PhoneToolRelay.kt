@@ -77,6 +77,10 @@ class HttpPhoneRelayLink(
     override fun pending(): PhoneToolCall? {
         if (network.currentRoute.value is NetworkRoute.Offline) {
             probeIfNeeded()
+        } else if (network.currentRoute.value is NetworkRoute.Lan) {
+            // the key goes to the LAN address in clear every poll: a LAN route is proven again once a minute
+            // (ensureRoute), not trusted until a request fails
+            runBlocking { network.ensureRoute() }
         }
         return try {
             val request = network.newAuthenticatedRequestBuilder(PENDING_PATH).get().build()
@@ -136,6 +140,7 @@ class PhoneToolRelay(
         @Synchronized
         fun ensureBackgroundRelay(context: Context) {
             val appCtx = context.applicationContext
+            NetworkClient.shared.watchNetwork(appCtx)
             PhoneClipboardManager.ensureListener(appCtx)
             if (bgJob?.isActive == true) return
             val relay = PhoneToolRelay(

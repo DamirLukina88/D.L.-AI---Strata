@@ -32,6 +32,14 @@ class LanProofTest {
     }
 
     @Test
+    fun aServerWithSeveralKeysIsProvenByAnyOfThem() {
+        val nonce = NetworkClient.newNonce()
+        val body = """{"proof": "${NetworkClient.lanProof("k-one", nonce)}", "proofs": ["${NetworkClient.lanProof("k-one", nonce)}", "${NetworkClient.lanProof(key, nonce)}"]}"""
+        assertTrue(NetworkClient.proofMatches(key, nonce, body))
+        assertFalse(NetworkClient.proofMatches("k-three", nonce, body))
+    }
+
+    @Test
     fun onlyTheExactOriginsAreTrusted() {
         val lan = StrataOrigins.originFor("http://192.168.1.10:8080")
         val remote = StrataOrigins.originFor("https://ray.example.org")
