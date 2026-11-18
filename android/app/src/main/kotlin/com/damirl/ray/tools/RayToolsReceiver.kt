@@ -49,7 +49,7 @@ class RayToolsReceiver : BroadcastReceiver() {
                 Thread {
                     try {
                         val result = PhoneTools(context).execute(tool, args)
-                        Log.d(TAG, "Tool $tool from adb: ${result.take(80)}")
+                        Log.d(TAG, "Tool $tool from adb: ${result.length} chars")   // not the text: a 2FA code went to logcat
                     } catch (e: Exception) {
                         Log.e(TAG, "Error executing tool from broadcast: $tool", e)
                     } finally {

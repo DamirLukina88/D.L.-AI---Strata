@@ -118,20 +118,23 @@ class RayChatRepository(private val networkClient: NetworkClient) {
                 val request = networkClient.newAuthenticatedRequestBuilder("/v1/ray/history?session=$session")
                     .get()
                     .build()
-                val response = networkClient.okHttpClient.newCall(request).execute()
-                if (response.isSuccessful) {
-                    val body = response.body?.string() ?: "{}"
-                    val root = json.parseToJsonElement(body).jsonObject
-                    val msgsArray = root["messages"]?.jsonArray
-                    msgsArray?.mapNotNull { el ->
-                        val obj = el.jsonObject
-                        val role = obj["role"]?.jsonPrimitive?.content ?: "user"
-                        val content = obj["content"]?.jsonPrimitive?.content ?: ""
-                        if (content.isNotBlank()) ChatMessage(role, content) else null
-                    } ?: emptyList()
-                } else {
-                    Log.w(TAG, "Failed to fetch history: HTTP ${response.code}")
-                    emptyList()
+                // closed after use (it was never closed); a message whose content is a list of parts (not a string)
+                // is skipped instead of throwing, which emptied the whole history
+                networkClient.okHttpClient.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val body = response.body?.string() ?: "{}"
+                        val root = json.parseToJsonElement(body).jsonObject
+                        val msgsArray = root["messages"]?.jsonArray
+                        msgsArray?.mapNotNull { el ->
+                            val obj = el as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+                            val role = (obj["role"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "user"
+                            val content = (obj["content"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: ""
+                            if (content.isNotBlank()) ChatMessage(role, content) else null
+                        } ?: emptyList()
+                    } else {
+                        Log.w(TAG, "Failed to fetch history: HTTP ${response.code}")
+                        emptyList()
+                    }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Error fetching session history", e)
