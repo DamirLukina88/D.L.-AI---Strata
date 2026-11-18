@@ -10586,8 +10586,10 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            // a STOP that arrived between requests is stale (a GEN / GENI line had it cleared as it was queued)
-            if (line.rfind("GEN ", 0) != 0 && line.rfind("GENI ", 0) != 0) stop_req.store(false);
+            // a STOP that arrived between requests is stale.  A GEN / GENI line had it cleared as it was queued (one
+            // sent after it is for it); a BGEN, rewritten to GEN above, is cleared here as before: in --batch a BGEN can
+            // be queued while another slot's admission is being stopped, so the reader must not clear it then
+            if (admit_slot >= 0 || (line.rfind("GEN ", 0) != 0 && line.rfind("GENI ", 0) != 0)) stop_req.store(false);
             err.clear();
             // Disk sessions: SAVE <path> | RESTORE <path>, between requests (the path runs to the end of the line,
             // UTF-8).  The file holds what a parked conversation holds (conversation_file.hpp).  Answers: SAVED /
