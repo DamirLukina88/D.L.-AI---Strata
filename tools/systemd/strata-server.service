@@ -21,7 +21,7 @@ RestartSec=5s
 KillMode=mixed
 TimeoutStopSec=15
 # STRATA_API_KEY and the other keys (README step 2)
-EnvironmentFile=%h/.config/dl-ai/secrets.env
+EnvironmentFile=-%h/.config/dl-ai/secrets.env
 Environment=STRATA_WORKSPACE_DIR=%h/DL-AI-workspace
 Environment=STRATA_DROP_CACHE_ON_EXIT=1
 

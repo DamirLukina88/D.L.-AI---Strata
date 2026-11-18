@@ -64,6 +64,14 @@ class StrataSh(unittest.TestCase):
         self.assertIn("--user stop strata-server.service", calls)
         self.assertFalse((self.state / "active").exists())
 
+    def test_stop_cancels_a_restart_that_is_pending(self):
+        # round 2: between a crash and Restart=always's restart the unit is not active; stop said "not running"
+        # and systemd started it again 5 s later
+        (self.state / "unit").touch()
+        rc, out, calls = self.run_sh("stop")
+        self.assertIn("not running", out)
+        self.assertIn("--user stop strata-server.service", calls)
+
     def test_start_uses_the_unit_when_there_is_one(self):
         (self.state / "unit").touch()
         rc, out, calls = self.run_sh("start")

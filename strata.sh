@@ -71,7 +71,9 @@ start() {
     wait_ready pidfile
 }
 
-wait_ready() {                                  # unit: the systemd unit is running it; pidfile: our nohup child
+# unit: the systemd unit is running it; pidfile: our nohup child.  Readiness is asked on $PORT: a unit whose run
+# script uses another port needs PORT=<that port> ./strata.sh start
+wait_ready() {
     waited=0
     while [ "$waited" -lt "$START_TIMEOUT" ]; do
         if [ "$1" = unit ]; then
@@ -97,9 +99,16 @@ wait_ready() {                                  # unit: the systemd unit is runn
 }
 
 stop() {
+    was_active=""
     if unit_known && systemctl --user is-active --quiet "$UNIT"; then
         echo "Stopping Strata ($UNIT) ..."
         systemctl --user stop "$UNIT"
+        was_active=1
+    elif unit_known; then
+        # not active, but maybe between a crash and its restart (Restart=always, 5 s): stopping cancels that
+        systemctl --user stop "$UNIT" 2>/dev/null
+    fi
+    if [ -n "$was_active" ]; then
         p=$(pid)                                # a copy started by hand beside it
         if [ -z "$p" ]; then
             end_leftovers
@@ -191,7 +200,8 @@ case "$1" in
     status) status ;;
     logs)
         # the unit's output goes to the journal; strata-server.out is only the nohup start's
-        if unit_known; then journalctl --user -u "$UNIT" -f; else tail -f "$OUT"; fi
+        if unit_known && systemctl --user is-active --quiet "$UNIT"; then journalctl --user -u "$UNIT" -f
+        else tail -f "$OUT"; fi                 # a model started by name (./strata.sh start q2_0) runs from nohup
         ;;
     *) echo "Usage: $0 {start [model]|stop|restart|status|select|logs}" >&2; exit 2 ;;
 esac

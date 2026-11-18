@@ -1871,6 +1871,9 @@ def verify_sha256(s: Path, size: int, sha: str, own: bool = False) -> None:
         return
     have = s.stat().st_size if s.exists() else -1
     if have != size:
+        if own:                                        # --gguf-dir: setup downloads nothing there
+            fail(f"{s.name} is {have:,} bytes; the published file is {size:,}",
+                 "it may be cut short or another version; your file was left as it is. Copy the whole published file into the folder")
         fail(f"{s.name} is {have:,} bytes, not {size:,}", "delete it and run setup again (the download restarts)")
     say(f"  checking {s.name} (SHA-256, {size / 1e9:.1f} GB) ...")
     h = hashlib.sha256()
