@@ -111,3 +111,18 @@ class Context7Call(unittest.TestCase):
         script = f"import sys\nfor i, line in enumerate(sys.stdin):\n    if i == 1:\n        print({reply!r}, flush=True)\n"
         with mock.patch.object(impl, "CONTEXT7_CMD", [sys.executable, "-c", script]):
             self.assertEqual(impl.call_context7_mcp_raw("get-library-docs", {}), "docs here")
+
+
+class ViewFileImage(unittest.TestCase):
+    """view_file said "shown to you as an image" for a picture outside the workspace, which is never attached."""
+
+    def test_inside_is_shown_outside_says_so(self):
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            ws, other = Path(a), Path(b)
+            (ws / "in.png").write_bytes(b"\x89PNG")
+            (other / "out.png").write_bytes(b"\x89PNG")
+            with mock.patch.dict(impl.os.environ, {"STRATA_WORKSPACE_DIR": ""}):
+                self.assertIn("shown to you as an image", impl.tool_view_file({"AbsolutePath": str(ws / "in.png")}, ws))
+                out = impl.tool_view_file({"AbsolutePath": str(other / "out.png")}, ws)
+        self.assertIn("not shown", out)
+        self.assertNotIn("[[image:", out)

@@ -73,6 +73,15 @@ def tool_view_file(args: dict, workspace: Path) -> str:
         return f"Error: File not found: {p}"
     # an image is shown to the model as an image (tool_result_images), not read as text (that gave raw JPEG bytes)
     if p.suffix.lower() in IMAGE_EXTENSIONS:
+        # only an image inside the workspace (or the server's workspace root) is attached (dl_media's
+        # tool_result_images); one elsewhere was "shown to you" in words only, and the model described a picture
+        # it never saw
+        roots = [Path(workspace).resolve()] + ([Path(os.environ["STRATA_WORKSPACE_DIR"]).expanduser().resolve()]
+                                               if os.environ.get("STRATA_WORKSPACE_DIR") else [])
+        rp = p.resolve()
+        if not any(rp == r or r in rp.parents for r in roots):
+            return (f"Image file {p} ({p.stat().st_size // 1024} KB) is outside the workspace, so it is not shown to "
+                    "you. Copy it into the workspace (run_command cp) and view that copy.")
         return f"Image file {p} ({p.stat().st_size // 1024} KB): shown to you as an image. [[image: {p}]]"
     try:
         lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
