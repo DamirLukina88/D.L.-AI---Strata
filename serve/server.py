@@ -308,10 +308,16 @@ IMAGE_PAD = "<|image_pad|>"
 RAY_LAN_PROOF_PATH = "/v1/ray/proof"                # the Android app's check that the LAN address is this server
 
 
-def ray_lan_proof(api_key: str, nonce: str, peer_addr: str, headers) -> tuple[int, dict]:
-    """(status, body) for GET /v1/ray/proof (Handler._ray_lan_proof): the HMAC of the nonce, for a client on the LAN."""
-    if not api_key:
+def ray_lan_proof(api_key, nonce: str, peer_addr: str, headers, host_names=None) -> tuple[int, dict]:
+    """(status, body) for GET /v1/ray/proof (Handler._ray_lan_proof): the HMAC of the nonce, for a client on the LAN.
+    Several keys ("k1,k2" or a list): one proof each, in "proofs" (the app checks its own among them)."""
+    keys = key_list(api_key)
+    if not keys:
         return 404, {"error": {"message": "this server has no API key to prove"}}
+    # the Host check parse_request skips when a key is set: a DNS-rebinding page in a LAN browser is same-origin
+    # under its own name and could read proofs to relay to a host posing as this one elsewhere (the app asks by IP)
+    if host_names is not None and not host_allowed(headers.get("Host"), host_names):
+        return 403, {"error": {"message": "the LAN proof is answered only for this server's own names"}}
     try:
         peer = ipaddress.ip_address(peer_addr)
         peer = getattr(peer, "ipv4_mapped", None) or peer
@@ -322,7 +328,8 @@ def ray_lan_proof(api_key: str, nonce: str, peer_addr: str, headers) -> tuple[in
         return 403, {"error": {"message": "the LAN proof is only answered on the LAN"}}
     if not re.fullmatch(r"[0-9a-f]{32,128}", nonce or ""):
         return 400, {"error": {"message": "nonce: 32-128 lowercase hex digits"}}
-    return 200, {"proof": hmac.new(api_key.encode(), b"strata-lan-proof:" + nonce.encode(), hashlib.sha256).hexdigest()}
+    proofs = [hmac.new(k.encode(), b"strata-lan-proof:" + nonce.encode(), hashlib.sha256).hexdigest() for k in keys]
+    return 200, {"proof": proofs[0], "proofs": proofs}
 RAY_CHAT_SILENCE_S = 900.0                          # /v1/ray/chat: how long Ray's session may say nothing
 WORKSPACE_DIR = Path(os.environ.get("STRATA_WORKSPACE_DIR", str(Path.cwd() / "workspace"))).resolve()
 
@@ -1952,7 +1959,7 @@ def make_handler(svc: Service):
             for a client on the LAN itself: through the tunnel (cloudflared connects from 127.0.0.1) anyone could ask
             for an answer to relay."""
             nonce = (parse_qs(urlsplit(self.path).query).get("nonce") or [""])[0]
-            self._json(*ray_lan_proof(svc.api_key, nonce, self.client_address[0], self.headers))
+            self._json(*ray_lan_proof(svc.api_key, nonce, self.client_address[0], self.headers, svc.host_names))
 
         def _ray_chat(self, req: dict):
             """Bridge /v1/ray/chat to the shared CLI session daemon (dl_sessiond) so Ray has access to

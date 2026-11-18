@@ -54,6 +54,20 @@ class LanProof(unittest.TestCase):
         self.assertEqual(self.proof(headers={"CF-Connecting-IP": "1.2.3.4"})[0], 403)
         self.assertEqual(server.ray_lan_proof("", NONCE, "192.168.1.20", {})[0], 404)
 
+    def test_a_rebinding_name_gets_nothing_an_ip_does(self):
+        names = {"localhost", "127.0.0.1"}
+        self.assertEqual(server.ray_lan_proof(KEY, NONCE, "192.168.1.20", {"Host": "evil.example:8080"}, names)[0], 403)
+        self.assertEqual(server.ray_lan_proof(KEY, NONCE, "192.168.1.20", {"Host": "192.168.1.2:8080"}, names)[0], 200)
+
+    def test_several_keys_give_a_proof_each(self):
+        for keys in ("k-one,k-two", ["k-one", "k-two"]):
+            with self.subTest(keys=keys):
+                status, body = server.ray_lan_proof(keys, NONCE, "192.168.1.20", {})
+                self.assertEqual(status, 200)
+                want = [hmac.new(k.encode(), b"strata-lan-proof:" + NONCE.encode(), hashlib.sha256).hexdigest()
+                        for k in ("k-one", "k-two")]
+                self.assertEqual(body["proofs"], want)
+
     def test_a_bad_nonce_is_refused(self):
         for nonce in ("", "short", "Z" * 40):
             with self.subTest(nonce=nonce):
