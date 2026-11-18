@@ -211,8 +211,10 @@ def tool_replace_file_content(args: dict, workspace: Path) -> str:
         except UnicodeDecodeError:
             return (f"Error: {p} is not UTF-8 text; replace_file_content would change its other bytes. "
                     "Edit it with run_command (sed, python) instead.")
-        if "\r\n" in orig and target not in orig:     # the model writes \n; the file's lines end in \r\n
-            target = target.replace("\r\n", "\n").replace("\n", "\r\n")
+        if "\r\n" in orig:                             # the model writes \n; the file's lines end in \r\n
+            if target not in orig:
+                target = target.replace("\r\n", "\n").replace("\n", "\r\n")
+            # always, also when the target matched as written: "one" -> "one\nhalf" left a bare \n among \r\n
             replacement = replacement.replace("\r\n", "\n").replace("\n", "\r\n")
         if target not in orig:
             if STAND_IN.search(target):

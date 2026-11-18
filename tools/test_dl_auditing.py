@@ -229,7 +229,7 @@ class TestGateReadsTheRealPath(unittest.TestCase):
     def test_still_free(self):
         from tools.dl_auditing import classify_command
         for cmd in ("echo x > /tmp/a.txt", "echo > /dev/null", "echo e 2> /dev/stderr", "cat a > out.txt",
-                    "cp a sub/b", "ls .."):
+                    "cp a sub/b", "ls ..", "cp -r ../lib .", "rsync -a ../src/ ./src/"):   # into the workspace
             with self.subTest(cmd=cmd):
                 self.assertIsNone(classify_command(cmd, self.ws))
 

@@ -712,7 +712,7 @@ _DESTRUCTIVE_PATTERNS = [
     ("pipes a download into a shell", re.compile(r"\b(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:ba|z|fi)?sh\b")),
     ("removes packages", re.compile(r"\bpacman\s+-R|\bapt(?:-get)?\s+(?:remove|purge)|\bpip\d?\s+uninstall\b|\bnpm\s+(?:uninstall|rm)\s+-g")),
 ]
-_PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?|\b(?:mv|cp|rsync|ln)\s+(?:-\S+\s+)*\S+\s+)(['"]?)(~?/[^\s'";&|)]*|\.\.(?:/[^\s'";&|)]*)?)\1""")
+_PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?|\b(?:mv|cp|rsync|ln)\s+(?:-\S+\s+)*(?!-)\S+\s+)(['"]?)(~?/[^\s'";&|)]*|\.\.(?:/[^\s'";&|)]*)?)\1""")
 
 
 def _outside(path_str: str, workspace: Path) -> bool:

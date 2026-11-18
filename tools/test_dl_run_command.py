@@ -90,6 +90,10 @@ class ReplaceFileContent(unittest.TestCase):
         self.assertIn("Successfully", out)
         self.assertEqual(data, b"line1\r\nLINE2\r\nLINE3\r\n")
 
+    def test_a_one_line_target_in_a_crlf_file_gets_crlf_replacement_lines(self):
+        out, data = self.edit(b"one\r\ntwo\r\n", "one", "one\nhalf")
+        self.assertEqual(data, b"one\r\nhalf\r\ntwo\r\n")
+
     def test_lf_stays_lf(self):
         out, data = self.edit(b"a\nb\n", "b", "B")
         self.assertEqual(data, b"a\nB\n")
