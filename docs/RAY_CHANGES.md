@@ -104,3 +104,6 @@ could go upstream as its own pull request.
   this PC; built for HIP, not run): the MMQ row tables lacked upstream #5108's over-read margin (prefill.cpp has it);
   `--hybrid-rows` below 8 sent a hybrid layer's 2-8 token batch to `k_group` over the slot-sized blob array; an
   all-NaN logits row picked token id 0x7fffffff, which then indexed the embedding table.
+- Ported from upstream (`719b733e0`, #1540), found by the HIP ctest here: the Q2_0 signed-zero guard in
+  `dq_q2_0` covered only gfx1012 / gfx1151 / gfx1200 / gfx1201, and ROCm 7.2.4 on this RX 7600 XT (gfx1102) folds a
+  negative scale times +0 to +0 too (`hip_q2_zero`: 128 of 1024 values wrong). It is on for every HIP target now.
