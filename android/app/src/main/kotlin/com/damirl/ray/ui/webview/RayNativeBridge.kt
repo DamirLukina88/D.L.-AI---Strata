@@ -268,15 +268,27 @@ class RayNativeBridge(
      */
     @JavascriptInterface
     fun executeToolAsync(name: String, argsJson: String = "{}", callId: String = "") {
-        val trustedNow = StrataOrigins.isTrusted(pageUrl)            // decided on the page's own call, not later
+        val askedFrom = pageUrl
+        val trustedNow = StrataOrigins.isTrusted(askedFrom)          // decided on the page's own call, not later
         Thread({
-            val res = if (trustedNow) executeTool(name, argsJson, callId) else
-                JSONObject().put("tool", name).put("callId", callId)
-                    .put("result", "Error: refused (not the Strata server)").toString()
+            // anything a tool throws is its answer: on this plain thread an uncaught exception ended the whole app
+            // (the synchronous call turned it into a JS error the page caught)
+            val res = try {
+                if (trustedNow) executeTool(name, argsJson, callId) else
+                    JSONObject().put("tool", name).put("callId", callId)
+                        .put("result", "Error: refused (not the Strata server)").toString()
+            } catch (t: Throwable) {
+                Log.e(TAG, "executeToolAsync: $name failed", t)
+                fallbackJson(name, callId, "Error executing tool: ${t.javaClass.simpleName}: ${t.message ?: ""}")
+            }
             webViewProvider()?.let { wv ->
                 wv.post {
-                    wv.evaluateJavascript("window.__rayToolDone && window.__rayToolDone(" +
-                        "${JSONObject.quote(callId)}, ${JSONObject.quote(res)});", null)
+                    // only to the page that asked: a slow tool (the camera, a sensor monitor) can outlive a reload,
+                    // and a page loaded since then may not be the Strata server's
+                    if (pageUrl == askedFrom && StrataOrigins.isTrusted(pageUrl)) {
+                        wv.evaluateJavascript("window.__rayToolDone && window.__rayToolDone(" +
+                            "${JSONObject.quote(callId)}, ${JSONObject.quote(res)});", null)
+                    }
                 }
             }
         }, "ray-bridge-tool").start()
