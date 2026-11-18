@@ -4,9 +4,13 @@ import sys
 import json
 import subprocess
 
+# pinned: @latest ran whatever npm published next, unreviewed, on every call (1.0.0 is the version in use)
+MWG_PACKAGE = "modern-web-guidance@1.0.0"
+
+
 def search_guidance(query: str) -> str:
     try:
-        cmd = ["npx", "-y", "modern-web-guidance@latest", "search", query]
+        cmd = ["npx", "-y", MWG_PACKAGE, "search", query]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
         raw = res.stdout.strip()
         lines = [l for l in raw.splitlines() if not l.startswith("npm notice")]
@@ -29,7 +33,7 @@ def search_guidance(query: str) -> str:
 
 def retrieve_guidance(guide_id: str) -> str:
     try:
-        cmd = ["npx", "-y", "modern-web-guidance@latest", "retrieve", guide_id]
+        cmd = ["npx", "-y", MWG_PACKAGE, "retrieve", guide_id]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
         raw = res.stdout.strip()
         lines = [l for l in raw.splitlines() if not l.startswith("npm notice")]

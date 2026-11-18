@@ -9,13 +9,18 @@ Exposes:
 
 import sys
 import json
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 WRAPPER = str(Path.home() / ".gemini" / "config" / "plugins" / "science" / "skills" / "literature_search_europepmc" / "scripts" / "europepmc_api.py")
 
 def run_cmd(subcmd: str, arg: str) -> str:
-    out_file = "/tmp/epmc_out.json"
+    # a file of its own per call: the fixed /tmp/epmc_out.json raced between calls, and another local user could
+    # plant it
+    tmp_dir = tempfile.mkdtemp(prefix="epmc-")         # 0700, ours alone
+    out_file = os.path.join(tmp_dir, "out.json")
     try:
         cmd = ["/usr/bin/uv", "run", WRAPPER, subcmd, arg, "--output", out_file]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -27,6 +32,9 @@ def run_cmd(subcmd: str, arg: str) -> str:
         return f"Error: No output generated. Stderr: {res.stderr}"
     except Exception as e:
         return f"Europe PMC query error: {e}"
+    finally:
+        Path(out_file).unlink(missing_ok=True)
+        os.rmdir(tmp_dir)
 
 def _reply(req, res):
     """Write one JSON-RPC reply: nothing for a notification, an empty result for ping, and isError on a tool
