@@ -205,7 +205,7 @@ def run_benchmark():
     output_data = {
         "benchmark": "PromptEncoder_Prefix_Caching",
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "tokenizer_pack": pack_dir,
+        "tokenizer_pack": Path(pack_dir).name,      # the folder's name: the full path is this PC's data disk
         "turns": results_summary,
         "total_full_ms": round(total_full_ms, 2),
         "total_cached_ms": round(total_cached_ms, 2),
