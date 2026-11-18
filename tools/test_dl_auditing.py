@@ -247,6 +247,18 @@ class TestWiderSecretPatterns(unittest.TestCase):
         "Connection String with Password": "postgres://" + "admin:hunter2x" + "@db.example.org/app",
     }
 
+    def test_templates_and_stock_defaults_are_not_secrets(self):
+        # round 2: these blocked writing and editing ordinary settings files
+        from tools.dl_auditing import scan_secrets_in_text
+        jwt_io = ("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" + ".eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0"
+                  "IjoxNTE2MjM5MDIyfQ" + ".SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c")
+        for text in ('f"postgresql://{user}:{password}@{host}/{db}"',
+                     "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/app",
+                     "amqp://" + "guest:guest@localhost:5672/", "mongodb://" + "root:example@mongo:27017/",
+                     "https://" + "user:pass@host", "postgres://" + "app:password123@db/app", jwt_io):
+            with self.subTest(text=text):
+                self.assertTrue(scan_secrets_in_text(f"url = {text}\n", "settings.py")[0])
+
     def test_each_is_caught(self):
         from tools.dl_auditing import scan_secrets_in_text
         for label, value in self.SAMPLES.items():

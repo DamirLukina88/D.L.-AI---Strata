@@ -173,7 +173,12 @@ SECRET_PATTERNS = [
     ("JWT", re.compile(r"\b(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})")),
     ("Stripe Live Key", re.compile(r"\b([rs]k_live_[A-Za-z0-9]{16,})")),
     ("npm Token", re.compile(r"\b(npm_[A-Za-z0-9]{36})")),
-    ("Connection String with Password", re.compile(r"\b([a-z][a-z0-9+.-]*://[^\s/:@]+:[^\s/@]{3,}@[^\s/]+)")),
+    # a real-looking password only: 8+ characters with a digit, no template ({user}, ${VAR}, %s, <pw>) and no stock
+    # default (guest:guest, root:example, user:pass) - those are in every docker-compose.yml and settings.py, and
+    # flagging them blocked editing such files
+    ("Connection String with Password", re.compile(
+        r"\b([a-z][a-z0-9+.-]*://[^\s/:@{}$%<>]+:(?!(?:password|passw0rd|changeme|secret|example|admin)\d*@)"
+        r"(?=[^\s/@]*\d)[^\s/@{}$%<>]{8,}@[^\s/]+)")),
 ]
 
 # The real values on this PC: every value in secrets.env, secret-looking environment variables and the Google sign-in
@@ -266,6 +271,9 @@ def find_known_secrets(text: str) -> List[str]:
 SAFE_SECRET_WHITELIST = {
     "your_api_key_here", "sk-placeholder", "test_key", "mock_key",
     "000000000000000000000000", "xxxxxxxxxxxxxxxxxxxxxxxx",
+    # jwt.io's example token, quoted in docs and tests everywhere
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ"
+    ".SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
 }
 
 
