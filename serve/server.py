@@ -305,6 +305,7 @@ IM_END = "<|im_end|>"
 IMAGE_PAD = "<|image_pad|>"
 
 
+RAY_ROUTES = ("/api/code/session", "/v1/ray/", "/api/workspace", "/api/phone/")   # need a key from off this PC
 RAY_LAN_PROOF_PATH = "/v1/ray/proof"                # the Android app's check that the LAN address is this server
 
 
@@ -695,10 +696,25 @@ def make_handler(svc: Service):
             return key_matches(given, svc.api_key)
 
         def _authorized(self) -> bool:
+            if not svc.api_key and self.path.startswith(RAY_ROUTES) and not self._from_loopback() \
+                    and self._access_claims() is None:
+                # no key: anyone may use the model (as upstream, with the startup warning), but Ray's own routes run
+                # a shell, read and write the workspace and reach the phone, so they are this computer's alone
+                self._json(401, {"error": {"type": "authentication_error", "message":
+                                 "Ray's session, workspace and phone routes need an api_key when the server is "
+                                 "reached from another computer"}})
+                return False
             if not svc.api_key or self._given_key() or self._access_claims() is not None:
                 return True
             self._json(401, {"error": {"type": "authentication_error", "message": "missing or wrong API key"}})
             return False
+
+        def _from_loopback(self) -> bool:
+            try:
+                ip = ipaddress.ip_address(self.client_address[0])
+                return (getattr(ip, "ipv4_mapped", None) or ip).is_loopback
+            except (ValueError, IndexError, TypeError):
+                return False
 
         def _session_events(self, name: str):
             """D.L. AI Code tab: the shared CLI session's live events (tools/dl_sessiond.py) as Server-Sent Events.
