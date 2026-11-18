@@ -57,6 +57,23 @@ class BoundaryArgs(unittest.TestCase):
         self.assertIn("ScanSecrets", out)
 
 
+class ListenersLeftByACrashedTurn(unittest.TestCase):
+    """execute_agent_loop stops what detached commands left listening only when it ends normally; an engine error
+    that escaped skipped it, and the next turn's reset of bg_listeners forgot those servers."""
+
+    def test_the_next_turn_stops_them_first(self):
+        import dl_cli
+        ctx = {"user_text": "hi", "bg_listeners": [("http.server", 8000, 1234, 0.0)]}
+        seen = []
+        with mock.patch.object(dl_cli, "stop_left_listeners", side_effect=lambda c, e: seen.append(list(c["bg_listeners"]))), \
+                mock.patch.object(dl_cli, "chat_turn_in_context", side_effect=RuntimeError("stop here")):
+            with self.assertRaises(RuntimeError):
+                dl_cli.execute_agent_loop([{"role": "system", "content": "s"}, {"role": "user", "content": "hi"}],
+                                          "http://127.0.0.1:9", "", Path(tempfile.gettempdir()),
+                                          session_context=ctx)
+        self.assertEqual(seen[:1], [[("http.server", 8000, 1234, 0.0)]])
+
+
 if __name__ == "__main__":
     unittest.main()
 
