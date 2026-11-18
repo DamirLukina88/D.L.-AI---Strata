@@ -679,10 +679,6 @@ class ReadingProgress(unittest.TestCase):
         self.assertLess(events.index(prog[-1]), next(i for i, e in enumerate(events) if e["type"] == "text"))
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
-
 class LastParallelRoundStaysWhole(unittest.TestCase):
     """The newest round with 2+ parallel tool calls ran past `stop` (len - 2): _units cut it there, so a trim or a
     handoff removed the assistant message with the calls and kept their results, answering nothing."""
@@ -710,3 +706,7 @@ class LastParallelRoundStaysWhole(unittest.TestCase):
         for a, b in cli._units(msgs, 2, len(msgs) - 2):
             if msgs[a].get("tool_calls"):
                 self.assertTrue(b == len(msgs) or msgs[b].get("role") != "tool", (a, b))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

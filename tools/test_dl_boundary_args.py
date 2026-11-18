@@ -74,10 +74,6 @@ class ListenersLeftByACrashedTurn(unittest.TestCase):
         self.assertEqual(seen[:1], [[("http.server", 8000, 1234, 0.0)]])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class SwitchWorkspaceGate(unittest.TestCase):
     def test_home_or_root_asks_a_project_does_not(self):
         ws = Path(tempfile.gettempdir())
@@ -107,3 +103,7 @@ class SmallChecks(unittest.TestCase):
         src = (Path(__file__).resolve().parent / "dl_auditing.py").read_text(encoding="utf-8")
         self.assertIn("passed = res.returncode == 0", src)
         self.assertNotIn('"PASSED" in res.stdout or', src)
+
+
+if __name__ == "__main__":
+    unittest.main()

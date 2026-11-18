@@ -205,10 +205,6 @@ class TestKnownValues(unittest.TestCase):
             A.SECRETS_ENV, A.WIKI_PRIVATE_ENV, A.GOOGLE_TOKEN_DIR = saved
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestGateReadsTheRealPath(unittest.TestCase):
     """The outside-workspace check compared the text with /tmp/ before resolving it, so /tmp/../home/u/.bashrc
     asked nothing; /bin/rm and \\rm got past the rm pattern; a relative ../../x target was never looked at."""
@@ -266,3 +262,7 @@ class TestWiderSecretPatterns(unittest.TestCase):
                 ok, err = scan_secrets_in_text(f"value = {value}\n", "notes.md")
                 self.assertFalse(ok)
                 self.assertIn(label, err)
+
+
+if __name__ == "__main__":
+    unittest.main()

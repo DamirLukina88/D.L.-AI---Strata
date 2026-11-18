@@ -6065,10 +6065,6 @@ def tearDownModule():
             pass
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class PrepareCancelled(unittest.TestCase):
     """#1999: a client that leaves while its pictures are prepared gives the turn up and encodes nothing more."""
 
@@ -6136,3 +6132,7 @@ class PrepareCancelled(unittest.TestCase):
             ids, _, _ = svc.prepare(self.msgs(), None, {}, cancel=threading.Event())
             self.assertEqual(ids.count(ByteTokenizer().encode("<|image_pad|>", parse_special=True)[0]), 6)
             svc.embeddings.path.unlink(missing_ok=True)
+
+
+if __name__ == "__main__":
+    unittest.main()

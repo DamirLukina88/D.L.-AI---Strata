@@ -65,10 +65,6 @@ class RunCommand(unittest.TestCase):
         self.assertIn("exited with code 3", out)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ReplaceFileContent(unittest.TestCase):
     """replace_file_content read with universal newlines and errors="replace": a CRLF file came back LF, a byte that
     was not UTF-8 became U+FFFD, and an empty TargetContent put the replacement at the top of the file."""
@@ -148,3 +144,7 @@ class ViewFileImage(unittest.TestCase):
                 out = impl.tool_view_file({"AbsolutePath": str(other / "out.png")}, ws)
         self.assertIn("not shown", out)
         self.assertNotIn("[[image:", out)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -656,10 +656,6 @@ class HostCompilers(unittest.TestCase):
             self.assertIn("-DCMAKE_CUDA_HOST_COMPILER=g++-14", defs, target)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CalibrateWithModel(unittest.TestCase):
     """#2036: --calibrate --model X tunes model X (it used to fall through to a plain re-setup); a model that is not
     installed is an error that says so; --calibrate with --setup or --check says it does nothing."""
@@ -705,3 +701,7 @@ class CalibrateWithModel(unittest.TestCase):
             self.assertEqual(setup.calibration_targets(ps, "Q2_0", None), [ps[1]])
             self.assertEqual(setup.calibration_targets(ps, "Q2_0", "qwen"), [ps[1]])
             self.assertEqual(setup.calibration_targets(ps, "Q4_K_M", None), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

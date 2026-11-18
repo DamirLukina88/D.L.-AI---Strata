@@ -426,10 +426,6 @@ class RayKeepsToJjMemory(Store):
         self.assertIn("Git is not yours", block)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class VaultWrites(unittest.TestCase):
     """env set/rm read, changed and rewrote private/.env with no lock (40 sets at once kept 2 keys), created it with
     the umask's 0644 before chmodding it, and left private/ at 0755 in a store that init had not made."""
@@ -454,3 +450,7 @@ class VaultWrites(unittest.TestCase):
             self.assertEqual(dl_memory.env_cmd(root, "rm", "KEY_3")[0], 0)
             self.assertNotIn("KEY_3", [line.split()[0] for line in dl_memory.env_cmd(root, "list")[1].splitlines()])
             self.assertEqual([p.name for p in env.parent.iterdir() if ".tmp" in p.name], [])
+
+
+if __name__ == "__main__":
+    unittest.main()

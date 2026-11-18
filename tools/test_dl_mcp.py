@@ -820,10 +820,6 @@ class PhoneActionsNeedWords(unittest.TestCase):
         self.assertIsNone(self.r.words_refusal("phone__phone_get_last_photo", {}, "show the last photo you took"))
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
-
 class NoNoticeUnderTheRegistryLock(unittest.TestCase):
     """enable() sent "starting ..." and _evict's "-name (tool limit)" while holding the registry lock. The session's
     notify takes Session.lock, and the daemon calls state() -> status() (the registry lock) while holding
@@ -868,3 +864,7 @@ class NoNoticeUnderTheRegistryLock(unittest.TestCase):
             other.join(5)
         self.assertFalse(turn.is_alive() or other.is_alive(), "deadlock between the registry and session locks")
         self.assertEqual(list(reg.enabled), ["b"])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

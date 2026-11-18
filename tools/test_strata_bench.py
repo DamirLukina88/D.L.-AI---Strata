@@ -340,10 +340,6 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(B.main(["--url", "http://127.0.0.1:9", "--quiet"]), 2)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class AuditFixes20261118(unittest.TestCase):
     """The config key expert_profile_save (turned into --expert-profile-save at start) was not stripped; a lazy
     config's server never reported loaded to wait_ready; the engine outlived a server ended while loading."""
@@ -370,3 +366,7 @@ class AuditFixes20261118(unittest.TestCase):
         B.end_process_tree(proc, 5)
         _time.sleep(0.3)
         self.assertFalse(any(k.is_running() and k.status() != psutil.STATUS_ZOMBIE for k in kids))
+
+
+if __name__ == "__main__":
+    unittest.main()

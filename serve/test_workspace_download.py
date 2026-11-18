@@ -112,10 +112,6 @@ class WorkspaceDownload(unittest.TestCase):
         self.assertEqual(status, 404)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class WorkspaceUploadContent(unittest.TestCase):
     """A JSON upload's content is text or a list of byte values: bytes() of a number zero-filled that many bytes
     (10**10: 10 GB of RAM taken from the engine), and -1 or a non-string text raised with no answer."""
@@ -136,3 +132,7 @@ class WorkspaceUploadContent(unittest.TestCase):
         self.assertEqual(self.upload({"filename": "a.txt", "content": "hi"})[0], 200)
         self.assertEqual(self.upload({"filename": "b.bin", "content": [104, 105]})[0], 200)
         self.assertEqual((server.WORKSPACE_DIR / "b.bin").read_bytes(), b"hi")
+
+
+if __name__ == "__main__":
+    unittest.main()
