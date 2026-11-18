@@ -43,20 +43,29 @@ class RayNativeBridge(
         return false
     }
 
+    // the drawer and the native mic stop the web app's voice through this before they listen
+    private val stopWebSpeech: () -> Unit = {
+        webViewProvider()?.let { wv ->
+            wv.post { wv.evaluateJavascript("if (typeof TTSController !== 'undefined' && TTSController.speaking) TTSController.stop();", null) }
+        }
+    }
+    // Ray's mouth in the page starts and stops with his voice: the page's TTSController only knows what it sent
+    private val onSounding: (VoiceOutput.Piece?) -> Unit = { piece ->
+        webViewProvider()?.let { wv ->
+            val args = if (piece == null) "null, 0" else "${JSONObject.quote(piece.text)}, ${piece.seconds}"
+            wv.post { wv.evaluateJavascript("if (typeof TTSController !== 'undefined') TTSController.voicePiece($args);", null) }
+        }
+    }
+
+    /** The WebView is gone (RayWebView's dispose): VoiceOutput's static callbacks held it, and the Activity, for good. */
+    fun detach() {
+        if (VoiceOutput.stopWebSpeech === stopWebSpeech) VoiceOutput.stopWebSpeech = null
+        if (VoiceOutput.onSounding === onSounding) VoiceOutput.onSounding = null
+    }
+
     init {
-        // the drawer and the native mic stop the web app's voice through this before they listen
-        VoiceOutput.stopWebSpeech = {
-            webViewProvider()?.let { wv ->
-                wv.post { wv.evaluateJavascript("if (typeof TTSController !== 'undefined' && TTSController.speaking) TTSController.stop();", null) }
-            }
-        }
-        // Ray's mouth in the page starts and stops with his voice: the page's TTSController only knows what it sent
-        VoiceOutput.onSounding = { piece ->
-            webViewProvider()?.let { wv ->
-                val args = if (piece == null) "null, 0" else "${JSONObject.quote(piece.text)}, ${piece.seconds}"
-                wv.post { wv.evaluateJavascript("if (typeof TTSController !== 'undefined') TTSController.voicePiece($args);", null) }
-            }
-        }
+        VoiceOutput.stopWebSpeech = stopWebSpeech
+        VoiceOutput.onSounding = onSounding
         try {
             speechManager = SpeechRecognitionManager(context)
         } catch (e: Exception) {

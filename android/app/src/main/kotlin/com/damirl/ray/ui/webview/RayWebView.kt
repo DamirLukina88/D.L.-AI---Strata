@@ -39,6 +39,7 @@ fun RayWebView(
 ) {
     val context = LocalContext.current
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+    var bridgeInstance by remember { mutableStateOf<RayNativeBridge?>(null) }
     var lastLoadedUrl by remember { mutableStateOf("") }
     var filePathCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
 
@@ -106,6 +107,7 @@ fun RayWebView(
                     webViewProvider = { this }
                 )
                 addJavascriptInterface(bridge, "RayAndroid")
+                bridgeInstance = bridge
 
                 webChromeClient = object : WebChromeClient() {
                     override fun onShowFileChooser(
@@ -213,6 +215,8 @@ fun RayWebView(
 
     DisposableEffect(Unit) {
         onDispose {
+            bridgeInstance?.detach()
+            bridgeInstance = null
             webViewInstance?.destroy()
             webViewInstance = null
         }
