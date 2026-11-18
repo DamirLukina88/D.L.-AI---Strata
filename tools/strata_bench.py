@@ -672,6 +672,10 @@ def without_profile_save(cfg: dict) -> tuple[dict, bool]:
     server quits, and a benchmark's short prompts must not replace the user's calibrated one.  -> (config, removed)."""
     args = list(cfg.get("args") or [])
     out, i, removed = [], 0, False
+    # the config key too: serve/engine_args.learned_profile_args turns "expert_profile_save" into the flag at start
+    keys = {k: v for k, v in cfg.items() if k not in ("expert_profile_save", "expert_profile_save_every")}
+    if len(keys) != len(cfg):
+        cfg, removed = keys, True
     while i < len(args):
         if args[i] == "--expert-profile-save":
             i, removed = i + 2, True
@@ -690,9 +694,13 @@ def start_server(cfg_path: Path, port: int, gpu: str | None, log_path: Path):
         cfg = None
     if isinstance(cfg, dict):
         safe, removed = without_profile_save(cfg)
-        if removed:                       # a copy beside the log: the user's config file is not touched
+        if removed:
             print("Note: the bench starts this model without --expert-profile-save, so its short prompts do not "
                   "overwrite your saved expert profile.", file=sys.stderr)
+        lazy = safe.get("lazy_load") is True
+        if lazy:                          # a lazy engine starts at the first request, and wait_ready waits for loaded
+            safe = {**safe, "lazy_load": False}
+        if removed or lazy:               # a copy beside the log: the user's config file is not touched
             tmp = log_path.with_suffix(".config.json")
             tmp.write_text(json.dumps(safe), encoding="utf-8")
             cfg_path = tmp
@@ -721,11 +729,32 @@ def wait_ready(base: str, key: str, proc, timeout: float, log=print) -> bool:
 def stop_server(proc):
     if proc is None or proc.poll() is not None:
         return
+    end_process_tree(proc, 90)
+
+
+def end_process_tree(proc, wait_s: float) -> None:
+    """The server and what it started: server.py takes SIGTERM only once the engine has loaded, and Linux has no
+    job object, so a server ended while loading (or killed after the wait) left its engine holding RAM and VRAM."""
+    try:
+        import psutil
+        kids = psutil.Process(proc.pid).children(recursive=True)
+    except Exception:
+        kids = []
     proc.terminate()
     try:
-        proc.wait(90)
+        proc.wait(wait_s)
     except subprocess.TimeoutExpired:
         proc.kill()
+        proc.wait(10)
+    for k in kids:
+        try:
+            k.terminate()
+            k.wait(10)
+        except Exception:
+            try:
+                k.kill()
+            except Exception:
+                pass
 
 
 def log_excerpt(path: Path, limit: int = 80) -> list[str]:
@@ -837,7 +866,7 @@ def render_readme(res: dict) -> str:
           f"timed. One warm-up chat and a 1K prompt are discarded first. Every prompt starts with a unique tag, so the conversation "
           f"cache cannot help the fresh-prompt tests.", "",
           f"- short chat: the three questions of `tools/ab_engine.py`, up to {CHAT_MAX_TOKENS} new tokens, {p['runs']} runs",
-          f"- 4K / 16K{' / 32K' if 'prompt' in res['results'] and '32K' in res['results']['prompts'] else ''} prompts: generated word lists sized by a calibration request, "
+          f"- 4K / 16K{' / 32K' if 'prompts' in res['results'] and '32K' in res['results']['prompts'] else ''} prompts: generated word lists sized by a calibration request, "
           f"{LONG_MAX_TOKENS} new tokens, {p['runs']} fresh prompts each",
           f"- agent session: system prompt and four tools, then {AGENT_TURNS} turns that each add about {AGENT_WORDS} words of a project file "
           f"and continue from the model's own earlier answers (the way agent clients resend a conversation), {AGENT_MAX_TOKENS} new tokens per turn, "

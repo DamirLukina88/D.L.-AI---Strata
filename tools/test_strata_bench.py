@@ -342,3 +342,31 @@ class ReportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AuditFixes20261118(unittest.TestCase):
+    """The config key expert_profile_save (turned into --expert-profile-save at start) was not stripped; a lazy
+    config's server never reported loaded to wait_ready; the engine outlived a server ended while loading."""
+
+    def test_the_profile_config_key_is_stripped_too(self):
+        cfg = {"args": ["--x"], "expert_profile_save": "/p/profile.bin", "expert_profile_save_every": 50}
+        safe, removed = B.without_profile_save(cfg)
+        self.assertTrue(removed)
+        self.assertNotIn("expert_profile_save", safe)
+        self.assertNotIn("expert_profile_save_every", safe)
+        self.assertEqual(safe["args"], ["--x"])
+
+    def test_the_process_tree_ends(self):
+        import subprocess
+        import sys as _sys
+        import time as _time
+        proc = subprocess.Popen([_sys.executable, "-c",
+                                 "import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', "
+                                 "'import time; time.sleep(60)']); time.sleep(60)"])
+        _time.sleep(0.8)
+        import psutil
+        kids = psutil.Process(proc.pid).children(recursive=True)
+        self.assertTrue(kids)
+        B.end_process_tree(proc, 5)
+        _time.sleep(0.3)
+        self.assertFalse(any(k.is_running() and k.status() != psutil.STATUS_ZOMBIE for k in kids))

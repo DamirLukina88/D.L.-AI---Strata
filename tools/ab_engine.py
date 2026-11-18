@@ -82,6 +82,8 @@ def main() -> int:
     ap.add_argument("--starts", type=int, default=0, help="only start each arm N times with one short answer")
     ap.add_argument("--out", default="", help="folder for the engine logs (default: the temp folder)")
     a = ap.parse_args()
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from strata_bench import end_process_tree, without_profile_save   # here: strata_bench imports this module
     base = json.loads(Path(a.config).read_text())
     arms = []
     for s in a.arms:
@@ -89,8 +91,9 @@ def main() -> int:
         env = dict(x.split("=", 1) for x in kv.split(",") if x)
         arms.append((name, env))
     reqs = [] if a.no_chat else [(f"chat{i}", p) for i, p in enumerate(PROMPTS)]
-    if a.prompt_tokens:                                   # a vocabulary word is about 1.6 tokens with its space
-        reqs += [(f"p{n}", long_prompt(max(16, int(int(n) / 1.6)), seed=int(n))) for n in a.prompt_tokens.split(",")]
+    if a.prompt_tokens:                                   # a word of long_prompt is about 1.07 tokens with its space
+        # (measured with the q2_0 tokenizer: 1.6 made "p2048" 1,369 tokens and "p8192" 5,405)
+        reqs += [(f"p{n}", long_prompt(max(16, int(int(n) / 1.07)), seed=int(n))) for n in a.prompt_tokens.split(",")]
     elif not a.no_chat:
         reqs.append(("long", long_prompt(a.long_words)))
     if a.starts:
@@ -102,7 +105,7 @@ def main() -> int:
     for rnd in range(a.starts or a.rounds):
         order = arms if rnd % 2 == 0 else arms[::-1]
         for name, env in order:
-            cfg = dict(base)
+            cfg, _ = without_profile_save(dict(base))  # every arm's QUIT saved a profile the next arm started from
             e = dict(env)
             if "exe" in e:
                 cfg["exe"] = e.pop("exe")
@@ -158,19 +161,16 @@ def main() -> int:
                 out.flush()
                 print(f"round {rnd} {name}: FAILED {type(ex).__name__}: {ex}", flush=True)
             finally:
-                proc.terminate()
-                try:
-                    proc.wait(60)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
+                end_process_tree(proc, 60)         # and its engine: one left loading overlapped the next arm
                 time.sleep(5)
     print("\nmedians over rounds:")
     for tag, _ in reqs:
         cells = []
         for name, _ in arms:
             rows = res[name].get(tag, [])
-            d = statistics.median([x["decode"] for x in rows if x["decode"]]) if rows else float("nan")
-            pr = statistics.median([x["prompt"] for x in rows if x["prompt"]]) if rows else float("nan")
+            dv, pv = [x["decode"] for x in rows if x["decode"]], [x["prompt"] for x in rows if x["prompt"]]
+            d = statistics.median(dv) if dv else float("nan")      # median([]) raised and lost the whole table
+            pr = statistics.median(pv) if pv else float("nan")
             cells.append(f"{name}: decode {d:6.1f}  prompt {pr:7.1f}")
         print(f"  {tag:6s} | " + " | ".join(cells))
     return 0
