@@ -142,3 +142,20 @@ console.log(`All ${n} web app function tests passed.`);
   assert.ok(SRC.slice(cp, cp + 500).includes('cp.closest(".st-code")'), "a code block's copy button copies the block");
   console.log("  ok sensor polling, dialog backdrop clicks and code-block copy");
 })().catch((e) => { console.error(e); process.exitCode = 1; });
+
+// phone tools from the page: RayAndroid.executeTool blocked the page's thread for as long as a tool ran (a camera shot,
+// a sensor monitor of up to an hour); executeToolAsync answers later through window.__rayToolDone
+(async () => {
+  const win = {};
+  const tctx = vm.createContext({window: win, setTimeout, Map, Promise, JSON, String});
+  win.RayAndroid = {executeToolAsync(tool, args, id) {
+    setTimeout(() => win.__rayToolDone(id, JSON.stringify({tool, callId: id, result: `ran ${tool}`})), 10);
+  }};
+  vm.runInContext("const phoneToolWaiters = new Map();\n" + cut("runPhoneToolAsync") + "\nthis.run = runPhoneToolAsync;", tctx);
+  const both = await Promise.all([tctx.run({id: "a", tool: "phone_camera_snap", args: {}}),
+                                  tctx.run({id: "b", tool: "phone_get_battery", args: {}})]);
+  assert.deepStrictEqual(both.map((r) => JSON.parse(r).result), ["ran phone_camera_snap", "ran phone_get_battery"]);
+  win.RayAndroid = {executeToolAsync() { throw new Error("gone"); }};
+  assert.ok((await tctx.run({id: "c", tool: "x"})).includes("gone"));
+  console.log("  ok phone tools run through executeToolAsync without blocking the page");
+})().catch((e) => { console.error(e); process.exitCode = 1; });

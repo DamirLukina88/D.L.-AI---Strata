@@ -657,6 +657,25 @@ function closeOpenDrawer() {
 }
 
 let phoneBridgePollerRunning = false;
+// RayAndroid.executeToolAsync answers through window.__rayToolDone(callId, json): one promise per call id
+const phoneToolWaiters = new Map();
+function runPhoneToolAsync(p) {
+  return new Promise((resolve) => {
+    phoneToolWaiters.set(p.id, resolve);
+    window.__rayToolDone = (id, res) => {
+      const done = phoneToolWaiters.get(id);
+      phoneToolWaiters.delete(id);
+      if (done) done(res);
+    };
+    try {
+      window.RayAndroid.executeToolAsync(p.tool, JSON.stringify(p.args || {}), p.id);
+    } catch (e) {
+      phoneToolWaiters.delete(p.id);
+      resolve("Error executing tool: " + (e && e.message ? e.message : String(e)));
+    }
+  });
+}
+
 function startPhoneCompanionBridge() {
   if (phoneBridgePollerRunning) return;
   phoneBridgePollerRunning = true;
@@ -678,7 +697,10 @@ function startPhoneCompanionBridge() {
           const p = data.pending;
           let toolRes = "";
           try {
-            if (typeof window.RayAndroid.executeTool === "function") {
+            if (typeof window.RayAndroid.executeToolAsync === "function") {
+              // off the page's thread: the synchronous call froze the whole web app while a tool ran (up to an hour)
+              toolRes = await runPhoneToolAsync(p);
+            } else if (typeof window.RayAndroid.executeTool === "function") {
               toolRes = window.RayAndroid.executeTool(p.tool, JSON.stringify(p.args || {}), p.id);
             } else {
               toolRes = "Error: RayAndroid.executeTool unavailable";

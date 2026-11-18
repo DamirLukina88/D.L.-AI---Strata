@@ -261,6 +261,27 @@ class RayNativeBridge(
         return com.damirl.ray.tools.PhoneSensorManager.getLiveDashboardJson(context)
     }
 
+    /**
+     * [executeTool] on a worker thread; the answer goes to the page's window.__rayToolDone(callId, json).  A
+     * @JavascriptInterface call blocks the page's JS thread until it returns, and a tool can take seconds (the camera)
+     * to an hour (a sensor monitor): the whole web app froze for that long.
+     */
+    @JavascriptInterface
+    fun executeToolAsync(name: String, argsJson: String = "{}", callId: String = "") {
+        val trustedNow = StrataOrigins.isTrusted(pageUrl)            // decided on the page's own call, not later
+        Thread({
+            val res = if (trustedNow) executeTool(name, argsJson, callId) else
+                JSONObject().put("tool", name).put("callId", callId)
+                    .put("result", "Error: refused (not the Strata server)").toString()
+            webViewProvider()?.let { wv ->
+                wv.post {
+                    wv.evaluateJavascript("window.__rayToolDone && window.__rayToolDone(" +
+                        "${JSONObject.quote(callId)}, ${JSONObject.quote(res)});", null)
+                }
+            }
+        }, "ray-bridge-tool").start()
+    }
+
     @JavascriptInterface
     fun executeTool(name: String, argsJson: String = "{}", callId: String = ""): String {
         if (!trusted("executeTool")) {
