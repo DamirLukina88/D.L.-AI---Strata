@@ -63,15 +63,18 @@ class ListenersLeftByACrashedTurn(unittest.TestCase):
 
     def test_the_next_turn_stops_them_first(self):
         import dl_cli
-        ctx = {"user_text": "hi", "bg_listeners": [("http.server", 8000, 1234, 0.0)]}
-        seen = []
-        with mock.patch.object(dl_cli, "stop_left_listeners", side_effect=lambda c, e: seen.append(list(c["bg_listeners"]))), \
+        ctx = {"user_text": "hi", "bg_listeners": [("http.server", 8000, 1234, 0.0)],
+               "bg_listeners_text": "start the server and keep it running"}
+        seen, words = [], []
+        with mock.patch.object(dl_cli, "stop_left_listeners",
+                               side_effect=lambda c, e: (seen.append(list(c["bg_listeners"])), words.append(c["user_text"]))), \
                 mock.patch.object(dl_cli, "chat_turn_in_context", side_effect=RuntimeError("stop here")):
             with self.assertRaises(RuntimeError):
                 dl_cli.execute_agent_loop([{"role": "system", "content": "s"}, {"role": "user", "content": "hi"}],
                                           "http://127.0.0.1:9", "", Path(tempfile.gettempdir()),
                                           session_context=ctx)
         self.assertEqual(seen[:1], [[("http.server", 8000, 1234, 0.0)]])
+        self.assertEqual(words[0], "start the server and keep it running")    # that turn's words, not "hi"
 
 
 class SwitchWorkspaceGate(unittest.TestCase):
@@ -81,7 +84,8 @@ class SwitchWorkspaceGate(unittest.TestCase):
             with self.subTest(target=target):
                 self.assertIsNotNone(dl_boundary.approval_reason("switch_workspace", {"path": target}, ws))
         self.assertIsNone(dl_boundary.approval_reason("switch_workspace", {"path": str(Path.home() / "proj")}, ws))
-        for target in ("~/.ssh", "~/.config", "/etc", "/usr/local/bin"):      # round 2: one level down asked nothing
+        for target in ("~/.ssh", "~/.config", "/etc", "/usr/local/bin",      # round 2: one level down asked nothing
+                       "~/.config/systemd/user", "~/.config/dl-ai", "~/.local/bin"):   # round 3: and deeper
             with self.subTest(target=target):
                 self.assertIsNotNone(dl_boundary.approval_reason("switch_workspace", {"path": target}, ws))
 

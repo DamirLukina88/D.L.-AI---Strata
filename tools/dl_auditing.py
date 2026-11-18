@@ -178,7 +178,7 @@ SECRET_PATTERNS = [
     # flagging them blocked editing such files
     ("Connection String with Password", re.compile(
         r"\b([a-z][a-z0-9+.-]*://[^\s/:@{}$%<>]+:(?!(?:password|passw0rd|changeme|secret|example|admin)\d*@)"
-        r"(?=[^\s/@]*\d)[^\s/@{}$%<>]{8,}@[^\s/]+)")),
+        r"(?![^@\s]*%[sd(])(?=[^\s/@]*\d)(?:[^\s/@{}$%<>]|%[0-9A-Fa-f]{2}){8,}@[^\s/]+)")),   # %24 (an encoded $) yes, %s no
 ]
 
 # The real values on this PC: every value in secrets.env, secret-looking environment variables and the Google sign-in
@@ -712,7 +712,8 @@ _DESTRUCTIVE_PATTERNS = [
     ("pipes a download into a shell", re.compile(r"\b(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:ba|z|fi)?sh\b")),
     ("removes packages", re.compile(r"\bpacman\s+-R|\bapt(?:-get)?\s+(?:remove|purge)|\bpip\d?\s+uninstall\b|\bnpm\s+(?:uninstall|rm)\s+-g")),
 ]
-_PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?|\b(?:mv|cp|rsync|ln)\s+(?:-\S+\s+)*(?!-)\S+\s+)(['"]?)(~?/[^\s'";&|)]*|\.\.(?:/[^\s'";&|)]*)?)\1""")
+_PATH_ARG = re.compile(r"""(?:>>?\s*|\btee\s+(?:-a\s+)?|\b(?:mv|cp|rsync|ln)\s+(?:-\S+\s+)*(?!-)\S+\s+"""
+                       r"""|\b(?:mv|cp|ln|install)\b[^;&|\n]*?\s(?:-t\s*|--target-directory=))(['"]?)(~?/[^\s'";&|)]*|\.\.(?:/[^\s'";&|)]*)?)\1""")
 
 
 def _outside(path_str: str, workspace: Path) -> bool:

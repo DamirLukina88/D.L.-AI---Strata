@@ -217,7 +217,9 @@ class TestGateReadsTheRealPath(unittest.TestCase):
 
     def test_asks(self):
         from tools.dl_auditing import classify_command, classify_write
-        for cmd in ("echo x > /tmp/../etc/foo", "/bin/rm -rf ~/x", "\\rm -rf ~/x", "cp a ../../../../../../../etc/out"):
+        for cmd in ("echo x > /tmp/../etc/foo", "/bin/rm -rf ~/x", "\\rm -rf ~/x", "cp a ../../../../../../../etc/out",
+                    "cp -t ~/.config/systemd/user a.service", "ln -sf -t /usr/local/bin tool",
+                    "cp --target-directory=/etc x"):
             with self.subTest(cmd=cmd):
                 self.assertIsNotNone(classify_command(cmd, self.ws))
         self.assertIsNotNone(classify_write(Path("/tmp/../home/someone/.bashrc"), self.ws))
@@ -240,7 +242,7 @@ class TestWiderSecretPatterns(unittest.TestCase):
         "JWT": "eyJ" + "hbGciOiJIUzI1NiJ9" + "." + "eyJzdWIiOiIxMjM0NTY3ODkwIn0" + "." + "abcdefghijklmnop",
         "Stripe Live Key": "sk_" + "live_" + "A1b2C3d4E5f6G7h8I9",
         "npm Token": "npm_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8",
-        "Connection String with Password": "postgres://" + "admin:hunter2x" + "@db.example.org/app",
+        "Connection String with Password": "postgres://" + "app:Pa%24%24w0rd2024" + "@db.example.org/app",
     }
 
     def test_templates_and_stock_defaults_are_not_secrets(self):

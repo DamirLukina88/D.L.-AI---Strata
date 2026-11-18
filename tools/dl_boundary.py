@@ -4,6 +4,7 @@ Moved out of dl_cli.py without changes; see dl_cli.py for the entry point and th
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import re
 try:
     from .dl_common import (
@@ -57,15 +58,23 @@ def approval_reason(name: str, args: dict, workspace: Path) -> tuple[str, str] |
         # ~/.bashrc and the rest would no longer be asked about
         raw = str(args.get("path") or args.get("workspace") or "").strip()
         if raw:
-            np = Path(raw).expanduser()
-            np = (np if np.is_absolute() else workspace / np).resolve()
+            given = Path(raw).expanduser()
+            given = given if given.is_absolute() else workspace / given
+            np = given.resolve()
             home = Path.home().resolve()
             if np == home or np in home.parents:
                 return (f"{name} {np}", "makes the whole home folder the workspace (its writes are then not asked "
                                         "about)")
             # one level down: ~/.ssh, ~/.config (systemd units, secrets.env) or a system folder as the workspace
             # also made authorized_keys or a user service an unasked write
-            hidden = np.parent == home and np.name.startswith(".")
+            # any folder inside a hidden one under home (~/.config/systemd/user, ~/.config/dl-ai, ~/.local/bin), also
+            # as written before a symlink is followed out of home
+            def in_hidden(q: Path, h: Path) -> bool:
+                try:
+                    return q.relative_to(h).parts[:1] != () and q.relative_to(h).parts[0].startswith(".")
+                except ValueError:
+                    return False
+            hidden = in_hidden(np, home) or in_hidden(Path(os.path.normpath(given)), Path.home())
             system = any(np == Path(r) or Path(r) in np.parents for r in SYSTEM_ROOTS)
             if hidden or system:
                 return (f"{name} {np}", "makes a settings or system folder the workspace (its writes are then not "
