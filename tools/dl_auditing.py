@@ -743,10 +743,11 @@ _VALUE_LONG = {"--suffix", "--mode", "--owner", "--group", "--rsh", "--exclude",
 _SH_TOKEN = re.compile(r"""(?P<nl>\n)|(?P<ws>(?:[ \t\r\f\v]|\\\n)+)|(?P<comment>\#[^\n]*)
     |(?P<redir>\d*(?:&>>?|[<>]&(?P<fd>\d+-?|-)?|>>|>\||<<<|<<-?|[<>]))
     |(?P<op>;;|&&|\|\||[;&|()`])
-    |(?P<word>(?:[^\s'"\\;&|()<>`$\#]+|'[^']*'|"(?:[^"\\]|\\.)*"|\\.|\$\(\([^()]*\)\)|\$\([^()]*\)|\$\{[^{}]*\}|\$|['"\\]|\#)+)
+    |(?P<word>(?:[^\s'"\\;&|()<>`$\#]+|\$'(?:[^'\\]|\\.)*'|'[^']*'|"(?:[^"\\]|\\.)*"|\\.|\$\(\([^()]*\)\)|\$\([^()]*\)|\$\{[^{}]*\}|\$|['"\\]|\#)+)
     |(?P<other>.)""", re.X | re.S)
 # (a backslash-newline is a line continuation, not a word; an fd only after >& / <&, so >1.log is a file;
 # ${...} without braces inside, or an unclosed ${ rescanned to the end from every ${: 97 s on 1 MB)
+_CMD_SUBST = re.compile(r"'[^']*'()|\$\((?!\()([^()]*)\)")   # group 2: a $( ) body outside single quotes
 _DEQUOTE = re.compile(r"""'([^']*)'|"((?:[^"\\]|\\.)*)"|\\(.)""", re.S)
 
 
@@ -755,6 +756,7 @@ def _sh_segments(cmd: str, heredocs: bool = True) -> list[list[str]]:
     comments and redirects (with their target word) dropped.  A heredoc body is read line by line, each line on its
     own: its quotes are text and must not pair with a later line's (that hid a cp after `it's done`), but a body can
     run as commands (bash <<EOF, `cp ...` in it), and a wrongly seen heredoc must not hide what follows."""
+    cmd = cmd.replace("\\\n", "")         # a \-newline joins the lines, inside a word too (c\<newline>p is cp)
     segments, seg, skip_next = [], [], False
     heredoc, pending = None, None        # pending: the << delimiter word expected next; heredoc: (delimiter, strip tabs)
     pos, n = 0, len(cmd)
@@ -773,9 +775,15 @@ def _sh_segments(cmd: str, heredocs: bool = True) -> list[list[str]]:
                     eol = cmd.find("\n", pos)
                     line = cmd[pos:eol if eol >= 0 else n]
                     pos = (eol + 1) if eol >= 0 else n
-                    if (line.lstrip("\t") if tabs else line).rstrip("\r") == delim:
-                        break
+                    while pos < n and (len(line) - len(line.rstrip("\\"))) % 2:   # a \-newline joins the next line
+                        eol = cmd.find("\n", pos)
+                        line = line[:-1] + cmd[pos:eol if eol >= 0 else n]
+                        pos = (eol + 1) if eol >= 0 else n
+                    # read even the delimiter line: a << bash does not take for a heredoc (in `...`, in (( )))
+                    # left a line equal to the "delimiter" that runs
                     segments.extend(_sh_segments(line, heredocs=False))
+                    if (line.lstrip("\t") if tabs else line) == delim:   # exactly, as bash compares it
+                        break
         elif kind == "comment":
             continue                     # only at a word's start: a # inside a word is part of it
         elif kind == "redir":
@@ -788,7 +796,12 @@ def _sh_segments(cmd: str, heredocs: bool = True) -> list[list[str]]:
                                 (re.sub(r"\\(.)", r"\1", q.group(2)) if q.group(2) is not None else q.group(3)),
                                 m.group("word"))
             if pending is not None:
-                heredoc, pending = (word, pending == "<<-"), None
+                cr = len(cmd[pos:pos + 8]) - len(cmd[pos:pos + 8].lstrip("\r"))
+                heredoc, pending = (word + "\r" * cr, pending == "<<-"), None
+            # a command substitution inside the word ($(cp a /etc/b) in an echo or an assignment) runs: read it
+            for _, inner in _CMD_SUBST.findall(m.group("word")):
+                if inner:
+                    segments.extend(_sh_segments(inner, heredocs=False))
             if skip_next:
                 skip_next = False
                 continue
@@ -841,7 +854,8 @@ def _copy_args_target(name: str, args: list[str]) -> Optional[str]:
 
 def _copy_targets(cmd: str, depth: int = 0) -> list[str]:
     """Where each cp / mv / rsync / ln / install in a command line writes.  Linear in the line's length."""
-    if not any(c in cmd for c in _COPY_COMMANDS):
+    probe = re.sub(r"[\\'\"\n]", "", cmd)      # c''p, c\<newline>p and "c"p are cp to the shell
+    if not any(c in probe for c in _COPY_COMMANDS):
         return []
     out = []
     for seg in _sh_segments(cmd):

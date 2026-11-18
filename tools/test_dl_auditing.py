@@ -243,7 +243,11 @@ class TestGateReadsTheRealPath(unittest.TestCase):
                     "bash -lc 'cp a /etc/b'", "timeout 5s install a /etc/b",
                     # round 13: nothing after a heredoc or a here-string is hidden; a body is read line by line
                     "grep -q x <<< \"$v\"\ncp a /etc/b", "SIZE=$((1<<20))\ncp a /etc/b", "bash <<EOF\ncp a /etc/b\nEOF",
-                    "cat <<EOF\r\nhi\r\nEOF\r\ncp a /etc/b", "echo x >|/etc/x", "echo x >& /etc/x"):
+                    "cat <<EOF\r\nhi\r\nEOF\r\ncp a /etc/b", "echo x >|/etc/x", "echo x >& /etc/x",
+                    # round 14: an exact CRLF delimiter, the delimiter line, continuations, $(...), $'...', c''p
+                    "cat <<EOF\nhi\nEOF\r\nit's\nEOF\ncp a /etc/b\n'x'", "x=`cat <<\"cp a /etc/b\"`\ncp a /etc/b",
+                    "bash <<'EOF'\nc\\\np a /etc/b\nEOF", "echo $(cp a /etc/b)", "x=$(cp a /etc/b)",
+                    "echo $'\\''\ncp a /etc/b\necho '", "c''p a /etc/b", "c\\\np a /etc/b"):
             with self.subTest(cmd=cmd):
                 self.assertIsNotNone(classify_command(cmd, self.ws))
         self.assertIsNotNone(classify_write(Path("/tmp/../home/someone/.bashrc"), self.ws))
@@ -282,7 +286,7 @@ class TestGateReadsTheRealPath(unittest.TestCase):
                     "go install ./cmd/a ~/go/src/b", "npm-install a /opt/x",     # they only read those paths
                     "pip install " + "--no-deps " * 17, "rsync -av --exclude x src/ dst/", "rm -v x",
                     "git push origin main", "cp a b; ls -t /etc", "cp a b # to /etc/c", "cp a#b c",
-                    "cp a b 2>/tmp/err.log"):
+                    "cp a b 2>/tmp/err.log", "echo '$(cp a /etc/b)'"):
             with self.subTest(cmd=cmd):
                 self.assertIsNone(classify_command(cmd, self.ws))
 
