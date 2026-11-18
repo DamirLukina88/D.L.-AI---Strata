@@ -1,0 +1,29 @@
+# The Strata server (serve/server.py through the run script setup.sh wrote) as a user service; strata.sh start, stop,
+# restart and logs go through this unit when it is installed.  Install:
+#   cp tools/systemd/strata-server.service ~/.config/systemd/user/   (set the paths below to your checkout and run script)
+#   systemctl --user daemon-reload && systemctl --user enable --now strata-server
+[Unit]
+Description=Strata Inference Server (D.L. AI)
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+# never swap the engine: its experts in RAM are what make it fast; the kernel drops file cache instead
+MemorySwapMax=0
+# a unit keeps running when the kernel ends one of its processes; the engine is ended before the session daemon (100)
+OOMPolicy=continue
+OOMScoreAdjust=300
+Type=simple
+WorkingDirectory=%h/Strata
+ExecStart=%h/Strata/run-coder-iq1_m.sh
+Restart=always
+RestartSec=5s
+KillMode=mixed
+TimeoutStopSec=15
+# STRATA_API_KEY and the other keys (README step 2)
+EnvironmentFile=%h/.config/dl-ai/secrets.env
+Environment=STRATA_WORKSPACE_DIR=%h/DL-AI-workspace
+Environment=STRATA_DROP_CACHE_ON_EXIT=1
+
+[Install]
+WantedBy=default.target

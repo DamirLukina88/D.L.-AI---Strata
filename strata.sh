@@ -1,13 +1,17 @@
 #!/bin/sh
 # strata.sh - start, stop and check the local Strata server (this PC's Coder IQ1_M install).
 #
-#   ./strata.sh start     start in the background and wait until the model is loaded
+#   ./strata.sh start [model]  start in the background and wait until the model is loaded (model: part of a
+#                              run-*.sh name, e.g. q2_0, which runs that script instead of the unit)
 #   ./strata.sh stop      stop the server (the engine and image encoder end with it)
 #   ./strata.sh restart   stop, then start
 #   ./strata.sh status    running or not, and what /health says
+#   ./strata.sh select    list the installed run-*.sh model scripts
 #   ./strata.sh logs      follow the server output (Ctrl+C to leave)
 #
-# RUN_SCRIPT and PORT can be overridden from the environment, e.g. RUN_SCRIPT=./run-iq2_xs.sh ./strata.sh start
+# With the systemd user unit strata-server.service installed (tools/systemd/), start, stop, restart and logs go
+# through it (STRATA_UNIT names another).  RUN_SCRIPT and PORT can be overridden from the environment, e.g.
+# RUN_SCRIPT=./run-q2_0.sh ./strata.sh start
 
 cd "$(dirname "$0")" || exit 1
 [ -n "$RUN_SCRIPT" ] && CHOSEN=1               # a script from the environment runs as given, not through the unit
@@ -185,6 +189,9 @@ case "$1" in
         fi
         ;;
     status) status ;;
-    logs) tail -f "$OUT" ;;
+    logs)
+        # the unit's output goes to the journal; strata-server.out is only the nohup start's
+        if unit_known; then journalctl --user -u "$UNIT" -f; else tail -f "$OUT"; fi
+        ;;
     *) echo "Usage: $0 {start [model]|stop|restart|status|select|logs}" >&2; exit 2 ;;
 esac

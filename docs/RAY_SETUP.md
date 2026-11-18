@@ -24,8 +24,10 @@ Installing this fork on your own PC, and how to use it from the browser, the ter
    STRATA_CF_ACCESS_AUD=<the Access application's Audience tag>
    ```
 
-3. **Run the server and the session daemon as user services.** Point the server's unit at the secrets file with
-   `EnvironmentFile=%h/.config/dl-ai/secrets.env`. Then install the session daemon:
+3. **Run the server and the session daemon as user services.** `tools/systemd/strata-server.service` runs the
+   server (it reads the secrets file with `EnvironmentFile=%h/.config/dl-ai/secrets.env`; `strata.sh` start, stop,
+   restart and logs go through it once installed). Set the paths in both units to your checkout, then install them
+   (the server's the same way as the session daemon's):
 
    ```sh
    cp tools/systemd/dl-ai-sessiond.service ~/.config/systemd/user/
@@ -76,10 +78,10 @@ Installing this fork on your own PC, and how to use it from the browser, the ter
   | `/status`, `/health` | engine status, hardware health |
   | `/mcp`, `/mcp on\|off <server>` | list the MCP servers, turn one on or off |
   | `/mcp trust\|ask <server>` | stop or resume a server's approval card for this session (e.g. DeepSeek) |
-  | `/speak` | read the latest assistant message aloud |
+  | `/speak` | read the latest assistant message aloud (the web app only) |
   | `/exa <query>`, `/context7 <library>` | web search, library docs |
   | `/diff`, `/secrets`, `/test` | review the diff, scan for secrets, run tests |
-  | `/memory [search\|read\|lint\|digest\|backup\|undo] ...` | the shared memory store (`/wiki` is an alias) |
+  | `/memory [search\|history\|diff\|undo\|lint\|digest\|backup] ...` | the shared memory store (`/wiki` is an alias) |
   | `/remember [global\|project] <fact>`, `/recall <words>` | save a fact to the store, search it |
   | `/handoff` | write the handoff brief now and reset the conversation to it |
   | `/schedule` | list, add or remove scheduled jobs |

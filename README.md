@@ -47,8 +47,9 @@ system RAM. Your conversations stay at home.
 
 **Speed:** about **26–30 tokens per second** when chatting (about **33 tok/s** in coding-agent sessions), and up to
 **383 tokens per second** when reading a long prompt (a 32K prompt is read in 84 s). Both were measured on the
-RX 7600 XT above on 2026-11-13 and 2026-11-14 at a GPU setting of 2800 MHz / 198 W; since GPU crashes the card runs
-at 2500 MHz / 150 W and the numbers await a re-run. The full numbers are in [docs/RAY_SPEED.md](docs/RAY_SPEED.md).
+RX 7600 XT above on 2026-11-13 and 2026-11-14 at a GPU setting of 2800 MHz / 198 W. Since GPU crashes the card runs
+at 2500 MHz / 150 W; two runs there on 2026-11-16 gave 22.6–25.9 tok/s chatting, 28.9–33.5 tok/s in agent sessions and
+340–362 tok/s reading a 32K prompt. The full numbers are in [docs/RAY_SPEED.md](docs/RAY_SPEED.md).
 
 ## Quick start
 
@@ -61,8 +62,10 @@ You need Linux, a graphics card with 16 GB (AMD with ROCm, or NVIDIA), and 32 GB
 3. **Start the server and Ray's session** as user services:
 
    ```sh
-   cp tools/systemd/dl-ai-sessiond.service ~/.config/systemd/user/
-   systemctl --user enable --now dl-ai-sessiond
+   cp tools/systemd/strata-server.service tools/systemd/dl-ai-sessiond.service ~/.config/systemd/user/
+   # set the paths in both files to your checkout (and the server's to your run script), then:
+   systemctl --user daemon-reload
+   systemctl --user enable --now strata-server dl-ai-sessiond
    ```
 
 4. **Open** `http://127.0.0.1:8080` and say hello.
