@@ -77,7 +77,10 @@ reads `0.1.44.1+0.2.12-fixes`. The reviews live in the shared memory store (proj
   Linux for the server's own process (`mallopt`, as it is started by hand) and for the engine it starts, unless the
   variable is already set (`aeecf0f5d`, `serve/childenv.py`, `serve/test_childenv_arenas.py`). Upstream measured the
   server only (2-hour soak: RSS 312 MiB and +4.5 %/h by default, 252 MiB and +0.69 %/h with it; engine RSS the same
-  band). Neither the server's memory nor the engine's speed with it was measured on this PC.
+  band). Engine speed on this PC (2026-11-19, live server, coder IQ1_M, `tools/strata_bench.py --clients 4 --long`, one
+  run each, 96 first, then 2): `MALLOC_ARENA_MAX=96` (glibc's limit for 12 threads) against 2: chat decode 27.4 / 28.6
+  tok/s, prompt 4K 325.8 / 329.8, 16K 359.2 / 360.2, 32K 356.3 / 358.1 tok/s, agent decode 31.9 / 31.8, 4 clients 20.9 /
+  20.7 tok/s. No difference beyond the run-to-run spread, so the cap stays. The server's memory was not measured here.
 - **Audit, 2026-11-18:** the HIP ctest here failed `hip_q2_zero` (128 of 1024 Q2_0 half values +0 instead of -0 on
   this RX 7600 XT, gfx1102, ROCm 7.2.4): the signed-zero guard in `dq_q2_0` covered only gfx1012 on HIP < 7, gfx1151
   and gfx1200 / gfx1201. Upstream's `719b733e0` (#1540, in v0.1.45 and later), which keeps it on every HIP target, is
