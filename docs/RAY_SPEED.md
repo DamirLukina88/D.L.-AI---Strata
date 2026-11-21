@@ -62,6 +62,14 @@ The two runs differ by 5–16%; nothing the bench measures changed between them,
 start to the next. Against Column H at `2800 MHz` (4K / 16K / 32K: `346.8` / `381.1` / `379.7 tok/s`), prompt
 ingestion at `2500 MHz` is 4–11% slower; decode is inside the run-to-run spread.
 
+**Newest run** (2026-11-21, `2500 MHz` / `150 W`, ROCm 10.1 with Arch's `libamdhip64` as the HIP runtime, engine
+`0.1.44.1`, commit `71a5118d`, `tools/strata_bench.py --clients 4 --long` against the running server, 3 runs per test):
+chat decode **29.2 tok/s** median (`25.4–43.6`), chat first token `1.44 s`, 4K / 16K / 32K prompt ingestion `344.3` /
+`371.5` / `368.3 tok/s` (32K first token `87.1 s`), agent decode **33.7 tok/s** (`25.0–39.2`), agent turn first token
+`10.04 s`, conversation cache hit `67.6 %`, four clients `23.3 tok/s` in total. Against the same bench on ROCm 7.2.4 the
+day before (same engine and power setting), every figure is within 2%. One 32K prompt of seven froze that day
+(first full run, GPU idle during the freeze, cause unknown); the other six passed.
+
 The configuration these numbers were measured with combines Arm E, Arm F, Arm G and Column H: `STRATA_ADAPT_OVERLAP=1`,
 `STRATA_ADAPT_OVERLAP_RESIDENT=1`, `STRATA_ROUTE_TAIL_SKIP=7`, `STRATA_ROUTE_RESIDENT=0.5`, fusion and RDNA3 switches,
 WMMA prompt GEMMs (`STRATA_HIP_WMMA=1`), the gfx1102 SIMT QSA scorer (`STRATA_SELECT_SIMT=1`), Q8_0 hyper-connection weights
