@@ -1535,6 +1535,13 @@ bool load_control_vectors(const Options& o, const strata::core::ModelGeometry& g
                     err = path + ": " + t.name + " must be " + std::to_string((long long) N) + " f32";
                     return false;
                 }
+                // the tensor's offset comes from the file: check it before reading, as the other readers of
+                // tensor_data() do, so a truncated or damaged file is refused instead of read past its end
+                const uint64_t pl = f.file_size() > f.data_start() ? f.file_size() - f.data_start() : 0;
+                if (t.offset > pl || (uint64_t) N * sizeof(float) > pl - t.offset) {
+                    err = path + ": " + t.name + " is truncated";
+                    return false;
+                }
                 const float* src = reinterpret_cast<const float*>(f.tensor_data(t));
                 for (int64_t j = 0; j < N; ++j) data[(size_t) (l * N + j)] += scale * src[j];
                 have[(size_t) l] = true;
@@ -10367,6 +10374,14 @@ int main(int argc, char **argv) try {
                 continue;
             }
             const int64_t n = (int64_t) ids.size();
+            // before the image positions below: a GENI request writes one for every id into a table of
+            // max_context + 64 cells, so this check must come first.  max_new is compared without the sum, which
+            // overflows for a huge max_new
+            if (max_new > (int64_t) o.max_context - 8 - n) {
+                std::printf("ERR prompt (%lld tokens) + max_new (%lld) exceeds the context (%lld)\n", (long long) n,
+                            (long long) max_new, (long long) o.max_context);
+                continue;
+            }
             req_imgs.clear();
             if (geni && !o.vision) { std::printf("ERR this engine was started without --vision\n"); continue; }
             if (geni || !mrope_identity) {
@@ -10478,11 +10493,6 @@ int main(int argc, char **argv) try {
                 mrope_identity = !geni;
             }
             sp.embd_rows = geni ? row_ptr.data() : nullptr;
-            if (n + max_new + 8 > o.max_context) {
-                std::printf("ERR prompt (%lld tokens) + max_new (%lld) exceeds the context (%lld)\n", (long long) n,
-                            (long long) max_new, (long long) o.max_context);
-                continue;
-            }
             bool bad = false;
             for (int64_t t : ids) bad = bad || t < 0 || t >= n_vocab;
             if (bad) { std::printf("ERR a token id is outside the vocabulary\n"); continue; }
