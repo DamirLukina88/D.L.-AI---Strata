@@ -85,6 +85,30 @@ reads `0.1.44.1+0.2.12-fixes`. The reviews live in the shared memory store (proj
   this RX 7600 XT, gfx1102, ROCm 7.2.4): the signed-zero guard in `dq_q2_0` covered only gfx1012 on HIP < 7, gfx1151
   and gfx1200 / gfx1201. Upstream's `719b733e0` (#1540, in v0.1.45 and later), which keeps it on every HIP target, is
   ported.
+- **0.2.17 (2026-11-20), parser and server part, ported 2026-11-21:** `serve/frontend.py`'s output parser is
+  upstream's v0.2.17 copy again, with the fork's OpenAI-shape schema lookup kept. New in it: one stray backtick no longer
+  hides the tool calls after it (#4923, #5183); a call whose opener lost its `<` (`function=NAME>`) is recovered (#5648);
+  `<function_calls>`, bare `<invoke>` calls and a JSON object body are read for declared tools (#6022); a bare
+  `<function=NAME>` call in the reasoning is read (#5804); a quote right before `</think>` ends the thinking (#5605,
+  #5640, #6218); a value that holds `</parameter>` then `</function>` and more of a file stays whole (#5883); a nested
+  parameter pair survives a missing closer (#5756); a streamed indented `<function=` opener is held (#6138); a declared
+  number written `+10`, `010` or `.5` is the number (#4754). Above the parser: a `chat_template_kwargs` that is not an
+  object, a content or text part that is not a string or array, and a non-string Anthropic `thinking` are a 400 naming
+  the field (#6097, #6098, #6112); an Anthropic content block that is not an object is skipped (#6101). In the server:
+  an unexpected error in a request handler is a 500, not a dropped connection (#4757); a stop string on the token cap's
+  own token ends as `"stop"` (#4035); a non-streamed reply with no text and no call has content `""` (#5249); a JSON
+  array reply is not taken for the object inside it (#4755); the thinking budget is also read from
+  `thinking_token_budget` and `thinking_budget` (#3340); `GET /v1/models/{id}` answers one model or a 404
+  `model_not_found` (#5477, #5460) and the model row carries `max_model_len`, `context_length` and
+  `max_context_length` (#1882, #6116); the engine's ERR lines from the protocol pipe go into the engine log (#4197); the
+  cache figures drop to zero after the engine's #879 recovery clears every parked conversation (#3337); the picture
+  reader's work folder is made again when a temp cleaner removed it, and a running reader is restarted then (#3370,
+  #5755; systemd-tmpfiles can remove an old `/tmp/strata-vision-*` folder). Upstream's tests came with each; two are
+  adapted: the `all_cached` test is left out (this server has no such read), and a streamed structured failure before
+  the first data may be the fork's plain 502 instead of upstream's SSE error (#5633 is not ported). Not ported: a refused
+  tool call is not declared again from the history (#6120; it builds on #4663's history tools, which this server does
+  not have). The engine, setup, app and Terminal changes of 0.2.17 are not taken; the HIP fixes #6188 and #4408 apply to
+  this engine and wait for a rebuild with an A/B run.
 
 ## Community benchmark, 2026-11-01
 
