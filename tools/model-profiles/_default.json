@@ -1,0 +1,7 @@
+{
+ "note": "Ray's settings for every model (tools/dl_profile.py). A model's own file goes over this one; the environment goes over both.",
+ "settings": {
+  "DL_MCP_ROUTER_MODE": "rules",
+  "DL_ADVISOR": 1
+ }
+}

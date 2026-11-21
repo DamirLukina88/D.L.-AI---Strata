@@ -15,6 +15,7 @@ try:
     _switch,
     cli as _cli,
     dl_memory,
+    dl_profile,
     memory_store,
 )
 except ImportError:
@@ -22,6 +23,7 @@ except ImportError:
     _switch,
     cli as _cli,
     dl_memory,
+    dl_profile,
     memory_store,
 )
 try:
@@ -222,7 +224,7 @@ def in_session_handoff_diary(messages: list[dict], tools: list[dict] | None, ws:
     try:
         res = _cli().stream_chat_turn(
             messages, url, api_key, tools=tools or [], emit=lambda e: None, cancel=cancel,
-            effort=os.environ.get("DL_HANDOFF_EFFORT") or "low",
+            effort=dl_profile.env("DL_HANDOFF_EFFORT") or "low",
         )
         text = (res.get("content") or "").strip()
     except RuntimeError:
@@ -264,7 +266,7 @@ def generate_handoff_diary(messages: list[dict], ws: Path, url: str = "", api_ke
         res = _cli().stream_chat_turn(
             [{"role": "system", "content": HANDOFF_SYSTEM}, {"role": "user", "content": digest}],
             url, api_key, tools=[], emit=lambda e: None, cancel=cancel,
-            effort=os.environ.get("DL_HANDOFF_EFFORT") or "low",
+            effort=dl_profile.env("DL_HANDOFF_EFFORT") or "low",
         )
         text = (res.get("content") or "").strip()
     except RuntimeError:
@@ -439,7 +441,7 @@ def handoff_session(messages: list[dict], tools: list[dict] | None, limit: int, 
         growth = (before - base_tokens) if base_tokens > 0 else (
             estimate_prompt_tokens(messages[handoff_idx + 1:], tools) if handoff_idx is not None else before
         )
-        if growth < HANDOFF_MIN_GROWTH:
+        if growth < dl_profile.tuned("DL_HANDOFF_MIN_GROWTH", HANDOFF_MIN_GROWTH):
             return compact_history(messages, tools, limit, target, measured=measured, force=force)
 
     part = prev_part + 1

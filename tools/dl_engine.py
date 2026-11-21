@@ -19,6 +19,7 @@ try:
     C_RESET,
     _switch,
     cli as _cli,
+    dl_profile,
 )
 except ImportError:
     from dl_common import (
@@ -27,6 +28,7 @@ except ImportError:
     C_RESET,
     _switch,
     cli as _cli,
+    dl_profile,
 )
 try:
     from .dl_tools_schema import DL_TOOLS
@@ -119,10 +121,10 @@ def stream_chat_turn(messages: list[dict], url: str, api_key: str, tools: list[d
             return
         now = time.time()
         elapsed = now - t0
-        if elapsed < _cli().READING_SHOW_S:
+        if elapsed < dl_profile.tuned("DL_READING_SHOW_S", _cli().READING_SHOW_S, float):
             return
         # a progress chunk at most every 2 s; a bare keep-alive (no progress to tell) only after 10 s of nothing
-        turns_slow = elapsed >= _cli().READING_SLOW_S and not reading["slow"]          # always told, once
+        turns_slow = elapsed >= dl_profile.tuned("DL_READING_SLOW_S", _cli().READING_SLOW_S, float) and not reading["slow"]          # always told, once
         if not turns_slow and ((now - reading["last_pp"] < 2.0) if pp else
                                (now - reading["last"] < 10.0 and reading["sent"])):
             return

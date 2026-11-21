@@ -15,9 +15,8 @@ OOMScoreAdjust=100
 EnvironmentFile=%h/.config/dl-ai/secrets.env
 Environment=STRATA_URL=http://127.0.0.1:8080
 Environment=STRATA_WORKSPACE_DIR=%h/DL-AI-workspace
-# thinking level: rules first, then a Model2Vec classifier (rules alone: remove this line); MCP servers: rules
-Environment=DL_EFFORT_ROUTER_MODE=hybrid
-Environment=DL_MCP_ROUTER_MODE=rules
+# Ray's DL_* settings live per model in ~/.config/dl-ai/models (tools/dl_profile.py; examples in
+# tools/model-profiles/). A DL_* line here would go over every model's profile, so set one only to force a value.
 ExecStart=%h/Strata/.venv/bin/python %h/Strata/tools/dl_sessiond.py
 Restart=on-failure
 RestartSec=3

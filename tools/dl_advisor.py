@@ -32,6 +32,11 @@ import re
 import time
 from pathlib import Path
 
+try:
+    from tools import dl_profile
+except ImportError:
+    import dl_profile
+
 TOOL = "deepseek__deepseek_reason"
 FLASH = "auto"             # the newest Flash model (deepseek_mcp.model_ladder), stepping down if it is unavailable
 PRO = "deepseek-v4-pro"
@@ -143,7 +148,7 @@ FINAL_NOTE = ("[D.L. CLI] A final review by a stronger model (DeepSeek, {model},
 
 
 def enabled() -> bool:
-    return os.environ.get("DL_ADVISOR", "0") == "1" and paused() is None
+    return dl_profile.env("DL_ADVISOR", "0") == "1" and paused() is None
 
 
 def _int(name: str, default: int) -> int:
@@ -353,7 +358,7 @@ class Advisor:
                 return None
         args = {"prompt": prompt if prompt is not None else self.brief(why, diff), "system": system or SYSTEM,
                 "include_thinking": False, "model": model,
-                "web": os.environ.get("DL_ADVISOR_WEB", "0") == "1",
+                "web": dl_profile.env("DL_ADVISOR_WEB", "0") == "1",
                 # Pro thinks long and its thinking counts against max_tokens: 8192 left it 164 characters of answer
                 "max_tokens": max_tokens or (32768 if model == PRO else 16384)}
         blocked = registry.leak(args)
@@ -450,7 +455,7 @@ class Advisor:
     def review_plan(self, registry, plan: str, approve=None, emit=None) -> str | None:
         """Plan Mode: Pro reads Ray's finished plan once and lists gaps and risks; the note asks Ray to revise it before
         the Execute card.  None when it is off, refused, or nothing came back."""
-        if not enabled() or os.environ.get("DL_ADVISOR_PLAN_REVIEW", "1") == "0" or not (plan or "").strip():
+        if not enabled() or dl_profile.env("DL_ADVISOR_PLAN_REVIEW", "1") == "0" or not (plan or "").strip():
             return None
         task = str(self.ctx.get("user_text") or "").strip()
         prompt = (f"## The user's request\n{task[:4000]}\n\n## The agent's plan\n{plan[:16000]}")
@@ -461,7 +466,7 @@ class Advisor:
                      approve=None, emit=None) -> tuple[str, str | None]:
         """A plan run that the agent says is done: Pro reviews the plan, the final report and the changed files.
         ('pass', None), ('fix', note to send the agent back with), or ('skip', None) when it could not ask."""
-        if not enabled() or os.environ.get("DL_ADVISOR_FINAL", "1") == "0":
+        if not enabled() or dl_profile.env("DL_ADVISOR_FINAL", "1") == "0":
             return "skip", None
         rounds = _int("DL_ADVISOR_FINAL_MAX", 5)
         body = [f"## The user's request\n{str(self.ctx.get('user_text') or '')[:3000]}",

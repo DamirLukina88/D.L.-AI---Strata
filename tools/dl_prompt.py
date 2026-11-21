@@ -10,9 +10,9 @@ import os
 import re
 import time
 try:
-    from .dl_common import dl_mcp, dl_memory, memory_store
+    from .dl_common import dl_mcp, dl_memory, dl_profile, memory_store
 except ImportError:
-    from dl_common import dl_mcp, dl_memory, memory_store
+    from dl_common import dl_mcp, dl_memory, dl_profile, memory_store
 try:
     from .dl_tools_schema import resolve_wiki_root, web_docs_tools_hint
 except ImportError:
@@ -294,7 +294,7 @@ def voice_note(thinking: bool = True) -> str:
 def persona_text() -> str:
     """RAY_ABOUT, or one line with DL_PERSONA=minimal: an A/B switch for the benches only (does the persona change
     the quality of the work?), so unset it stays the prompt every session gets (2026-10-29)."""
-    if os.environ.get("DL_PERSONA") == "minimal":
+    if dl_profile.env("DL_PERSONA") == "minimal":
         return "You run on the home server."
     return RAY_ABOUT
 

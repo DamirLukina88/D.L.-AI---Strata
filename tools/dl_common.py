@@ -24,6 +24,15 @@ except ImportError:
     dl_advisor = None
 
 
+# Per-model settings profiles (~/.config/dl-ai/models/<model>.json): the DL_* settings of the model the server runs.
+try:
+    from tools import dl_profile
+except ImportError:
+    import dl_profile
+env = dl_profile.env
+tuned = dl_profile.tuned
+
+
 def memory_store() -> Path | None:
     """The shared memory store's root, or None when it is off."""
     return dl_memory.resolve_memory_root() if dl_memory is not None else None
@@ -162,7 +171,8 @@ DEFAULT_CLIENT_IP_KEY = os.environ.get("CLIENT_IP_ENCRYPTION_KEY", "")
 # DL_BROWSER_CHECK=0, DL_EVIDENCE=0, DL_REVIEW=0.  Each sends the agent back at most once per request, except the
 # done check, which in YOLO keeps sending it back until the plan is done, blocked, or nothing changes 3 times in a row.
 def _switch(name: str) -> bool:
-    return os.environ.get(name, "1").strip() not in ("0", "off", "false", "no")
+    """On unless the environment, or the loaded model's settings profile (dl_profile.py), says 0, off, false or no."""
+    return dl_profile.switch(name)
 
 
 def _note(emit, text: str, level: str = "info") -> None:

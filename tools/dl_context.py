@@ -14,6 +14,8 @@ try:
     C_RESET,
     _switch,
     cli as _cli,
+    dl_profile,
+    tuned,
 )
 except ImportError:
     from dl_common import (
@@ -21,6 +23,8 @@ except ImportError:
     C_RESET,
     _switch,
     cli as _cli,
+    dl_profile,
+    tuned,
 )
 
 
@@ -65,6 +69,27 @@ def context_window(url: str, api_key: str) -> int:
             return 65536                 # not cached: a starting engine reports 0
         _ctx_cache[url] = n
     return _ctx_cache[url]
+
+
+def sync_model_profile(url: str, api_key: str, emit=None) -> None:
+    """At the start of a request: the settings profile of the model the server runs now (/health "model"), so a model
+    swap or an edited profile takes effect on the next request.  A changed model also forgets the cached context size.
+    A server that does not answer keeps the profile in use."""
+    try:
+        req = urllib.request.Request(f"{url.rstrip('/')}/health",
+                                     headers={"Authorization": f"Bearer {api_key}"} if api_key else {})
+        with urllib.request.urlopen(req, timeout=3) as r:
+            model = json.loads(r.read().decode("utf-8")).get("model")
+    except Exception:
+        return
+    if not model:
+        return
+    before = dl_profile.active()["model"]
+    if dl_profile.use_model(model):
+        if before != model:
+            _ctx_cache.pop(url, None)
+        if emit is not None and (before is not None or dl_profile.active()["settings"]):
+            emit({"type": "notice", "level": "info", "text": dl_profile.describe()})
 
 
 _degraded_told: set = set()
@@ -284,7 +309,7 @@ TOOL_RESULT_MAX = int(os.environ.get("DL_TOOL_RESULT_MAX") or 30000)    # chars 
 
 def cap_tool_result(text: str, limit: int | None = None, read: bool = False) -> str:
     """The start and the end of a result longer than limit, with a stand-in that says how to get the rest."""
-    limit = limit or TOOL_RESULT_MAX
+    limit = limit or tuned("DL_TOOL_RESULT_MAX", TOOL_RESULT_MAX)
     if len(text) <= limit:
         return text
     if read:                                # a file read or command output: the start is what was asked for
@@ -305,7 +330,7 @@ def fit_context(messages: list[dict], tools: list[dict] | None, url: str, api_ke
     writes a condensed wiki handoff diary and reloads a clean session instead of mechanical pruning.  Returns stats,
     or None when nothing was needed."""
     ctx = _cli().context_window(url, api_key)
-    limit = max(4096, ctx - _cli().CONTEXT_RESERVE)
+    limit = max(4096, ctx - tuned("DL_CONTEXT_RESERVE", _cli().CONTEXT_RESERVE))
     target = int(limit * 0.6)
     if over:                                # the estimate was low: aim lower by the same ratio
         measured = None
@@ -317,7 +342,7 @@ def fit_context(messages: list[dict], tools: list[dict] | None, url: str, api_ke
         # for the ~1.5k warm in-session diary turn; above 61k (or after an overflow refusal) fall back to digest mode.
         before_est = over or estimate_prompt_tokens(messages, tools, measured)
         use_in_session = (in_session if in_session is not None
-                          else (not over and before_est <= max(limit, ctx - HANDOFF_MIN_REPLY_ROOM)))
+                          else (not over and before_est <= max(limit, ctx - tuned("DL_HANDOFF_MIN_REPLY_ROOM", HANDOFF_MIN_REPLY_ROOM))))
         stats = _cli().handoff_session(messages, tools, limit, target, workspace, url=url, api_key=api_key,
                                 plan_file=plan_file, measured=measured, force=bool(over), cancel=cancel,
                                 in_session=use_in_session, on_handoff=on_handoff)

@@ -18,6 +18,11 @@ from pathlib import Path
 from typing import Sequence
 
 try:
+    from tools import dl_profile
+except ImportError:
+    import dl_profile
+
+try:
     import numpy as np
 except ImportError:  # pragma: no cover - numpy missing fallback
     np = None
@@ -62,13 +67,13 @@ def router_mode(mode: str | None = None, *, subsystem: str | None = None) -> str
         return m if m in VALID_MODES else "rules"
     if subsystem:
         sub_key = f"DL_{str(subsystem).strip().upper()}_ROUTER_MODE"
-        sub_mode = os.environ.get(sub_key, "").strip().lower()
+        sub_mode = (dl_profile.env(sub_key, "") or "").strip().lower()
         if sub_mode:
             return sub_mode if sub_mode in VALID_MODES else "rules"
-    env_mode = os.environ.get("DL_ROUTER_MODE", "").strip().lower()
+    env_mode = (dl_profile.env("DL_ROUTER_MODE", "") or "").strip().lower()
     if env_mode:
         return env_mode if env_mode in VALID_MODES else "rules"
-    legacy = os.environ.get("DL_SEMANTIC_ROUTER", "").strip().lower()
+    legacy = (dl_profile.env("DL_SEMANTIC_ROUTER", "") or "").strip().lower()
     if legacy in ("1", "true", "yes", "on"):
         return "hybrid"
     return "rules"

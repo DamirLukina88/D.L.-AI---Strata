@@ -20,6 +20,7 @@ try:
     C_YELLOW,
     DEFAULT_API_KEY,
     DEFAULT_URL,
+    dl_profile,
 )
 except ImportError:
     from dl_common import (
@@ -31,6 +32,7 @@ except ImportError:
     C_YELLOW,
     DEFAULT_API_KEY,
     DEFAULT_URL,
+    dl_profile,
 )
 try:
     from .dl_prompt import NOW_PREFIX
@@ -104,6 +106,9 @@ def check_status(url: str, api_key: str) -> str:
                 out += (f"  • Memory:     {C_YELLOW}started short: {d.get('kept_gib')} of {d.get('wanted_gib')} GiB of "
                         f"experts in RAM, the rest read from disk (slow){C_RESET}\n")
             out += f"  • GPU stalls: {stall_summary()}\n"
+            if data.get("model"):
+                dl_profile.use_model(data["model"])
+                out += f"  • Ray:        {dl_profile.describe().removeprefix('Settings profile: ')} (~/.config/dl-ai/models)\n"
             print(out)
             return out.strip()
     except Exception as e:

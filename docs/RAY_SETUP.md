@@ -36,9 +36,23 @@ Installing this fork on your own PC, and how to use it from the browser, the ter
    ```
 
    The template runs the daemon with the checkout's Python (`.venv`). Both units should carry `OOMPolicy=continue`
-   and an `OOMScoreAdjust` (the engine's higher than the daemon's, so the kernel ends the engine first). The live
-   daemon also sets `DL_EFFORT_ROUTER_MODE=hybrid` (rules first, then a Model2Vec classifier; `rules` is the
-   plain default without it) and `DL_MCP_ROUTER_MODE=rules`.
+   and an `OOMScoreAdjust` (the engine's higher than the daemon's, so the kernel ends the engine first). 
+
+3a. **Ray's settings per model.** Ray's `DL_*` settings (the thinking-level router, the edit-first watchdog's
+   rounds, lean thinking, result caps, the DeepSeek helper ...) are read per model, so tuning one model leaves the
+   others as they are. Copy the examples:
+
+   ```bash
+   mkdir -p ~/.config/dl-ai/models && cp -n tools/model-profiles/*.json ~/.config/dl-ai/models/
+   ```
+
+   `_default.json` holds settings for every model (`DL_MCP_ROUTER_MODE=rules`, `DL_ADVISOR=1`);
+   `<model name>.json` (the name the server's `/health` reports) goes over it. The Qwen profiles carry the values Ray
+   was tuned with: `DL_EFFORT_ROUTER_MODE=hybrid` (rules first, then a Model2Vec classifier; `rules` without it),
+   `DL_NUDGE_AT` 12, `DL_PATCH_AT` 18, lean thinking with 2 high rounds, 8000-character reads. A model with no file
+   of its own gets the code's defaults plus `_default.json`. Ray checks the served model at the start of every
+   request, so a model swap or an edited file takes effect on the next one; `/status` names the profile in use. An
+   environment variable (a `DL_*` line in the unit, or one set for a test or benchmark) still goes over both files.
 
 3b. **The shared memory store (optional, recommended).** Ray, Claude Code and Antigravity share one jj-versioned
    Markdown store. Install [jj](https://github.com/jj-vcs/jj), create a folder for it, write

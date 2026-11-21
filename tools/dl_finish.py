@@ -28,6 +28,7 @@ try:
     cli as _cli,
     dl_advisor,
     dl_effort,
+    dl_profile,
 )
 except ImportError:
     from dl_common import (
@@ -38,6 +39,7 @@ except ImportError:
     cli as _cli,
     dl_advisor,
     dl_effort,
+    dl_profile,
 )
 try:
     from .dl_context import (
@@ -318,7 +320,7 @@ def review_changes(messages: list[dict], changes: RequestChanges, final: str, pl
             + (f"PLAN PROGRESS:\n{plan_section[:3000]}\n\n" if plan_section else "")
             + f"DIFF:\n{diff if diff is not None else changes.diff()}\n\n"
             + f"TOOL ACTIONS:\n{request_actions(messages) or '(none)'}\n\nFINAL ANSWER:\n{final[:3000]}")
-    level = os.environ.get("DL_REVIEW_EFFORT") or REVIEW_EFFORT
+    level = dl_profile.env("DL_REVIEW_EFFORT") or REVIEW_EFFORT
     # the level needs its token budget too: without one the engine let the "low" review think for 10,000+ tokens
     # (7 minutes and counting, 2026-11-15 10:07)
     budget = dl_effort.budget_for(level) if dl_effort is not None and level in ("low", "medium", "high") else 0
@@ -416,7 +418,7 @@ def finish_checks(state: dict, messages: list[dict], final: str, mode: str, ws: 
     # the DeepSeek helper (DL_ADVISOR=1): a run that started from an approved plan gets a final review by Pro, and
     # goes back for fixes until it passes (at most DL_ADVISOR_FINAL_MAX rounds; the user's choice, 2026-11-14)
     if (dl_advisor is not None and dl_advisor.enabled() and state.get("from_plan") and (changed or via_cps)
-            and os.environ.get("DL_ADVISOR_FINAL", "1") != "0"):
+            and dl_profile.env("DL_ADVISOR_FINAL", "1") != "0"):
         return _final_review(state, final, ws, ctx, changed, via_cps, emit)
     return None
 
@@ -450,7 +452,7 @@ def final_review_files(ws: Path, changed: list, via_cps: list, plan: str | None 
 
 def _final_review(state: dict, final: str, ws: Path, ctx: dict, changed: list, via_cps: list, emit) -> str | None:
     """One round of the Pro final review: a note sending the agent back, or None when it passed or must stop."""
-    rounds_max = int(os.environ.get("DL_ADVISOR_FINAL_MAX") or 5)
+    rounds_max = int(dl_profile.env("DL_ADVISOR_FINAL_MAX") or 5)
     done = state.get("final_rounds", 0)
     snap = workspace_snapshot(ws)
     if done and snap == state.get("final_snap"):

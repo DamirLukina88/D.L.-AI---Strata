@@ -1,0 +1,11 @@
+{
+ "note": "Qwen3.8-Flash-Next coder IQ1_M: the values Ray was tuned with on it (edit-first watchdog and lean thinking 2026-11-14, thinking-level router 2026-11-16).",
+ "settings": {
+  "DL_EFFORT_ROUTER_MODE": "hybrid",
+  "DL_NUDGE_AT": 12,
+  "DL_PATCH_AT": 18,
+  "DL_LEAN_THINKING": 1,
+  "DL_LEAN_HIGH_ROUNDS": 2,
+  "DL_READ_RESULT_MAX": 8000
+ }
+}

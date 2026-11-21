@@ -5,6 +5,11 @@ import json
 import os
 import re
 
+try:
+    from tools import dl_profile
+except ImportError:
+    import dl_profile
+
 if __package__ == "tools":
     from tools import dl_effort_scorer, dl_router
 else:
@@ -138,10 +143,10 @@ def _resolve_router_mode(router_mode: str | None = None, semantic: bool | None =
     if dl_router is not None:
         return dl_router.router_mode(subsystem="effort")
     for key in ("DL_EFFORT_ROUTER_MODE", "DL_ROUTER_MODE"):
-        v = os.environ.get(key, "").strip().lower()
+        v = (dl_profile.env(key, "") or "").strip().lower()
         if v:
             return v if v in ("rules", "model2vec", "hybrid") else "rules"
-    legacy = os.environ.get("DL_SEMANTIC_ROUTER", "").strip().lower()
+    legacy = (dl_profile.env("DL_SEMANTIC_ROUTER", "") or "").strip().lower()
     return "hybrid" if legacy in ("1", "true", "yes", "on") else "rules"
 
 

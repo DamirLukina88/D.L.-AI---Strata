@@ -69,6 +69,7 @@ try:
         DEFAULT_URL,
         _note,
         _switch,
+        dl_profile,
         classify_command,
         classify_write,
         dl_advisor,
@@ -110,6 +111,7 @@ except ImportError:
         DEFAULT_URL,
         _note,
         _switch,
+        dl_profile,
         classify_command,
         classify_write,
         dl_advisor,
@@ -421,6 +423,7 @@ try:
         context_window,
         current_check_note,
         degraded_notice,
+        sync_model_profile,
         estimate_prompt_tokens,
         fit_context,
         is_cli_note,
@@ -454,6 +457,7 @@ except ImportError:
         context_window,
         current_check_note,
         degraded_notice,
+        sync_model_profile,
         estimate_prompt_tokens,
         fit_context,
         is_cli_note,
@@ -767,7 +771,7 @@ def chat_turn_in_context(messages: list[dict], url: str, api_key: str, tools: li
                     emit({"type": "notice", "level": "warn", "text": note})
                 else:
                     print(f"\n{C_YELLOW}{note}{C_RESET}")
-                wait_s = float(os.environ.get("DL_ENGINE_RETRY_WAIT_S") or ENGINE_RETRY_WAIT_S)
+                wait_s = float(dl_profile.env("DL_ENGINE_RETRY_WAIT_S") or ENGINE_RETRY_WAIT_S)
                 if wait_s > 0:
                     time.sleep(wait_s)
                 continue
@@ -921,7 +925,7 @@ def turn_cap_wrap_up(messages: list[dict], url: str, api_key: str, tools: list[d
 def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                        workspace: Path, max_turns: int | None = None,
                        mode: str = "act", session_context: dict | None = None) -> Path:
-    max_turns = max_turns or MAX_TURNS
+    max_turns = max_turns or dl_profile.tuned("DL_MAX_TURNS", MAX_TURNS)
     turn = 0
     total_tokens = 0
     t_start = time.time()
@@ -944,7 +948,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             pass
     coding = mode == "act" and (kind in CODING_REASONS or bool(sc.get("plan_file")))
     lean = (effort_auto and coding and effort == "high" and dl_effort is not None
-            and os.environ.get("DL_LEAN_THINKING", "1") != "0")
+            and dl_profile.env("DL_LEAN_THINKING", "1") != "0")
     high_left = 1                           # lean: rounds left on high (the first one plans)
     quiet = 0                               # watchdog: rounds in a row without a changed workspace file
     nudged = 0
@@ -959,9 +963,9 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
             session_context["raised"] = True          # the helper waits for this rung first
         if lean and reason:
             if high_left <= 0:
-                _note(emit, f"Thinking on high for the next {LEAN_HIGH_ROUNDS} rounds, because "
+                _note(emit, f"Thinking on high for the next {lean_high_rounds} rounds, because "
                             f"{dl_effort.RAISE_WHY.get(reason, reason)}.")
-            high_left = max(high_left, LEAN_HIGH_ROUNDS)
+            high_left = max(high_left, lean_high_rounds)
             return
         if effort_auto and reason and effort != "high":
             effort = "high"
@@ -971,7 +975,11 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                 session_context["reasoning_budget_tokens"] = budget
             _note(emit, dl_effort.describe_raise(reason) if dl_effort is not None else f"Thinking raised to high ({reason}).")
 
+    sync_model_profile(url, api_key, emit)
     degraded_notice(url, api_key, emit)
+    lean_high_rounds = dl_profile.tuned("DL_LEAN_HIGH_ROUNDS", LEAN_HIGH_ROUNDS)
+    nudge_at, patch_at = dl_profile.tuned("DL_NUDGE_AT", NUDGE_AT), dl_profile.tuned("DL_PATCH_AT", PATCH_AT)
+    read_result_max = dl_profile.tuned("DL_READ_RESULT_MAX", READ_RESULT_MAX)
     if session_context is not None and "user_text" in session_context:
         if session_context.get("bg_listeners"):
             # a turn an engine error ended never reached its stop_left_listeners: stop what it left before forgetting,
@@ -987,7 +995,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
     # ray_identity or called get_engine_status, get_system_health or local_wiki in 6-7 of 10 bench runs whatever the
     # persona said, and a server turned on changes the tool list, so the whole prompt is read again (2026-10-29).
     # The tools stay in the request (tool_choice "none" would drop them and break the cached prefix the same way).
-    small_talk = (dl_effort is not None and os.environ.get("DL_SMALLTALK_GUARD", "1") != "0"
+    small_talk = (dl_effort is not None and dl_profile.env("DL_SMALLTALK_GUARD", "1") != "0"
                   and dl_effort.is_small_talk((session_context or {}).get("user_text") or "",
                                               voice=bool((session_context or {}).get("voice")),
                                               last_reply=next((m.get("content") or "" for m in reversed(messages)
@@ -1008,7 +1016,7 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
     if cps is not None:
         cps.take("request start")
         finish["cps"], finish["cp_start"] = cps, cps.head     # the reviewer's diff: everything since this point
-    alarm = os.environ.get("DL_SHRINK_ALARM", "1") != "0"
+    alarm = dl_profile.env("DL_SHRINK_ALARM", "1") != "0"
     measured = None                         # (messages in the last request, its prompt tokens)
     text_call_retries = 0
     loop_retries = 0
@@ -1211,10 +1219,10 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
                     # it and goes on; it ended the whole request, the call left in messages with no result
                     result_str = f"Error: {fn_name} failed: {type(e).__name__}: {e}"
             result_str = cap_tool_result(result_str)    # 2026-10-20 22:12: a 106k debug print ended a CONTRA run
-            if fn_name in READ_TOOLS and READ_RESULT_MAX > 0 and not bad_args:     # keep reads small (2026-11-14)
+            if fn_name in READ_TOOLS and read_result_max > 0 and not bad_args:     # keep reads small (2026-11-14)
                 # a file read keeps its start; a command keeps its start and its end, where the failures, the
                 # summary and the "[Command exited with code N]" line are (cut off, a failed run looked like a pass)
-                result_str = cap_tool_result(result_str, READ_RESULT_MAX, read=fn_name == "view_file")
+                result_str = cap_tool_result(result_str, read_result_max, read=fn_name == "view_file")
             if before is not None:                  # did it empty, delete or halve a file?
                 after = scan_workspace(current_ws)
                 hits = shrunk_files(before, after) if after is not None else []
@@ -1296,21 +1304,21 @@ def execute_agent_loop(messages: list[dict], url: str, api_key: str,
         start = finish.get("cp_start")
         approve_fn = (session_context or {}).get("approve") or terminal_approve
         consulted = False
-        if coding and not small_talk and NUDGE_AT > 0:          # edit-first watchdog
+        if coding and not small_talk and nudge_at > 0:          # edit-first watchdog
             quiet = 0 if changed_now else quiet + 1
             if changed_now:
                 nudged = 0
-            elif quiet >= NUDGE_AT and nudged == 0:
+            elif quiet >= nudge_at and nudged == 0:
                 nudged = 1
                 messages.append({"role": "user", "content": NUDGE_NOTE.format(n=quiet)})
                 _note(emit, f"Watchdog: {quiet} rounds without changing a project file; told Ray to make the edit.",
                       "warn")
-            elif PATCH_AT > 0 and quiet >= PATCH_AT and nudged == 1:
+            elif patch_at > 0 and quiet >= patch_at and nudged == 1:
                 nudged = 2
                 note = None
                 # DeepSeek is asked only when something failed lately; quiet rounds of reading alone get the note
                 # (2026-11-15: the patch fired 18 rounds in with nothing broken).  DL_PATCH_NEEDS_FAILURE=0: always.
-                failing = any(recent_fail) or os.environ.get("DL_PATCH_NEEDS_FAILURE", "1") == "0"
+                failing = any(recent_fail) or dl_profile.env("DL_PATCH_NEEDS_FAILURE", "1") == "0"
                 if advisor is not None and dl_advisor.enabled() and failing:
                     changed = cps.changed_since(start) if cps is not None and start else []
                     note = advisor.patch(registry, f"{quiet} rounds without changing a project file",
