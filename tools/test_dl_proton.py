@@ -244,6 +244,58 @@ class Writing(Base):
         self.assertIn("outside the workspace", out)
         self.assertEqual(FakeSmtp.sent, [])
 
+    def test_attachment_from_workspace(self):
+        ws = Path(self.tmp.name)
+        (ws / "game.html").write_text("<!DOCTYPE html><html><body>Play</body></html>", encoding="utf-8")
+        with mock.patch.object(dl_mcp, "call_context", lambda: {"workspace": ws}):
+            out = dl_proton.call("send_mail", {
+                "to": "a@example.com", "subject": "game", "body": "Here is the game",
+                "attachments": "game.html"
+            })
+            self.assertTrue(out.startswith("Sent"), out)
+            self.assertIn("[attachment: game.html (45 bytes)]", out)
+            msg = FakeSmtp.sent[0][0]
+            atts = [p for p in msg.walk() if p.get_content_disposition() == "attachment"]
+            self.assertEqual(len(atts), 1)
+            self.assertEqual(atts[0].get_filename(), "game.html")
+            self.assertEqual(atts[0].get_content_type(), "text/html")
+            self.assertEqual(atts[0].get_payload(decode=True), b"<!DOCTYPE html><html><body>Play</body></html>")
+
+    def test_multiple_attachments_and_alias(self):
+        ws = Path(self.tmp.name)
+        (ws / "f1.txt").write_text("hello", encoding="utf-8")
+        (ws / "f2.bin").write_bytes(b"\x00\x01\x02")
+        with mock.patch.object(dl_mcp, "call_context", lambda: {"workspace": ws}):
+            out = dl_proton.call("send_mail", {
+                "to": "a@example.com", "subject": "files",
+                "attachments": ["f1.txt", "f2.bin"]
+            })
+            self.assertTrue(out.startswith("Sent"), out)
+            self.assertIn("f1.txt (5 bytes)", out)
+            self.assertIn("f2.bin (3 bytes)", out)
+
+            # Test single string alias 'attachment'
+            out2 = dl_proton.call("send_mail", {
+                "to": "a@example.com", "subject": "single",
+                "attachment": "f1.txt"
+            })
+            self.assertTrue(out2.startswith("Sent"), out2)
+            self.assertIn("f1.txt (5 bytes)", out2)
+
+    def test_attachment_outside_workspace_and_not_found(self):
+        ws = Path(self.tmp.name)
+        with mock.patch.object(dl_mcp, "call_context", lambda: {"workspace": ws}):
+            out = dl_proton.call("send_mail", {
+                "to": "a@example.com", "subject": "s", "body": "b",
+                "attachments": "/etc/hostname"
+            })
+            self.assertIn("outside the workspace", out)
+            out_missing = dl_proton.call("send_mail", {
+                "to": "a@example.com", "subject": "s", "body": "b",
+                "attachments": "nonexistent.bin"
+            })
+            self.assertIn("not found", out_missing)
+
     def test_signature_and_grid_stay_inside_the_document(self):
         dl_proton.call("send_mail", {"to": "a@example.com", "html": "<!doctype html><html><head><title>T</title>"
                                      "</head><body><table><tr><td>1</td></tr></table></body></html>"})

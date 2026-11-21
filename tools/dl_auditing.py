@@ -193,7 +193,7 @@ SECRET_JSON_KEYS = {"token", "access_token", "refresh_token", "id_token", "clien
 MIN_SECRET_LEN = 12
 
 
-NOT_SECRET_NAME = re.compile(r"(_|^)(USER|USERNAME|LOGIN|EMAIL|ADDRESS|HOST|PORT|URL|FROM|TO)$", re.I)
+NOT_SECRET_NAME = re.compile(r"(_|^)(USER|USERNAME|LOGIN|EMAIL|ADDRESS|HOST|PORT|URL|FROM|TO|CLIENT_ID)$", re.I)
 EMAIL_VALUE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 
 

@@ -365,7 +365,7 @@ def _strings(value):
 
 
 # A local file a tool reads and sends on (a mail attachment's "path", a Drive upload's file_path / file:// URL)
-FILE_KEY = re.compile(r"^(path|file|file_?path|file_?url|fileUrl|url|source|local_?path|\w+_file)$", re.I)
+FILE_KEY = re.compile(r"^(path|file|file_?path|file_?url|fileUrl|url|source|local_?path|\w+_file|attachments?)$", re.I)
 PRIVATE_DIRS = [Path.home() / d for d in (
     ".config/dl-ai", ".ssh", ".gnupg", ".aws", ".kube", ".docker",
     ".config/protonmail", ".local/state/dl-ai",                       # Bridge's vault and keys; session histories

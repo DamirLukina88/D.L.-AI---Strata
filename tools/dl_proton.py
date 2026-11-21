@@ -22,6 +22,7 @@ import email.policy
 import email.utils
 import imaplib
 import ipaddress
+import mimetypes
 import os
 import re
 import smtplib
@@ -46,7 +47,10 @@ _FOLDER = {"type": "string", "description": "Folder, default INBOX (list_folders
 _CONTENT = {"body": {"type": "string", "description": "Plain-text body"},
             "html": {"type": "string", "description": "HTML body (tables, links)"},
             "html_file": {"type": "string", "description": "An .html file in the workspace to use as the HTML body "
-                                                           "(read when the email is sent), instead of `html`"}}
+                                                           "(read when the email is sent), instead of `html`"},
+            "attachments": {"description": "One workspace file path or a list of workspace file paths to attach",
+                            "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]},
+            "attachment": {"type": "string", "description": "Alias for `attachments`: one workspace file path to attach"}}
 TOOLS = [
     {"name": "search_mail", "description": "Search Proton Mail. Returns UID, date, sender and subject, newest first.",
      "inputSchema": {"type": "object", "properties": {
@@ -436,15 +440,16 @@ def compose(s: dict, a: dict, original=None) -> EmailMessage:
     msg["Date"] = email.utils.formatdate(localtime=True)
     msg["Message-ID"] = email.utils.make_msgid(domain=sender.rpartition("@")[2] or None)
     body = str(a.get("body") or "").rstrip() or (html_to_text(html) if html else "")
-    if not body and not html:
-        raise ProtonError("the email is empty: give `body`, `html` or `html_file`")
+    attachments = _attachments_of(a)
+    if not body and not html and not attachments:
+        raise ProtonError("the email is empty: give `body`, `html`, `html_file` or `attachments`")
     try:
         sig = s["signature"].read_text(encoding="utf-8", errors="replace").strip()
     except OSError:
         sig = ""
     if sig and sig not in body:
-        body += "\n\n" + sig
-    msg.set_content(body + "\n")
+        body = (body + "\n\n" + sig) if body else sig
+    msg.set_content((body + "\n") if body else "\n")
     if html:
         if sig and sig not in html_to_text(html):
             sig_html = "<br>".join(_esc(l) for l in sig.splitlines())
@@ -458,6 +463,14 @@ def compose(s: dict, a: dict, original=None) -> EmailMessage:
             html = re.sub(r"</head>", css + "</head>", html, count=1, flags=re.I) if re.search(
                 r"</head>", html, re.I) else css + html
         msg.add_alternative(html, subtype="html")
+    for f in attachments:
+        data = f.read_bytes()
+        content_type, _ = mimetypes.guess_type(str(f))
+        if content_type:
+            maintype, subtype = content_type.split("/", 1)
+        else:
+            maintype, subtype = "application", "octet-stream"
+        msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=f.name)
     return msg
 
 
@@ -504,6 +517,40 @@ def _html_of(a: dict) -> str:
     return f.read_text(encoding="utf-8", errors="replace")
 
 
+def _attachments_of(a: dict) -> list[Path]:
+    raw = a.get("attachments") or a.get("attachment")
+    if not raw:
+        return []
+    items = raw if isinstance(raw, list) else [raw]
+    res = []
+    try:
+        import dl_mcp
+        ws = dl_mcp.call_context().get("workspace")
+    except ImportError:
+        ws = None
+    for item in items:
+        name = str(item or "").strip()
+        if not name:
+            continue
+        f = Path(os.path.expanduser(name))
+        if not f.is_absolute():
+            f = Path(ws or os.getcwd()) / f
+        f = f.resolve()
+        if ws and not f.is_relative_to(Path(ws).resolve()):
+            raise ProtonError(f"attachment {name!r} is outside the workspace {ws}")
+        if not f.is_file():
+            raise ProtonError(f"attachment {name!r} not found ({f})")
+        try:
+            import dl_mcp
+            why = dl_mcp.file_leak(f)
+            if why:
+                raise ProtonError(f"BLOCKED: {why}")
+        except ImportError:
+            pass
+        res.append(f)
+    return res
+
+
 def _original(s: dict, a: dict):
     if not a.get("reply_to_uid"):
         return None
@@ -527,7 +574,10 @@ def draft_mail(m, a: dict, s: dict) -> str:
                          msg.as_bytes(policy=email.policy.SMTP))
     if typ != "OK":
         raise ProtonError(f"saving the draft failed: {data}")
-    return f"Draft saved in Drafts from {msg['From']}: {msg['Subject']}"
+    atts = [f"{p.get_filename() or '(no name)'} ({len(p.get_payload(decode=True) or b'')} bytes)"
+            for p in _attachments(msg)]
+    att_str = f" [attachment: {', '.join(atts)}]" if atts else ""
+    return f"Draft saved in Drafts from {msg['From']}: {msg['Subject']}{att_str}"
 
 
 def _uids(v) -> list[int]:
@@ -599,7 +649,10 @@ def send_mail(a: dict, s: dict) -> str:
             pass
     if refused:
         return f"Error: sent, but refused for: {', '.join(refused)}"
-    return f"Sent from {msg['From']} to {', '.join(to + cc + bcc)}: {msg['Subject']}"
+    atts = [f"{p.get_filename() or '(no name)'} ({len(p.get_payload(decode=True) or b'')} bytes)"
+            for p in _attachments(msg)]
+    att_str = f" [attachment: {', '.join(atts)}]" if atts else ""
+    return f"Sent from {msg['From']} to {', '.join(to + cc + bcc)}: {msg['Subject']}{att_str}"
 
 
 def _logout(m) -> None:
