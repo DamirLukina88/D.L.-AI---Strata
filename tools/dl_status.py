@@ -107,8 +107,8 @@ def check_status(url: str, api_key: str) -> str:
                         f"experts in RAM, the rest read from disk (slow){C_RESET}\n")
             out += f"  • GPU stalls: {stall_summary()}\n"
             if data.get("model"):
-                dl_profile.use_model(data["model"])
-                out += f"  • Ray:        {dl_profile.describe().removeprefix('Settings profile: ')} (~/.config/dl-ai/models)\n"
+                out += (f"  • Ray:        {dl_profile.describe(data['model']).removeprefix('Settings profile: ')}"
+                        " (~/.config/dl-ai/models)\n")
             print(out)
             return out.strip()
     except Exception as e:

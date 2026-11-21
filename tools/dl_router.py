@@ -65,17 +65,13 @@ def router_mode(mode: str | None = None, *, subsystem: str | None = None) -> str
     if mode is not None:
         m = str(mode).strip().lower()
         return m if m in VALID_MODES else "rules"
-    if subsystem:
-        sub_key = f"DL_{str(subsystem).strip().upper()}_ROUTER_MODE"
-        sub_mode = (dl_profile.env(sub_key, "") or "").strip().lower()
-        if sub_mode:
-            return sub_mode if sub_mode in VALID_MODES else "rules"
-    env_mode = (dl_profile.env("DL_ROUTER_MODE", "") or "").strip().lower()
-    if env_mode:
-        return env_mode if env_mode in VALID_MODES else "rules"
-    legacy = (dl_profile.env("DL_SEMANTIC_ROUTER", "") or "").strip().lower()
-    if legacy in ("1", "true", "yes", "on"):
-        return "hybrid"
+    sub = [f"DL_{str(subsystem).strip().upper()}_ROUTER_MODE"] if subsystem else []
+    got = dl_profile.from_env_then_profile(sub + ["DL_ROUTER_MODE", "DL_SEMANTIC_ROUTER"])   # environment, then profile
+    if got is not None:
+        name, value = got
+        if name == "DL_SEMANTIC_ROUTER":                    # legacy: 1 means hybrid
+            return "hybrid" if value.lower() in ("1", "true", "yes", "on") else "rules"
+        return value.lower() if value.lower() in VALID_MODES else "rules"
     return "rules"
 
 

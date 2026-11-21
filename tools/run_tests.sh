@@ -13,6 +13,10 @@ cd "$(dirname "$0")/.." || exit 1
 PY=${PYTHON:-.venv/bin/python}
 [ -x "$PY" ] || PY=python3
 LOG=$(mktemp -d)
+# Ray's per-model settings profiles (tools/dl_profile.py): the tests never read the user's own
+# (~/.config/dl-ai/models); `unittest` does not load tools/conftest.py, which does the same under pytest.
+DL_MODEL_PROFILES=$(mktemp -d)
+export DL_MODEL_PROFILES
 declare -a SUMMARY
 fail=0
 

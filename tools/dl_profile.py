@@ -35,8 +35,12 @@ if _twin is not None and isinstance(getattr(_twin, "_STATE", None), dict):
     _STATE = _twin._STATE
 
 
+_DIR_AT_IMPORT = os.environ.get("DL_MODEL_PROFILES")    # kept: a test that clears os.environ must not fall back to ~
+
+
 def profiles_dir() -> Path:
-    return Path(os.environ.get("DL_MODEL_PROFILES") or Path.home() / ".config" / "dl-ai" / "models").expanduser()
+    return Path(os.environ.get("DL_MODEL_PROFILES") or _DIR_AT_IMPORT
+                or Path.home() / ".config" / "dl-ai" / "models").expanduser()
 
 
 def file_for(model: str | None) -> Path:
@@ -102,6 +106,20 @@ def env(name: str, default: str | None = None) -> str | None:
     return default if v is None else v
 
 
+def from_env_then_profile(names) -> tuple[str, str] | None:
+    """(name, value) of the first of `names` the environment sets, else of the first the profile sets; None when
+    neither does.  For a setting with several spellings (DL_MCP_ROUTER_MODE, DL_ROUTER_MODE ...): the environment, at
+    any spelling, goes over the profile."""
+    for n in names:
+        if os.environ.get(n, "").strip():
+            return n, os.environ[n].strip()
+    _ensure()
+    for n in names:
+        if (_STATE["settings"].get(n) or "").strip():
+            return n, _STATE["settings"][n].strip()
+    return None
+
+
 def switch(name: str) -> bool:
     """An on/off setting that is on unless it says 0, off, false or no."""
     return (env(name, "1") or "1").strip().lower() not in ("0", "off", "false", "no")
@@ -121,7 +139,15 @@ def tuned(name: str, current, cast=int):
     try:
         return cast(v)
     except (TypeError, ValueError):
-        return current
+        pass
+    if cast is int:                                       # "12.0" (a JSON number written as 12.0) is 12
+        try:
+            f = float(v)
+            if f.is_integer():
+                return int(f)
+        except (TypeError, ValueError):
+            pass
+    return current
 
 
 def active() -> dict:
@@ -132,13 +158,21 @@ def active() -> dict:
             "file": str(own) if own is not None and own.is_file() else None, "error": _STATE["error"]}
 
 
-def describe() -> str:
-    """One line for /status and the change notice."""
-    a = active()
-    own = f"{Path(a['file']).name}" if a["file"] else "no profile of its own"
-    base = " + _default.json" if file_for(None).is_file() else ""
-    line = f"Settings profile: {a['model'] or 'unknown model'} ({own}{base}, {len(a['settings'])} settings)"
-    return line + (f"; could not read {a['error']}" if a["error"] else "")
+def describe(model: str | None = None) -> str:
+    """One line for the change notice (the profile in use) or for /status (`model`: the profile that model gets, read
+    from the files without making it the one in use, so the next request's sync still sees a model swap)."""
+    if model is None:
+        a = active()
+        model, settings, err, own = a["model"], a["settings"], a["error"], a["file"]
+    else:
+        base, err1 = _read(file_for(None))
+        mine, err2 = _read(file_for(model))
+        settings, err = {**base, **mine}, err2 or err1
+        own = str(file_for(model)) if file_for(model).is_file() else None
+    own_text = Path(own).name if own else "no profile of its own"
+    base_text = " + _default.json" if file_for(None).is_file() else ""
+    line = f"Settings profile: {model or 'unknown model'} ({own_text}{base_text}, {len(settings)} settings)"
+    return line + (f"; could not read {err}" if err else "")
 
 
 def reset() -> None:

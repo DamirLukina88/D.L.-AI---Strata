@@ -88,7 +88,7 @@ def sync_model_profile(url: str, api_key: str, emit=None) -> None:
     if dl_profile.use_model(model):
         if before != model:
             _ctx_cache.pop(url, None)
-        if emit is not None and (before is not None or dl_profile.active()["settings"]):
+        if emit is not None and before is not None:      # a real switch, not the first request after a start
             emit({"type": "notice", "level": "info", "text": dl_profile.describe()})
 
 
