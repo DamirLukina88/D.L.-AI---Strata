@@ -483,6 +483,31 @@ GROUPS = {"all": ["tetris", "bugfix", "crc32c"], "quick": ["bugfix", "roman", "i
 
 
 # ---------------------------------------------------------------------------------------------------- generic metrics
+# The daemon's notices that tell how a turn went when it got stuck (dl_cli.py's loop guard and lean raise, dl_advisor's
+# DeepSeek helper and dl_finish's review).  Counted per run so a sampling or prompt change can be compared on them.
+NOTICE_KINDS = (
+    ("loop_guard_hits", re.compile(r"^Loop guard:")),
+    ("thinking_raised", re.compile(r"^Thinking on high for the next")),
+    ("deepseek_asked", re.compile(r"^Asking DeepSeek for help")),
+    ("deepseek_failed", re.compile(r"^DeepSeek helper failed")),
+    ("deepseek_reviews", re.compile(r"^Final review by DeepSeek")),
+)
+
+
+def notice_counts(notices: list[str]) -> dict:
+    """How many of each NOTICE_KINDS notice a list of notice texts holds (every kind, 0 when absent)."""
+    return {k: sum(1 for n in notices if rx.search(n or "")) for k, rx in NOTICE_KINDS}
+
+
+def sampling_warning(summary: str) -> str:
+    """A reason the server's Chat settings make repeats useless or unlike Ray's everyday use; empty when fine."""
+    if "seed " in summary:
+        return "a fixed seed is set in the Chat settings: every repeat gives the same answer"
+    if "greedy" in summary:
+        return "temperature 0 (greedy) is set in the Chat settings"
+    return ""
+
+
 def thinking_metrics(steps: list[dict]) -> dict:
     blocks = [b for s in steps for b in s.get("thinking", [])]
     if not blocks:
@@ -528,6 +553,7 @@ def session_metrics(steps: list[dict]) -> dict:
         "approvals_denied": sum(1 for s in steps for a in s.get("approvals", []) if not a["ok"]),
         "claims_without_check_after_edit": unbacked,
         "wall_seconds": round(sum(s.get("seconds", 0) for s in steps), 1),
+        **notice_counts([n for s in steps for n in s.get("notices", [])]),
         **thinking_metrics(steps),
         "tokens_finished_turns": sum(s.get("tokens", 0) for s in steps),
     }
@@ -611,7 +637,7 @@ def drive(live: Live, text: str, ws: Path, timeout: float, nudge: bool = False,
     """Send one prompt or /command and follow the session until its turn ends.  `approve(event)` answers approval
     requests (default: approval_ok on the summary)."""
     rec = {"text": text, "nudge": nudge, "tool_calls": [], "tool_results": [], "approvals": [], "errors": [],
-           "tokens": 0}
+           "notices": [], "tokens": 0}
     t0 = time.time()
     live.send(op="input", text=text, origin="bench")
     interrupted, finished, cap_notice, texts = False, False, False, []
@@ -663,10 +689,12 @@ def drive(live: Live, text: str, ws: Path, timeout: float, nudge: bool = False,
             finished = True
         elif t == "error":
             rec["errors"].append(ev.get("text", ""))
-        elif t == "notice" and "tool rounds" in ev.get("text", ""):
-            cap_notice = True                       # the fixed loop stops with a status and says so
-        elif t == "notice" and "working" in ev.get("text", ""):
-            rec["errors"].append(ev["text"])        # "The session is working" - the prompt was dropped
+        elif t == "notice":
+            rec["notices"].append(ev.get("text", "")[:300])     # counted by notice_counts (loop guard, DeepSeek)
+            if "tool rounds" in ev.get("text", ""):
+                cap_notice = True                   # the fixed loop stops with a status and says so
+            elif "working" in ev.get("text", ""):
+                rec["errors"].append(ev["text"])    # "The session is working" - the prompt was dropped
         elif t == "approval_request" and ev.get("kind") != "plan":
             ok = approve(ev) if approve else approval_ok(ev.get("summary", ""), ws)
             rec["approvals"].append({"summary": ev.get("summary", "")[:300], "reason": ev.get("reason", ""), "ok": ok})
@@ -750,6 +778,13 @@ def engine_health() -> dict:
     with urllib.request.urlopen(req, timeout=10) as r:
         h = json.loads(r.read())
     return {"url": cli.DEFAULT_URL, "model": h.get("model"), "settings": cli.chat_settings_summary()}
+
+
+def chat_settings() -> str:
+    """The server's Chat settings in one line (dl_status.chat_settings_summary), for the other benches' reports."""
+    sys.path.insert(0, str(HERE))
+    import dl_cli as cli
+    return cli.chat_settings_summary()
 
 
 def score_run(run_dir: Path) -> dict:
@@ -853,6 +888,8 @@ def cmd_run(a) -> int:
     except Exception as e:  # noqa: BLE001
         print(f"Strata is not answering: {e}", file=sys.stderr)
         return 1
+    if warn := sampling_warning(str(engine.get("settings") or "")):
+        print(f"note: {warn} ({engine.get('settings')})", file=sys.stderr, flush=True)
     sys.path.insert(0, str(HERE))
     import dl_sessiond
     sock_path = Path(a.socket) if a.socket else dl_sessiond.SOCKET_PATH
@@ -1002,8 +1039,9 @@ def main() -> int:
     r.add_argument("--step-timeout", type=float, default=45, help="minutes per prompt before interrupting")
     r.add_argument("--max-nudges", type=int, default=3, help="'continue' prompts after a cut-off, per step")
     r.add_argument("--socket", default="", help="dl-ai-sessiond socket (default: the user service's)")
-    r.add_argument("--effort", default="", choices=["", "none", "low", "medium", "high"],
-                   help="thinking level for the bench sessions (default: the web app's Chat settings)")
+    r.add_argument("--effort", default="", choices=["", "none", "low", "medium", "high", "auto"],
+                   help="thinking level for the bench sessions (default: the web app's Chat settings; "
+                        "auto: Ray's per-turn pick, as the Code tab runs)")
     r.add_argument("--allow-stale", action="store_true", help="run even if the daemon started before a code change")
     r.add_argument("--email-to", default="", help="when done, Ray emails the result here with its Gmail tool")
     w = sub.add_parser("sweep", help="run the same tasks once per thinking level and compare")

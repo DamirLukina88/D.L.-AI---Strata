@@ -295,7 +295,7 @@ def api(path: str, body: dict, timeout: float = 900) -> dict:
 def cli_turns(case: dict, session: str, sock: Path, timeout: float) -> dict:
     live = bench.Live(session, sock)
     ws = Path(live.state.get("workspace") or ".")
-    rec = {"t0": time.time(), "tool_calls": [], "turns": [], "workspace": str(ws)}
+    rec = {"t0": time.time(), "tool_calls": [], "notices": [], "turns": [], "workspace": str(ws)}
     try:
         bench.drive(live, "/clear", ws, 60)
         if case.get("voice"):                       # as the web app sends a spoken prompt
@@ -304,6 +304,7 @@ def cli_turns(case: dict, session: str, sock: Path, timeout: float) -> dict:
         for text in case["turns"]:
             r = bench.drive(live, text, ws, timeout)
             rec["tool_calls"] += r["tool_calls"]
+            rec["notices"] += r.get("notices", [])
             rec["turns"].append({"text": text, "reply": r["final_text"], "seconds": r["seconds"],
                                  "tools": [t["name"] for t in r["tool_calls"]], "errors": r["errors"]})
     finally:
@@ -351,9 +352,15 @@ def sizes() -> dict:
 
 
 # ------------------------------------------------------------------ commands
+def notices_line(results: list[dict]) -> str:
+    c = bench.notice_counts([n for r in results for n in r["rec"].get("notices", [])])
+    return "Stuck signs: " + ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in c.items())
+
+
 def report(res: dict) -> str:
     lines = [f"# Ray persona bench: {res['label']}", "",
-             f"{res['started']} · code {res['code'].get('head')} · repeat {res['repeat']}", ""]
+             f"{res['started']} · code {res['code'].get('head')} · repeat {res['repeat']}"
+             f"{' · ' + res['settings'] if res.get('settings') else ''}", ""]
     s = res.get("sizes") or {}
     if s:
         lines += ["| Prompt | chars | engine tokens | cold read |", "| :-- | --: | --: | --: |",
@@ -367,6 +374,7 @@ def report(res: dict) -> str:
                 acc[0] += k["ok"]
                 acc[1] += 1
     lines += [f"**{tot[0]}/{tot[1]} checks passed**", "", precision_line(tool_precision(res["results"])), "",
+              notices_line(res["results"]), "",
               "| Category | passed |", "| :-- | --: |"]
     lines += [f"| {k} | {v[0]}/{v[1]} |" for k, v in sorted(cats.items())]
     lines += ["", "| Case | Surface | # | Result | Failed checks | Seconds | Tools |", "| :-- | :-- | --: | :-- | :-- | --: | :-- |"]
@@ -399,7 +407,9 @@ def cmd_run(a) -> int:
     sock = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "dl-ai" / "sessiond.sock"
     want = set(a.cases.split(",")) if a.cases else None
     res = {"label": a.label, "started": datetime.datetime.now().isoformat(timespec="seconds"), "code": code,
-           "repeat": a.repeat, "sizes": sizes(), "results": []}
+           "repeat": a.repeat, "settings": cli.chat_settings_summary(), "sizes": sizes(), "results": []}
+    if warn := bench.sampling_warning(res["settings"]):
+        print(f"note: {warn} ({res['settings']})", file=sys.stderr, flush=True)
     for case in CASES:
         if want and case["id"] not in want:
             continue
@@ -456,6 +466,7 @@ def cmd_compare(a) -> int:
         print(f"{res['label']}: {tot}/{n} checks, {secs:.0f} s of turns; CLI prompt {s.get('cli_prompt_tokens')} "
               f"tokens ({s.get('cli_cold_seconds')} s cold)")
         print(f"  {precision_line(tool_precision(res['results']))}")
+        print(f"  {notices_line(res['results'])}")
     return 0
 
 

@@ -30,6 +30,8 @@ from pathlib import Path
 from typing import Callable
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from dl_agent_bench import chat_settings, notice_counts, sampling_warning  # noqa: E402  (shared with the other benches)
 DEFAULT_SOCKET = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "dl-ai" / "sessiond.sock"
 DEFAULT_ROOT = Path.home() / ".cache" / "strata" / "bench" / "weather_reasoning"
 DEFAULT_PROMPT = "I would like you to create a weather forecast table for me for todays and tomorrow's weather, our forecast and send it to me per email."
@@ -126,6 +128,7 @@ def drive_turn(live: LiveSession, text: str, ws: Path, timeout: float, allowed_e
         "approvals": [],
         "errors": [],
         "thinking": [],
+        "notices": [],
         "tokens": 0,
         "seconds": 0.0,
     }
@@ -196,6 +199,8 @@ def drive_turn(live: LiveSession, text: str, ws: Path, timeout: float, allowed_e
             finished = True
         elif etype == "error":
             rec["errors"].append(ev.get("text", ""))
+        elif etype == "notice":
+            rec["notices"].append(ev.get("text", "")[:300])
         elif etype == "approval_request":
             summary = ev.get("summary", "")
             ok = approval_filter(summary, ws, allowed_email)
@@ -350,11 +355,12 @@ def score_reasoning_turn(steps: list[dict], recipient: str) -> dict:
 
 # ---------------------------------------------------------------------- Single Level Runner
 def run_level(effort: str, run_dir: Path, timeout_minutes: float, max_turns: int,
-              sock_path: Path, prompt: str, recipient: str) -> dict:
-    """Executes a single reasoning level run."""
-    ws = run_dir / f"ws-{effort}"
+              sock_path: Path, prompt: str, recipient: str, n: int = 1) -> dict:
+    """Executes a single reasoning level run (`n`: which repeat of this level)."""
+    tag = effort if n == 1 else f"{effort}-{n}"
+    ws = run_dir / f"ws-{tag}"
     ws.mkdir(parents=True, exist_ok=True)
-    session = f"bench-weather-{effort}-{int(time.time())}"[:64]
+    session = f"bench-weather-{tag}-{int(time.time())}"[:64]
 
     print(f"\n{C_BOLD}{C_ORANGE}▶ Starting Level: thinking={effort}{C_RESET} (session: {session})", flush=True)
     print(f"  {C_MUTED}Watch live: python3 tools/dl_cli.py --attach {session}{C_RESET}", flush=True)
@@ -397,13 +403,15 @@ def run_level(effort: str, run_dir: Path, timeout_minutes: float, max_turns: int
         live.close()
 
     # Save step trace
-    log_file = run_dir / f"{effort}.steps.jsonl"
+    log_file = run_dir / f"{tag}.steps.jsonl"
     with log_file.open("w", encoding="utf-8") as f:
         for s in steps:
             f.write(json.dumps(s, ensure_ascii=False) + "\n")
 
     score_card = score_reasoning_turn(steps, recipient)
     score_card["effort"] = effort
+    score_card["n"] = n
+    score_card["stuck"] = notice_counts([x for st in steps for x in st.get("notices", [])])
     score_card["session"] = session
     score_card["workspace"] = str(ws)
 
@@ -428,13 +436,15 @@ def format_summary_table(results: list[dict]) -> str:
         "Wall Time",
         "Think Time",
         "Think Chars",
-        "Calls"
+        "Calls",
+        "Loop guard",
+        "DeepSeek asked"
     ]
     rows = []
     for r in results:
         t = r["telemetry"]
         rows.append([
-            f"**{r['effort']}**",
+            f"**{r['effort']}**" + (f" #{r['n']}" if r.get("n", 1) != 1 else ""),
             f"**{r['total_score']}/100**",
             f"{r['location']['score']}/25 ({r['location']['note'][:20]}...)" if len(r['location']['note']) > 20 else f"{r['location']['score']}/25",
             f"{r['forecast_table']['score']}/25",
@@ -442,7 +452,9 @@ def format_summary_table(results: list[dict]) -> str:
             f"{t['wall_seconds']}s",
             f"{t['think_seconds']}s",
             f"{t['think_chars']}",
-            f"{t['tool_calls']}"
+            f"{t['tool_calls']}",
+            f"{(r.get('stuck') or {}).get('loop_guard_hits', '-')}",
+            f"{(r.get('stuck') or {}).get('deepseek_asked', '-')}"
         ])
 
     col_widths = [max(len(row[i]) for row in [headers] + rows) for i in range(len(headers))]
@@ -453,7 +465,7 @@ def format_summary_table(results: list[dict]) -> str:
 
 
 def run_benchmark(efforts: list[str], root_dir: Path, timeout_minutes: float,
-                  max_turns: int, sock_path: Path, prompt: str, recipient: str, label: str) -> None:
+                  max_turns: int, sock_path: Path, prompt: str, recipient: str, label: str, repeat: int = 1) -> None:
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     run_dir = root_dir / f"{timestamp}-{label}"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -466,20 +478,28 @@ def run_benchmark(efforts: list[str], root_dir: Path, timeout_minutes: float,
     print(f"  {C_BOLD}Turns max:{C_RESET}   {max_turns}")
     print(f"  {C_BOLD}Prompt:{C_RESET}      \"{prompt}\"")
     print(f"  {C_BOLD}Recipient:{C_RESET}   {recipient}")
+    settings = chat_settings()
+    print(f"  {C_BOLD}Repeats:{C_RESET}     {repeat}")
+    print(f"  {C_BOLD}Settings:{C_RESET}    {settings}")
+    if warn := sampling_warning(settings):
+        print(f"  {C_YELLOW}note: {warn}{C_RESET}")
     print(f"  {C_BOLD}Run Dir:{C_RESET}     {run_dir}\n")
 
     results = []
-    for effort in efforts:
-        res = run_level(
-            effort=effort,
-            run_dir=run_dir,
-            timeout_minutes=timeout_minutes,
-            max_turns=max_turns,
-            sock_path=sock_path,
-            prompt=prompt,
-            recipient=recipient
-        )
-        results.append(res)
+    for n in range(1, repeat + 1):          # round by round: a run cut short still has every level
+        for effort in efforts:
+            res = run_level(
+                effort=effort,
+                run_dir=run_dir,
+                timeout_minutes=timeout_minutes,
+                max_turns=max_turns,
+                sock_path=sock_path,
+                prompt=prompt,
+                recipient=recipient,
+                n=n,
+            )
+            results.append(res)
+            (run_dir / "results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
 
     # Save results.json
     results_file = run_dir / "results.json"
@@ -491,7 +511,8 @@ def run_benchmark(efforts: list[str], root_dir: Path, timeout_minutes: float,
 **Date:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 **Prompt:** *"{prompt}"*
 **Target Recipient:** `{recipient}`
-**Levels Tested:** {', '.join(efforts)}
+**Levels Tested:** {', '.join(efforts)} ({repeat} run(s) each)
+**Chat settings:** {settings}
 
 ## Comparison Summary
 
@@ -502,12 +523,13 @@ def run_benchmark(efforts: list[str], root_dir: Path, timeout_minutes: float,
 """
     for r in results:
         t = r["telemetry"]
-        report_md += f"""### Reasoning Level: `{r['effort']}` (Total Score: {r['total_score']}/100)
+        report_md += f"""### Reasoning Level: `{r['effort']}`{f" #{r['n']}" if r.get('n', 1) != 1 else ""} (Total Score: {r['total_score']}/100)
 - **Location Inference:** {r['location']['score']}/25 - {r['location']['note']}
 - **Weather Table:** {r['forecast_table']['score']}/25 - {r['forecast_table']['note']}
 - **Email Delivery:** {r['email_delivery']['score']}/25 - {r['email_delivery']['note']}
 - **Tool & Turn Efficiency:** {r['efficiency']['score']}/25 - {r['efficiency']['note']}
 - **Telemetry:** Wall: {t['wall_seconds']}s | Thinking: {t['think_seconds']}s ({t['think_chars']} chars) | Tools called: {t['tool_calls']} {t['tool_names']}
+- **Stuck signs:** {', '.join(f"{k.replace('_', ' ')} {v}" for k, v in (r.get('stuck') or {}).items()) or '-'}
 
 """
 
@@ -539,11 +561,13 @@ def main():
                         help="Target recipient email for Proton Mail")
     parser.add_argument("--label", default="sweep",
                         help="Run directory label prefix")
+    parser.add_argument("--repeat", type=int, default=1,
+                        help="Runs per level (sampling is random: one run cannot tell a change from luck)")
 
     args = parser.parse_args()
 
     efforts = [e.strip() for e in args.efforts.split(",") if e.strip()]
-    valid_efforts = {"none", "low", "medium", "high"}
+    valid_efforts = {"none", "low", "medium", "high", "auto"}
     invalid = [e for e in efforts if e not in valid_efforts]
     if invalid:
         print(f"{C_RED}Error: Invalid effort level(s): {invalid}. Valid options are: {sorted(valid_efforts)}{C_RESET}",
@@ -564,7 +588,8 @@ def main():
         sock_path=sock,
         prompt=args.prompt,
         recipient=args.recipient,
-        label=args.label
+        label=args.label,
+        repeat=max(1, args.repeat),
     )
 
 

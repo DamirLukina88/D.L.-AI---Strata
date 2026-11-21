@@ -176,9 +176,12 @@ def report(res: dict) -> str:
         rows.append(f"| {cid} | {case['text'][:60]} | {', '.join(case['want']) or 'none'} | {ok}/{len(runs)} | "
                     f"{', '.join(used) or '-'} | {'; '.join(why) or '-'} | "
                     f"{(sorted(first)[len(first) // 2] if first else '-')} | {sorted(end)[len(end) // 2]} |")
+    stuck = bench.notice_counts([n for r in res["results"] for n in r["rec"].get("notices", [])])
     head = (f"# Ray tool choice: {res['label']} ({res['started']}, {res['repeat']} run(s) per case)\n\n"
-            f"- Needs no server: {none_ok}/{none_n} runs stayed without one.\n"
-            f"- Needs a server: {need_ok}/{need_n} runs reached for a right one.\n\n")
+            + (f"- Chat settings: {res['settings']}\n" if res.get("settings") else "")
+            + f"- Needs no server: {none_ok}/{none_n} runs stayed without one.\n"
+            f"- Needs a server: {need_ok}/{need_n} runs reached for a right one.\n"
+            f"- Stuck signs: " + ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in stuck.items()) + "\n\n")
     return (head + "| Case | Prompt | Wanted | Passed | Reached for | Why turned on | First text s (median) | "
             "Turn s (median) |\n|---|---|---|---|---|---|---|---|\n" + "\n".join(rows) + "\n")
 
@@ -195,7 +198,9 @@ def cmd_run(a) -> int:
     sock = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "dl-ai" / "sessiond.sock"
     want = set(a.cases.split(",")) if a.cases else None
     res = {"label": a.label, "started": datetime.datetime.now().isoformat(timespec="seconds"), "code": code,
-           "repeat": a.repeat, "results": []}
+           "repeat": a.repeat, "settings": bench.chat_settings(), "results": []}
+    if warn := bench.sampling_warning(res["settings"]):
+        print(f"note: {warn} ({res['settings']})", file=sys.stderr, flush=True)
     for n in range(1, a.repeat + 1):                    # round by round: a run cut short still has every case
         for case in CASES:
             if want and case["id"] not in want:

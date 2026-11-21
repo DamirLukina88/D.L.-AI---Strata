@@ -133,6 +133,13 @@ class TestWeatherReasoningBench(unittest.TestCase):
         self.assertIn("none", table)
         self.assertIn("high", table)
         self.assertIn("100/100", table)
+        self.assertIn("Loop guard", table)
+        # a repeat and its stuck counts show in the row; older results without them still format
+        mock_results[1].update(n=2, stuck={"loop_guard_hits": 3, "deepseek_asked": 1})
+        table = bench.format_summary_table(mock_results)
+        row = next(l for l in table.splitlines() if "high" in l)
+        self.assertIn("#2", row)
+        self.assertEqual([c.strip() for c in row.strip("|").split("|")][-2:], ["3", "1"])
 
 
 if __name__ == "__main__":

@@ -357,5 +357,50 @@ class Live(unittest.TestCase):
         self.assertIn("Continue the task from where you stopped.", md)
 
 
+class StuckSigns(unittest.TestCase):
+    """The notices the per-turn sampling comparison counts (loop guard, lean raise, DeepSeek helper and review)."""
+
+    NOTES = ["Loop guard: the thinking kept repeating itself; stopped it and asked for the next action (1/3).",
+             "Loop guard: the thinking kept repeating itself; stopped it and asked for the next action (2/3).",
+             "Thinking on high for the next 3 rounds, because a tool failed.",
+             "Asking DeepSeek for help: same error twice (DL_ADVISOR=0 turns this off).",
+             "DeepSeek helper failed: error: timeout",
+             "Final review by DeepSeek Pro, round 1 of at most 2 (3 file(s))...",
+             "MCP: +weather (matched 'weather')"]
+
+    def test_counts(self):
+        self.assertEqual(bench.notice_counts(self.NOTES),
+                         {"loop_guard_hits": 2, "thinking_raised": 1, "deepseek_asked": 1, "deepseek_failed": 1,
+                          "deepseek_reviews": 1})
+        self.assertEqual(set(bench.notice_counts([]).values()), {0})     # every kind present, 0 when absent
+
+    def test_sampling_warning(self):
+        self.assertEqual(bench.sampling_warning("effort auto · temp 0.6 · top_p 0.95 · top_k 20 · max auto"), "")
+        self.assertIn("seed", bench.sampling_warning("effort auto · temp 0.6 · top_p 0.95 · max auto · seed 7"))
+        self.assertIn("greedy", bench.sampling_warning("effort auto · greedy · max auto"))
+
+    def test_drive_keeps_notices_and_still_answers_approvals(self):
+        import queue as _q
+
+        class FakeLive:
+            def __init__(self, events):
+                self.q, self.sent = _q.Queue(), []
+                for e in events:
+                    self.q.put(e)
+
+            def send(self, **m):
+                self.sent.append(m)
+
+        live = FakeLive([{"type": "notice", "text": self.NOTES[0]},
+                         {"type": "approval_request", "id": "a1", "summary": "run_command: echo hi"},
+                         {"type": "notice", "text": "I stopped after 5 tool rounds."},
+                         {"type": "turn_end"}])
+        rec = bench.drive(live, "go", Path("/tmp/ws"), 30, approve=lambda ev: True)
+        self.assertEqual(rec["notices"], [self.NOTES[0], "I stopped after 5 tool rounds."])
+        self.assertTrue(rec["cut_off"])                                   # the turn-cap notice still counts
+        self.assertEqual([m for m in live.sent if m.get("op") == "approve"], [{"op": "approve", "id": "a1"}])
+        self.assertEqual(bench.session_metrics([rec])["loop_guard_hits"], 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
