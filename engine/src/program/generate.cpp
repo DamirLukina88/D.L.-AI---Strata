@@ -15957,6 +15957,14 @@ int main(int argc, char** argv) {
                 if (!l.empty() && l.back() == '\r') l.pop_back();
                 if (l == "STOP") { st->stop_req.store(true); g_prompt_stop_req.store(true); continue; }
                 std::lock_guard<std::mutex> lk(st->mu);
+                // a STOP read before this request's line is stale; one read after it is for it.  Cleared here, in
+                // order: the main loop cleared it only after popping the line (and a profile save, a VRAM query), so
+                // a STOP the server sent in between was lost and the request ran to max_new.  A BGEN is not cleared
+                // here: in --batch it can be queued while another slot's admission is being stopped
+                if (l.rfind("GEN ", 0) == 0 || l.rfind("GENI ", 0) == 0) {
+                    st->stop_req.store(false);
+                    g_prompt_stop_req.store(false);
+                }
                 st->lines.push_back(std::move(l));
                 st->cv.notify_one();
             }
@@ -18480,8 +18488,12 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            stop_req.store(false);   // a STOP that arrived between requests is stale
-            g_prompt_stop_req.store(false);   // the prompt read's cancel flag resets with it (#962/#3675)
+            // a STOP that arrived between requests is stale.  A GEN / GENI line had it cleared as it was queued (one
+            // sent after it is for it); a BGEN, rewritten to GEN above, is cleared here as before
+            if (admit_slot >= 0 || (line.rfind("GEN ", 0) != 0 && line.rfind("GENI ", 0) != 0)) {
+                stop_req.store(false);
+                g_prompt_stop_req.store(false);   // the prompt read's cancel flag resets with it (#962/#3675)
+            }
             err.clear();
             // Disk sessions: SAVE <path> | RESTORE <path>, between requests (the path runs to the end of the line,
             // UTF-8).  The file holds what a parked conversation holds (conversation_file.hpp).  Answers: SAVED /
