@@ -950,7 +950,8 @@ __global__ void k_argmax(const float* x, int n, int32_t* out, float* pv, int32_t
         __syncthreads();
     }
     if (threadIdx.x == 0) {
-        if (stage2) *out = bi[0];
+        if (stage2) *out = bi[0] == 0x7fffffff ? 0 : bi[0];   // an all-NaN / -inf row: token 0, not an id past the vocabulary
+                                                                // that then indexes the embedding table
         else { pv[blockIdx.x] = bv[0]; pi[blockIdx.x] = bi[0]; }
     }
 }
@@ -4346,7 +4347,9 @@ bool place_experts(Model& m, Engine& E, double vram_gib, int threads, int hybrid
     E.main_hybrid = !mtp_only;
     if (E.main_hybrid) E.use_graph = false;   // the host takes part in every layer
     E.mtp_graph = false;                      // the MTP block's layer is hybrid either way
-    E.hybrid_t = std::max(1, std::min(hybrid_t, E.use_mmq ? E.tmax : E.tmax));
+    // at least kGemmT: a hybrid layer's batch of hybrid_t < T <= 8 was neither a hybrid-rows batch nor an MMQ one and
+    // reached k_group over the slot-sized blob array with expert ids up to n_expert (out of bounds)
+    E.hybrid_t = std::max(Engine::kGemmT, std::min(hybrid_t, E.use_mmq ? E.tmax : E.tmax));
     if (!E.use_pf) E.hybrid_t = E.tmax;   // no streamed prompt path: every batch on slots + the pool
     // the slot count and the VRAM need (hybrid_fit.hpp); when the staging pair of the streamed prompt path does not fit the card, the plan without it (#5533)
     strata::qwen35::HybridIn hin;
