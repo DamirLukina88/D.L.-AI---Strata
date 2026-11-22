@@ -516,6 +516,8 @@ void full_session(int fmt, int mode, int experts) {
         // ---- the running-state codec (strata/core/state_codec.hpp). The state the session holds is fp32; a stored
         // copy may hold it as bf16. The session itself is never coded, and a coded copy is only ever read by a
         // restore, which widens it. Everything below compares against image `a`, the same state captured as fp32.
+        // the borrowed-prefix block above leaves another conversation in the session: A first, as the checks compare with A
+        check(conversation_snapshot_restore(a,ss,g,draft.state,err)==ConversationRestore::restored,"the session holds A again");
         const ConversationView coded_view{ids,images,checkpoints,true,StateCodec::Bf16};
         size_t plain=0,coded=0;
         check(conversation_snapshot_bytes(view,ss,g,draft.state,plain,err) &&
