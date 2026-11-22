@@ -47,6 +47,11 @@ struct ConversationCheckpoint {
     std::vector<int32_t> ids;
     std::vector<ConversationImageKey> imgs;
     std::vector<uint8_t> gdn, ple, tails, dead, block_pos;
+    // How gdn/ple/tails/dead are stored (strata/core/state_codec.hpp): 0 = fp32, the bytes the engine computes.
+    // A checkpoint the engine holds live is always 0; a stored copy (a parked image, a session file) may say
+    // otherwise, and every size check, estimate and restore reads it from here. block_pos is int32 positions and is
+    // never coded. A target codec is asked for by setting this before conversation_checkpoint_save.
+    uint8_t state_codec = 0;
     uint64_t used = 0; // upstream root-pinned/LRU checkpoint retention
     // STRATA_CKPT_VRAM_SLOTS: the tag of the device copy of `gdn` (0: none).  Set by conversation_checkpoint_save, the
     // only writer of a checkpoint's GDN bytes besides a whole copy (which keeps them equal, so it keeps the tag).
@@ -148,6 +153,8 @@ inline ConversationCheckpointSplit conversation_checkpoints_split(std::vector<Co
         for (size_t k = 0; k < stages; ++k) {
             ConversationCheckpoint part;
             part.ids = c.ids; part.imgs = c.imgs; part.used = c.used; part.pinned = c.pinned;
+            // the part's own arrays come from its own checkpoint, so its own coding travels with them
+            part.state_codec = c.stage_parts[k].state_codec;
             out.parts[k].push_back(std::move(part));
         }
     }

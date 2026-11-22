@@ -1119,6 +1119,11 @@ struct Options {
     bool conversation_spill_persist = false;
     int64_t conversation_spill_mib = -1;
     bool session_save_reclaim = false;
+    /// --serve: how a stored conversation's running state is held - "fp32" (the bytes the engine computes) or
+    /// "bf16" (half the bytes, every value within 2^-8 of what it was). Parked conversation-cache images and
+    /// session files only: the state the engine computes on, and its live checkpoint chain, are always fp32.
+    std::string session_state_codec = "fp32";
+    strata::core::StateCodec session_state_codec_id = strata::core::StateCodec::Fp32;   // resolved from the name above
     /// --serve: also keep a checkpoint every N freshly read prompt tokens (0 = only at the last turn boundary)
     int64_t prompt_cache_every = 16384;
     bool prompt_cache_tail = false;   // optional extra checkpoint at an existing near-tail chunk boundary
@@ -1309,6 +1314,9 @@ void usage() {
                  "                       if that branch is revisited)\n"
                  "  --session-min-free-mib N  --serve: disk space a SAVE must leave free (default 4096; 0 = no check)\n"
                  "  --session-save-reclaim  --serve: reclaim unpinned host caches if SAVE needs RAM (opt-in)\n"
+                 "  --session-state-codec NAME  --serve: how a stored conversation's running state is held:\n"
+                 "                       fp32 (default) or bf16 (half the bytes, within 2^-8 per value). Affects what\n"
+                 "                       is parked and what a SAVE writes; the live state is never coded\n"
                  "  --vram-elastic       --serve (#533, opt-in, NVIDIA): the expert cache in segments (--vram-segment-mib,\n"
                  "                       default 512), so the command `VRAM <reserve_mib>` (the server's POST /v1/vram) can\n"
                  "                       give VRAM back to other programs between requests and take it back later\n"
@@ -4105,6 +4113,14 @@ int main(int argc, char** argv) {
         else if (a == "--conversation-spill-dir") o.conversation_spill_dir = next("--conversation-spill-dir");
         else if (a == "--prompt-cache-tail") o.prompt_cache_tail = true;
         else if (a == "--prompt-cache-spread") o.prompt_cache_spread = true;
+        else if (a == "--session-state-codec") {
+            const std::string value = next(a.c_str());
+            if (!strata::core::state_codec_by_name(value, o.session_state_codec_id)) {
+                std::fprintf(stderr, "%s wants fp32 or bf16 (got '%s')\n", a.c_str(), value.c_str());
+                return 2;
+            }
+            o.session_state_codec = value;
+        }
         else if (a == "--prompt-cache-every") o.prompt_cache_every = std::max(0LL, std::atoll(next("--prompt-cache-every")));
         else if (a == "--prompt-cache-root") o.prompt_cache_root = std::max(0LL, std::atoll(next("--prompt-cache-root")));
         else if (a == "--turn-token") o.turn_token = std::atoll(next("--turn-token"));
@@ -13876,6 +13892,15 @@ int main(int argc, char** argv) {
                          segpool != nullptr ? segpool->capacity() >> 20 : (size_t) 0, ckpt_pool.on() ? "on" : "off", ckpt_pool_ready_env(),
                          ckpt_pool.cap(), park_ckpt_bytes >> 20, cache_mib_now, stages.size());
         segpool_kick();
+        // How a stored conversation's running state is held (strata/core/state_codec.hpp). The name was checked when
+        // the flags were read, so it resolves here. fp32 - the default - leaves every byte of every parked image and
+        // every session file exactly as the last release wrote it; bf16 halves the running state in both, and says so
+        // in the image and in the file so that anything reading them knows. The live state and the live checkpoint
+        // chain are fp32 whatever this says.
+        const strata::core::StateCodec session_codec = o.session_state_codec_id;
+        if (session_codec != strata::core::StateCodec::Fp32)
+            std::fprintf(stderr, "strata serve: stored conversation state: %s (parked images and session files; "
+                                 "the live state stays fp32)\n", strata::core::state_codec_name(session_codec));
         // Disk sessions: what a session file is bound to.  The model fingerprint samples every model input this
         // engine loaded, by role (conversation_file.hpp), once; the config fingerprint covers the RESOLVED settings
         // that change what the saved bytes mean - the rope (K is cached post-RoPE), the loaded control vector, the
@@ -14211,7 +14236,8 @@ int main(int argc, char** argv) {
                 strata::core::ConversationCheckpointSplit& cs; std::vector<ConvCheckpoint>& checks; bool on;
                 ~MergeBack() { if (on && !strata::core::conversation_checkpoints_merge(std::move(cs), checks)) checks.clear(); }
             } merge_back{cs, checks, n_st > 0};
-            const strata::core::ConversationView view{src.ids, src.imgs, n_st > 0 ? cs.stage0 : checks, src.cvec};
+            const strata::core::ConversationView view{src.ids, src.imgs, n_st > 0 ? cs.stage0 : checks, src.cvec,
+                                                      session_codec};
             const int64_t retained_n = src.with_reuse ? conversations.retained_tokens() : 0;
             // a batch slot's image carries no retained K/V (it describes the main session's conversation), and the
             // main session's stays retained for its own park
@@ -14229,7 +14255,7 @@ int main(int argc, char** argv) {
             for (size_t k = 0; k < n_st; ++k) {
                 auto& st = stages[k];
                 const strata::core::OnDevice on(st->dev);
-                const strata::core::ConversationView view_k{src.ids, src.imgs, cs.parts[k], src.cvec};
+                const strata::core::ConversationView view_k{src.ids, src.imgs, cs.parts[k], src.cvec, session_codec};
                 size_t b = 0;
                 if (!strata::core::conversation_snapshot_bytes(view_k, *src.stage_sessions[k], g, draft_of(k), b, err)) {
                     std::fprintf(stderr, "strata serve: conversation cache: skip parking (stage CUDA%d: %s)\n",
@@ -14380,7 +14406,7 @@ int main(int argc, char** argv) {
                     auto& st = stages[k];
                     const strata::core::OnDevice on(st->dev);
                     if (cudaDeviceSynchronize() != cudaSuccess) { err = "stage sync failed"; return false; }
-                    const strata::core::ConversationView view_k{src.ids, src.imgs, cs.parts[k], src.cvec};
+                    const strata::core::ConversationView view_k{src.ids, src.imgs, cs.parts[k], src.cvec, session_codec};
                     strata::core::SavedConversation part;
                     if (!strata::core::conversation_snapshot_save(part, view_k, *src.stage_sessions[k], g, draft_of(k), err,
                             std::move(stage_reuse[k]), &reused_bytes))
@@ -18555,7 +18581,7 @@ int main(int argc, char** argv) {
                         pools_budget.shrink((size_t) -1);   // (the park pools' idle memory goes back before the RAM checks of a session save)
                         if (o.session_save_reclaim) {
                             const auto freed = strata::core::session_save_reclaim(
-                                checks, conversations, sl, floor, strata::core::available_host_bytes);
+                                checks, conversations, sl, session_codec, floor, strata::core::available_host_bytes);
                             if (freed.bytes || freed.checkpoints || freed.parked) {
                                 // A removed tail must not mark a later checkpoint at this length as a tail.
                                 if (tail_ckpt_len >= 0 && std::none_of(checks.begin(), checks.end(), [&](const auto& c) {
@@ -18578,12 +18604,13 @@ int main(int argc, char** argv) {
                         };
                         std::vector<ConvCheckpoint> disk_checks;
                         std::string why;
-                        if (!strata::core::session_save_checkpoints(checks, sl, admit, disk_checks, why)) {
+                        if (!strata::core::session_save_checkpoints(checks, sl, session_codec, admit, disk_checks, why)) {
                             refuse(why, strata::core::SessionError::memory);
                             continue;
                         }
                         kept = disk_checks.size();
-                        const strata::core::ConversationView view{live, live_imgs, disk_checks, cvec_cached};
+                        const strata::core::ConversationView view{live, live_imgs, disk_checks, cvec_cached,
+                                                                  session_codec};
                         strata::core::SavedConversation meta;
                         std::vector<strata::core::SessionKvSource> sources;
                         // the live running state comes off the device in one synchronous copy
@@ -19923,6 +19950,15 @@ int main(int argc, char** argv) {
                     if (!strata::core::conversation_checkpoints_merge(std::move(cs), checks)) checks.clear();
                 }
                 cvec_cached = incoming->cvec;
+                // A parked image may hold its running state coded (strata/core/state_codec.hpp); the engine's own
+                // checkpoint chain does not. Widening here is what keeps a coded park from reaching a prompt-cache
+                // resume: from this line on, the chain is the fp32 bytes it has always been.
+                if (!strata::core::conversation_checkpoints_widen(checks, err)) {
+                    std::fprintf(stderr, "strata serve: conversation cache: could not widen the parked checkpoints "
+                                         "(%s); this conversation keeps no older resume point\n", err.c_str());
+                    err.clear();
+                    checks.clear();
+                }
                 resume = taken.tokens;   // (parked.tokens unless the image came from the SSD tier)
                 from_live = taken.live;
                 if (!swapped_parked && std::getenv("STRATA_SNAPSHOT_FULL_CAPTURE") == nullptr) {
