@@ -717,6 +717,11 @@ class StrataEngine:
         # report their own version (INFO engine=, 0.1.8+) win, the manifest stays the fallback for older ones
         if self.info.get("engine"):
             self.info["version"] = str(self.info["engine"])
+        if getattr(self, "inkling_engine", False):      # which drafter runs (Inkling-2-Mini's built-in DSpark, or off)
+            try:
+                self.info.update(inkling_kind.drafting_info(args, self.info))
+            except Exception:                           # noqa: BLE001 - a note must never stop a start
+                pass
         self.ended = False                              # READY: alive from here (restart() set it True, #344)
         self.degraded = degraded_start(log, log_start)  # short of RAM at the start: /health says so, idle reload
         if self.degraded:
