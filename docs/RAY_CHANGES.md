@@ -4,11 +4,12 @@ How this fork follows upstream Strata releases, what was ported, and the communi
 
 [← Back to the README](../README.md)
 
-The inference engine is Strata, configured and optimized for AMD RDNA3 (ROCm/HIP). This fork last merged upstream
-as a whole at v0.1.44.1 (2026-10-15). Later upstream releases are reviewed against this PC (AMD Ryzen 5 3600, 32 GB
-RAM, Radeon RX 7600 XT 16 GB `gfx1102`, CachyOS, ROCm) and only the fixes that apply are ported by hand, so the engine
-reads `0.1.44.1+0.2.12-fixes`. The reviews live in the shared memory store (project `strata`, pages named
-`upstream-v0-2-*-review-*`); they are not part of this repository.
+The inference engine is Strata, configured and optimized for AMD RDNA3 (ROCm/HIP). This fork last merged upstream as a
+whole at v0.1.44.1 (2026-10-15). Later upstream releases are reviewed against this PC (AMD Ryzen 5 3600, 32 GB RAM,
+Radeon RX 7600 XT 16 GB `gfx1102`, CachyOS, ROCm) and only the fixes that apply are ported by hand, so the engine read
+`0.1.44.1+0.2.12-fixes` until 2026-11-23; since then the engine is upstream's v0.2.20 tree with this fork's few
+changes on top (branch `ray-engine-66`, below). The reviews live in the shared memory store (project `strata`, pages
+named `upstream-v0-2-*-review-*`); they are not part of this repository.
 
 ## Releases reviewed and ported
 
@@ -109,6 +110,33 @@ reads `0.1.44.1+0.2.12-fixes`. The reviews live in the shared memory store (proj
   tool call is not declared again from the history (#6120; it builds on #4663's history tools, which this server does
   not have). The engine, setup, app and Terminal changes of 0.2.17 are not taken; the HIP fixes #6188 and #4408 apply to
   this engine and wait for a rebuild with an A/B run.
+- **0.2.18 (2026-11-21):** reviewed: Tencent Hy4-Flash (a new engine program, `strata-hy4`); nothing for Qwen.
+- **0.2.19 / 0.2.20 (2026-11-22), engine, switched 2026-11-23:** the engine now comes from upstream's own tree, not
+  from `src/`. Branch `ray-engine-66` is upstream v0.2.20 with four commits on top: `--session-state-codec bf16`
+  (ported onto upstream's background checkpoint copies), a STOP read between two requests is no longer lost, two
+  Qwen3.6 fixes, and the codec test starting from the right conversation. The context check before GENI's image
+  positions and the control-vector bounds came back from upstream as #6493. Built for gfx1102 against ROCm 10.1 with
+  Arch's `libamdhip64`, installed as the data disk's `engines/ray-0.1.66/strata` (`0.1.66+ray`). Measured
+  against 0.1.44.1 on the live Coder IQ1_M config (RX 7600 XT at 2500 MHz / 150 W / -50 mV, the A/B in
+  the data disk's `ab-0.2.19` and `ab-0.2.20`): prompt reading 358 → 830-854 tok/s from 21K to 30K tokens,
+  `tools/strata_bench.py --long` 32K first token 87.2 → 37.3 s and agent turn first token 10.0 → 5.5 s, decode the same
+  (31-35 tok/s). Quality against 0.1.44.1: 94.9 % top-1, KL 0.019 (the route tail skip in use moves it more: 91.2 %,
+  0.060); 0.1.66 against 0.1.65: 95.2 %, KL 0.021, perplexity 5.238 vs 5.249. Both repeat bit for bit. Upstream's new
+  gfx11 matrix-core defaults are what make the prompt faster: with them off (`STRATA_GFX11_WMMA_DEFAULTS=0`) the old
+  speed comes back and the quality does not change. 20 of 20 starts per arm, 10 of 10 for each installed build, a
+  30-minute soak (278 and 267 requests) with no error, no amdgpu error. Known upstream test failures on this PC, also
+  on untouched upstream: `conversation_snapshot_test` "six more restores allocate nothing on the card" (the ROCm
+  runtime takes 14 MiB against a 4 MiB slack) and, new in 0.1.66, `pool_determinism` for Q4_K gate/up with Q4_0 down
+  on the CPU path (Ryzen 5 3600). The old engine and config stay as the way back
+  (`engines/ray-0.1.44.1`, `strata-coder-iq1_m.json.bak-20261122-pre0165`).
+- **0.2.18-0.2.20, serve part (2026-11-23):** Inkling-2-Mini and Hy4-Flash run through this server and the web app's
+  model menu: upstream's `serve/hy4_kind.py`, `hy4_dialect.py`, `inkling_kind.py`, `inkling_dialect.py` and
+  `toolformat.py`, the output parser picked by the chat template, pictures handed to the engine as files, each
+  family's thinking words, Inkling's turn opener (#6612), logprobs refused with a reason, and the tokenizer folder's
+  pre-tokenizer read (o200k for Inkling, DeepSeek-v3 for Hy4). A model switch now also changes the end tokens, the
+  literal tags and the parser (before, they stayed the first model's). From v0.2.20's parser: a tool parameter named
+  `function` (#6461) and `mcp__server__tool` name spellings. Not ported: upstream's installer for these models and
+  multi-GPU roles.
 
 ## Community benchmark, 2026-11-01
 

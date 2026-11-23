@@ -78,3 +78,34 @@ from coding traces with `tools/make_profile_mix.py`, `--vram-reserve-mib 3072` (
 RAM lendable prompt slots with `0` file blob reads), and LACT GPU settings (`2800 MHz` max core clock, `198 W` power cap,
 `-50 mV` GFX voltage offset; verified with `0` kernel/ring errors across `2,595` hwmon samples and 15 transient spike tests).
 
+## Engine 0.1.65 / 0.1.66 and the other models (2026-11-23)
+
+RX 7600 XT 16 GB at 2500 MHz / 150 W / -50 mV, Ryzen 5 3600, 31 GiB RAM, ROCm 10.1 with Arch's `libamdhip64`.
+Qwen: Coder IQ1_M, the live config, `tools/strata_bench.py --long --runs 2`; prompt rows from `tools/ab_engine.py`.
+
+| Qwen3.8-Flash-Next Coder IQ1_M | 0.1.44.1 (before) | 0.1.65+ray | 0.1.66+ray (live) |
+| :--- | ---: | ---: | ---: |
+| 4K prompt ingestion | 339.6 tok/s | 672.6 | 672.5 |
+| 16K prompt ingestion | 366.2 tok/s | 857.0 | 863.1 |
+| 32K prompt, time to first token | 87.2 s | 38.4 | 37.3 |
+| Agent turn, time to first token | 10.0 s | 5.6 | 5.5 |
+| Agent decode (median) | 33.9 tok/s | 34.5 | 31.1 |
+| Chat decode (median) | 28.7 tok/s | 24.8 | 28.7 |
+
+Decode moves 24-40 tok/s by prompt in every build, so the decode rows are level within that spread.
+
+Other models through the same server, measured with the engines' own `--bench` and a functional check (chat, three
+kinds of tool call, a picture, a 6K prompt, an Anthropic request); configs `strata-inkling-sq15.json`,
+`strata-inkling-sq20.json`, `strata-hy4-flash-sq64.json`:
+
+| Model (engine) | Where it sits | Decode | Prompt | Checks |
+| :--- | :--- | ---: | ---: | ---: |
+| Inkling 2 Mini SQ-15 (strata-inkling 0.1.66) | all in VRAM | 38 tok/s short chat, 22 at 7K, 8 at 39K | 550-640 tok/s, ~290 past 27K | 7/7 |
+| Inkling 2 Mini SQ-20, lossless (same) | 9.0 GB VRAM + 6.7 GB RAM | 6-8 tok/s | 350-570 tok/s | 7/7 |
+| Hy4-Flash SQ-64 (strata-hy4 0.1.66) | 8.65 GB VRAM + 12.9 GB RAM + 36.7 GB SSD | 1.2-1.5 tok/s | ~31 tok/s | 6/7 (the 6K check thought past its 150-token cap) |
+
+SQ-20 at the engine's own placement left 972 MiB of VRAM, and a long prompt after a picture ran out of it; the
+config caps the experts at 9.0 GB VRAM / 6.7 GB RAM. Hy4-Flash keeps its expert RAM at 12 GB (`--ram-experts-gb`,
+which engine 0.1.64 ignored in the 2026-11-21 trial and ran out of memory with 25 GB); it was run inside a systemd
+scope with `MemoryMax=24G`, peak 22.7 GB including page cache.
+

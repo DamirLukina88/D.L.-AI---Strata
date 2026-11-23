@@ -7,7 +7,11 @@ fixes ported one by one ([docs/RAY_CHANGES.md](docs/RAY_CHANGES.md)).
 
 ## Layout
 
-- `src/`, `include/`: the C++/CUDA/HIP/SYCL engine. `setup.py`, `setup.sh`, `START-HERE.bat`: the installer.
+- The engine Ray runs is built from branch `ray-engine-66`: upstream's v0.2.20 `engine/` tree with this fork's few
+  changes on top (docs/RAY_CHANGES.md), installed in the data disk's `engines/ray-0.1.66/`. `src/`, `include/`
+  are the older 0.1.44.1-based engine, kept as the way back. `setup.py`, `setup.sh`, `START-HERE.bat`: the installer.
+- Inkling-2-Mini and Hy4-Flash run as upstream's own engine programs (`strata-inkling`, `strata-hy4`) behind the same
+  server (`serve/inkling_*.py`, `serve/hy4_*.py`); run Hy4-Flash only under a memory cap (it reads from the SSD).
 - `serve/server.py`: the HTTP handler (`make_handler`) and `main`; it re-exports the modules it was split into
   (`engine`, `service`, `vision`, `engine_args`, `textcore`, `request_stats`, `api_formats`, `http_security`, `config`,
   `tunables`, `errors`, `ray_phone`), keeping upstream's names and bodies. Names tests patch on `serve.server` are read
