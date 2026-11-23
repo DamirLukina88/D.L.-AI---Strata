@@ -14,6 +14,11 @@ from serve.frontend import FUNC_START
 from serve.frontend import OutputParser
 from serve.frontend import THINK_END
 from serve.frontend import images_of
+from serve.frontend import parser_for_template
+from serve import hy4_kind
+from serve import hy4_dialect
+from serve import inkling_kind
+from serve import inkling_dialect
 from serve.frontend import literal_tags
 from serve.frontend import mark_think_literals
 from serve.frontend import unmark_think_literals
@@ -184,8 +189,7 @@ class Service:
         self.tool_markup_retry = os.environ.get("STRATA_TOOL_MARKUP_RETRY", "1").strip().lower() not in ("0", "off", "false", "no")
         self.images = None                                # serve/images.py's ImageGen when the config has "images"
         self.restore_after_load = None                    # a session file an image job saved before it unloaded
-        self.stop_ids = set(tokenizer.encode(_server().IM_END, parse_special=True) +
-                            tokenizer.encode("<|endoftext|>", parse_special=True))
+        self._adopt_model(engine, tokenizer, template)   # end tokens, literal tags, family, output parser
         # #567: a prompt re-encodes only what follows the last special token it shares with a recent prompt (the
         # same ids as a full encode: tools/strata_tokenizer.py PromptEncoder).  Tokenizers without resume points
         # encode in full.
@@ -292,6 +296,49 @@ class Service:
         Other names are still served, as before."""
         asked = req.get("model") if isinstance(req, dict) else None
         return asked if isinstance(asked, str) and asked in self.aliases else self.model
+
+    def _adopt_model(self, engine, tokenizer, template) -> None:
+        """What follows from the model being served: its end tokens, the tags that stay text in a message, the family
+        (Qwen, Hy4-Flash, Inkling-2-Mini: thinking words, forced-call spelling) and the output parser.  At the start and
+        again after a /switch_model, so a model never runs with the one before it's tokens or parser."""
+        self.literals = literal_tags(getattr(tokenizer, "control_tokens", ()))   # texts that stay text inside a message
+        # end tokens: each text counts only when it is one token (another tokenizer, Inkling-2-Mini's o200k, spells
+        # <|im_end|> as several ordinary tokens, which must not stop every reply)
+        self.stop_ids = set()
+        for text in (_server().IM_END, "<|endoftext|>"):
+            got = tokenizer.encode(text, parse_special=True)
+            if len(got) == 1:
+                self.stop_ids.add(int(got[0]))
+        self.hy4 = getattr(engine, "hy4_engine", False) is True      # the Hy4-Flash engine: its end tokens, its tagged texts that stay text in a message
+        self.inkling = getattr(engine, "inkling_engine", False) is True   # the Inkling-2-Mini engine: its end tokens & channel tags
+        if self.hy4:
+            self.stop_ids |= hy4_kind.end_ids(tokenizer)
+            self.literals = literal_tags(list(getattr(tokenizer, "control_tokens", ())) + hy4_kind.literal_tags(tokenizer))
+        elif self.inkling:
+            self.stop_ids |= inkling_kind.end_ids(tokenizer)
+            self.literals = literal_tags(list(getattr(tokenizer, "control_tokens", ())) + inkling_kind.literal_tags(tokenizer))
+        self.parser_cls = parser_for_template(getattr(template, "source", None))   # reads the model's output by the template's tool-call form
+        self.set_family("hy4" if self.hy4 else "inkling2" if self.inkling else None)
+        self._force_text = hy4_dialect.force_text if self.hy4 else inkling_dialect.force_text if self.inkling else None
+
+    def set_family(self, family: str | None) -> None:
+        """The model family (None: the Qwen form this server was written for)."""
+        self.family = family
+        import serve.frontend as _frontend
+        _frontend.use_family(family)
+
+    _force_text = None
+
+    def force_text(self, force):
+        """forced_call's opening of the call the reply must make, in this model's spelling."""
+        return self._force_text(force) if (self._force_text is not None and force) else force
+
+    def has_vision(self) -> bool:
+        """Whether this server can read images: either a separate vision encoder (Flash-Next)
+        or an in-process Hy4-Flash / Inkling-2-Mini engine that reported `images=1`."""
+        if self.vision is not None:
+            return True
+        return bool((self.hy4 or self.inkling) and (getattr(self.engine, "info", None) or {}).get("images") == 1)
 
     def reported_ctx(self) -> int:
         """The context the endpoints report (/v1/status, /v1/models, /props, /health, /slots, /metrics): the engine's,
@@ -778,7 +825,7 @@ class Service:
                 # Give Linux kernel and ROCm driver a moment to unpin/reclaim memory
                 time.sleep(2.0)
 
-            engine = StrataEngine(exe, engine_args(cfg), cwd=cfg.get("cwd"), log=cfg.get("log"), env=env, lazy=lazy, cfg=cfg)
+            engine = StrataEngine(exe, engine_args(cfg, exe), cwd=cfg.get("cwd"), log=cfg.get("log"), env=env, lazy=lazy, cfg=cfg)
             self.engine = engine
             self.tok = tok
             self.model = target_id
@@ -786,6 +833,13 @@ class Service:
             self.lazy = lazy
             tpl = tpath / "chat_template.jinja"
             self.template = ChatTemplate(tpl if tpl.exists() else _server().ROOT / "serve/chat_template.jinja")
+            self._adopt_model(engine, tok, self.template)   # the new model's end tokens, tags, family and parser
+            if self.prompts is not None and not (hasattr(tok, "encode_marked") and hasattr(tok, "max_special_len")):
+                self.prompts = None
+            elif hasattr(tok, "encode_marked") and hasattr(tok, "max_special_len"):
+                from strata_tokenizer import PromptEncoder   # the kept prompts are the old tokenizer's ids
+                slots = conversation_slots(engine)
+                self.prompts = PromptEncoder(tok, keep=slots) if slots is not None and slots > 0 else PromptEncoder(tok)
             if "idle_unload_s" in cfg:
                 self.idle_unload_s = float(cfg["idle_unload_s"])
 
@@ -891,6 +945,8 @@ class Service:
     def effort_default(self) -> str | None:
         """The thinking level of a request that names none: the Chat settings shared with apps first, then the config's
         "reasoning_effort" (#1641).  Every API reads it here (the Responses API did not: 0.1.44.1)."""
+        if self.inkling:
+            return None
         return self.shared.get("reasoning_effort") or self.config_effort
 
     def with_shared(self, req: dict, api: str) -> dict:
@@ -1044,7 +1100,7 @@ class Service:
         engine_info = dict(getattr(self.engine, "info", {}) or {}) if is_loaded else {
             k: v for k, v in (getattr(self.engine, "info", {}) or {}).items() if k in ("version",)
         }
-        engine = {"model": self.model, "max_context": self.reported_ctx(), "images": self.vision is not None,
+        engine = {"model": self.model, "max_context": self.reported_ctx(), "images": self.has_vision(),
                   **engine_info}
         # D.L. AI: with lazy_load the engine reports cvec only once it is loaded; the Sampling drawer's projection
         # switch must also show (and its saved value survive a Save) while the model is unloaded
@@ -1115,7 +1171,7 @@ class Service:
             return round(v / unit, digits) if isinstance(v, (int, float)) else None
 
         busy, ctx = bool(s.get("busy")), self.reported_ctx()
-        images = self.vision is not None
+        images = self.has_vision()
         return {
             "service": "strata", "model": self.model,
             "loaded": self.loaded(), "auto_load": hasattr(self.engine, "restart"),
@@ -1149,6 +1205,10 @@ class Service:
         thinking) is rendered as a default one up to the answer - the same prompt start, so the conversation cache
         keeps it - and its effort follows in a short system turn right before the answer (thinking off: the template's
         empty thinking block).  The engine (--tail-role-token) checkpoints in front of that turn."""
+        if self.hy4:                                   # Hy4's template reads reasoning_effort no_think | high | max (serve/hy4_dialect.py)
+            return self.template.render(messages, tools=tools, **hy4_dialect.template_kwargs(kwargs))
+        if self.inkling:                               # Inkling-2-Mini reads reasoning_effort none|minimal|low|medium|high|max (serve/inkling_dialect.py)
+            return self.template.render(inkling_dialect.prepare_messages(messages), tools=tools, **inkling_dialect.template_kwargs(kwargs))
         effort = kwargs.get("reasoning_effort")
         off = kwargs.get("enable_thinking") is False
         if not self.effort_end or (not off and effort in (None, "", "xhigh", "high")):
@@ -1207,7 +1267,7 @@ class Service:
             for n, item in enumerate(content):
                 if not isinstance(item, dict) or item.get("type") != "image":
                     continue
-                why = "this server has no image encoder" if self.vision is None else None
+                why = None if self.has_vision() else "this server has no image encoder"
                 if why is None:
                     src = item["source"]
                     try:
@@ -1215,9 +1275,13 @@ class Service:
                             raise ClientGone()
                         if src.startswith(("http://", "https://")):
                             src = fetched[item["source"]] = Vision.download(src)   # outside the FIFO, as in prepare()
-                        with self._turn(cancel):  # the encoder takes its turn with the requests (see below)
-                            self._vision_up()         # an elastic encoder is not running until a picture needs it
-                            self.vision.encode(src)
+                        if self.vision is not None:
+                            with self._turn(cancel):  # the encoder takes its turn with the requests (see below)
+                                self._vision_up()         # an elastic encoder is not running until a picture needs it
+                                self.vision.encode(src)
+                        else:
+                            # Hy4-Flash / Inkling-2-Mini read pictures in the engine: only check that it can be read
+                            Vision.normalize(src if isinstance(src, bytes) else Vision.load(src))
                     except (ValueError, OSError, RuntimeError) as e:    # RuntimeError: the encoder did not start
                         why = str(e)
                 if why is not None:
@@ -1242,6 +1306,22 @@ class Service:
         self.embeddings.path = None
         self.embeddings.keys = None
         images = images_of(messages)
+        self.embeddings.hy4 = self._drop_hy4_images(getattr(self.embeddings, "hy4", None))
+        self.embeddings.inkling = self._drop_hy4_images(getattr(self.embeddings, "inkling", None))      # an earlier pass of this request left its files: gone first
+        if images and (self.hy4 or self.inkling):                     # Hy4-Flash / Inkling-2-Mini: in-process engine reads pictures directly (INFO images=1)
+            kind_mod = inkling_kind if self.inkling else hy4_kind
+            if (getattr(self.engine, "info", None) or {}).get("images") != 1:
+                raise ValueError(kind_mod.NO_IMAGES_REPLY)
+            def _load(src):
+                if src in fetched:
+                    return fetched[src]
+                return Vision.download(src) if src.startswith(("http://", "https://")) else Vision.load(src)
+            written = kind_mod.write_images(images, _load, Vision.normalize, cancel)
+            if self.inkling:
+                self.embeddings.inkling = written
+            else:
+                self.embeddings.hy4 = written
+            images = []
         if images:
             if self.vision is None:
                 raise ValueError("this server was started without the vision encoder (run setup again and choose "
@@ -1410,6 +1490,18 @@ class Service:
         path, self.embeddings.path = getattr(self.embeddings, "path", None), None
         if path is not None:
             Path(path).unlink(missing_ok=True)
+        self.embeddings.hy4 = self._drop_hy4_images(getattr(self.embeddings, "hy4", None))
+        self.embeddings.inkling = self._drop_hy4_images(getattr(self.embeddings, "inkling", None))
+
+    @staticmethod
+    def _drop_hy4_images(paths):
+        """Delete the picture files of a Hy4-Flash / Inkling-2-Mini request (the engine has read them by the end of the request)."""
+        for p in paths or []:
+            try:
+                Path(p).unlink(missing_ok=True)
+            except OSError:
+                pass
+        return None
 
     def _note(self, n, evs, st=None, rate=None):
         with self.status_lock:
@@ -1489,7 +1581,7 @@ class Service:
                 print(f"[strata] thinking capped at {max_new - reserve} of max_tokens {max_new} to leave room for "
                       f"the answer (budget {budget})", flush=True)
                 budget = max(1, max_new - reserve)
-        parser = OutputParser(thinking=thinking, tools=tools, stream_tools=True, recover=self.tool_call_recovery,
+        parser = self.parser_cls(thinking=thinking, tools=tools, stream_tools=True, recover=self.tool_call_recovery,
                               declared_only=declared_only,
                               deferred=getattr(self, "undeclared_tool_calls", "text") == "call")
         detok, n, finish = Detokenizer(self.tok), 0, "length"
@@ -1542,6 +1634,12 @@ class Service:
         img_keys, self.embeddings.keys = getattr(self.embeddings, "keys", None), None
         if emb and img_keys:
             sampling = {**(sampling or {}), "strata_img_keys": img_keys}   # #2228: sent beside the embeddings file
+        hy4_images = getattr(self.embeddings, "hy4", None)                 # Hy4-Flash: the picture files of this request (kept until drop_embeddings)
+        if hy4_images:
+            sampling = {**(sampling or {}), "strata_hy4_images": list(hy4_images)}
+        inkling_images = getattr(self.embeddings, "inkling", None)         # Inkling-2-Mini: the picture files of this request
+        if inkling_images:
+            sampling = {**(sampling or {}), "strata_inkling_images": list(inkling_images)}
         # Only a DONE line replaces engine.last, so a request that died, errored or was disconnected must not have
         # the PREVIOUS request's decode figures recorded as its own: each pass keeps its own DONE (a segment) if
         # one arrived.  A reasoning-budget continuation is another native generation, not another API request,
@@ -1830,7 +1928,7 @@ class Service:
                                           flush=True)
                                     max_new -= len(extra)       # the note is prompt: the reply keeps inside the context
                                     prompt = prompt + seg + extra
-                                    parser = OutputParser(thinking=False, tools=tools, stream_tools=True,
+                                    parser = self.parser_cls(thinking=False, tools=tools, stream_tools=True,
                                                           recover=self.tool_call_recovery, declared_only=declared_only,
                                                           deferred=getattr(self, "undeclared_tool_calls", "text") == "call")
                                     detok, tail, parser_done, force, budget = Detokenizer(self.tok), "", False, None, None

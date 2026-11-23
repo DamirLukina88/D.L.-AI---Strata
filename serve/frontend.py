@@ -27,12 +27,22 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import jinja2
+import jinja2.ext
 from jinja2.sandbox import ImmutableSandboxedEnvironment
 
 LOGGER = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------------------------------------------ template
+class _GenerationExtension(jinja2.ext.Extension):
+    """No-op Jinja2 `{% generation %}...{% endgeneration %}` tag used by HuggingFace chat templates (e.g. Inkling-2-Mini)."""
+    tags = {"generation"}
+
+    def parse(self, parser):
+        next(parser.stream)
+        return parser.parse_statements(("name:endgeneration",), drop_needle=True)
+
+
 class TemplateRequestError(jinja2.exceptions.TemplateError, ValueError):
     """The template refused the request's messages (e.g. "No user query found in messages."): a ValueError, so the
     client gets a 400 with the template's message instead of a dropped connection (#365)."""
@@ -48,10 +58,13 @@ class ChatTemplate:
         def tojson(x, ensure_ascii=False, indent=None, separators=None, sort_keys=False):
             return json.dumps(x, ensure_ascii=ensure_ascii, indent=indent, separators=separators, sort_keys=sort_keys)
 
-        env = ImmutableSandboxedEnvironment(trim_blocks=True, lstrip_blocks=True, extensions=["jinja2.ext.loopcontrols"])
+        env = ImmutableSandboxedEnvironment(trim_blocks=True, lstrip_blocks=True,
+                                            extensions=["jinja2.ext.loopcontrols", _GenerationExtension])
         env.filters["tojson"] = tojson
         env.globals["raise_exception"] = raise_exception
         self.source = Path(path).read_text(encoding="utf-8")
+        self._is_hy4 = "<tool_calls{}>" in self.source or "<\uff5creasoning_mode" in self.source
+        self._is_inkling2 = "<|content_invoke_tool_json|>" in self.source or "tool_declare<|content_xml|>" in self.source
         self.template = env.from_string(self.source)
         self.caps = self._detect_caps()
 
@@ -63,6 +76,13 @@ class ChatTemplate:
                     if i == len(messages) - 1 or os.environ.get("STRATA_KEEP_EMPTY_TURNS") == "1" or not (isinstance(m, dict) and m.get("role") == "assistant"
                                                       and not _text_of(m.get("content")).strip()
                                                       and not _has_image(m.get("content")) and not m.get("tool_calls"))]
+        if self._is_hy4 and kwargs:
+            from serve import hy4_dialect
+            kwargs = hy4_dialect.template_kwargs(kwargs)
+        elif self._is_inkling2:
+            from serve import inkling_dialect
+            messages = inkling_dialect.prepare_messages(messages)
+            kwargs = inkling_dialect.template_kwargs(kwargs)
         return self.template.render(messages=messages, tools=tools, add_generation_prompt=add_generation_prompt,
                                     **kwargs)
 
@@ -117,6 +137,32 @@ class ChatTemplate:
 
         history = [user, {"role": "assistant", "content": "strata_caps_answer",
                           "reasoning_content": "strata_caps_reasoning"}, user]
+        if "<|content_invoke_tool_json|>" in self.source or "tool_declare<|content_xml|>" in self.source:
+            def inkling_calls(count):
+                calls = [{"name": f"strata_caps_call_{i}", "arguments": {"arg": f"strata_caps_arg_{i}"}} for i in range(count)]
+                messages = [user, {"role": "assistant", "content": "", "tool_calls": [{"function": call} for call in calls]}]
+                messages += [{"role": "tool", "name": f"strata_caps_call_{i}", "content": f"strata_caps_result_{i}"} for i in range(count)] + [user]
+                prompt = render(messages, tools)
+                return all(f"<|message_model|>strata_caps_call_{i}<|content_invoke_tool_json|>" in prompt
+                           and f"strata_caps_result_{i}" in prompt for i in range(count))
+            return {"supports_tools": all(s in tool_prompt for s in ("strata_caps_call_0", "strata_caps_description", "tool_declare<|content_xml|>")),
+                    "supports_tool_calls": inkling_calls(1),
+                    "supports_system_role": "strata_caps_system" in render([{"role": "system", "content": "strata_caps_system"}, user]),
+                    "supports_parallel_tool_calls": inkling_calls(2),
+                    "supports_preserve_reasoning": False}
+        if "<tool_calls{}>" in self.source:      # Hy4-Flash (serve/hy4_dialect.py): its own spelling of the same capabilities
+            def hy4_calls(count):
+                calls = [{"name": f"strata_caps_call_{i}", "arguments": {"arg": f"strata_caps_arg_{i}"}} for i in range(count)]
+                messages = [user, {"role": "assistant", "content": "", "tool_calls": [{"function": call} for call in calls]}]
+                messages += [{"role": "tool", "content": f"strata_caps_result_{i}"} for i in range(count)] + [user]
+                prompt = render(messages, tools)
+                return all(f"<tool_call:opensource>strata_caps_call_{i}<arg_key:opensource>arg</arg_key:opensource><arg_value:opensource>strata_caps_arg_{i}" in prompt
+                           and f"strata_caps_result_{i}" in prompt for i in range(count))
+            return {"supports_tools": all(s in tool_prompt for s in ("strata_caps_call_0", "strata_caps_description", "<tool_calls:opensource>")),
+                    "supports_tool_calls": hy4_calls(1),
+                    "supports_system_role": "strata_caps_system" in render([{"role": "system", "content": "strata_caps_system"}, user]),
+                    "supports_parallel_tool_calls": hy4_calls(2),
+                    "supports_preserve_reasoning": "strata_caps_reasoning" in render(history, tools)}
         return {"supports_tools": all(s in tool_prompt for s in
                                       ("strata_caps_call_0", "strata_caps_description", "<tool_call>", "<function=")),
                 "supports_tool_calls": calls_supported(1),
@@ -148,12 +194,39 @@ EFFORT = {"none": None, "off": None, "minimal": None, "disabled": None, "false":
           "low": "low", "medium": "medium", "high": "xhigh", "xhigh": "xhigh", "max": "xhigh", "maximum": "xhigh"}
 
 
+_EFFORT_QWEN = dict(EFFORT)
+_FAMILY: str | None = None
+
+
+def use_family(family: str | None) -> None:
+    """The reasoning-effort words of the model family this server runs (module state, like ENV_TO_USER): Qwen, Hy4-Flash, or Inkling-2-Mini."""
+    global _FAMILY
+    _FAMILY = family
+    EFFORT.clear()
+    if family == "hy4":
+        from serve import hy4_dialect
+        EFFORT.update(hy4_dialect.EFFORT)
+        return
+    if family == "inkling2":
+        from serve import inkling_dialect
+        EFFORT.update(inkling_dialect.EFFORT)
+        return
+    EFFORT.update(_EFFORT_QWEN)
+
+
 def effort_kwargs(value) -> dict:
-    """A reasoning effort as given by a client -> the template's kwargs.  Unknown values are a 400, not a crash."""
+    """A reasoning effort as given by a client -> the template's kwargs."""
     if value is None or value == "":
         return {}
     if value is False:
-        return {"enable_thinking": False}
+        return {"reasoning_effort": "none"} if _FAMILY == "inkling2" else {"enable_thinking": False}
+    if _FAMILY == "hy4":
+        from serve import hy4_dialect
+        mode = hy4_dialect.normalize_effort(value)
+        return {"enable_thinking": False} if mode == "no_think" else {"reasoning_effort": mode}
+    if _FAMILY == "inkling2":
+        from serve import inkling_dialect
+        return {"reasoning_effort": inkling_dialect.normalize_effort(value)}
     key = str(value).strip().lower()
     if key not in EFFORT:
         raise ValueError(f"unknown reasoning effort {value!r}: use none, low, medium or high")
@@ -162,12 +235,13 @@ def effort_kwargs(value) -> dict:
 
 
 def budget_effort(tokens) -> dict:
-    """Anthropic's thinking budget (budget_tokens) -> a level: under 2K low, under 8K medium, else high."""
+    """Anthropic's thinking budget (budget_tokens) -> a level: under 2K low, under 8K medium, else high (clamped through EFFORT for Hy4-Flash)."""
     try:
         n = int(tokens)
     except (TypeError, ValueError):
         return {}
-    return {"reasoning_effort": "low" if n < 2048 else "medium" if n < 8192 else "xhigh"}
+    level = EFFORT.get("low", "low") if n < 2048 else EFFORT.get("medium", "medium") if n < 8192 else EFFORT["high"]
+    return {"reasoning_effort": level}
 
 
 def _has_image(content) -> bool:
@@ -283,7 +357,8 @@ def literal_tags(controls) -> dict[str, str]:
     written inside a message - a file an agent reads, a pasted chat template - opened or ended a turn there.  Longest
     first, as the tokenizer matches them: a literal inside a longer one is not marked before it."""
     tags = {**LITERAL_TAGS, **{c: chr(CONTROL_MARK0 + k) for k, c in enumerate(c for c in controls
-                                                                                if c not in LITERAL_TAGS)}}
+                                                                                if c not in LITERAL_TAGS)
+                               if CONTROL_MARK0 + k < 0x10FFFE}}
     return dict(sorted(tags.items(), key=lambda t: -len(t[0])))
 
 
@@ -607,7 +682,7 @@ def openai_to_messages(req: dict) -> tuple[list[dict], list[dict] | None, dict]:
     for k, v in ctk.items():
         if k == "enable_thinking" and not v:
             kwargs = {"enable_thinking": False}
-        elif k == "reasoning_effort" and "enable_thinking" not in kwargs:
+        elif k in ("reasoning_effort", "thinking_mode") and "enable_thinking" not in kwargs:
             kwargs.update(effort_kwargs(v))
     return _env_to_user(messages), tools, kwargs
 
@@ -2847,9 +2922,65 @@ class JsonOutputParser(OutputParser):
                          declared_only=declared_only, deferred=deferred)
 
 
+class Hy4OutputParser(OutputParser):
+    """The parser for Hy4-Flash: the model writes its reasoning and its calls with tagged tokens (`<think:opensource>`, `<tool_calls:opensource>`, `<arg_key:opensource>` ...);
+    serve/hy4_dialect.py turns them into the form OutputParser reads as the text arrives, and everything else (reasoning, content, declared-tool rules, recovery) is
+    OutputParser's.  A call is in the declared-tool form once translated, so the recovery that reads a drifted opener is on, as for the JSON form."""
+
+    def __init__(self, thinking: bool = True, tools: list[dict] | None = None, stream_tools: bool = False,
+                 recover: bool = False, declared_only: bool = False, deferred: bool = False):
+        super().__init__(thinking=thinking, tools=tools, stream_tools=stream_tools, recover=recover,
+                         declared_only=declared_only, deferred=deferred)
+        from serve import hy4_dialect
+        self._dialect = hy4_dialect.Hy4Dialect()
+
+    def feed(self, delta: str) -> list[Event]:
+        return super().feed(self._dialect.feed(delta))
+
+    def finish(self, reason: str | None = None) -> list[Event]:
+        tail = self._dialect.feed("", final=True)
+        out = super().feed(tail) if tail else []
+        return out + super().finish(reason)
+
+
+class InklingOutputParser(JsonOutputParser):
+    """The parser for Inkling-2-Mini: translates `<|content_thinking|>`, `<|content_text|>`, `<|content_invoke_tool_json|>`,
+    `<|content_invoke_tool_text|>`, and `<|content_xml|>` channels via serve/inkling_dialect.py.
+    Starts in content mode (`thinking=False`) because Inkling-2-Mini opens and closes thinking explicitly with `<|content_thinking|>`,
+    so `reasoning_effort=none`, interleaved thinking, and direct tool calls all parse cleanly."""
+
+    def __init__(self, thinking: bool = True, tools: list[dict] | None = None, stream_tools: bool = False,
+                 recover: bool = False, declared_only: bool = False, deferred: bool = False):
+        super().__init__(thinking=False, tools=tools, stream_tools=stream_tools, recover=True,
+                         declared_only=declared_only, deferred=deferred)
+        from serve import inkling_dialect
+        self._dialect = inkling_dialect.InklingDialect()
+
+    def _dispatch(self, chunks: list[tuple[str, str]]) -> list[Event]:
+        out: list[Event] = []
+        for kind, chunk in chunks:
+            if kind == "reasoning":
+                out.append(Event("reasoning", chunk))
+            elif chunk:
+                out.extend(super().feed(chunk))
+        return out
+
+    def feed(self, delta: str) -> list[Event]:
+        return self._dispatch(self._dialect.feed_channels(delta))
+
+    def finish(self, reason: str | None = None) -> list[Event]:
+        out = self._dispatch(self._dialect.feed_channels("", final=True))
+        return out + super().finish(reason)
+
+
 def parser_for_template(source: str | None):
     """The OutputParser class for a chat template's text, by the tool-call form the template documents (serve/toolformat.py):
     the JSON form gets JsonOutputParser; the XML form every Strata model ships with, templates without tools, and forms nothing
     here reads keep OutputParser (the same class as before this existed)."""
     from serve import toolformat
-    return JsonOutputParser if toolformat.tool_format(source or "") == "json" else OutputParser
+    kind = toolformat.tool_format(source or "")
+    if kind == "hy4":
+        return Hy4OutputParser
+    if kind == "inkling2":
+        return InklingOutputParser
+    return JsonOutputParser if kind == "json" else OutputParser

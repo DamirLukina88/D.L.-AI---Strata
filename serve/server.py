@@ -75,6 +75,8 @@ from serve.frontend import (THINK_END, ChatTemplate, Event, OutputParser, anthro
                             forced_call, images_of, literal_tags, mark_think_literals, openai_to_messages, require_messages,
                             tool_choice_of, unmark_think_literals)
 from serve.mcp import McpCancelled, hub_from_config  # noqa: E402
+from serve import hy4_kind  # noqa: E402
+from serve import inkling_kind  # noqa: E402
 from serve import runconfig  # noqa: E402
 from serve import cf_access  # noqa: E402
 from serve import logit_bias as bias_api  # noqa: E402
@@ -1131,7 +1133,7 @@ def make_handler(svc: Service):
                 self.wfile.write(body)
             elif path in ("/health", "/api/health"):
                 self._json(200, {"status": "ok", "max_context": svc.reported_ctx(), "model": svc.model,
-                                 "images": svc.vision is not None, "api_key": bool(svc.api_key),
+                                 "images": svc.has_vision(), "api_key": bool(svc.api_key),
                                  "image_generation": svc.images is not None,
                                  "loaded": svc.loaded(), "service": "strata",
                                  "degraded": getattr(svc.engine, "degraded", None) if svc.loaded() else None})
@@ -1170,7 +1172,7 @@ def make_handler(svc: Service):
                     # context_length), so a client that sizes its window from /v1/models reads it
                     model = {"id": svc.model, "object": "model", "status": {"value": "loaded"},
                              "max_model_len": ctx, "context_length": ctx, "max_context_length": ctx, "meta": {"n_ctx": ctx},
-                             "architecture": {"input_modalities": ["text", "image"] if svc.vision is not None else ["text"],
+                             "architecture": {"input_modalities": ["text", "image"] if svc.has_vision() else ["text"],
                                               "output_modalities": ["text"]}}
                     if not loaded and (svc.idle_unload_s or getattr(svc.engine, "unloaded", False)):
                         model["status"] = {"value": "unloaded"}   # like llama-server's router: listed, loads on use
@@ -1823,7 +1825,7 @@ def make_handler(svc: Service):
                      "total_slots": max(1, int(getattr(svc.engine, "batch", 0) or 0)),   # #1004: the batch slots
                      "model_alias": svc.model, "chat_template": svc.template.source,
                      "chat_template_caps": svc.template.caps,
-                     "modalities": {"vision": svc.vision is not None}, "models_autoload": hasattr(svc.engine, "restart"),
+                     "modalities": {"vision": svc.has_vision()}, "models_autoload": hasattr(svc.engine, "restart"),
                      "is_sleeping": not svc.loaded()}
             if getattr(svc.engine, "model_path", None):
                 props["model_path"] = svc.engine.model_path
@@ -2293,7 +2295,9 @@ def make_handler(svc: Service):
             self._no_local_images(messages)
             if tool_choice_of(req.get("tool_choice"))[0] == "none":   # as the Responses route: no tools are offered
                 tools = None
-            force = forced_call(req.get("tool_choice"), tools)      # a bad value is a 400 before anything is sent
+            hy4_kind.refuse(svc.engine, req)          # Hy4-Flash / Inkling-2-Mini have no logprobs: a 400 with the reason
+            inkling_kind.refuse(svc.engine, req)
+            force = svc.force_text(forced_call(req.get("tool_choice"), tools))      # a bad value is a 400 before anything is sent
             messages, validator = prepare_format(req.get("response_format"), messages, with_tools=bool(tools))
             if validator is not None and req.get("strata_mcp"):
                 raise ValueError("structured response_format with MCP is not supported")
@@ -2608,7 +2612,7 @@ def make_handler(svc: Service):
             responses_api.check_request(req)
             messages = responses_api.input_messages(req)
             tools, names, skipped = responses_api.request_tools(req)
-            force = forced_call(req.get("tool_choice"), tools)   # "required" / {"type": "function", "name": N}
+            force = svc.force_text(forced_call(req.get("tool_choice"), tools))   # "required" / {"type": "function", "name": N}
             kw = responses_api.template_kwargs(req, {"reasoning_effort": svc.effort_default()})
             try:
                 self._no_local_images(messages)              # as on the chat route: no file read for a foreign page
@@ -2683,7 +2687,7 @@ def make_handler(svc: Service):
             self._no_local_images(messages)
             if tool_choice_of(req.get("tool_choice"))[0] == "none":   # Anthropic's {"type": "none"}: no tools offered
                 tools = None
-            force = forced_call(req.get("tool_choice"), tools)        # "any" / {"type": "tool", "name": N}
+            force = svc.force_text(forced_call(req.get("tool_choice"), tools))        # "any" / {"type": "tool", "name": N}
             max_new = token_limit(req.get("max_tokens"), "max_tokens") or 0   # 0/-1: the rest of the context
             svc.reasoning_budget(req)                         # a bad value is a 400 before anything is sent
             stop_strings(req)                                 # ... and so is a bad stop / stop_sequences
@@ -2887,7 +2891,7 @@ def _main() -> int:
                             env=vision_env(cfg, env), lazy=lazy)
         print("model unloaded; the first request loads it ..." if lazy else
               "loading the model (the first start takes a minute or two) ...", flush=True)
-        warn_budget_over_ram(engine_args(cfg) if "args" in cfg else [])      # #1080
+        warn_budget_over_ram(engine_args(cfg, announce=False) if "args" in cfg else [])      # #1080
         if layer_split_of(cfg):
             try:
                 split = layer_split_value(cfg)          # #644: before the (minutes-long) start
@@ -2916,7 +2920,7 @@ def _main() -> int:
         if groups:
             engine = start_replicas(cfg, groups, exe, effort_end or [], lazy)
         else:
-            engine = StrataEngine(exe, engine_args(cfg) + (effort_end or []), cwd=cfg.get("cwd"), log=cfg.get("log"),
+            engine = StrataEngine(exe, engine_args(cfg, exe) + (effort_end or []), cwd=cfg.get("cwd"), log=cfg.get("log"),
                                   env=env, lazy=lazy, cfg=cfg)
         engine.silence_s = silence                      # an attribute of its own: restart() keeps it
         warn_tight_ram(engine.info.get("arena_mib"))
@@ -3102,7 +3106,7 @@ def _main() -> int:
     svc.start_vision_idle()
     here = "127.0.0.1" if a.host in ("0.0.0.0", "", "::") else a.host
     print(f"ready: http://{here}:{a.port}/v1  (OpenAI: /v1/chat/completions, Anthropic: /v1/messages, "
-          f"context {engine.max_context} tokens{', images on' if vision else ''}"
+          f"context {engine.max_context} tokens{', images on' if svc.has_vision() else ''}"
           f"{', API key required' if svc.api_key else ''})", flush=True)
     print(f"       open http://{here}:{a.port}/ in a browser to chat; close this window to stop the model", flush=True)
     if a.host not in ("127.0.0.1", "localhost", "::1"):

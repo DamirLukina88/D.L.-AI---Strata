@@ -175,10 +175,16 @@ def layer_split_of(cfg: dict) -> bool:
     return len(gpu_list(cfg)) > 1 and "--peer-device" not in cfg["args"]
 
 
-def engine_args(cfg: dict) -> list[str]:
+def engine_args(cfg: dict, exe: str | None = None, *, announce: bool = True) -> list[str]:
     """The engine's arguments: the config's, and with several GPUs the layer split across them ("layer_split" in the
     config: "auto" by default, or the first layer of each later GPU's share, e.g. "18" or "16,32"; see
-    layer_split_value)."""
+    layer_split_value).  The Hy4-Flash and Inkling-2-Mini engines take their own (serve/hy4_kind.py,
+    serve/inkling_kind.py): none of the Flash-Next flags below."""
+    from serve import hy4_kind, inkling_kind
+    if hy4_kind.is_hy4(cfg):
+        return hy4_kind.engine_args(cfg, exe, announce=announce)
+    if inkling_kind.is_inkling(cfg):
+        return inkling_kind.engine_args(cfg, exe, announce=announce)
     args = list(cfg["args"])
     # #1322: a config with a "vision" section but without --vision in its args (written by an older setup run, or edited by
     # hand) advertised images and then refused every picture ("this engine was started without --vision").  The section

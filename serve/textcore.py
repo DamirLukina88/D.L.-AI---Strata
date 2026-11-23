@@ -206,5 +206,13 @@ def load_tokenizer_from_path(tpath: Path):
             tokens[i] = t
         merges = (tpath / "merges.txt").read_text(encoding="utf-8").split("\n")
         types = json.loads((tpath / "token_type.json").read_text())
-        return ST.Tokenizer(tokens, merges, types)
+        tcfg = {}
+        try:                                            # the pack's pre-tokenizer name and special ids (upstream server.py)
+            tcfg = json.loads((tpath / "tokenizer.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+        if not isinstance(tcfg, dict):
+            tcfg = {}
+        # a model with its own splitting rule (Inkling-2-Mini's o200k): never split with another's (UnknownPreTokenizer)
+        return ST.Tokenizer(tokens, merges, types, tcfg.get("pre") or "qwen35", tcfg.get("special_ids") or None)
     return ByteTokenizer()

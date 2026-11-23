@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pathlib import Path
 from serve import logit_bias as bias_api
+from serve import hy4_kind
+from serve import inkling_kind
 from typing import Iterator
 from typing import Protocol
 import json
@@ -588,6 +590,8 @@ class StrataEngine:
                  cfg: dict | None = None, retry_args=None, **kw):
         self.cfg = cfg
         self.spawn = (exe, list(args), cwd, log, env, False, cpus)   # to start it again after it died (issue #27)
+        self.hy4_engine = hy4_kind.is_hy4_exe(exe)     # the Hy4-Flash engine (serve/hy4_kind.py): one request at a time, no logprobs, no logit bias
+        self.inkling_engine = inkling_kind.is_inkling_exe(exe)   # Inkling-2-Mini (serve/inkling_kind.py): 1..64 continuous batching, DSpark, in-process Vision
         self.session_save_reclaim = '--session-save-reclaim' in args
         paths = {k: v for k, v in zip(args, args[1:]) if k in ("--native", "--pack")}
         self.model_path = paths.get("--native") or paths.get("--pack", "pack/full")
@@ -968,8 +972,16 @@ class StrataEngine:
             if time.time() > deadline:
                 raise EngineDied("the engine did not answer the VRAM command")
 
+    def _request_keys(self, sampling: dict) -> str:
+        """sampling_keys for this engine: the Hy4-Flash and Inkling-2-Mini engines get their own short form; Flash-Next's
+        call is the one it always was."""
+        if getattr(self, "hy4_engine", False) is True or getattr(self, "inkling_engine", False) is True:
+            return self.sampling_keys(sampling, hy4=getattr(self, "hy4_engine", False) is True,
+                                      inkling=getattr(self, "inkling_engine", False) is True)
+        return self.sampling_keys(sampling)
+
     @staticmethod
-    def sampling_keys(sampling: dict) -> str:
+    def sampling_keys(sampling: dict, *, hy4: bool = False, inkling: bool = False) -> str:
         keys = ""
         t = sampling.get("temperature")
         if isinstance(t, (int, float)) and float(t) > 0.0:
@@ -1006,6 +1018,13 @@ class StrataEngine:
         seed = sampling.get("seed")
         if isinstance(seed, int) and seed > 0:
             keys += f" seed={seed}"
+        if hy4 or inkling:
+            # Hy4-Flash & Inkling-2-Mini: strip Flash-Next-only keys; pass image=<path> keys cleanly
+            for p in sampling.get("strata_hy4_images") or []:
+                keys += " image=" + hy4_kind.encode_path(p)
+            for p in sampling.get("strata_inkling_images") or []:
+                keys += " image=" + inkling_kind.encode_path(p)
+            return keys
         # setup's calibration (tools/calibrate.py): engine settings for this request only, measured without a restart
         tune = sampling.get("strata_tune")
         if isinstance(tune, dict):
@@ -1351,7 +1370,7 @@ class StrataEngine:
             raise EngineDied("the engine is unavailable; this request was not sent")
         self.progress, self.progress_ms, self.reused = None, 0, 0
         born = self.gen                                 # the engine process this request is sent to
-        keys = self.sampling_keys(sampling or {})
+        keys = self._request_keys(sampling or {})
         out: list[int] = []
         pending: list[int] = []
         prompt, left = list(ids), int(max_new)
@@ -1743,8 +1762,8 @@ class StrataEngine:
         self.prefill_tok_s_mean = None
         self.cur_image = bool(embeddings)                # log_stall: did the request carry an image
         # an image request takes the same sampling keys as text (#75: it used to decode greedily whatever was asked)
-        head = f"GENI {int(max_new)}{self.sampling_keys(sampling or {})} {embeddings}" if embeddings else \
-            f"GEN {int(max_new)}{self.sampling_keys(sampling or {})}"
+        head = f"GENI {int(max_new)}{self._request_keys(sampling or {})} {embeddings}" if embeddings else \
+            f"GEN {int(max_new)}{self._request_keys(sampling or {})}"
         try:
             self.proc.stdin.write(f"{head} {','.join(str(int(t)) for t in ids)}\n")
             self.proc.stdin.flush()
